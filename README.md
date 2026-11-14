@@ -155,7 +155,7 @@ The repository has a development container for [VS Code](https://code.visualstud
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+pytest -n auto
 ```
 
 The tests in `tests/browser` open the label designer in Chromium and are skipped unless Playwright is installed. Playwright does not run on Alpine, so outside the devcontainer:
@@ -163,7 +163,7 @@ The tests in `tests/browser` open the label designer in Chromium and are skipped
 ```bash
 pip install -r requirements-browser.txt
 python -m playwright install --with-deps chromium
-pytest tests/browser
+pytest -n auto tests/browser
 ```
 
 To build the image yourself, with the commit and build time shown in the navbar:
