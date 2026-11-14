@@ -53,3 +53,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends hunspell hunspell-de-de
       - name: Check the spelling of the German demo labels
         run: python tools/spelling_de.py
+
+  # The font of the symbols built again from tools/symbols, see
+  # tools/symbols_font.py: it must be the one committed
+  symbols:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install the font tools
+        run: pip install -r requirements-symbols.txt
+      - name: Build the fasteners and the font
+        run: |
+          python tools/fastener_svgs.py
+          python tools/symbols_font.py
+      - name: Compare with the committed ones
+        run: git diff --exit-code -- tools/symbols app/static/symbols && test -z "$(git status --porcelain -- tools/symbols app/static/symbols)"

@@ -13,6 +13,12 @@
     font-family: "Material Design Icons";
     src: url("../mdi/materialdesignicons-webfont.ttf") format("truetype");
 }
+/* Fasteners and electronic components for {{fastener:<name>}} and
+   {{electronic:<name>}} */
+@font-face {
+    font-family: "Labelburg Symbols";
+    src: url("../symbols/symbols.ttf") format("truetype");
+}
 
 :root {
     --page: #eceeef;
@@ -389,8 +395,12 @@ img[data-lazy]:not([src]) { visibility: hidden; }
 .sym { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); font-size: 1.15rem; cursor: pointer; }
 .sym:hover { border-color: var(--muted); background: var(--surface-2); }
 .sym.ico { font-family: "Material Design Icons"; font-size: 1.4rem; }
-.sym-icons { display: flex; flex-direction: column; gap: .55rem; }
-/* Symbols and icons share the height of the screen */
+.sym.sx { font-family: "Labelburg Symbols"; font-size: 1.4rem; }
+.sym.sx.wide { grid-column: span 2; }
+/* Each set of symbols opens on its own, those open share the height of the screen */
+.sym-set { border-top: 1px solid var(--line-soft); padding-top: .55rem; }
+.sym-set > summary { cursor: pointer; font-weight: 600; }
+.sym-body { display: flex; flex-direction: column; gap: .55rem; margin-top: .55rem; }
 .dialog.symbols .sym-grid { max-height: 26vh; }
 /* Two rows per line: the text on top, its settings below */
 .lrow { display: flex; flex-direction: column; align-items: stretch; gap: .35rem; padding: .5rem .7rem .55rem; border-top: 1px solid var(--line-soft); }

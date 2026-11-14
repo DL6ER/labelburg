@@ -1648,23 +1648,45 @@ function findIcons(list, query) {
         .sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length || a.name.localeCompare(b.name));
 }
 
+// The symbols of fasteners and electronic components for {{fastener:<name>}}
+// and {{electronic:<name>}}, by set
+let symbolSets = null;
+async function loadSymbolSets() {
+    if (symbolSets) return symbolSets;
+    try {
+        symbolSets = await (await fetch(STATIC + 'symbols/symbols.json')).json();
+    } catch (e) { return {}; }
+    return symbolSets;
+}
+const SYMBOL_SETS = { fastener: 'Fasteners', electronic: 'Electronic components' };
+// The sections of the dialog open, as left last time
+const openSymbolSections = new Set(['symbols']);
+
 async function openSymbols(input) {
     if (!input) return;
     // Open at once, so that Escape closes it while the lists load
     openLayer('<div class="dialog narrow" role="dialog" aria-label="Insert a symbol"><p class="muted">Loading the symbols</p></div>');
     const loading = $('#layer .dialog');
-    const [list, icons] = await Promise.all([loadSymbols(), loadIcons()]);
+    const [list, icons, sets] = await Promise.all([loadSymbols(), loadIcons(), loadSymbolSets()]);
     if (!loading.isConnected) return;
-    openLayer(`<div class="dialog narrow${icons.length ? ' symbols' : ''}" role="dialog" aria-label="Insert a symbol">
+    const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
+            <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
+    const setGrid = (set, symbols) => `<div class="sym-grid">${Object.entries(symbols).map(([name, code]) =>
+        `<button type="button" class="sym sx${name.startsWith('bolt-') ? ' wide' : ''}" data-tpl="${set}:${esc(name)}" title="${set}:${esc(name)}">${String.fromCodePoint(parseInt(code, 16))}</button>`).join('')}</div>`;
+    openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
         <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>
-        ${icons.length ? `<div class="sym-icons"><h3>Icons <span class="muted small">Material Design Icons, in every font</span></h3>
+        ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
+        ${icons.length ? section('mdi', 'Icons <span class="muted small">Material Design Icons, in every font</span>', `
             <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
             <div class="sym-grid" id="icoGrid"></div>
             <p class="muted small" id="icoHint" style="margin:0"></p>
-            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button></div>` : ''}</div>`);
+            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button>`) : ''}
+        ${Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => section(set, `${title} <span class="muted small">in every font</span>`,
+            `${setGrid(set, sets[set])}<p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${set}:${esc(Object.keys(sets[set])[0])}}}</code>. Point at a symbol to see its name.</p>`)).join('')}</div>`);
+    $$('#layer .sym-set').forEach(d => d.addEventListener('toggle', () => openSymbolSections[d.open ? 'add' : 'delete'](d.dataset.section)));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
+    $$('[data-tpl]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); });
     if (!icons.length) return;
     // The first ones, all of them on request
     const draw = all => {
@@ -1709,6 +1731,7 @@ function varsHelpHTML() {
             <li><code>{{counter[:&lt;start&gt;]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1). When you print several labels at once, each gets the next number.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
+            <li><code>{{fastener:&lt;name&gt;}}</code> and <code>{{electronic:&lt;name&gt;}}</code> - a fastener or an electronic component, e.g. <code>{{fastener:head-torx}}</code> or <code>{{electronic:resistor-iec-standard}}</code>. The Symbol button shows them.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
             <li><code>{{random[:&lt;len&gt;][:shift]}}</code> - a random string of &lt;len&gt; characters (default 64, at most 10000). <code>shift</code> shifts it around to fill gaps.</li>
         </ul>`;

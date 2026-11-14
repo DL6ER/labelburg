@@ -756,6 +756,8 @@ def test_symbols_are_offered(designer):
 def test_icons_are_offered_with_the_symbols(designer):
     type_line(designer, 0, 'Light ')
     designer.click('#edSym')
+    # Each set opens on its own
+    designer.click('[data-section="mdi"] summary')
     designer.wait_for_selector('#icoGrid .ico')
     # The first ones, all of them on request
     count = "() => document.querySelectorAll('#icoGrid .ico').length"
@@ -768,6 +770,25 @@ def test_icons_are_offered_with_the_symbols(designer):
     assert designer.input_value('[data-row="0"] .tx') == 'Light {{mdi:lightbulb}}'
     wait_for_preview(designer)
     assert 'Everything fits.' in fits_note(designer)
+
+
+def test_fasteners_and_electronic_components_are_offered(designer):
+    type_line(designer, 0, 'M3 ')
+    designer.click('#edSym')
+    designer.wait_for_selector('[data-section="fastener"]')
+    assert not designer.is_visible('[data-tpl="fastener:head-torx"]')
+    designer.click('[data-section="fastener"] summary')
+    designer.click('[data-tpl="fastener:head-torx"]')
+    assert designer.input_value('[data-row="0"] .tx') == 'M3 {{fastener:head-torx}}'
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    # The set opened stays open, the next one opens too
+    designer.click('#edSym')
+    designer.wait_for_selector('[data-tpl="fastener:head-torx"]')
+    designer.click('[data-section="electronic"] summary')
+    assert designer.locator('[data-tpl^="electronic:"]').count() > 100
+    designer.click('[data-tpl="electronic:resistor-iec-standard"]')
+    assert designer.input_value('[data-row="0"] .tx').endswith('{{electronic:resistor-iec-standard}}')
 
 
 @pytest.mark.parametrize('view', ['edit', 'wizard'])

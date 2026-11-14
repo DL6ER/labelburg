@@ -13,6 +13,7 @@ from PIL import Image, ImageOps
 from flask.testing import FlaskClient
 
 from app import create_app
+from app.labeldesigner import icons
 from app.labeldesigner.routes import create_label_from_request
 
 from tests.helpers import EXAMPLE_FORMDATA, make_client, pixels, TEXT, verify_image
@@ -208,6 +209,17 @@ def test_mdi_template_inserts_the_icon(tmp_path):
     assert label.text[0]['text'] == '\U000F0335 Light {{mdi:no-such-icon}}'
 
 
+def test_symbol_templates_insert_the_symbols(tmp_path):
+    client = make_client(tmp_path)
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'text': '{{fastener:head-torx}} M3 {{electronic:resistor-iec-standard}} {{fastener:no-such}}', 'size': '40'}])
+    with client.application.test_request_context():
+        label = create_label_from_request({'text': text})
+    label.process_templates()
+    torx, resistor = icons.icon('head-torx', 'fastener'), icons.icon('resistor-iec-standard', 'electronic')
+    assert label.text[0]['text'] == f'{torx} M3 {resistor} {{{{fastener:no-such}}}}'
+    assert icons.font_of(torx) == icons.font_of(resistor) == icons.SYMBOLS_FONT_PATH
+
+
 @pytest.mark.parametrize('align', ['left', 'center', 'right'])
 def test_icon_and_text_in_one_line(tmp_path, align):
     # The icon comes from the icon font, the text from the font of the line,
@@ -221,9 +233,11 @@ def test_icon_and_text_in_one_line(tmp_path, align):
         image = Image.open(io.BytesIO(response.data)).convert('L')
         return ImageOps.invert(image).point(lambda p: 255 if p > 127 else 0).getbbox()
 
-    text_only, with_icon = ink('230 V'), ink('{{mdi:flash}} 230 V')
-    assert with_icon[2] - with_icon[0] > text_only[2] - text_only[0] + 30
-    assert abs(with_icon[3] - with_icon[1] - (text_only[3] - text_only[1])) < 10
+    text_only = ink('230 V')
+    for icon in ('{{mdi:flash}}', '{{fastener:head-phillips}}'):
+        with_icon = ink(f'{icon} 230 V')
+        assert with_icon[2] - with_icon[0] > text_only[2] - text_only[0] + 30
+        assert abs(with_icon[3] - with_icon[1] - (text_only[3] - text_only[1])) < 10
 
 
 def test_random_template_length_is_limited(tmp_path):

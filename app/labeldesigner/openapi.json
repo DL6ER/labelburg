@@ -1622,7 +1622,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}`, `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}` and `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}`, `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
