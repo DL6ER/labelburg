@@ -2182,6 +2182,14 @@
             "type": "boolean",
             "description": "The printer prints in color (VC-500W), the label designer then offers any color."
           },
+          "label_size": {
+            "type": "string",
+            "description": "Label size of the loaded tape, as `label_size` takes it. Where the printer reports none it takes, the assumed one: `LABEL_DEFAULT_SIZE`, else the first one the printer takes."
+          },
+          "label_size_assumed": {
+            "type": "boolean",
+            "description": "`label_size` is assumed, the printer reports no tape it takes."
+          },
           "tape_length_mm": {
             "type": ["integer", "null"],
             "description": "VC-500W: length of the tape in the cassette when new, in millimeters."

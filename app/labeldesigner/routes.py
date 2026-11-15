@@ -28,7 +28,7 @@ from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
-from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
+from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits, printer_label_size
 from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
@@ -1215,6 +1215,8 @@ def get_printer_status():
     for printer in [status] + status.get('printers', []):
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
+        # Labels are shown and printed on the tape in the printer
+        printer['label_size'], printer['label_size_assumed'] = printer_label_size(printer, current_app.config['LABEL_DEFAULT_SIZE'])
     return status
 
 

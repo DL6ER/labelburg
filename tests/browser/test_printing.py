@@ -7,13 +7,13 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 
 
 def fake_printer(page, **status):
     """Answer the status queries with a QL-800 that reports the given
     status, e.g. the loaded labels, and load the page again."""
-    printer = {'errors': [], 'model': 'QL-800', 'path': 'simulation', 'media_width': None, 'media_length': 0, **status}
+    printer = with_tape({'errors': [], 'model': 'QL-800', 'path': 'simulation', 'media_width': None, 'media_length': 0, **status})
     body = json.dumps({**printer, 'printers': [printer], 'selected': 'simulation'})
     page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
     page.reload()
@@ -115,15 +115,30 @@ def test_label_sizes_follow_the_printer_model(designer):
     assert designer.inner_text('#edTapeChange') == 'Set the tape'
 
 
+def use_printer(page, printer):
+    page.evaluate("p => { S.printer = p; detectTape(); }", with_tape(printer))
+
+
 def test_tape_follows_the_printer(designer):
     # DK and TZe tape of 12 mm have the same size, the model tells them apart
-    designer.evaluate("() => { S.printer = { path: 'a', model: 'PT-P750W', media_width: 12, media_length: 0 }; detectTape(); }")
-    assert designer.evaluate('() => S.tape') == 'pt12'
+    use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': 12, 'media_length': 0})
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['pt12', False]
     # A tape set by hand belongs to its printer
     designer.evaluate("() => { S.settings.tapes = { a: 'pt24' }; detectTape(); }")
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt24', True]
-    designer.evaluate("() => { S.printer = { path: 'b', model: 'QL-800', media_width: 62, media_length: 0 }; detectTape(); }")
+    use_printer(designer, {'path': 'b', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['62', False]
+    # A tape the printer does not take, the server assumes the one it would
+    # print on
+    use_printer(designer, {'path': 'c', 'model': 'PUQU/Q00', 'media_width': 62, 'media_length': 0})
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed, S.tapeUnknown]') == ['puqu50x30', True, '62 mm']
+
+
+def test_tape_is_the_one_the_server_tells(designer):
+    # The server tells the label size, the label designer does not match the
+    # tape itself
+    designer.evaluate("() => { S.printer = { path: 'a', model: 'QL-800', media_width: 62, media_length: 0, label_size: '29x90', label_size_assumed: false }; detectTape(); }")
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['29x90', False]
 
 
 def test_label_is_placed_on_the_loaded_tape(designer):
@@ -262,12 +277,8 @@ def test_dense_printing_is_named_without_dpi(designer):
 
 
 def test_ptouch_tape_is_shown_at_180_dpi(designer):
-    designer.evaluate("""() => {
-        S.printer = { path: 'a', model: 'PT-E550W', media_width: 12, media_length: 0 };
-        detectTape();
-        S.edit.design.label_size = S.tape;
-        renderEditor();
-    }""")
+    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': 12, 'media_length': 0})
+    designer.evaluate("() => { S.edit.design.label_size = S.tape; renderEditor(); }")
     offered = offered_tapes(designer)
     assert 'pt6' in offered and 'pt9' in offered and '62' not in offered
     # 35 dots at 180 dpi
@@ -279,12 +290,8 @@ def test_ptouch_tape_is_shown_at_180_dpi(designer):
 
 
 def test_wide_ptouch_tape_is_shown_at_360_dpi(designer):
-    designer.evaluate("""() => {
-        S.printer = { path: 'a', model: 'PT-P900W', media_width: 36, media_length: 0 };
-        detectTape();
-        S.edit.design.label_size = S.tape;
-        renderEditor();
-    }""")
+    use_printer(designer, {'path': 'a', 'model': 'PT-P900W', 'media_width': 36, 'media_length': 0})
+    designer.evaluate("() => { S.edit.design.label_size = S.tape; renderEditor(); }")
     assert designer.evaluate('() => S.edit.design.label_size') == 'pt36'
     # 35 dots at 360 dpi
     assert designer.input_value('[data-margin="left"]') == '2.5'
@@ -455,11 +462,12 @@ def test_loaded_label_that_is_not_offered(designer):
 def test_tape_set_by_hand_is_known(designer):
     # A roll the designer does not offer, or one reported without its color,
     # says nothing about a tape set by hand
-    designer.evaluate("() => { S.printer = { path: 'a', model: 'QL-800', media_width: 40, media_length: 0 }; detectTape(); }")
+    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 40, 'media_length': 0})
     assert designer.evaluate('() => S.tapeUnknown') == '40 mm'
     designer.evaluate("() => { S.settings.tapes = { a: '62' }; detectTape(); }")
     assert designer.evaluate('() => [S.tapeUnknown, S.tapeManual]') == ['', True]
-    designer.evaluate("() => { S.settings.tapes = {}; S.printer.media_width = 62; detectTape(); }")
+    designer.evaluate("() => { S.settings.tapes = {}; }")
+    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate("() => fitsTape('62red')")
     designer.evaluate("() => { S.settings.tapes = { a: '62' }; detectTape(); }")
     assert not designer.evaluate("() => fitsTape('62red')")
@@ -671,13 +679,14 @@ def test_ql500_labels_are_cut_by_hand(designer):
 
 def test_assumed_tape_is_one_the_printer_takes(designer):
     # A PUQU Q00 does not report its labels, 62 mm endless tape was assumed
-    designer.evaluate("() => { S.settings.tapes = {}; S.printer = Object.assign({}, S.printer, { model: 'PUQU/Q00', media_width: null, media_length: 0 }); detectTape(); }")
+    designer.evaluate("() => { S.settings.tapes = {}; }")
+    use_printer(designer, {'path': 'simulation', 'model': 'PUQU/Q00', 'media_width': None, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['puqu50x30', True]
     # New labels start on it, the printer panel names it, not 62 mm endless
     designer.evaluate('() => openPrinterPanel()')
     assert designer.inner_text('.pp #setTape + .muted') == 'The printer does not report its tape. Labels keep their own size, new ones are 50 x 30 mm.'
     designer.evaluate('() => closeLayer(true)')
-    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'QL-700', media_width: null }); detectTape(); }")
+    use_printer(designer, {'path': 'simulation', 'model': 'QL-700', 'media_width': None, 'media_length': 0})
     assert designer.evaluate('() => S.tape') == '62'
 
 
@@ -755,7 +764,7 @@ def test_printer_on_the_stage_follows_its_status(designer):
 def test_open_printer_panel_follows_the_status(designer):
     # It showed the status of when it was opened until "Look for printers"
     printer = {'path': 'simulation', 'model': 'QL-800', 'status_type': 'Reply to status request', 'errors': []}
-    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={'printers': [printer]}))
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={'printers': [with_tape(printer)]}))
     designer.evaluate("() => refreshPrinters()")
     designer.evaluate("() => openPrinterPanel()")
     designer.focus('.pp .prow')
@@ -770,7 +779,7 @@ def test_open_printer_panel_follows_the_status(designer):
 
 def test_editor_follows_the_tape_the_printer_reports(designer):
     printer = {'path': 'simulation', 'model': 'QL-800', 'status_type': 'Reply to status request', 'errors': [], 'media_width': 62, 'media_length': 0}
-    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={'printers': [printer]}))
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={'printers': [with_tape(printer)]}))
     type_line(designer, 0, 'Jars')
     designer.evaluate("() => refreshPrinters()")
     assert designer.inner_text('.tape-note').strip() == 'In the printer'
