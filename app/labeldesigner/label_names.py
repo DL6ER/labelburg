@@ -53,7 +53,8 @@ def label_size_problem(label_size: str, model: str) -> str:
     if label is None:
         return f'Unknown label size: {label_size}'
     if model in MODELS and not label_fits(label, model):
-        return f'The label size {label_name(label)} cannot be printed on a {shown(model)}'
+        name = shown(model)
+        return f"The label size {label_name(label)} cannot be printed on {'an' if name[:1] in tuple('AEIOU') else 'a'} {name}"
     return ''
 
 
