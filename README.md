@@ -2,7 +2,7 @@
 
 [![Python tests](https://github.com/DL6ER/labelburg/actions/workflows/ci.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/ci.yml) [![CodeQL Advanced](https://github.com/DL6ER/labelburg/actions/workflows/codeql.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/codeql.yml) [![Build and push images to GHCR.io](https://github.com/DL6ER/labelburg/actions/workflows/devcontainer-ghcr.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/devcontainer-ghcr.yml)
 
-Design and print labels 100% offline. With Labelburg you design labels in your web browser, on a computer or a phone, and print them on your label printer. You set it up once on a computer that is always on, e.g., a Raspberry Pi or a home server, and everyone at home or in the office can use it from their browser. It needs no account, no cloud and no app of the printer's maker.
+Design and print labels 100% offline. With Labelburg you design labels in your web browser, on a computer or a phone, and print them on your label printer. You set it up once on a computer that is always on, e.g., a Raspberry Pi or a home server, and everyone at home or in the office can use it from their browser. It needs no cloud and no app of the printer's maker, and your saved labels stay on that computer, also through updates. Labelburg is 100% free, with no account, no subscription and no paid version, forever. It is fully open source under the GPLv3: all of the code is on GitHub and stays fully open.
 
 ![Label designer](./screenshots/image1.png)
 
@@ -193,7 +193,7 @@ The repository has a development container for [VS Code](https://code.visualstud
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+pytest -n auto
 ```
 
 The tests in `tests/browser` open the label designer in Chromium and are skipped unless Playwright is installed. Playwright does not run on Alpine, so outside the devcontainer:
@@ -201,7 +201,7 @@ The tests in `tests/browser` open the label designer in Chromium and are skipped
 ```bash
 pip install -r requirements-browser.txt
 python -m playwright install --with-deps chromium
-pytest tests/browser
+pytest -n auto tests/browser
 ```
 
 To build the image yourself, with the commit and build time shown in the navbar:
