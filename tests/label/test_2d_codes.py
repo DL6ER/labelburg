@@ -5,7 +5,7 @@ import io
 import json
 
 import pytest
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageOps
 
 from app.labeldesigner import codes
 from app.labeldesigner.label import _code_image
@@ -286,3 +286,20 @@ def test_a_label_loads_with_the_code_type_the_designer_offers(tmp_path, saved, l
                                                                        'print_type': 'qrcode', 'barcode_type': saved})
     assert response.status_code == 200
     assert client.get('/labeldesigner/api/repository/load?name=Shelf.json').get_json()['barcode_type'] == loaded
+
+
+@pytest.mark.parametrize('code_type, settings', [
+    ('RMQR', {}),
+    ('PDF417', {'label_size': '29', 'high_res': '1'}),
+    ('DATAMATRIX', {'orientation': 'standard'}),
+])
+def test_a_mirrored_wide_code_is_the_label_mirrored(tmp_path, code_type, settings):
+    # Laid out as without mirror, also too long for the printer, with the
+    # same warnings
+    client = make_client(tmp_path)
+    plain = along_tape(client, barcode_type=code_type, **settings)
+    mirrored = along_tape(client, barcode_type=code_type, mirror='1', **settings)
+    assert plain.status_code == mirrored.status_code == 200
+    assert mirrored.headers.get('X-Label-Warning') == plain.headers.get('X-Label-Warning')
+    image = Image.open(io.BytesIO(mirrored.data))
+    assert image.tobytes() == ImageOps.mirror(Image.open(io.BytesIO(plain.data))).tobytes()

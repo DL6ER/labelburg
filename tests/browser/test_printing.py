@@ -412,6 +412,16 @@ def test_black_roll_is_no_black_and_red_one(designer):
     assert designer.evaluate("() => JSON.parse(formFor(S.edit.design).get('text'))[0].color") == 'black'
 
 
+def test_red_parts_on_a_black_roll_are_said_in_the_warning_box(designer):
+    # The note of the tape the label was made for stays below it
+    fake_printer(designer, media_width=62, media_length=0, media_type='Continuous length tape', red_roll=False)
+    designer.evaluate("() => openEditor({ title: 'Red', design: Object.assign(baseDesign('62red'), { text: [L('Red', 40, false, 'center', { color: 'red' })] }) })")
+    wait_for_preview(designer)
+    assert designer.inner_text('#edFits.warn .say b') == 'This tape has no red, the red parts print black.'
+    assert designer.is_visible('#edMade') and designer.locator('#edFits #edMade').count() == 0
+    assert designer.is_enabled('#edPrint')
+
+
 def test_tape_with_red_text_is_found(designer):
     # The color of the text on TZe tape says nothing about black and red rolls
     fake_printer(designer, model='PT-P750W', media_width=12, media_length=0, media_type='Laminated tape', tape_color='White', text_color='Red')

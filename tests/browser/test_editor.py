@@ -394,6 +394,21 @@ def test_a_wide_code_that_makes_a_long_label_is_said_so(designer):
     assert 'warn' not in designer.get_attribute('#edFits', 'class').split()
 
 
+def test_a_mirrored_wide_code_is_said_to_make_a_long_label(designer):
+    designer.click('[data-lay="codetext"]')
+    designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
+    type_line(designer, 0, 'Pantry shelf 3')
+    designer.select_option('#edBarcode', 'PDF417')
+    wait_for_preview(designer)
+    warning = fits_note(designer).strip()
+    assert warning.startswith('This code makes the label')
+    designer.check('#edMirror')
+    designer.wait_for_function("() => S.edit.design.mirror === '1'")
+    wait_for_preview(designer)
+    assert fits_note(designer).strip() == warning
+    assert designer.inner_text('#edFits.warn .say b').startswith('This code makes the label')
+
+
 def test_a_date_typed_into_a_template_keeps_its_format(designer):
     # Typed into the wizard, [today] got the format of the printer panel
     # unless it was at the same place as the date of the template
