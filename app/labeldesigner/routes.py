@@ -992,11 +992,12 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data['blanks'] = _requested_blanks(data)
         device, model = _printer(requested_printer, _requested('model'))
         # What the label leaves out as set in the printer settings, the
-        # quality always: the label designer saves high_res 0 with each label.
-        # Which end leaves first is never one of the label.
+        # quality and which end leaves first unless the request names them:
+        # the label designer saves high_res 0 with each label
+        requested = {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')}
         kept = printer_settings.for_printing(_kept_settings(), device, model, {
-            key: value for key, value in data.items() if key not in ('high_res', 'fast_printing', 'leaves_first')})
-        data = {**data, **kept}
+            **{key: value for key, value in data.items() if key not in requested}, **requested})
+        data = {**data, **{key: value for key, value in kept.items() if value is not None}}
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
 
@@ -1994,12 +1995,12 @@ def webhook_print():
 
     Multipart form-data:
         - images: one or more image files (field name "images")
-        - label_size: label size identifier (default: from config)
+        - label_size: label size identifier (default: as set in the printer settings, else from config)
         - orientation: "standard" or "rotated" (default: from config)
         - image_mode: "grayscale", "black_and_white" (also "bw"), "red_and_black", "colored" (default: from config)
         - bw_threshold: black/white threshold 0-255 (default: from config)
-        - high_res: 0 or 1 for 600 DPI (default: 0)
-        - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: 0)
+        - high_res: 0 or 1 for 600 DPI (default: as the quality set in the printer settings, else 0)
+        - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: as the quality set in the printer settings, else 0)
         - image_contrast: 0 or 1, 1 prints the images with stronger contrast on the tapes of the VC-500W (default: 0)
         - leaves_first: "top" or "bottom", the end of the labels that leaves the printer first (default: as set in the printer settings, else as the driver prints them)
         - printer: printer device specifier (default: from config)

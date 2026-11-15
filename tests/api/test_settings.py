@@ -185,6 +185,22 @@ def test_a_saved_label_prints_with_the_quality_set(tmp_path, monkeypatch):
     assert fast == [True, False]
 
 
+def test_a_request_that_names_the_quality_of_a_saved_label_decides_it_alone(tmp_path, monkeypatch):
+    # As for /api/print: Dense set and fast_printing 1 is fast printing, not both
+    from app.labeldesigner import printer
+    jobs = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue',
+                        lambda self: jobs.extend((entry['high_res'], entry['fast']) for entry in self._print_queue) or '')
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+    client.post('/labeldesigner/api/repository/save', json={'name': 'Shelf', 'label_size': '62', 'high_res': '0', 'text': text})
+    for quality, given in (('high', {'fast_printing': '1'}), ('fast', {'high_res': '1'})):
+        client.post(URL, data={'printer': 'simulation', 'quality': quality})
+        client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text, 'label_size': '62', **given})
+        client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation', **given})
+    assert jobs == [(False, True), (False, True), (True, False), (True, False)]
+
+
 def test_settings_refuse_a_printer_that_is_no_text(tmp_path):
     # As printing does, not with an error page
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
@@ -229,7 +245,7 @@ def test_print_requests_that_leave_out_which_end_leaves_first_take_it_as_set(tmp
     text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
     client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text})
     client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text, 'leaves_first': 'bottom'})
-    client.post('/labeldesigner/api/repository/save', json={'name': 'Shelf', 'label_size': '62', 'text': text, 'leaves_first': 'bottom'})
+    (tmp_path / 'label_repo' / 'Shelf.json').write_text(json.dumps({'name': 'Shelf.json', 'label_size': '62', 'text': json.loads(text), 'leaves_first': 'bottom'}))
     client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation'})
     client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation', 'leaves_first': 'bottom'})
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'
