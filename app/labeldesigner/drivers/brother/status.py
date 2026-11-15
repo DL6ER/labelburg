@@ -75,7 +75,7 @@ PHASE_TYPES = {
 
 # Byte 25 of the status, reserved in Brother's reference: the QL-800 series
 # sets bit 7 for a black and red roll and reports 0x01 for a black one. Seen
-# on two QL-800 and a QL-810W (black only); other values tell nothing.
+# on two QL-800 and a QL-810W; other values tell nothing.
 RED_ROLL_BYTE = 25
 
 
