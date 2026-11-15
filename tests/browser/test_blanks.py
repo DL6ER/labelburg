@@ -361,6 +361,37 @@ def test_choice_blanks_are_filled_in_from_their_list(designer, server, app, monk
     assert 'choices' not in designer.evaluate('() => S.edit.design.fields.Room')
 
 
+def test_a_choice_blank_without_choices_asks_for_them(designer):
+    # A plain hint instead of the refusal of the server, Print and Save wait
+    # for the first choice
+    type_line(designer, 0, 'Shelf [Room]')
+    designer.click('#blankSet')
+    row = '[data-bname="Room"]'
+    designer.click(f'{row} [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields.Room.type === 'choice'")
+    wait_for_preview(designer)
+    box = f'{row} [data-choices]'
+    assert designer.get_attribute(box, 'placeholder') == 'Type the choices, one per line, the first is the default'
+    assert 'need' in designer.get_attribute(box, 'class').split()
+    assert fits_note(designer).strip() == 'Type the choices of [Room] in Blank settings.'
+    assert designer.query_selector('#edStage .err') is None and designer.query_selector('#edStage img')
+    assert designer.is_disabled('#edPrint') and designer.is_disabled('#edSave')
+    # Also with the blank settings closed
+    designer.click('#blankSet')
+    field = '#edFields select[data-blank="Room"]'
+    designer.wait_for_selector(field)
+    assert designer.is_disabled(field) and designer.inner_text(field) == 'No choices yet'
+    assert designer.is_disabled('#edPrint')
+    designer.click('#blankSet')
+    designer.fill(box, 'Garage')
+    designer.dispatch_event(box, 'change')
+    designer.wait_for_function("() => S.edit.design.fields.Room.choices.length === 1")
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    assert 'need' not in designer.get_attribute(box, 'class').split()
+    assert not designer.is_disabled('#edPrint') and not designer.is_disabled('#edSave')
+
+
 def test_a_new_choice_blank_needs_its_choices(designer):
     designer.click('#edBlank')
     designer.fill('#bName', 'Room')

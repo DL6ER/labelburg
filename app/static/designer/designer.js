@@ -330,6 +330,8 @@ function fieldType(item, name) {
 const blankChoices = (item, name) => ((blankFields(item)[name] || {}).choices || []).map(String);
 // Choices as typed, one per line: each once, empty lines left out
 const choicesOf = text => [...new Set(String(text).split('\n').map(c => c.trim()).filter(Boolean))];
+// Choice blanks without choices yet: the label waits for them to print or save
+const choicesMissing = item => blanksOf(item.design).filter(b => fieldType(item, b) === 'choice' && !blankChoices(item, b).length);
 
 // The blanks of a design as the server fills them in: the values given, and
 // the settings of each blank. A date is written in its format, else as set
@@ -611,6 +613,10 @@ function preview(design, values, stale, first = false) {
     // Dates the server fills in, e.g. of a [today], change with the time: a
     // preview kept from another minute is not used
     const blanks = blankRequest(asked, values || {});
+    // A choice blank without choices yet shows as one still to fill in
+    for (const [name, f] of Object.entries(blanks.fields)) {
+        if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
+    }
     const shown = JSON.stringify(Object.assign({}, asked, { image: design.image ? imageKey(design.image) : null, more_images: undefined },
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
@@ -2136,7 +2142,8 @@ function fieldHTML(item, name, value, i) {
         return `<div><label class="label-s" for="${id}">${esc(name)}</label><input class="field" id="${id}" type="date" data-blank="${esc(name)}" value="${esc(value || today())}"></div>`;
     }
     if (t === 'choice') {
-        return `<div><label class="label-s" for="${id}">${esc(name)}</label><select class="field" id="${id}" data-blank="${esc(name)}">${blankChoices(item, name).map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`;
+        const choices = blankChoices(item, name);
+        return `<div><label class="label-s" for="${id}">${esc(name)}</label><select class="field${choices.length ? '' : ' need'}" id="${id}" data-blank="${esc(name)}"${choices.length ? '' : ' disabled'}>${choices.length ? choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('') : '<option value="">No choices yet</option>'}</select></div>`;
     }
     const used = [];
     if (item.kind === 'saved') {
@@ -2732,7 +2739,7 @@ const keepEditor = debounce(() => { if (S.edit) { recordHistory(S.edit); storeEd
 // does not refuse. What it cannot draw it cannot print either, nor an empty
 // label. One that took too long may still print.
 let editorFailed = false;
-const printable = empty => { $('#edPrint').disabled = empty || editorFailed; };
+const printable = empty => { $('#edPrint').disabled = empty || editorFailed || !!(S.edit && choicesMissing(editItem(S.edit)).length); };
 // The fields and buttons follow each change at once, the preview after the
 // one on its way
 function drawEditor() {
@@ -2772,7 +2779,7 @@ function drawEditor() {
             const k = fieldType(item, b);
             return `<div class="bset-row" data-bname="${esc(b)}"><b>[${esc(b)}]</b>
                 <div class="seg">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-kind="${v}" class="${k === v ? 'on' : ''}">${n}</button>`).join('')}</div>
-                ${k === 'choice' ? `<textarea class="field choices" data-choices rows="2" placeholder="One choice per line, the first is the default" aria-label="Choices of ${esc(b)}, one per line">${esc(blankChoices(item, b).join('\n'))}</textarea>`
+                ${k === 'choice' ? `<textarea class="field choices${blankChoices(item, b).length ? '' : ' need'}" data-choices rows="2" placeholder="Type the choices, one per line, the first is the default" aria-label="Choices of ${esc(b)}, one per line">${esc(blankChoices(item, b).join('\n'))}</textarea>`
                     : k !== 'date' ? `<input class="field" data-default="1" type="${k === 'number' ? 'number' : 'text'}" placeholder="Default, optional" value="${esc(blankStart(item, b))}">`
                     : blankStart(item, b) && !DATE_OFFSET_RE.test(blankStart(item, b)) ? `<span class="muted small">Starts at ${esc(blankStart(item, b))}</span><button type="button" class="btn sm quiet" data-today="1">Start at today</button>`
                     : offsetFields(blankStart(item, b), undefined, (E.offsetUnits || {})[b])}</div>`;
@@ -2831,7 +2838,7 @@ function drawEditor() {
     // first line's size makes it, and cannot be printed or saved yet
     const empty = isEmptyDesign(E.design);
     printable(empty);
-    $('#edSave').disabled = empty;
+    $('#edSave').disabled = empty || choicesMissing(item).length > 0;
     // Typing the first line of text, or deleting the last, changes whether
     // the position and the distance to the text apply
     const on = paired(E.design), gap = $('#edGap'), side = $('#edSide');
@@ -2873,7 +2880,10 @@ const drawStage = latest(async () => {
         // The server finds the image light, stronger contrast would help it
         if ($('#edContrastHint')) $('#edContrastHint').hidden = !(p && p.faint && !empty);
         if (empty) { const n = $('#edFits'); n.className = 'fits'; n.innerHTML = ''; }
-        else fitsNote($('#edFits'), w, err, E.design, () => renderEditor());
+        else {
+            const missing = choicesMissing(editItem(E));
+            fitsNote($('#edFits'), missing.length ? `Type the choices of [${missing[0]}] in Blank settings.` : w, err, E.design, () => renderEditor());
+        }
         editorFailed = !!refused;
         printable(empty);
     }, empty);
