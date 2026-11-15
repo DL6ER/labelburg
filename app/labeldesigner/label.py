@@ -39,6 +39,9 @@ MAX_FILL_SIZE = 2000
 # long as the tape is wide, about a meter on 62 mm tape at any resolution,
 # e.g. many lines across the tape
 MAX_FILLED_RATIO = 16
+# Fitted, the short side of a wide 2D code fills the tape, along wide tape it
+# makes a label of up to a meter. Longer than this, in mm, it is said so.
+LONG_CODE_LABEL = 200
 # Where an image or code can be next to the text
 IMAGE_POSITIONS = ('above', 'below', 'left', 'right')
 # The contents of labels with an image, by its colors
@@ -98,6 +101,12 @@ def check_image_size(width: int, height: int) -> None:
     """Refuse to create images that would exhaust the memory."""
     if width * height > MAX_LABEL_PIXELS:
         raise ValueError(f"Label is too large ({int(width)} x {int(height)} pixels)")
+
+
+def long_code_warning(length: int) -> str:
+    """What the label designer says of a fitted wide 2D code that makes the
+    label length mm long."""
+    return f"This code makes the label {length} mm long. A QR code, or a fixed size for this code, gives a shorter label."
 
 
 # The codes of {{datetime:<format>}} the label designer explains. Their
@@ -228,6 +237,7 @@ class SimpleLabel:
         with_code: bool = False,
         flag_wrap: int = 0,
         flag_dpi: int = 300,
+        dpi: int = 300,
         fixed_length: bool = False,
         vertical_align: str = 'center',
     ):
@@ -242,7 +252,8 @@ class SimpleLabel:
         the other side of the text. With fixed_length an endless label has
         the size given, it does not grow with its content. vertical_align
         places the content at the top, in the center or at the bottom of a
-        label that does not grow with it in height."""
+        label that does not grow with it in height. dpi tells the length of
+        the label in mm, which warnings name."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -295,6 +306,7 @@ class SimpleLabel:
         # A cable flag with a wrap of this many dots at flag_dpi, 0 for none
         self._flag_wrap = flag_wrap
         self._flag_dpi = flag_dpi
+        self._dpi = dpi
         # Lines wider than the room for the text wrap at spaces into lines
         # with their settings. How wide the lines may be, None where they do
         # not wrap, is set before the text is laid out, see _wrap_room().
@@ -787,6 +799,10 @@ class SimpleLabel:
                 self.warnings.append(f'The {name} does not fit on the label, part of it is cut off.')
         if len(boxes) == 2 and self._overlaps(boxes[0][1], boxes[1][1]):
             self.warnings.append('The code does not fit next to the image, it overlaps it.')
+        if self._image_fit and self.barcode_type in codes.WIDE and self._draws_code() and (grows_wide or grows_high):
+            length = round((width if grows_wide else height) / self._dpi * 25.4)
+            if length > LONG_CODE_LABEL:
+                self.warnings.append(long_code_warning(length))
 
         logger.debug(f"Image resolution: {int(width)} x {int(height)} px")
         check_image_size(width, height)

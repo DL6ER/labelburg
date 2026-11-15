@@ -194,6 +194,77 @@ def test_2d_codes_fit_narrow_tape(tmp_path):
     assert image.height == 70 and image.width > 7 * image.height
 
 
+LONG_LABEL = 'This code makes the label {} mm long. A QR code, or a fixed size for this code, gives a shorter label.'
+SHELF = [dict(LINES[0], font='DejaVu Serif,Bold', text='Pantry shelf 3', size='70')]
+
+
+def along_tape(client, files=None, **settings):
+    """A code fitted next to text along endless tape, as the label designer
+    lays out a label of a code, with the margins it leaves."""
+    data = {'label_size': '62', 'print_type': 'qrcode_text', 'orientation': 'rotated', 'image_fit': '1',
+            'code_text': 'https://example.com/pantry/shelf-3', 'text': json.dumps(SHELF)}
+    data.update(settings, **(files or {}))
+    return client.post(PREVIEW, data=data, content_type='multipart/form-data' if files else None)
+
+
+def length_mm(response, dpi=300) -> int:
+    assert response.status_code == 200, response.get_json()
+    return round(Image.open(io.BytesIO(response.data)).width / dpi * 25.4)
+
+
+@pytest.mark.parametrize('code_type, settings, length', [
+    # Its short side fills the tape
+    ('RMQR', {}, 1157),
+    ('RMQR', {'label_size': '29'}, 492),
+    ('PDF417', {}, 580),
+    ('PDF417', {'label_size': '29', 'high_res': '1'}, 256),
+])
+def test_a_wide_code_that_makes_a_long_label_is_said_so(tmp_path, code_type, settings, length):
+    client = make_client(tmp_path)
+    response = along_tape(client, barcode_type=code_type, **settings)
+    assert length_mm(response, 600 if settings.get('high_res') else 300) == length
+    warning = response.headers['X-Label-Warning']
+    assert LONG_LABEL.format(length) in warning
+    # Longer than the printer prints, it says that as well
+    assert ('Labels on the QL-800 can be at most 1000 mm long' in warning) == (length > 1000)
+
+
+def test_a_wide_code_next_to_an_image_that_makes_a_long_label_is_said_so(tmp_path):
+    client = make_client(tmp_path)
+    image = io.BytesIO()
+    Image.new('RGB', (120, 120), (90, 90, 90)).save(image, 'PNG')
+    image.seek(0)
+    response = along_tape(client, files={'image': (image, 'gray.png', 'image/png')}, print_type='image_qrcode_text', barcode_type='PDF417',
+                          code_text='Box 7')
+    assert LONG_LABEL.format(length_mm(response)) in response.headers['X-Label-Warning']
+
+
+@pytest.mark.parametrize('code_type, settings, length', [
+    # Narrow tape, which rMQR codes are made for
+    ('RMQR', {'label_size': '12'}, 152),
+    ('PDF417', {'label_size': '12'}, 101),
+    # Codes about as high as wide, also next to text that makes the label long
+    ('QR', {}, 111),
+    ('DATAMATRIX', {}, 112),
+    ('AZTEC', {}, 112),
+    ('MICROQR', {'code_text': 'HELLO 123'}, 114),
+    ('QR', {'text': json.dumps([dict(SHELF[0], text='Pantry shelf 3: rice, pasta, flour, sugar and salt')])}, 221),
+    # The size of a dot set, as long as it makes the label
+    ('RMQR', {'image_fit': '0'}, 172),
+    ('RMQR', {'image_fit': '0', 'qrcode_size': '40'}, 530),
+    # A length set, the code across the tape
+    ('RMQR', {'label_length': '300'}, 294),
+    ('RMQR', {'label_length': '300', 'orientation': 'standard'}, None),
+    ('PDF417', {'orientation': 'standard'}, None),
+])
+def test_other_codes_and_sizes_are_not_said_to_make_a_long_label(tmp_path, code_type, settings, length):
+    client = make_client(tmp_path)
+    response = along_tape(client, barcode_type=code_type, **settings)
+    if length is not None:
+        assert length_mm(response) == length
+    assert 'This code makes the label' not in response.headers.get('X-Label-Warning', '')
+
+
 @pytest.mark.parametrize('values, message', [
     ({'barcode_type': 'RMQR', 'qrcode_correction': 'L'}, 'qrcode_correction must be M or H for rMQR codes'),
     ({'barcode_type': 'datamatrix', 'qrcode_correction': 'X'}, None),

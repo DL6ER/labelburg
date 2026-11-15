@@ -317,7 +317,8 @@ def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(d
     wait_for_preview(designer)
     assert designer.evaluate(design) == ['RMQR', 'M']
     assert designer.eval_on_selector_all('#edQrCorr option', 'os => os.map(o => o.value)') == ['M', 'H']
-    assert 'Everything fits.' in fits_note(designer)
+    # Fitted along the 62 mm tape it makes a long label
+    assert 'This code makes the label' in fits_note(designer)
     # The others choose it themselves, they have the size of a dot as well
     designer.select_option('#edBarcode', 'DATAMATRIX')
     wait_for_preview(designer)
@@ -332,6 +333,25 @@ def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(d
     wait_for_preview(designer)
     assert designer.input_value('#edQrCorr') == 'None'
     assert 'Error correction can be chosen for QR, Micro QR and rMQR codes.' in designer.inner_text('.ed-panel')
+
+
+def test_a_wide_code_that_makes_a_long_label_is_said_so(designer):
+    designer.click('[data-lay="codetext"]')
+    designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
+    type_line(designer, 0, 'Pantry shelf 3')
+    designer.select_option('#edBarcode', 'PDF417')
+    wait_for_preview(designer)
+    # Above the preview as a problem, the label can be printed anyway
+    length = designer.inner_text('#edStage .dim-x')
+    assert fits_note(designer).strip() == f'This code makes the label {length} long. A QR code, or a fixed size for this code, gives a shorter label.'
+    assert 'warn' in designer.get_attribute('#edFits', 'class').split()
+    assert designer.is_visible('#edFits .fa-triangle-exclamation')
+    assert designer.is_enabled('#edPrint')
+    # The way out it names
+    designer.click('[data-fit="0"]')
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    assert 'warn' not in designer.get_attribute('#edFits', 'class').split()
 
 
 def test_a_date_typed_into_a_template_keeps_its_format(designer):

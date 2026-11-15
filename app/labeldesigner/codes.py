@@ -18,6 +18,8 @@ from rmqrcode import DataTooLongError, ErrorCorrectionLevel, FitStrategy, rMQR
 
 # The 2D codes by their barcode_type, with their names, QR codes first
 NAMES = {'QR': 'QR', 'DATAMATRIX': 'DataMatrix', 'MICROQR': 'Micro QR', 'RMQR': 'rMQR', 'AZTEC': 'Aztec', 'PDF417': 'PDF417'}
+# The 2D codes that are much wider than high
+WIDE = ('RMQR', 'PDF417')
 # The levels of error correction of the codes that have a choice, the first
 # one is used where none is given. The other codes choose it themselves.
 CORRECTIONS = {'QR': ('L', 'M', 'Q', 'H'), 'MICROQR': ('L', 'M', 'Q'), 'RMQR': ('M', 'H')}
