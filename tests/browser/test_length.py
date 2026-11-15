@@ -1,6 +1,6 @@
 """The length of endless labels in the label designer."""
 
-from tests.browser.helpers import fits_note, kept, preview_size, save_as, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, kept, preview_size, save_as, set_tape, type_line, wait_for_preview
 from tests.browser.test_vc500w import fake_vc500w, use_tape
 
 
@@ -34,10 +34,18 @@ def test_a_length_that_cannot_be_printed_is_explained(designer):
     assert designer.is_enabled('#edPrint')
 
 
+def test_a_label_longer_than_the_printer_prints_is_said_so(designer):
+    type_line(designer, 0, 'Shelf')
+    set_length(designer, '1006')
+    assert 'Labels on the QL-800 can be at most 1000 mm long' in fits_note(designer)
+    set_length(designer, '1005')
+    assert 'Everything fits.' in fits_note(designer)
+
+
 def test_die_cut_labels_have_their_own_length(designer):
     type_line(designer, 0, 'Shelf')
     set_length(designer, '40')
-    designer.select_option('#edSize', '62x29')
+    set_tape(designer, '62x29')
     wait_for_preview(designer)
     # Disabled with the reason, the length of the label shown instead
     assert designer.is_disabled('#edLength')
@@ -45,7 +53,7 @@ def test_die_cut_labels_have_their_own_length(designer):
     assert designer.get_attribute('#edLength', 'title') == 'Die-cut labels have their own length'
     assert 'off' in designer.get_attribute('label[for="edLength"]', 'class')
     # Kept for when the label is on endless tape again
-    designer.select_option('#edSize', '62')
+    set_tape(designer, '62')
     wait_for_preview(designer)
     assert designer.input_value('#edLength') == '40'
     assert designer.inner_text('#edStage .dim-y') == '40 mm'

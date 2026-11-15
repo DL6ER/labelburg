@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from tests.browser.helpers import kept, printed, save_as, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, kept, printed, save_as, type_line, wait_for_preview
 
 
 def _next_day(designer):
@@ -88,7 +88,7 @@ def test_values_of_blanks_saved_through_the_api_are_shown_and_replaced_by_settin
         designer.dispatch_event(default, 'change')
         designer.wait_for_function("() => !('Box' in (S.edit.design.blanks || {})) && document.querySelector('[data-bname=\"Box\"] [data-default]').value === '5'")
         designer.click('[data-bname="Frozen on"] [data-today]')
-        designer.wait_for_function("() => document.querySelector('[data-bname=\"Frozen on\"]').innerText.endsWith('Starts at today')")
+        designer.wait_for_function("() => document.querySelector('[data-bname=\"Frozen on\"] [data-offset-n]').value === ''")
         designer.click('#blankSet')
         designer.wait_for_selector(field)
         assert designer.input_value(field) == '5'
@@ -119,10 +119,81 @@ def test_a_date_saved_with_a_default_through_the_api_starts_at_it(designer, serv
         designer.click('#blankSet')
         assert 'Starts at 2026-12-24' in designer.inner_text('[data-bname="Due"]')
         designer.click('[data-bname="Due"] [data-today]')
-        designer.wait_for_function("() => document.querySelector('[data-bname=\"Due\"]').innerText.endsWith('Starts at today')")
+        designer.wait_for_function("() => document.querySelector('[data-bname=\"Due\"] [data-offset-n]').value === ''")
         assert designer.evaluate("() => [S.edit.values.Due === today(), 'default' in S.edit.design.fields.Due]") == [True, False]
     finally:
         designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Due.json'})
+
+
+@pytest.mark.parametrize('day, offset, moved', [
+    ('2024-01-31', '+1m', '2024-02-29'), ('2023-01-31', '+1m', '2023-02-28'), ('2024-03-31', '-1m', '2024-02-29'),
+    ('2024-02-29', '+1y', '2025-02-28'), ('2024-12-30', '+5d', '2025-01-04'), ('2024-01-31', '-2w', '2024-01-17'),
+    ('2024-11-15', '+14m', '2026-01-15'), ('2024-01-15', '-13m', '2022-12-15'),
+])
+def test_a_date_blank_moves_from_today_as_the_server_moves_dates(designer, day, offset, moved):
+    # The field starts at the browser's date, the server moves the others
+    import datetime
+    from app.labeldesigner.label import shift_date
+    assert shift_date(datetime.date.fromisoformat(day), offset).isoformat() == moved
+    assert designer.evaluate('([day, offset]) => shiftDate(day, offset)', [day, offset]) == moved
+
+
+def test_a_date_blank_starts_at_a_day_moved_from_today(designer, server, app):
+    # A best-before date started at today, the label said "Use within 5 days"
+    type_line(designer, 0, 'Use by [Use by]')
+    designer.click('#blankSet')
+    row = '[data-bname="Use by"]'
+    designer.click(f'{row} [data-kind="date"]')
+    designer.fill(f'{row} [data-offset-n]', '5')
+    designer.dispatch_event(f'{row} [data-offset-n]', 'change')
+    designer.wait_for_function("() => (S.edit.design.fields['Use by'] || {}).default === '+5d'")
+    designer.select_option(f'{row} [data-offset-unit]', 'm')
+    designer.wait_for_function("() => S.edit.design.fields['Use by'].default === '+5m'")
+    assert designer.evaluate('() => S.edit.values["Use by"] === shiftDate(today(), "+5m")')
+    # Back at today
+    designer.fill(f'{row} [data-offset-n]', '0')
+    designer.dispatch_event(f'{row} [data-offset-n]', 'change')
+    designer.wait_for_function("() => !('default' in S.edit.design.fields['Use by']) && S.edit.values['Use by'] === today()")
+    designer.fill(f'{row} [data-offset-n]', '2')
+    designer.dispatch_event(f'{row} [data-offset-n]', 'change')
+    designer.wait_for_function("() => S.edit.design.fields['Use by'].default === '+2m'")
+    designer.click('#blankSet')
+    field = '#edFields input[data-blank="Use by"]'
+    designer.wait_for_selector(field)
+    assert designer.input_value(field) == designer.evaluate('() => shiftDate(today(), "+2m")')
+    # Saved with it, the API prints that day as well
+    save_as(designer, 'Pesto')
+    designer.wait_for_selector('#saveForm', state='detached')
+    try:
+        with open(os.path.join(app.config['LABEL_REPOSITORY_DIR'], 'Pesto.json'), encoding='utf-8') as f:
+            assert json.load(f)['fields']['Use by']['default'] == '+2m'
+        # Opened again, it starts there
+        designer.evaluate("""async () => {
+            await loadSaved();
+            const item = { kind: 'saved', id: 'Pesto.json' };
+            openEditor({ title: 'Pesto', design: await itemDesign(item), origin: item });
+        }""")
+        designer.wait_for_selector(field)
+        assert designer.input_value(field) == designer.evaluate('() => shiftDate(today(), "+2m")')
+        designer.click('#blankSet')
+        assert [designer.input_value(f'{row} [data-offset-n]'), designer.input_value(f'{row} [data-offset-unit]')] == ['2', 'm']
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Pesto.json'})
+
+
+def test_a_new_date_blank_can_start_at_a_day_moved_from_today(designer):
+    designer.click('#edBlank')
+    designer.fill('#bName', 'today+5d')
+    designer.click('[data-bkind="date"]')
+    designer.click('#bInsert')
+    assert designer.inner_text('#bErr') == '[today+5d] is a variable already, choose another name.'
+    designer.fill('#bName', 'Use by')
+    designer.fill('#bDateStart [data-offset-n]', '2')
+    designer.select_option('#bDateStart [data-offset-unit]', 'w')
+    designer.click('#bInsert')
+    designer.wait_for_selector('#edFields input[data-blank="Use by"]')
+    assert designer.evaluate("() => S.edit.design.fields['Use by']") == {'type': 'date', 'default': '+2w'}
+    assert designer.evaluate('() => S.edit.values["Use by"] === shiftDate(today(), "+2w")')
 
 
 def test_a_date_at_today_follows_the_day(designer):
@@ -250,3 +321,141 @@ def test_code_of_empty_blanks_takes_the_text(designer):
     assert printed(designer) == ['printed']
     form = parse_qs(bodies[0].decode(), keep_blank_values=True)
     assert len(bodies) == 1 and form['code_text'] == ['{{blank:URL}}'] and form['blanks'] == ['{}']
+
+
+def test_choice_blanks_are_filled_in_from_their_list(designer, server, app, monkeypatch, tmp_path):
+    # Chosen from a list, a room is written the same on every label
+    monkeypatch.setattr('app.labeldesigner.printer.SIMULATED_LABELS_DIR', str(tmp_path))
+    type_line(designer, 0, 'Shelf [Room]')
+    designer.fill('#edFields input[data-blank="Room"]', 'Garage')
+    wait_for_preview(designer)
+    designer.click('#blankSet')
+    row = '[data-bname="Room"]'
+    designer.click(f'{row} [data-kind="choice"]')
+    # The list starts with the current value, the next ones are typed
+    designer.wait_for_function("() => document.activeElement && document.activeElement.matches('[data-choices]')")
+    assert designer.evaluate("() => S.edit.design.fields.Room") == {'type': 'choice', 'choices': ['Garage']}
+    designer.keyboard.type('\nKitchen\n\n Attic \nKitchen')
+    designer.dispatch_event(f'{row} [data-choices]', 'change')
+    designer.wait_for_function("() => S.edit.design.fields.Room.choices.length === 3")
+    assert designer.evaluate("() => S.edit.design.fields.Room") == {'type': 'choice', 'choices': ['Garage', 'Kitchen', 'Attic']}
+    designer.click('#blankSet')
+    field = '#edFields select[data-blank="Room"]'
+    designer.wait_for_selector(field)
+    assert designer.eval_on_selector_all(f'{field} option', 'os => os.map(o => o.value)') == ['Garage', 'Kitchen', 'Attic']
+    assert designer.input_value(field) == 'Garage'
+    designer.select_option(field, 'Attic')
+    wait_for_preview(designer)
+    assert designer.evaluate('() => S.edit.values.Room') == 'Attic'
+    assert 'Everything fits.' in fits_note(designer)
+    designer.click('#edPrint')
+    assert printed(designer) == ['printed']
+    # A value no longer among the choices falls back to the first one
+    designer.click('#blankSet')
+    designer.fill(f'{row} [data-choices]', 'Kitchen\nGarage')
+    designer.dispatch_event(f'{row} [data-choices]', 'change')
+    designer.wait_for_function("() => S.edit.values.Room === 'Kitchen'")
+    # Back to text, the list is gone
+    designer.click(f'{row} [data-kind="text"]')
+    designer.wait_for_function("() => S.edit.design.fields.Room.type === 'text'")
+    assert 'choices' not in designer.evaluate('() => S.edit.design.fields.Room')
+
+
+def test_a_choice_blank_without_choices_asks_for_them(designer):
+    # A plain hint instead of the refusal of the server, Print and Save wait
+    # for the first choice
+    type_line(designer, 0, 'Shelf [Room]')
+    designer.click('#blankSet')
+    row = '[data-bname="Room"]'
+    designer.click(f'{row} [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields.Room.type === 'choice'")
+    wait_for_preview(designer)
+    box = f'{row} [data-choices]'
+    assert designer.get_attribute(box, 'placeholder') == 'Type the choices, one per line, the first is the default'
+    assert 'need' in designer.get_attribute(box, 'class').split()
+    assert fits_note(designer).strip() == 'Type the choices of [Room] in Blank settings.'
+    assert designer.query_selector('#edStage .err') is None and designer.query_selector('#edStage img')
+    assert designer.is_disabled('#edPrint') and designer.is_disabled('#edSave')
+    # Also with the blank settings closed
+    designer.click('#blankSet')
+    field = '#edFields select[data-blank="Room"]'
+    designer.wait_for_selector(field)
+    assert designer.is_disabled(field) and designer.inner_text(field) == 'No choices yet'
+    assert designer.is_disabled('#edPrint')
+    designer.click('#blankSet')
+    designer.fill(box, 'Garage')
+    designer.dispatch_event(box, 'change')
+    designer.wait_for_function("() => S.edit.design.fields.Room.choices.length === 1")
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    assert 'need' not in designer.get_attribute(box, 'class').split()
+    assert not designer.is_disabled('#edPrint') and not designer.is_disabled('#edSave')
+
+
+def test_a_choice_blank_without_choices_is_asked_for_in_the_warning_box(designer):
+    type_line(designer, 0, 'Shelf [Room]')
+    designer.click('#blankSet')
+    designer.click('[data-bname="Room"] [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields.Room.type === 'choice'")
+    wait_for_preview(designer)
+    assert designer.inner_text('#edFits.warn .say b') == 'Type the choices of [Room] in Blank settings.'
+    assert designer.is_visible('#edFits .fa-triangle-exclamation')
+
+
+def test_a_date_blank_made_a_choice_starts_without_choices(designer):
+    # The date it shows is no choice, the text of a text blank is (see above)
+    type_line(designer, 0, 'Frozen on [Frozen on]')
+    designer.click('#blankSet')
+    row = '[data-bname="Frozen on"]'
+    designer.wait_for_selector(f'{row} [data-kind="date"].on')
+    designer.click(f'{row} [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields['Frozen on'].type === 'choice'")
+    assert designer.evaluate("() => S.edit.design.fields['Frozen on']") == {'type': 'choice', 'choices': []}
+    assert designer.input_value(f'{row} [data-choices]') == ''
+
+
+def test_a_new_choice_blank_needs_its_choices(designer):
+    designer.click('#edBlank')
+    designer.fill('#bName', 'Room')
+    designer.click('[data-bkind="choice"]')
+    assert designer.is_hidden('#bDefWrap') and designer.is_visible('#bChoicesWrap')
+    designer.click('#bInsert')
+    assert designer.inner_text('#bErr') == 'Give the blank its choices, one per line.'
+    designer.fill('#bChoices', 'Fridge\nFreezer\n\nFridge')
+    designer.click('#bInsert')
+    designer.wait_for_selector('#edFields select[data-blank="Room"]')
+    assert designer.evaluate("() => [S.edit.design.fields.Room, S.edit.values.Room]") == [{'type': 'choice', 'choices': ['Fridge', 'Freezer']}, 'Fridge']
+
+
+def test_choice_blanks_of_saved_labels_are_chosen_where_they_are_printed(designer, server):
+    # Also in the wizard and from a link, the default first
+    designer.request.post(server + '/labeldesigner/api/repository/save', headers={'Content-Type': 'application/json'},
+                          data=json.dumps({'name': 'Shelf.json', 'title': 'Shelf', 'label_size': '62',
+                                           'text': [{'text': 'Shelf {{blank:Room}}', 'size': '40'}],
+                                           'fields': {'Room': {'type': 'choice', 'choices': ['Garage', 'Kitchen', 2.5], 'default': 'Kitchen'}}}))
+    try:
+        designer.evaluate("async () => { await loadSaved(); location.hash = 'fill/Shelf.json'; }")
+        field = '#libFields select[data-blank="Room"]'
+        designer.wait_for_selector(field)
+        assert designer.eval_on_selector_all(f'{field} option', 'os => os.map(o => o.value)') == ['Garage', 'Kitchen', '2.5']
+        assert designer.input_value(field) == 'Kitchen'
+        designer.select_option(field, '2.5')
+        designer.wait_for_selector('#libPrint')
+        designer.evaluate('() => { window.printJob = job => { window.job = job; return true; }; }')
+        designer.click('#libPrint')
+        designer.wait_for_function('() => window.job')
+        assert designer.evaluate("() => job.values.Room") == '2.5'
+        # A link names one of the choices, else the default stays
+        for link, shown in (('Garage', 'Garage'), ('Attic', 'Kitchen')):
+            designer.evaluate(f"() => {{ S.libSel = null; location.hash = 'fill/Shelf.json?Room={link}'; }}")
+            designer.wait_for_function('() => S.libSel && S.libSel.values')
+            designer.wait_for_selector(field)
+            assert designer.evaluate('() => S.libSel.values.Room') == shown
+            assert designer.input_value(field) == shown
+        assert designer.inner_text('#toast') == '"Attic" is none of the choices for Room.'
+        # The example link names one of them
+        designer.click('#libMore')
+        designer.click('#libLinks')
+        assert designer.input_value('#linkUrl').endswith('#fill/Shelf.json?Room=Garage')
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Shelf.json'})

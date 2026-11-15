@@ -29,6 +29,7 @@ from app.labeldesigner.drivers.vc500w import image as vc_image
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from app.labeldesigner.drivers.vc500w import status as vc_status
 from tests.helpers import make_client
+from tests.printing.usbip_host import VC500W_ID, FakeHost, SharedDevice
 
 CONFIG = b'''<?xml version="1.0" encoding="UTF-8"?>
 <config>
@@ -86,15 +87,16 @@ class _Terminal:
 
 class FakeVC500W:
     """Answers the commands of the label designer, on localhost or, with
-    usb=True, at 'path' like a printer on USB. 'configs' and 'statuses' are
-    the answers to /config.xml and /status.xml one after the other, the last
-    one again and again. Received print commands and images are kept. With
+    usb=True, at 'path' like a printer on USB, with usbip=True shared by a
+    fake USB/IP host. 'configs' and 'statuses' are the answers to
+    /config.xml and /status.xml one after the other, the last one again and
+    again. Received print commands and images are kept. With
     'lose', the first bytes of each image are lost like on USB. A string in
     'refuse_print' refuses every print command, a list the next ones. The
     status questions counted in 'unanswered' (from 1) get no answer, as on a
     weak Wi-Fi. The data is confirmed after 'receive_delay' seconds."""
 
-    def __init__(self, usb=False):
+    def __init__(self, usb=False, usbip=False):
         self.configs = [CONFIG]
         self.statuses = [status_xml()]
         self.refuse_print = ''
@@ -108,7 +110,11 @@ class FakeVC500W:
         # image after it arrived
         self.ready_at = []
         self.data_at = []
-        if usb:
+        if usbip:
+            self.host = FakeHost(SharedDevice(product=0x2112, device_id=VC500W_ID, interfaces=((7, 4), (7, 2))))
+            self.target, self.port = self.host.address(), vc500w.PORT
+            threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True).start()
+        elif usb:
             self._master, self._slave = os.openpty()
             tty.setraw(self._slave)
             self.path = os.ttyname(self._slave)
@@ -183,7 +189,10 @@ class FakeVC500W:
                 connection.sendall(answer(comment='print data received'))
 
     def close(self):
-        if hasattr(self, 'server'):
+        if hasattr(self, 'host'):
+            self.host.close()
+            self.host.devices[0].unplug()
+        elif hasattr(self, 'server'):
             self.server.close()
         elif self._slave >= 0:
             # That hangs up the pty: its thread stops reading and closes the
@@ -193,9 +202,9 @@ class FakeVC500W:
             self._thread.join(5)
 
 
-@pytest.fixture(params=['network', 'usb'])
+@pytest.fixture(params=['network', 'usb', 'usbip'])
 def fake(request, monkeypatch):
-    printer_ = FakeVC500W(usb=request.param == 'usb')
+    printer_ = FakeVC500W(usb=request.param == 'usb', usbip=request.param == 'usbip')
     for name, value in (('POLL_INTERVAL', 0.01), ('DATA_DELAY', 0.05), ('FILL_WAIT', 0.05), ('START_TIMEOUT', 0.05)):
         monkeypatch.setattr(vc500w, name, value)
     monkeypatch.setattr(devices, 'status_cache', {})
@@ -281,8 +290,9 @@ def test_image_follows_ready_to_receive_after_a_pause(fake):
     assert fake.data_at[0] - fake.ready_at[0] >= vc500w.DATA_DELAY
 
 
-def test_lost_data_is_filled_up(fake):
+def test_lost_data_is_filled_up(fake, monkeypatch):
     # The printer waits for the bytes it lost, zeros make up for them
+    monkeypatch.setattr(vc500w, 'DATA_TIMEOUT', 0.1)
     fake.lose = 700
     assert vc500w.print_image(fake.target, Image.new('RGB', (100, 1), (255, 216, 0)), port=fake.port) == vc500w.DAMAGED
     assert fake.images[0][-200:] == bytes(200)
@@ -603,6 +613,7 @@ def test_short_labels_stay_short(tmp_path, orientation):
 def client(fake, tmp_path):
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = (f'vc500w://127.0.0.1:{fake.port}' if fake.target == '127.0.0.1'
+                                                     else fake.target if fake.target.startswith('usbip://')
                                                      else f'file://{fake.path}')
     client.application.config['PRINTER_MODEL'] = 'VC-500W'
     return client
@@ -668,21 +679,18 @@ def test_vc500w_among_the_configured_printers(client, fake, monkeypatch):
     assert (simulator['model'], simulator['color_support']) == ('QL-800', False)
 
 
-def test_vc500w_configured_as_a_tcp_printer(tmp_path):
+@pytest.mark.parametrize('fake', ['network'], indirect=True)
+def test_vc500w_configured_as_a_tcp_printer(fake, tmp_path):
     # Reached on port 9100 like vc500w://<host>, not asked over SNMP or IPP
-    printer_ = FakeVC500W()
-    try:
-        device = f'tcp://127.0.0.1:{printer_.port}'
-        client = make_client(tmp_path)
-        client.application.config['PRINTERS'] = [('VC-500W', device)]
-        vc = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-        assert (vc['media_width'], vc['tape_remaining_mm'], vc['weak_connection']) == (25, 4596, False)
-        response = client.post('/labeldesigner/api/print', data={
-            'printer': device, 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
-        assert response.get_json() == {'success': True}
-        assert len(printer_.images) == 1
-    finally:
-        printer_.close()
+    device = f'tcp://127.0.0.1:{fake.port}'
+    client = make_client(tmp_path)
+    client.application.config['PRINTERS'] = [('VC-500W', device)]
+    vc = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (vc['media_width'], vc['tape_remaining_mm'], vc['weak_connection']) == (25, 4596, False)
+    response = client.post('/labeldesigner/api/print', data={
+        'printer': device, 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    assert len(fake.images) == 1
 
 
 def test_vc500w_on_usb_is_detected_by_its_device_id(tmp_path, monkeypatch):

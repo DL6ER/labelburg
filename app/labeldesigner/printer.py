@@ -87,12 +87,19 @@ class PrinterQueue:
         self.cut = 'each'
         self.half_cut = True
         self.chain = False
+        # The end of the labels that leaves the printer first, top or bottom,
+        # None as the driver prints them
+        self.leaves_first = None
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):
         problem = self.driver.resolution_problem(self.model, high_res)
         if problem:
             raise ValueError(problem)
+        # Turned once for all drivers where the other end than the driver's
+        # leaves first, the preview stays upright
+        driver_end = 'top' if self.driver.capabilities(self.model)['leaves_turned'] else 'bottom'
+        label.turned = self.leaves_first not in (None, driver_end)
         self._print_queue.append({
             'label': label,
             'high_res': high_res,
@@ -241,7 +248,8 @@ def get_ptr_status(config: Config):
         'status_type': 'Simulator',
         'tape_color': '',
         'text_color': '',
-        'red_support': _red_support(default_model)
+        'red_support': _red_support(default_model),
+        'red_roll': None,
     }
 
     status = {
@@ -260,7 +268,8 @@ def get_ptr_status(config: Config):
         "status_type": "Unknown",
         "tape_color": "",
         "text_color": "",
-        "red_support": False
+        "red_support": False,
+        "red_roll": None
     }
     try:
         if config.get('PRINTERS'):
@@ -367,31 +376,19 @@ def get_ptr_status(config: Config):
                     'selected': None,
                     **status
                 }
+        # The label designer offers only the printers of the list
         driver, model = drivers.resolve(device_specifier, default_model)
-        # A Brother printer on USB is shown at the top only, like before the
-        # list of printers. The others are listed with the simulator.
-        if driver is not drivers.BROTHER or device_specifier.startswith('tcp://'):
-            try:
-                printer = driver.status(device_specifier, model)
-            except driver.errors as e:
-                logger.info('Status query of %s failed: %s', device_specifier, e)
-                printer = devices.failed_printer_state(device_specifier, e, model)
-            status.update(printer)
-            status['printers'] = [printer, SIMULATOR_PRINTER.copy()]
-            status['selected'] = device_specifier
-            return status
-        else:
-            printer_state = driver.status(device_specifier, model)
-            for key, value in printer_state.items():
-                status[key] = value
-        # Always include simulator in returned printers list
-        sim = SIMULATOR_PRINTER.copy()
-        status['red_support'] = _red_support(status['model'])
-        return {
-            'printers': [sim],
-            'selected': status.get('path'),
-            **status
-        }
+        try:
+            printer = driver.status(device_specifier, model)
+        except driver.errors as e:
+            logger.info('Status query of %s failed: %s', device_specifier, e)
+            printer = devices.failed_printer_state(device_specifier, e, model)
+        printer.setdefault('path', device_specifier)
+        printer.setdefault('red_support', _red_support(printer.get('model', model)))
+        status.update(printer)
+        status['printers'] = [printer, SIMULATOR_PRINTER.copy()]
+        status['selected'] = device_specifier
+        return status
     except Exception as e:
         logger.exception("Printer status error: %s", e)
         status['errors'] = ['The status of the printer could not be read, the log of the server names the reason']

@@ -92,7 +92,7 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                                  'half_cut': True, 'chain': False, 'feed_waste': False, 'job_stages': True, 'colors': 'color',
-                                 'never_cut': NEVER_WHY, 'leaves_turned': False, 'lead_mm': 0, 'vendor': 'Brother'}
+                                 'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother'}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
     assert models['PUQU/Q00']['cutter'] is False and models['PUQU/Q00']['leaves_turned'] is True
@@ -144,6 +144,8 @@ def test_vc500w_takes_only_its_tapes():
     assert label_size_problem('vc50', 'VC-500W') == ''
     assert label_size_problem('62', 'VC-500W') == 'The label size 62 mm endless (DK-22205 / DK-2205) cannot be printed on a VC-500W'
     assert label_size_problem('vc12', 'QL-800') == 'The label size 12 mm full color tape (VC-500W) cannot be printed on a QL-800'
+    # A model told with a vowel first takes "an"
+    assert label_size_problem('62', 'Epson/TM-T20II') == 'The label size 62 mm endless (DK-22205 / DK-2205) cannot be printed on an Epson TM-T20II'
 
 
 @pytest.mark.parametrize('label_size, model', [('vc25', 'QL-800'), ('62', 'VC-500W')])

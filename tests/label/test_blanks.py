@@ -102,18 +102,65 @@ def test_dates_of_blanks_are_written_in_their_format(tmp_path):
         assert label.text[0]['text'].split('|')[1] == today
 
 
+def test_dates_of_blanks_start_at_a_day_moved_from_today(tmp_path):
+    # A best-before date as a default, e.g., 5 days or 6 months from today.
+    # Given values may be moved as well, also through the API.
+    client = make_client(tmp_path)
+    timestamp = int(datetime(2024, 1, 31, 12).timestamp())
+    fields = {'Use by': {'type': 'date', 'format': '%d.%m.%Y', 'default': '+5d'}, 'Made on': {'type': 'date', 'default': '-1w'},
+              'Note': {'type': 'text', 'default': '+5d'}}
+    data = {'timestamp': str(timestamp), 'fields': json.dumps(fields),
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Use by}}|{{blank:Made on}}|{{blank:Note}}'}])}
+    expected = {
+        json.dumps({}): '05.02.2024|2024-01-24|+5d',
+        json.dumps({'Use by': '+1m', 'Made on': ' +1y '}): '29.02.2024|2025-01-31|+5d',
+        json.dumps({'Use by': '2024-03-01', 'Made on': '', 'Note': '+1d'}): '01.03.2024||+1d',
+        # Not an offset, stays as given like any value that is no date
+        json.dumps({'Use by': '+5', 'Made on': 'in 5d'}): '+5|in 5d|+5d',
+    }
+    with client.application.test_request_context():
+        for blanks, text in expected.items():
+            label = create_label_from_request(dict(data, blanks=blanks))
+            label.process_templates()
+            assert label.text[0]['text'] == text
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, **data, blanks=json.dumps({'Use by': '+101y'})))
+    assert response.status_code == 400 and response.get_json()['message'] == 'A date offset is at most a hundred years'
+
+
+@pytest.mark.parametrize('default, message', [
+    ('+5x', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
+    ('-5', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
+    (' +101y', 'A date offset is at most a hundred years'),
+])
+def test_dates_of_blanks_moved_by_another_offset_are_refused(tmp_path, default, message):
+    # Refused when saved, not only when printed
+    client = make_client(tmp_path, empty_repo=True)
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'text': '{{blank:Use by}}', 'size': '40'}])
+    fields = {'Use by': {'type': 'date', 'default': default}}
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, text=text, fields=json.dumps(fields)))
+    assert response.status_code == 400 and response.get_json()['message'] == message
+    response = client.post('/labeldesigner/api/repository/save', json={'name': 'Use by.json', 'label_size': '62', 'text': text, 'fields': fields})
+    assert response.status_code == 400 and response.get_json()['message'] == message
+    assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+    # Text may look like it
+    fields['Use by']['type'] = 'text'
+    response = client.post('/labeldesigner/api/repository/save', json={'name': 'Use by.json', 'label_size': '62', 'text': text, 'fields': fields})
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize('fields', ['Due', '["Due"]', '{"Due": "date"}',
                                     # What is in them as well: a format that is
                                     # no text was written as its Python text
                                     '{"Due": {"type": "date", "format": {"x": 1}}}', '{"Due": {"type": "color"}}',
                                     '{"Due": {"type": ["date"]}}', '{"Due": {"default": true}}', '{"Due": {"default": [1]}}',
+                                    '{"Due": {"choices": "a"}}', '{"Due": {"type": "choice", "choices": {"a": 1}}}',
                                     # Nested deeper than Python reads
                                     '[' * 100000])
 def test_settings_of_blanks_must_be_an_object_of_objects(tmp_path, fields):
     client = make_client(tmp_path, empty_repo=True)
     data = dict(EXAMPLE_FORMDATA, text=json.dumps([{'font': 'DejaVu Sans,Book', 'text': '{{blank:Due}}', 'size': '40'}]), fields=fields)
-    message = ('fields must be a JSON object with the settings of each blank: a type of text, number or date, '
-               'a format as text and a default as text or number, e.g. {"Frozen on": {"type": "date"}}')
+    message = ('fields must be a JSON object with the settings of each blank: a type of text, number, date or choice, '
+               'a format as text, a default as text or number and choices as a list, e.g., {"Frozen on": {"type": "date"}}')
     response = client.post('/labeldesigner/api/preview', data=data)
     assert response.status_code == 400 and response.get_json()['message'] == message
     # Also where they are saved with a label, and as an object
@@ -121,6 +168,95 @@ def test_settings_of_blanks_must_be_an_object_of_objects(tmp_path, fields):
         response = client.post('/labeldesigner/api/repository/save', json={'name': 'Due.json', 'label_size': '62', 'text': data['text'], 'fields': given})
         assert response.status_code == 400 and response.get_json()['message'] == message
     assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+
+
+def test_choice_blanks_are_filled_in_with_one_of_their_choices(tmp_path, caplog):
+    # Like a room or shelf picked from a list: the default, else the first
+    # one, numbers as they are written
+    client = make_client(tmp_path, empty_repo=True)
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Room}}|{{blank:Shelf}}'}])
+    fields = {'Room': {'type': 'choice', 'choices': ['Garage', 'Kitchen', 'Attic']},
+              'Shelf': {'type': 'choice', 'choices': [1, 2.50, 'top'], 'default': 2.50}}
+    expected = {None: 'Garage|2.5', json.dumps({'Room': 'Attic', 'Shelf': 'top'}): 'Attic|top', json.dumps({'Shelf': 1}): 'Garage|1'}
+    with client.application.test_request_context():
+        for blanks, printed in expected.items():
+            label = create_label_from_request({'text': text, 'fields': fields, 'blanks': blanks})
+            label.process_templates()
+            assert label.text[0]['text'] == printed
+        # As JSON text, numbers are as written
+        label = create_label_from_request({'text': text, 'fields': '{"Shelf": {"type": "choice", "choices": [1, 2.50], "default": 2.50}}'})
+        label.process_templates()
+        assert label.text[0]['text'] == '|2.50'
+    # One that is none of them is refused, also left empty
+    data = dict(EXAMPLE_FORMDATA, text=text, fields=json.dumps(fields))
+    for value in ('Cellar', 'garage', ''):
+        response = client.post('/labeldesigner/api/preview', data=dict(data, blanks=json.dumps({'Room': value})))
+        assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
+        # The log names the value and the blank
+        assert any(f'"{value}" is none of the choices of the blank Room' in record.getMessage() for record in caplog.records)
+    # Saved, also when printed by name
+    assert client.post('/labeldesigner/api/repository/save', json={'name': 'Room.json', 'label_size': '62', 'text': text, 'fields': fields}).status_code == 200
+    response = client.post('/labeldesigner/api/repository/print', json={'name': 'Room.json', 'printer': 'simulation', 'blanks': {'Room': 'Kitchen'}})
+    assert response.get_json() == {'success': True}
+    response = client.post('/labeldesigner/api/repository/print', json={'name': 'Room.json', 'printer': 'simulation', 'blanks': {'Room': 'Cellar'}})
+    assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
+    # A value saved with the label is one of them as well
+    saved = {'name': 'Attic.json', 'label_size': '62', 'text': text, 'fields': fields}
+    for value in ('Cellar', ''):
+        response = client.post('/labeldesigner/api/repository/save', json=dict(saved, blanks={'Room': value}))
+        assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
+    assert sorted(os.listdir(client.application.config['LABEL_REPOSITORY_DIR'])) == ['Room.json']
+    assert client.post('/labeldesigner/api/repository/save', json=dict(saved, blanks={'Room': 'Attic', 'Shelf': 1})).get_json() == {'success': True, 'name': 'Attic.json'}
+    with client.application.test_request_context():
+        stored = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Attic.json'}).get_json()
+        label = create_label_from_request(dict(stored, text=text))
+        label.process_templates()
+        assert label.text[0]['text'] == 'Attic|1'
+
+
+def test_choices_in_a_json_body_are_numbers_as_written(tmp_path):
+    # 2.50 stays 2.50 in the choices, as in the default and the values
+    client = make_client(tmp_path, empty_repo=True)
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Shelf}}'}])
+    body = '{"name": "Shelf.json", "label_size": "62", "text": %s, "fields": {"Shelf": {"type": "choice", "choices": [1, 2.50], "default": 2.50}}}' % text
+    assert client.post('/labeldesigner/api/repository/save', data=body, content_type='application/json').status_code == 200
+    loaded = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Shelf.json'}).get_json()
+    assert loaded['fields']['Shelf']['choices'] == ['1', '2.50']
+    response = client.post('/labeldesigner/api/repository/print', data='{"name": "Shelf.json", "printer": "simulation", "blanks": {"Shelf": 2.50}}',
+                           content_type='application/json')
+    assert response.get_json() == {'success': True}
+
+
+CHOICES_NEEDED = 'A choice blank needs 1 to 50 choices, each a text of at most 200 characters'
+
+
+@pytest.mark.parametrize('field, message', [
+    ({'type': 'choice'}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': []}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': [str(i) for i in range(51)]}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': ['Garage', '']}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': ['Garage', '  ']}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': ['x' * 201]}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': [True]}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': [['Garage']]}, CHOICES_NEEDED),
+    ({'type': 'choice', 'choices': ['Garage', 'Garage']}, 'A choice blank has a choice twice'),
+    ({'type': 'choice', 'choices': ['Garage'], 'default': 'Kitchen'}, 'The default of a choice blank is none of its choices'),
+])
+def test_choice_blanks_without_proper_choices_are_refused(tmp_path, caplog, field, message):
+    # Refused when saved, not only when printed
+    client = make_client(tmp_path, empty_repo=True)
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Room}}'}])
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, text=text, fields=json.dumps({'Room': field})))
+    assert response.status_code == 400 and response.get_json()['message'] == message
+    # The log names the blank
+    assert any('blank Room' in record.getMessage() for record in caplog.records)
+    response = client.post('/labeldesigner/api/repository/save', json={'name': 'Room.json', 'label_size': '62', 'text': text, 'fields': {'Room': field}})
+    assert response.status_code == 400 and response.get_json()['message'] == message
+    assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+    # Choices are left alone where the blank is no choice
+    response = client.post('/labeldesigner/api/repository/save', json={'name': 'Room.json', 'label_size': '62', 'text': text,
+                                                                         'fields': {'Room': dict(field, type='text')}})
+    assert response.status_code == 200
 
 
 def test_settings_of_blanks_as_the_label_designer_saves_them(tmp_path):
@@ -146,8 +282,8 @@ def test_preview_marks_the_blanks_to_fill_in(tmp_path, monkeypatch):
     # it as printed, with the same random parts as the text.
     from app.labeldesigner import label as label_module
     coded = []
-    original = label_module._qr_image
-    monkeypatch.setattr(label_module, '_qr_image', lambda data, *args: coded.append(data) or original(data, *args))
+    original = label_module._code_image
+    monkeypatch.setattr(label_module, '_code_image', lambda code_type, data, *args: coded.append(data) or original(code_type, data, *args))
     client = make_client(tmp_path)
     data = {'print_type': 'qrcode_text', 'barcode_type': 'QR', 'code_text': '', 'blanks': json.dumps({'Box': '4'}),
             'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf {{blank:Room}} {{blank:Box}} {{short-uuid}}'}])}
@@ -202,9 +338,9 @@ def test_preview_shows_the_blanks_of_a_code_that_has_nothing_else(tmp_path, monk
     # the preview shows what is still to fill in instead of nothing
     from app.labeldesigner import label as label_module
     coded = []
-    for name in ('_qr_image', '_barcode_image'):
+    for name in ('_code_image', '_barcode_image'):
         original = getattr(label_module, name)
-        monkeypatch.setattr(label_module, name, lambda *args, original=original, name=name: coded.append(args[0] if name == '_qr_image' else args[2]) or original(*args))
+        monkeypatch.setattr(label_module, name, lambda *args, original=original, name=name: coded.append(args[1] if name == '_code_image' else args[2]) or original(*args))
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, print_type='qrcode', barcode_type=barcode_type, code_text='{{blank:Link}}', text='[]')
     assert client.post('/labeldesigner/api/preview', data=dict(data, mark_blanks='1')).status_code == 200
@@ -225,9 +361,9 @@ def test_preview_shows_the_blanks_of_a_code_that_has_nothing_else(tmp_path, monk
 def test_preview_shows_the_blanks_of_a_code_that_takes_empty_text(tmp_path, monkeypatch, barcode_type, code, lines, qr, barcode):
     from app.labeldesigner import label as label_module
     coded = []
-    for name in ('_qr_image', '_barcode_image'):
+    for name in ('_code_image', '_barcode_image'):
         original = getattr(label_module, name)
-        monkeypatch.setattr(label_module, name, lambda *args, original=original, name=name: coded.append(args[0] if name == '_qr_image' else args[2]) or original(*args))
+        monkeypatch.setattr(label_module, name, lambda *args, original=original, name=name: coded.append(args[1] if name == '_code_image' else args[2]) or original(*args))
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, print_type='qrcode_text', barcode_type=barcode_type, code_text=code, mark_blanks='1',
                 text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': line} for line in lines]))
@@ -283,8 +419,8 @@ def test_image_label_with_many_large_blanks_is_refused_without_putting_them_toge
 def test_code_of_empty_blanks_and_spaces_takes_the_text(tmp_path, monkeypatch):
     from app.labeldesigner import label as label_module
     coded = []
-    original = label_module._qr_image
-    monkeypatch.setattr(label_module, '_qr_image', lambda data, *args: coded.append(data) or original(data, *args))
+    original = label_module._code_image
+    monkeypatch.setattr(label_module, '_code_image', lambda code_type, data, *args: coded.append(data) or original(code_type, data, *args))
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, print_type='qrcode_text', barcode_type='QR', code_text='{{blank:A}} {{blank:B}}',
                 text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}]))
@@ -338,3 +474,24 @@ def test_text_as_written_filled_in_and_drawn(tmp_path):
         label = create_label_from_request(dict(data, print_type='qrcode', blanks=json.dumps({'Room': 'Garage'})))
         label.process_templates()
         assert (label.has_lines(), label.has_text(), label.want_text(code)) == (False, True, False)
+
+
+def test_choice_blanks_counters_and_dates_in_one_line(tmp_path):
+    # Each copy counts on with the same choice and dates, in the text and in
+    # the code; a preview shows the first choice, not a mark
+    client = make_client(tmp_path)
+    template = '{{blank:Room}} {{counter:A}}{{counter:001:5}} {{blank:Frozen on}} use by {{datetime+1m:%Y-%m-%d}}'
+    data = {'print_type': 'qrcode_text', 'label_size': '62', 'code_text': template,
+            'timestamp': str(int(datetime(2024, 1, 31, 12, 15).timestamp())), 'blanks': {'Room': 'Attic'},
+            'fields': {'Room': {'type': 'choice', 'choices': ['Garage', 'Attic']}, 'Frozen on': {'type': 'date', 'format': '%d.%m.%Y'}},
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}])}
+    with client.application.test_request_context():
+        for copy, value in enumerate(['A001', 'B006', 'C011']):
+            label = create_label_from_request(data, {}, copy)
+            label.process_templates()
+            assert label.text[0]['text'] == label.code_text == f'Attic {value} 31.01.2024 use by 2024-02-29'
+        label = create_label_from_request(dict(data, blanks={}), {}, 1, mark_blanks=True)
+        label.process_templates()
+        assert label.text[0]['text'] == 'Garage B006 31.01.2024 use by 2024-02-29'
+        with pytest.raises(ValueError, match='is none of the choices'):
+            create_label_from_request(dict(data, blanks={'Room': 'Cellar'}), {}, 1).process_templates()
