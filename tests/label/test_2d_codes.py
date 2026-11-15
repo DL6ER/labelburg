@@ -3,11 +3,12 @@ The reference images were checked once with a decoder (zxing-cpp)."""
 
 import io
 import json
+import math
 
 import pytest
 from PIL import Image, ImageChops
 
-from app.labeldesigner import codes
+from app.labeldesigner import codes, label as label_module
 from app.labeldesigner.label import _code_image
 
 from tests.helpers import EXAMPLE_FORMDATA, make_client, TEXT, verify_image
@@ -192,6 +193,80 @@ def test_2d_codes_fit_narrow_tape(tmp_path):
     image = Image.open(io.BytesIO(response.data))
     # 7 rows of 10 dots across the 70 dots of the tape
     assert image.height == 70 and image.width > 7 * image.height
+
+
+def along_tape(client, **settings):
+    """A fitted code next to text along endless tape, as the label designer
+    lays out a label of a code."""
+    values = {'orientation': 'rotated', 'image_fit': '1', 'border_thickness': '0', 'code_text': 'https://example.com/pantry/shelf-3',
+              'text': json.dumps([dict(LINES[0], font='DejaVu Serif,Bold', text='Pantry shelf 3', size='70')])}
+    return preview(client, **dict(values, **settings))
+
+
+def dark_columns(image: Image.Image) -> tuple[int, int, int]:
+    """Width, top and bottom of what is drawn from the left margin up to the
+    first gap across the label: the code left of the text."""
+    dark = image.convert('L').point(lambda v: 255 if v < 128 else 0)
+    drawn = [dark.crop((x, 0, x + 1, image.height)).getbbox() is not None for x in range(image.width)]
+    start = drawn.index(True)
+    end = drawn.index(False, start)
+    _, top, _, bottom = dark.crop((start, 0, end, image.height)).getbbox()
+    return end - start, top, bottom
+
+
+@pytest.mark.parametrize('code_type, settings, length, short_side', [
+    # An rMQR code of 7 x 139 dots, about 0.4 mm each on 62 mm tape, a
+    # PDF417 code of 6 rows three dots high and 171 dots
+    ('RMQR', {}, 649, 7),
+    ('PDF417', {}, 686, 18),
+    ('RMQR', {'label_size': '29'}, 630, 7),
+])
+def test_a_wide_code_lies_across_wide_endless_tape(tmp_path, code_type, settings, length, short_side):
+    client = make_client(tmp_path)
+    response = along_tape(client, barcode_type=code_type, **settings)
+    assert response.status_code == 200
+    image = Image.open(io.BytesIO(response.data))
+    assert image.width == length
+    width, top, bottom = dark_columns(image)
+    # From margin to margin across the tape
+    assert top == 12 and bottom == image.height - 12
+    assert width == short_side * (bottom - top) // (171 if code_type == 'PDF417' else 139)
+
+
+def test_a_wide_code_next_to_an_image_lies_across_wide_endless_tape(tmp_path):
+    client = make_client(tmp_path)
+    image = io.BytesIO()
+    Image.new('RGB', (120, 120), (90, 90, 90)).save(image, 'PNG')
+    image.seek(0)
+    data = dict(EXAMPLE_FORMDATA, print_type='image_qrcode_text', orientation='rotated', image_fit='1', barcode_type='PDF417',
+                code_text='Box 7', text=json.dumps(LINES), image=(image, 'gray.png', 'image/png'))
+    response = client.post(PREVIEW, data=data, content_type='multipart/form-data')
+    assert response.status_code == 200
+    # The label is as long as image, text and code next to each other
+    assert Image.open(io.BytesIO(response.data)).size == (962, 696)
+
+
+@pytest.mark.parametrize('code_type, settings', [
+    # Codes that are not wide
+    ('QR', {}),
+    ('DATAMATRIX', {}),
+    ('AZTEC', {}),
+    ('MICROQR', {'code_text': 'HELLO 123'}),
+    # Narrow tape, which rMQR codes are made for
+    ('RMQR', {'label_size': '12'}),
+    ('PDF417', {'label_size': '12'}),
+    ('RMQR', {'label_size': 'pt24'}),
+    # The size of a dot set, a length set, the code across the tape anyway
+    ('RMQR', {'image_fit': '0', 'qrcode_size': '3'}),
+    ('RMQR', {'label_length': '80'}),
+    ('PDF417', {'orientation': 'standard'}),
+])
+def test_other_codes_and_tapes_keep_their_layout(tmp_path, monkeypatch, code_type, settings):
+    client = make_client(tmp_path, model='PT-P750W' if settings.get('label_size') == 'pt24' else None)
+    made = along_tape(client, barcode_type=code_type, **settings)
+    monkeypatch.setattr(label_module, 'WIDE_CODES_ALONG_UP_TO', math.inf)
+    along = along_tape(client, barcode_type=code_type, **settings)
+    assert made.status_code == along.status_code == 200 and made.data == along.data
 
 
 @pytest.mark.parametrize('values, message', [

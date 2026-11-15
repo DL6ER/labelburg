@@ -1897,7 +1897,7 @@
           "barcode_type": {
             "type": "string",
             "default": "QR",
-            "description": "One of `/labeldesigner/api/barcodes`. The 2D codes DATAMATRIX, MICROQR, RMQR, AZTEC and PDF417 are made like QR codes: of dots of the size `qrcode_size`, of the text of all lines where `code_text` is left out. DataMatrix codes hold ASCII characters only. Of a code with a check digit, e.g., EAN13, ISBN10 or UPCA, give the digits without it, which calculates it, or with the right one. A wrong one is refused."
+            "description": "One of `/labeldesigner/api/barcodes`. The 2D codes DATAMATRIX, MICROQR, RMQR, AZTEC and PDF417 are made like QR codes: of dots of the size `qrcode_size`, of the text of all lines where `code_text` is left out. DataMatrix codes hold ASCII characters only. Fitted to a label along endless tape wider than 24 mm, RMQR and PDF417 codes lie across the tape. Of a code with a check digit, e.g., EAN13, ISBN10 or UPCA, give the digits without it, which calculates it, or with the right one. A wrong one is refused."
           },
           "qrcode_size": {
             "type": "integer",

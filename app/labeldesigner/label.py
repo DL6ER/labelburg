@@ -39,6 +39,10 @@ MAX_FILL_SIZE = 2000
 # long as the tape is wide, about a meter on 62 mm tape at any resolution,
 # e.g. many lines across the tape
 MAX_FILLED_RATIO = 16
+# Fitted along endless tape wider than this, in mm, a wide 2D code (rMQR,
+# PDF417) lies across the tape and is as long as the tape is wide, so that
+# the label stays short
+WIDE_CODES_ALONG_UP_TO = 24
 # Where an image or code can be next to the text
 IMAGE_POSITIONS = ('above', 'below', 'left', 'right')
 # The contents of labels with an image, by its colors
@@ -230,6 +234,7 @@ class SimpleLabel:
         flag_dpi: int = 300,
         fixed_length: bool = False,
         vertical_align: str = 'center',
+        tape_width: float = 0,
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -242,7 +247,8 @@ class SimpleLabel:
         the other side of the text. With fixed_length an endless label has
         the size given, it does not grow with its content. vertical_align
         places the content at the top, in the center or at the bottom of a
-        label that does not grow with it in height."""
+        label that does not grow with it in height. tape_width in mm tells
+        whether a wide 2D code lies across endless tape, see _across_tape()."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -305,6 +311,7 @@ class SimpleLabel:
         self._shared_layouts = layouts
         # An endless label of a given length is laid out like a die-cut one
         self._fixed_length = fixed_length
+        self._tape_width = tape_width
         self._layouts: dict = {}
         self._text_key = ''
         self._text_scale = 1.0
@@ -654,7 +661,7 @@ class SimpleLabel:
             raise ValueError("The label has no image")
         code = None
         if self._draws_code():
-            code = self._generate_2d() if self.barcode_type in codes.NAMES else self._generate_barcode()
+            code = self._across_tape(self._generate_2d()) if self.barcode_type in codes.NAMES else self._generate_barcode()
         if self._label_content in (LabelContent.QRCODE_ONLY, LabelContent.TEXT_QRCODE):
             img, code = code, None
         elif self._label_content in IMAGE_CONTENTS:
@@ -932,6 +939,15 @@ class SimpleLabel:
             if self._code_of_marks:
                 raise ValueError("The code is empty until its blanks are filled in.") from None
             raise
+
+    def _across_tape(self, code: Image.Image) -> Image.Image:
+        """A 2D code wider than high turned to lie across endless tape wider
+        than WIDE_CODES_ALONG_UP_TO mm, where it is fitted to a label that
+        grows along the tape."""
+        if (self._image_fit and self._grows()[0] and self._tape_width > WIDE_CODES_ALONG_UP_TO
+                and code.width > code.height):
+            return code.transpose(Image.Transpose.ROTATE_90)
+        return code
 
     def _generate_2d(self):
         """A QR code or another 2D code, of the text of all lines where the
