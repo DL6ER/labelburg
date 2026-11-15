@@ -12,7 +12,7 @@ USB/IP has neither encryption nor passwords: whoever reaches port 3240 of the sh
 
 ## Printer on an ESP32 (ESPHome, Home Assistant)
 
-Tried with a QL-810W on a Waveshare ESP32-P4-NANO with ESPHome 2026.10.2 and the component [esphome-usbip-server](https://github.com/PedroPerfecto/esphome-usbip-server) 0.2.1, on Wi-Fi: status, printing, cover and roll errors, switching the printer and the board off and on, 500 status queries and 100 new connections in a row, data at 290 to 480 KiB/s. The Ethernet part uses the pins from Waveshare's schematic of the board.
+Tried with a QL-810W and a VC-500W on a Waveshare ESP32-P4-NANO with ESPHome 2026.10.2 and the component [esphome-usbip-server](https://github.com/PedroPerfecto/esphome-usbip-server) 0.2.1, on Wi-Fi. The Ethernet part uses the pins from Waveshare's schematic of the board.
 
 ### What you need
 
