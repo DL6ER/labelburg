@@ -1638,10 +1638,10 @@ async function loadIcons() {
     } catch (e) { return []; }
     return iconList;
 }
-// Icons whose names contain all words of the search, exact and leading
-// matches first. Without a search all icons, by name.
+// Icons and symbols whose names contain all words of the search, exact and
+// leading matches first. Without a search all of them, by name.
 function findIcons(list, query) {
-    const words = query.toLowerCase().replace(/^mdi:/, '').split(/[\s:]+/).filter(Boolean);
+    const words = query.toLowerCase().replace(/^[a-z]+:/, '').split(/[\s:]+/).filter(Boolean);
     if (!words.length) return list;
     const rank = i => i.name === words.join('-') ? 0 : i.name.startsWith(words[0]) ? 1 : 2;
     return list.filter(i => words.every(w => i.name.includes(w)))
@@ -1669,46 +1669,65 @@ async function openSymbols(input) {
     const loading = $('#layer .dialog');
     const [list, icons, sets] = await Promise.all([loadSymbols(), loadIcons(), loadSymbolSets()]);
     if (!loading.isConnected) return;
-    const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
-            <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
-    const setGrid = (set, symbols) => `<div class="sym-grid">${Object.entries(symbols).map(([name, code]) =>
-        `<button type="button" class="sym sx${name.startsWith('bolt-') ? ' wide' : ''}" data-tpl="${set}:${esc(name)}" title="${set}:${esc(name)}">${String.fromCodePoint(parseInt(code, 16))}</button>`).join('')}</div>`;
     // The sets inserted by name, {{<set>:<name>}}, by their titles
     const named = [
-        ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', body: `
-            <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
-            <div class="sym-grid" id="icoGrid"></div>
-            <p class="muted small" id="icoHint" style="margin:0"></p>
-            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button>` }] : []),
-        ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title, body:
-            `${setGrid(set, sets[set])}<p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${set}:${esc(Object.keys(sets[set])[0])}}}</code>. Point at a symbol to see its name.</p>` })),
+        ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', items: icons }] : []),
+        ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title,
+            items: Object.entries(sets[set]).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) })) })),
     ].sort((a, b) => a.title.localeCompare(b.title));
+    const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
+            <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
     openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
         <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${named.length ? '<input class="field" type="search" id="symQ" placeholder="Search icons and symbols, e.g. lightbulb, torx or resistor" autocomplete="off" aria-label="Search the icons and symbols">' : ''}
         ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
         ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
-        ${named.map(x => section(x.id, x.title + (x.note ? ` <span class="muted small">${x.note}</span>` : ''), x.body)).join('')}` : ''}</div>`);
-    $$('#layer .sym-set').forEach(d => d.addEventListener('toggle', () => openSymbolSections[d.open ? 'add' : 'delete'](d.dataset.section)));
+        ${named.map(x => section(x.id, `${x.title} <span class="muted small" data-count="${x.id}">${x.note || ''}</span>`, `<div class="sym-grid" data-grid="${x.id}"></div>
+            <p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${x.id}:${esc(x.items[0].name)}}}</code>. Point at one to see its name.</p>
+            <button class="btn sm" type="button" data-all="${x.id}" style="align-self:flex-start" hidden></button>`)).join('')}` : ''}
+        <p class="muted" id="symNone" hidden>Nothing found.</p></div>`);
+    const symbolsSection = $('#layer [data-section="symbols"]');
+    // Opened and closed by hand, not by the search
+    let searching = false;
+    $$('#layer .sym-set').forEach(d => d.addEventListener('toggle', () => {
+        if (!searching) openSymbolSections[d.open ? 'add' : 'delete'](d.dataset.section);
+    }));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
-    $$('[data-tpl]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); });
-    if (!icons.length) return;
-    // The first ones, all of them on request
-    const draw = all => {
-        const found = findIcons(icons, $('#icoQ').value);
-        const shown = all ? found : found.slice(0, 120);
-        $('#icoGrid').innerHTML = shown.map(i => `<button type="button" class="sym ico" data-ico="${esc(i.name)}" title="mdi:${esc(i.name)}">${i.char}</button>`).join('');
-        $('#icoHint').innerHTML = found.length ? 'Inserts the name, e.g. <code>{{mdi:power}}</code>. Point at an icon to see its name.' : 'No icon found.';
-        $('#icoAll').hidden = shown.length >= found.length;
-        $('#icoAll').textContent = `Show all ${found.length} icons`;
+    $('#layer .dialog').addEventListener('click', e => {
+        const b = e.target.closest('[data-tpl]');
+        if (b) { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); }
+    });
+    if (!named.length) return;
+    // The first ones of each set, all of them on request. A search shows
+    // the sets with something found, "fastener:torx" only those of the set.
+    const showAll = new Set();
+    const draw = () => {
+        const query = $('#symQ').value.trim();
+        const only = (query.match(/^([a-z]+):/) || [])[1];
+        searching = true;
+        symbolsSection.hidden = !!query;
+        if (!query) symbolsSection.open = openSymbolSections.has('symbols');
+        let any = !query;
+        for (const x of named) {
+            const found = only && named.some(y => y.id === only) && only !== x.id ? [] : findIcons(x.items, query);
+            const shown = showAll.has(x.id) ? found : found.slice(0, 120);
+            $(`[data-grid="${x.id}"]`).innerHTML = shown.map(i => `<button type="button" class="sym ${x.id === 'mdi' ? 'ico' : 'sx'}${i.name.startsWith('bolt-') && x.id === 'fastener' ? ' wide' : ''}" data-tpl="${x.id}:${esc(i.name)}" title="${x.id}:${esc(i.name)}">${i.char}</button>`).join('');
+            const all = $(`[data-all="${x.id}"]`);
+            all.hidden = shown.length >= found.length;
+            all.textContent = `Show all ${found.length}`;
+            $(`[data-count="${x.id}"]`).textContent = query ? `${found.length} found` : x.note || '';
+            const d = $(`#layer [data-section="${x.id}"]`);
+            d.hidden = !!query && !found.length;
+            d.open = query ? found.length > 0 : openSymbolSections.has(x.id);
+            any = any || found.length > 0;
+        }
+        $('#symNone').hidden = any;
+        searching = false;
     };
-    draw(false);
-    $('#icoQ').addEventListener('input', () => draw(false));
-    $('#icoAll').onclick = () => draw(true);
-    $('#icoGrid').onclick = e => {
-        const b = e.target.closest('[data-ico]');
-        if (b) { closeLayer(true); insertAt(input, `{{mdi:${b.dataset.ico}}}`, false); }
-    };
+    draw();
+    $('#symQ').addEventListener('input', () => { showAll.clear(); draw(); });
+    $$('[data-all]').forEach(b => b.onclick = () => { showAll.add(b.dataset.all); draw(); });
 }
 
 // The codes of {{datetime:<format>}}, with examples made by the server

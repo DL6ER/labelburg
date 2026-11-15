@@ -758,40 +758,41 @@ def test_icons_are_offered_with_the_symbols(designer):
     designer.click('#edSym')
     # Each set opens on its own
     designer.click('[data-section="mdi"] summary')
-    designer.wait_for_selector('#icoGrid .ico')
+    designer.wait_for_selector('[data-grid="mdi"] .ico')
     # The first ones, all of them on request
-    count = "() => document.querySelectorAll('#icoGrid .ico').length"
+    count = "() => document.querySelectorAll('[data-grid=\"mdi\"] .ico').length"
     assert designer.evaluate(count) == 120
-    designer.click('#icoAll')
+    designer.click('[data-all="mdi"]')
     assert designer.evaluate(count) > 7000
-    designer.fill('#icoQ', 'lightbulb')
-    assert designer.get_attribute('#icoGrid .ico', 'title') == 'mdi:lightbulb'
-    designer.click('#icoGrid .ico')
+    designer.fill('#symQ', 'lightbulb')
+    assert designer.get_attribute('[data-grid="mdi"] .ico', 'title') == 'mdi:lightbulb'
+    designer.click('[data-grid="mdi"] .ico')
     assert designer.input_value('[data-row="0"] .tx') == 'Light {{mdi:lightbulb}}'
     wait_for_preview(designer)
     assert 'Everything fits.' in fits_note(designer)
 
 
-def test_fasteners_and_electronic_components_are_offered(designer):
-    type_line(designer, 0, 'M3 ')
+def test_one_search_finds_in_every_set(designer):
+    designer.click('[data-row="0"] .tx')
     designer.click('#edSym')
-    designer.wait_for_selector('[data-section="fastener"]')
-    # The symbols first, then the sets inserted by name by their titles
-    sections = "() => [...document.querySelectorAll('#layer .sym-set')].map(d => d.dataset.section)"
-    assert designer.evaluate(sections) == ['symbols', 'electronic', 'fastener', 'mdi']
-    assert not designer.is_visible('[data-tpl="fastener:head-torx"]')
-    designer.click('[data-section="fastener"] summary')
-    designer.click('[data-tpl="fastener:head-torx"]')
-    assert designer.input_value('[data-row="0"] .tx') == 'M3 {{fastener:head-torx}}'
-    wait_for_preview(designer)
-    assert 'Everything fits.' in fits_note(designer)
-    # The set opened stays open, the next one opens too
-    designer.click('#edSym')
-    designer.wait_for_selector('[data-tpl="fastener:head-torx"]')
-    designer.click('[data-section="electronic"] summary')
-    assert designer.locator('[data-tpl^="electronic:"]').count() > 100
-    designer.click('[data-tpl="electronic:resistor-iec-standard"]')
-    assert designer.input_value('[data-row="0"] .tx').endswith('{{electronic:resistor-iec-standard}}')
+    designer.wait_for_selector('#symQ')
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].filter(d => !d.hidden && d.open).map(d => d.dataset.section)"
+    # The sets with something found open, the others and the symbols hidden
+    designer.fill('#symQ', 'nut')
+    assert designer.evaluate(sections) == ['fastener', 'mdi']
+    designer.fill('#symQ', 'diode')
+    assert designer.evaluate(sections) == ['electronic']
+    designer.fill('#symQ', 'resistor')
+    assert designer.evaluate(sections) == ['electronic', 'mdi']
+    # Only one set
+    designer.fill('#symQ', 'fastener:nut')
+    assert designer.evaluate(sections) == ['fastener']
+    designer.fill('#symQ', 'no such symbol')
+    assert designer.evaluate(sections) == []
+    assert designer.is_visible('#symNone')
+    # Without a search as opened by hand
+    designer.fill('#symQ', '')
+    assert designer.evaluate(sections) == ['symbols']
 
 
 @pytest.mark.parametrize('view', ['edit', 'wizard'])
