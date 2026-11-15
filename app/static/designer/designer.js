@@ -1659,8 +1659,10 @@ async function loadSymbolSets() {
     return symbolSets;
 }
 const SYMBOL_SETS = { fastener: 'Fasteners', electronic: 'Electronic components' };
+// The examples in the hints
+const SYMBOL_EXAMPLES = { mdi: 'power', fastener: 'head-torx', electronic: 'resistor-iec-standard' };
 // The sections of the dialog open, as left last time
-const openSymbolSections = new Set(['symbols']);
+const openSymbolSections = new Set(['symbols', 'mdi']);
 
 async function openSymbols(input) {
     if (!input) return;
@@ -1669,12 +1671,13 @@ async function openSymbols(input) {
     const loading = $('#layer .dialog');
     const [list, icons, sets] = await Promise.all([loadSymbols(), loadIcons(), loadSymbolSets()]);
     if (!loading.isConnected) return;
-    // The sets inserted by name, {{<set>:<name>}}, by their titles
+    // The sets inserted by name, {{<set>:<name>}}: the icons first, then
+    // the symbols
     const named = [
         ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', items: icons }] : []),
         ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title,
             items: Object.entries(sets[set]).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) })) })),
-    ].sort((a, b) => a.title.localeCompare(b.title));
+    ];
     const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
             <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
     openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
@@ -1683,15 +1686,15 @@ async function openSymbols(input) {
         ${named.length ? '<input class="field" type="search" id="symQ" placeholder="Search icons and symbols, e.g. lightbulb, torx or resistor" autocomplete="off" aria-label="Search the icons and symbols">' : ''}
         ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
         ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
-        ${named.map(x => section(x.id, `${x.title} <span class="muted small" data-count="${x.id}">${x.note || ''}</span>`, `<div class="sym-grid" data-grid="${x.id}"></div>
-            <p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${x.id}:${esc(x.items[0].name)}}}</code>. Point at one to see its name.</p>
+        ${named.map(x => section(x.id, `${x.title} <span class="muted small">${x.note || ''}</span>`, `<div class="sym-grid" data-grid="${x.id}"></div>
+            <p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${x.id}:${SYMBOL_EXAMPLES[x.id]}}}</code>. Point at one to see its name.</p>
             <button class="btn sm" type="button" data-all="${x.id}" style="align-self:flex-start" hidden></button>`)).join('')}` : ''}
         <p class="muted" id="symNone" hidden>Nothing found.</p></div>`);
     const symbolsSection = $('#layer [data-section="symbols"]');
-    // Opened and closed by hand, not by the search
-    let searching = false;
-    $$('#layer .sym-set').forEach(d => d.addEventListener('toggle', () => {
-        if (!searching) openSymbolSections[d.open ? 'add' : 'delete'](d.dataset.section);
+    // Opened and closed by hand, not by the search, whose toggle events
+    // come only after draw()
+    $$('#layer .sym-set > summary').forEach(s => s.addEventListener('click', () => {
+        openSymbolSections[s.parentElement.open ? 'delete' : 'add'](s.parentElement.dataset.section);
     }));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
     $('#layer .dialog').addEventListener('click', e => {
@@ -1705,7 +1708,6 @@ async function openSymbols(input) {
     const draw = () => {
         const query = $('#symQ').value.trim();
         const only = (query.match(/^([a-z]+):/) || [])[1];
-        searching = true;
         symbolsSection.hidden = !!query;
         if (!query) symbolsSection.open = openSymbolSections.has('symbols');
         let any = !query;
@@ -1716,14 +1718,12 @@ async function openSymbols(input) {
             const all = $(`[data-all="${x.id}"]`);
             all.hidden = shown.length >= found.length;
             all.textContent = `Show all ${found.length}`;
-            $(`[data-count="${x.id}"]`).textContent = query ? `${found.length} found` : x.note || '';
             const d = $(`#layer [data-section="${x.id}"]`);
             d.hidden = !!query && !found.length;
             d.open = query ? found.length > 0 : openSymbolSections.has(x.id);
             any = any || found.length > 0;
         }
         $('#symNone').hidden = any;
-        searching = false;
     };
     draw();
     $('#symQ').addEventListener('input', () => { showAll.clear(); draw(); });

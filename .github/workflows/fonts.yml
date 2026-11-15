@@ -1,7 +1,8 @@
-# Checks that the icon fonts in app/static are the versions in tools/fonts, and the font of the symbols
-# the one tools/symbols_font.py builds with the tools of requirements-symbols.txt, and adds the files of a
-# new version to Dependabot's pull requests with a GitHub App's token, as a push with GITHUB_TOKEN starts no
+# Checks that the icon fonts in app/static are the versions in tools/fonts, and adds the files of a new
+# version to Dependabot's pull requests with a GitHub App's token, as a push with GITHUB_TOKEN starts no
 # tests or CodeQL. The App's client ID and key are the Dependabot secrets FONTS_APP_CLIENT_ID and FONTS_APP_KEY.
+# Checks too that the font of the symbols is the one tools/symbols_font.py builds with the tools of
+# requirements-symbols.txt: on a pull request that raises one of them, it is built again by hand.
 name: Icon fonts
 
 on:
@@ -60,12 +61,11 @@ jobs:
         run: git diff --exit-code -- tools/symbols app/static/symbols && test -z "$(git status --porcelain -- tools/symbols app/static/symbols)"
 
   update:
-    # On Dependabot's pull requests for tools/fonts and the Python packages only, not on the push of
-    # this job: a new version of the font tools may build the font of the symbols a little differently.
+    # On Dependabot's pull requests for tools/fonts only, not on the push of this job.
     # Its actions are pinned to commits, as they handle the App's key.
     if: >-
       github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
-      && (startsWith(github.head_ref, 'dependabot/npm_and_yarn/') || startsWith(github.head_ref, 'dependabot/pip/'))
+      && startsWith(github.head_ref, 'dependabot/npm_and_yarn/')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
@@ -84,22 +84,14 @@ jobs:
           python-version: '3.15'
       - name: Copy the files of the new versions
         run: python tools/update_fonts.py
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
-      - name: Build the font of the symbols with the font tools of requirements-symbols.txt
-        run: |
-          pip install -r requirements-symbols.txt
-          python tools/fastener_svgs.py
-          python tools/symbols_font.py
       - name: Push them to the pull request
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           APP: ${{ steps.app.outputs.app-slug }}
         run: |
-          git add app/static tools/symbols
+          git add app/static
           git diff --cached --quiet && exit 0
           id=$(gh api "users/${APP}%5Bbot%5D" --jq .id)
           git -c user.name="${APP}[bot]" -c user.email="${id}+${APP}[bot]@users.noreply.github.com" \
-            commit -m "Add the font files of the versions in \`tools/fonts\` and \`requirements-symbols.txt\`"
+            commit -m "Add the icon font files of the versions in \`tools/fonts\`"
           git push

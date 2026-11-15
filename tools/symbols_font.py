@@ -7,8 +7,8 @@ tools/symbols/<set>:
     python3 tools/symbols_font.py
 
 The same SVGs and tool versions give the same font: .github/workflows/fonts.yml
-builds it again and fails when the committed one differs, and builds it on
-Dependabot's pull requests that raise the tools.
+builds it again and fails when the committed one differs, e.g. on a pull
+request that raises the tools: then build it again here.
 """
 import json
 import os
@@ -45,9 +45,11 @@ TIMESTAMP = timestampFromString('Thu Jan  1 00:00:00 2026')
 
 def name_of(file: str) -> str:
     """The name of a symbol, its file name without the standard "COM" of
-    the electronic symbols, e.g. Diode-COM-LED.svg is diode-led."""
+    the electronic symbols, e.g. Diode-COM-LED.svg is diode-led, spelled
+    right where the file name is not."""
     parts = file.removesuffix('.svg').lower().replace('_', '-').split('-')
-    return '-'.join(part for part in parts if part != 'com')
+    name = '-'.join(part for part in parts if part != 'com')
+    return {'diode-shottky': 'diode-schottky', 'transistor-phototransitor': 'transistor-phototransistor'}.get(name, name)
 
 
 def glyph(path: str, stroke: float = 1):
@@ -90,8 +92,10 @@ def build():
     fb.setupHorizontalMetrics(advances)
     fb.setupHorizontalHeader(ascent=ASCENT, descent=-DESCENT)
     fb.setupNameTable({'familyName': 'Labelburg Symbols', 'styleName': 'Regular',
-                       'copyright': 'Fasteners drawn as in gflabel by Nicholas Devenish (BSD-3-Clause), '
-                                    'electronic symbols by Chris Pikul (MIT), see tools/symbols'})
+                       'copyright': 'Fasteners: Copyright (c) 2024 Nicholas Devenish. '
+                                    'Electronic symbols: Copyright (c) 2022 Chris Pikul.',
+                       'licenseDescription': 'The fasteners under the BSD 3-Clause License, the electronic '
+                                             'symbols under the MIT License, see LICENSE next to this font.'})
     fb.setupOS2(sTypoAscender=ASCENT, sTypoDescender=-DESCENT, usWinAscent=ASCENT, usWinDescent=DESCENT)
     fb.setupPost()
     fb.setupHead(unitsPerEm=UPEM, created=TIMESTAMP, modified=TIMESTAMP)

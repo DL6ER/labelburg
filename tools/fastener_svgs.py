@@ -1,9 +1,9 @@
 """Draw the fastener symbols of {{fastener:<name>}} as SVGs in
 tools/symbols/fasteners, from which tools/symbols_font.py builds the font.
 
-The shapes are those of gflabel by Nicholas Devenish
-(https://github.com/ndevenish/gflabel, BSD-3-Clause, see the LICENSE there),
-drawn with skia-pathops instead of build123d:
+The shapes are those of gflabel (https://github.com/ndevenish/gflabel),
+Copyright (c) 2024 Nicholas Devenish, under the BSD 3-Clause License in
+tools/symbols/fasteners/LICENSE, drawn with skia-pathops instead of build123d:
 
     pip install -r requirements-symbols.txt
     python3 tools/fastener_svgs.py
@@ -224,6 +224,10 @@ def svg(path, width):
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
+    # Only those of SYMBOLS, also when one is taken out
+    for file in os.listdir(OUT):
+        if file.endswith('.svg'):
+            os.remove(os.path.join(OUT, file))
     for name, make in SYMBOLS.items():
         path = make()
         path.simplify()

@@ -220,6 +220,18 @@ def test_symbol_templates_insert_the_symbols(tmp_path):
     assert icons.font_of(torx) == icons.font_of(resistor) == icons.SYMBOLS_FONT_PATH
 
 
+def test_symbols_are_spelled_right():
+    assert icons.icon('diode-schottky', 'electronic') and icons.icon('transistor-phototransistor', 'electronic')
+    assert not icons.icon('diode-shottky', 'electronic')
+
+
+def test_the_symbols_font_carries_both_copyright_notices():
+    with open(icons.SYMBOLS_FONT_PATH, 'rb') as f:
+        font = f.read()
+    for notice in ('Copyright (c) 2024 Nicholas Devenish', 'Copyright (c) 2022 Chris Pikul'):
+        assert notice.encode('utf-16-be') in font
+
+
 @pytest.mark.parametrize('align', ['left', 'center', 'right'])
 def test_icon_and_text_in_one_line(tmp_path, align):
     # The icon comes from the icon font, the text from the font of the line,
