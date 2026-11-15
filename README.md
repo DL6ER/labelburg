@@ -2,7 +2,7 @@
 
 [![Python tests](https://github.com/DL6ER/labelburg/actions/workflows/ci.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/ci.yml) [![CodeQL Advanced](https://github.com/DL6ER/labelburg/actions/workflows/codeql.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/codeql.yml) [![Build and push images to GHCR.io](https://github.com/DL6ER/labelburg/actions/workflows/devcontainer-ghcr.yml/badge.svg)](https://github.com/DL6ER/labelburg/actions/workflows/devcontainer-ghcr.yml)
 
-Design and print labels 100% offline. Labelburg is a web interface and REST API for the label printers of Brother (QL, P-touch, VC-500W) and PUQU. Design labels with text, QR codes, barcodes and images in the browser, check them in an exact preview and print them, from a computer or a phone. It runs as a Docker container.
+Design and print labels 100% offline. Labelburg is 100% free, with no account, no subscription and no paid version, forever. It is fully open source under the GPLv3: all of the code is on GitHub and stays fully open. It is a web interface and REST API for the label printers of Brother (QL, P-touch, VC-500W), Epson, Niimbot and PUQU. Design labels with text, QR codes, barcodes and images in the browser, check them in an exact preview and print them, from a computer or a phone. Saved labels stay on your own server, also through updates. It runs as a Docker container.
 
 ![Label designer](./screenshots/image1.png)
 
