@@ -3,14 +3,10 @@ of a label it prints and whether its Wi-Fi is weak."""
 
 from urllib.parse import urlsplit
 
-from .. import devices
+from .. import devices, progress
 from ..base import network_status
 from . import protocol
 from .tapes import MODEL, TAPES
-
-# The stage of the label a VC-500W prints, by lock key, while a job holds
-# the device: a status query cannot ask it then
-jobs = {}
 
 
 def target(device_specifier: str) -> tuple[str, int]:
@@ -42,7 +38,7 @@ def query_status(device_specifier: str) -> dict:
     key = devices.lock_key(device_specifier)
     where = target(device_specifier)
     # A job of this server holds the printer, it tells the stage right away
-    with devices.device_lock(device_specifier, timeout=0 if key in jobs else devices.STATUS_LOCK_TIMEOUT) as acquired:
+    with devices.device_lock(device_specifier, timeout=progress.status_wait(device_specifier)) as acquired:
         if acquired:
             config, status = protocol.get_state(*where)
             state = network_status(device_specifier, config['model'] or MODEL)
@@ -65,8 +61,6 @@ def query_status(device_specifier: str) -> dict:
     state = dict(devices.status_cache.get(key, network_status(device_specifier, MODEL)))
     state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
     state.update(_link(device_specifier, where))
-    if key in jobs:
-        state['job'] = dict(jobs[key])
     return state
 
 

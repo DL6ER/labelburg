@@ -2200,7 +2200,7 @@
           },
           "job": {
             "type": "object",
-            "description": "VC-500W: what it does while it prints a label, which takes about 40 s.",
+            "description": "The job the printer prints for this server, also what a VC-500W does while it prints a label, which takes about 40 s.",
             "properties": {
               "stage": {
                 "type": "string",
@@ -2212,11 +2212,15 @@
               },
               "label": {
                 "type": "integer",
-                "description": "The label printed, counted from 1, for a job of this server."
+                "description": "The label printed, counted from 1, on printers that tell each label printed."
               },
               "labels": {
                 "type": "integer",
                 "description": "The labels of the job."
+              },
+              "seconds_left": {
+                "type": "integer",
+                "description": "About how long the job still takes: estimated from the print speed of the model, corrected by how long earlier jobs of the printer took and by the labels it printed."
               }
             }
           }

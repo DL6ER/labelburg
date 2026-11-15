@@ -685,7 +685,7 @@ def test_printer_of_another_driver_gets_what_it_offers(designer):
     # The label designer knows printers only by what their driver tells
     designer.evaluate("""() => {
         C.models['Other-1'] = { qualities: ['fast', 'quality'], high_res: false, half_cut: false, chain: false,
-                                feed_waste: false, job_stages: false, colors: 'black', never_cut: 'It keeps them.' };
+                                feed_waste: false, colors: 'black', never_cut: 'It keeps them.' };
         SIZES['o48'] = Object.assign({}, SIZES['62'], { id: 'o48', models: ['Other-1'], dpi: [203, 203] });
         S.printer = Object.assign({}, S.printer, { model: 'Other-1' }); S.settings.quality = 'high'; S.settings.cut = 'last';
         openPrinterPanel(); }""")
@@ -844,3 +844,33 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
     button = designer.locator('.pp #setLfTest')
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
+
+
+def test_time_left_is_shown_while_printing(designer):
+    # On every printer, not only the VC-500W that tells its stages
+    printer = {'errors': [], 'model': 'QL-800', 'path': 'file:///dev/usb/lp0', 'media_width': 62, 'media_length': 0,
+               'job': {'labels': 3, 'label': 2, 'seconds_left': 40}}
+    body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    designer.reload()
+    wait_for_preview(designer)
+    type_line(designer, 0, 'Spices')
+    pending = []
+    designer.route('**/api/print', lambda route: pending.append(route))
+    designer.click('#edPrint')
+    designer.wait_for_function("() => document.querySelector('#toast').textContent === 'Label 2 of 3, about 40 s left'")
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+    assert printed(designer) == ['printed']
+
+
+@pytest.mark.parametrize('job, text', [
+    ({'labels': 3, 'label': 2, 'seconds_left': 42}, 'Label 2 of 3, about 40 s left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 130}, 'About 2 min left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 70}, 'About 1 min left'),
+    # A printer that does not tell its labels printed
+    ({'labels': 20, 'seconds_left': 3}, 'A few seconds left'),
+    ({'labels': 2}, ''),
+    ({'stage': 'Preheating', 'label': 1, 'labels': 2, 'seconds_left': 75}, 'Preheating, label 1 of 2, about 1 min left'),
+])
+def test_time_left_in_words(designer, job, text):
+    assert designer.evaluate('job => jobText(job)', job) == text
