@@ -1667,6 +1667,291 @@
         }
       }
     },
+    "/labeldesigner/api/homebox": {
+      "get": {
+        "summary": "Label for Homebox",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the demo label \"Homebox\" placed on the tape in the printer: its QR code of `URL` next to `TitleText`, `DescriptionText` and `AdditionalInformation`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at its resolution; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "operationId": "homeboxLabel",
+        "parameters": [
+          {
+            "name": "TitleText",
+            "in": "query",
+            "description": "Name of the item or location, or the asset ID on the label of an asset.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "DescriptionText",
+            "in": "query",
+            "description": "`Location: <name>` for items, the name of the item and `Location: <name>` for assets, `Homebox Location` for locations.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "AdditionalInformation",
+            "in": "query",
+            "description": "The text of `HBOX_LABEL_MAKER_ADDITIONAL_INFORMATION`, where it is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "URL",
+            "in": "query",
+            "description": "Address of the item or location in Homebox.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The label as it is printed.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The label could not be made, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No saved label of this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Print a label of Homebox",
+        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it.",
+        "operationId": "homeboxPrint",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Printed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No image, or the printer cannot print the label, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No saved label of this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The printer did not print the label, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/homebox/{name}": {
+      "get": {
+        "summary": "Label for Homebox, from a saved label",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the saved label `name`, its blanks named like the fields filled with them, e.g. `{{blank:TitleText}}`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at its resolution; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "operationId": "homeboxLabelNamed",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Name of the saved label, with or without `.json`, e.g. `Homebox`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "TitleText",
+            "in": "query",
+            "description": "Name of the item or location, or the asset ID on the label of an asset.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "DescriptionText",
+            "in": "query",
+            "description": "`Location: <name>` for items, the name of the item and `Location: <name>` for assets, `Homebox Location` for locations.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "AdditionalInformation",
+            "in": "query",
+            "description": "The text of `HBOX_LABEL_MAKER_ADDITIONAL_INFORMATION`, where it is set.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "URL",
+            "in": "query",
+            "description": "Address of the item or location in Homebox.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The label as it is printed.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The label could not be made, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No saved label of this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Print a label of Homebox on the size of a saved label",
+        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it.",
+        "operationId": "homeboxPrintNamed",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Name of the saved label, with or without `.json`, e.g. `Homebox`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/*": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Printed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No image, or the printer cannot print the label, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No saved label of this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The printer did not print the label, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/openapi.json": {
       "get": {
         "summary": "This description of the API",

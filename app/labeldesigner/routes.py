@@ -1886,6 +1886,28 @@ def _convert_image(img: Image.Image, image_mode: str, bw_threshold: int = 70, co
         return convert_image_to_bw(img, bw_threshold)
 
 
+def _image_label(img: Image.Image, label_size: str, label_orientation: LabelOrientation, image_mode: str,
+                 bw_threshold: int = 70, contrast: bool = False, high_res: bool = False) -> SimpleLabel:
+    """A label of img alone, converted to image_mode and scaled to the
+    label size. On die-cut labels the image is turned like with auto-fit in
+    the label designer."""
+    kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+    width, height = _get_label_dimensions(label_size, high_res)
+    if height > width:
+        width, height = height, width
+    if label_orientation == LabelOrientation.ROTATED:
+        height, width = width, height
+    img = _convert_image(img, image_mode, bw_threshold, contrast)
+    if _label_type(kind) == LabelType.DIE_CUT_LABEL:
+        width, height, label_orientation = _fitting_orientation(img, width, height, label_orientation)
+    orientation = 'rotated' if label_orientation == LabelOrientation.ROTATED else 'standard'
+    content = {'grayscale': LabelContent.IMAGE_GRAYSCALE, 'red_and_black': LabelContent.IMAGE_RED_BLACK,
+               'colored': LabelContent.IMAGE_COLORED}.get(image_mode, LabelContent.IMAGE_BW)
+    return SimpleLabel(width=width, height=height, label_content=content, label_orientation=label_orientation,
+                       label_type=_label_type(kind), image=_scale_image_to_label(img, label_size, orientation, high_res),
+                       image_fit=True, text=[])
+
+
 def _scale_image_to_label(img: Image.Image, label_size: str, orientation: str,
                           high_res: bool = False) -> Image.Image:
     width, height = _get_label_dimensions(label_size, high_res)
@@ -2023,24 +2045,7 @@ def webhook_print():
         if problem:
             return make_response(jsonify({'success': False, 'message': problem}), 400)
 
-        # Determine label content type from image_mode
-        if image_mode == 'grayscale':
-            label_content = LabelContent.IMAGE_GRAYSCALE
-        elif image_mode == 'red_and_black':
-            label_content = LabelContent.IMAGE_RED_BLACK
-        elif image_mode == 'colored':
-            label_content = LabelContent.IMAGE_COLORED
-        else:
-            label_content = LabelContent.IMAGE_BW
-
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
-        label_type = _label_type(kind)
-
-        width, height = _get_label_dimensions(label_size, high_res)
-        if height > width:
-            width, height = height, width
-        if label_orientation == LabelOrientation.ROTATED:
-            height, width = width, height
 
     except Exception as e:
         current_app.logger.exception(e)
@@ -2054,22 +2059,15 @@ def webhook_print():
     if len(uploaded_files or json_images) > max_count:
         return make_response(jsonify({'success': False, 'message': f'Too many images, at most {max_count} per request'}), 400)
 
-    def prepare(img: Image.Image) -> tuple:
-        # Convert and scale right away, so only label sized images are kept.
-        # Images on die-cut labels are turned like with auto-fit in the label
-        # designer.
-        img = _convert_image(img, image_mode, bw_threshold, contrast)
-        image_width, image_height, image_orientation = width, height, label_orientation
-        if label_type == LabelType.DIE_CUT_LABEL:
-            image_width, image_height, image_orientation = _fitting_orientation(img, width, height, label_orientation)
-        image_orientation_name = 'rotated' if image_orientation == LabelOrientation.ROTATED else 'standard'
-        return _scale_image_to_label(img, label_size, image_orientation_name, high_res), image_width, image_height, image_orientation
+    def prepare(img: Image.Image) -> SimpleLabel:
+        # Converted and scaled right away, so only label sized images are kept
+        return _image_label(img, label_size, label_orientation, image_mode, bw_threshold, contrast, high_res)
 
-    pil_images = []
+    labels = []
     dpi = label_dpi(label_size, high_res)
     try:
         for f in uploaded_files:
-            pil_images.append(prepare(open_image(f, f.filename, dpi)))
+            labels.append(prepare(open_image(f, f.filename, dpi)))
 
         if not uploaded_files:
             for entry in json_images:
@@ -2080,30 +2078,20 @@ def webhook_print():
                     img_bytes = base64.b64decode(entry['data'])
                 else:
                     continue
-                pil_images.append(prepare(open_image(BytesIO(img_bytes), '', dpi)))
+                labels.append(prepare(open_image(BytesIO(img_bytes), '', dpi)))
 
     except Exception as e:
         current_app.logger.exception(e)
         return make_response(jsonify({'success': False, 'message': 'Failed to read images'}), 400)
 
-    if not pil_images:
+    if not labels:
         return make_response(jsonify({'success': False, 'message': 'No images provided'}), 400)
 
     # Process and queue each image
     try:
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
         printer.leaves_first = leaves_first
-        for img, image_width, image_height, image_orientation in pil_images:
-            label = SimpleLabel(
-                width=image_width,
-                height=image_height,
-                label_content=label_content,
-                label_orientation=image_orientation,
-                label_type=label_type,
-                image=img,
-                image_fit=True,
-                text=[],
-            )
+        for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
         status = printer.process_queue()
     except Exception as e:
@@ -2112,9 +2100,105 @@ def webhook_print():
 
     result = {
         'success': len(status) == 0,
-        'count': len(pil_images)
+        'count': len(labels)
     }
     if status:
         result['message'] = status
         return make_response(jsonify(result), PRINTER_FAILED)
     return jsonify(result)
+
+
+# --- Homebox ------------------------------------------------------------------
+# Homebox gets its labels from an external label service with GET and runs a
+# print command for them, which sends the image back with POST. Homebox
+# replaces the query of the service address, so a saved label is named in
+# its path.
+HOMEBOX_DEMO = 'storage/013-homebox-62.json'
+HOMEBOX_NO_IMAGE = 'Send the label as an image, e.g. the file Homebox made'
+
+
+def _homebox_printer() -> tuple[str, str, str]:
+    """The printer labels for Homebox are made for, the first one as in the
+    label designer: its device, model and the label size of its tape."""
+    status = get_ptr_status(current_app.config)
+    printers = status.get('printers') or [status]
+    chosen = next((p for p in printers if p.get('path') == status.get('selected')), printers[0])
+    label_size, _ = printer_label_size(chosen, current_app.config['LABEL_DEFAULT_SIZE'])
+    return chosen.get('path'), chosen.get('model'), label_size
+
+
+def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes | None]:
+    """The saved label name, else the demo label "Homebox" on label_size:
+    wide, i.e. along endless tape and across die-cut labels. With the folder
+    of its image and the image read with it."""
+    if name is None:
+        data = demos.load(HOMEBOX_DEMO)
+        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+        endless = _label_type(kind) == LabelType.ENDLESS_LABEL
+        data.update(label_size=label_size, orientation='rotated' if endless else 'standard', text=json.dumps(data['text']))
+        return data, demos.IMAGE_DIR, None
+    data, image_bytes = _load_repo_json(name if name.endswith('.json') else f'{name}.json')
+    return data, _get_repo_dir(), image_bytes
+
+
+def _along_endless_tape(img: Image.Image, label_size: str, high_res: bool) -> LabelOrientation:
+    """How an image is printed on endless tape: as made where a side is as
+    wide as the tape, e.g. a label made here, else its longer side along
+    the tape."""
+    across = _get_label_dimensions(label_size, high_res)[0]
+    if img.width == across:
+        return LabelOrientation.STANDARD
+    if img.height == across or img.width > img.height:
+        return LabelOrientation.ROTATED
+    return LabelOrientation.STANDARD
+
+
+@bp.route('/api/homebox', methods=['GET', 'POST'])
+@bp.route('/api/homebox/<name>', methods=['GET', 'POST'])
+def homebox(name: str | None = None):
+    """GET: the label for Homebox as PNG, the saved label name or the demo
+    label "Homebox" on the tape in the printer, its blanks filled with the
+    fields Homebox sends, e.g. TitleText and URL. POST: print the image of
+    the body on the same label."""
+    try:
+        device, model, label_size = _homebox_printer()
+        data, image_dir, image_bytes = _homebox_label(name, label_size)
+    except FileNotFoundError:
+        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+    except LabelsBusy:
+        return _busy()
+    except Exception as e:
+        current_app.logger.exception(e)
+        return make_response(jsonify({'success': False, 'message': 'Failed to load file'}), 500)
+    if request.method == 'GET':
+        return _preview_response(data, image_dir, image_bytes)
+
+    label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
+    high_res = _high_res(data)
+    try:
+        img = open_image(BytesIO(request.get_data()), '', label_dpi(label_size, high_res))
+    except Exception as e:
+        _log_refused_request('Homebox label', e)
+        return make_response(jsonify({'success': False, 'message': HOMEBOX_NO_IMAGE}), 400)
+    try:
+        device, model = _printer(device, model)
+        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
+        check_cut(printer.cut, printer.model)
+        printer.leaves_first = _leaves_first(_requested('leaves_first'))
+        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+        if _label_type(kind) == LabelType.ENDLESS_LABEL:
+            orientation = _along_endless_tape(img, label_size, high_res)
+        else:
+            orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
+        # Printed as it is shown, dithered like the labels made here
+        image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
+        printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
+                                   high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
+        status = printer.process_queue()
+    except Exception as e:
+        _log_refused_request('Print job', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+    if status:
+        return make_response(jsonify({'success': False, 'message': status}), PRINTER_FAILED)
+    return {'success': True}

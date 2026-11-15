@@ -33,7 +33,7 @@ USB printers are detected automatically, network printers with some limits. A US
 - **Printers:** several printers at once, each with a name if you like, and a simulator to try everything without a printer
 - **Printing:** copies with a cut after every label, only after the last one or none, on P-touch printers half cuts and chain printing, set for each printer or saved with a label, endless labels of a fixed length on QL and P-touch printers, borders, round labels, cable flags that fold around a cable, mirrored for clear tape behind glass, which end of the labels leaves the printer first, set for each printer, 600 dpi printing, fast printing (a little less sharp)
 - **Interface:** an editor with the preview of the label leaving the printer, also shown large, a wizard that turns typed text into labels and finds fitting templates, search (Ctrl K), undo, dark mode, works on phones, can be installed as an app (over HTTPS), which on Android takes images, PDFs and links from the share menu
-- **API:** everything the label designer does, described in OpenAPI, and a webhook to print images
+- **API:** everything the label designer does, described in OpenAPI, a webhook to print images, and labels for [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md)
 
 ## Screenshots
 
