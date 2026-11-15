@@ -70,11 +70,10 @@ def code_problems() -> list[str]:
             DATAMATRIX_ASCII_ONLY]
 
 
-def matrix(code_type: str, data: str, level: str | None, across: bool = False) -> tuple[list, int]:
+def matrix(code_type: str, data: str, level: str | None) -> tuple[list, int]:
     """The dots of a 2D code, rows of 1 (dark) and 0, and how many dots of
-    its width a row is high. An rMQR code is as low as its content allows,
-    with across one that lies across the tape is balanced. ValueError where
-    the code cannot hold the data."""
+    its width a row is high. ValueError where the code cannot hold the
+    data."""
     too_long = ValueError(_too_long_problem(code_type))
     if code_type == 'QR':
         qr = QRCode(version=1, error_correction=QR_LEVELS[level], border=0)
@@ -102,10 +101,7 @@ def matrix(code_type: str, data: str, level: str | None, across: bool = False) -
         return [list(row) for row in code.matrix], 1
     if code_type == 'RMQR':
         try:
-            # Across the tape the longest, lowest versions have dots too small
-            # to read on tape of 25 to 36 mm
-            strategy = FitStrategy.BALANCED if across else FitStrategy.MINIMIZE_HEIGHT
-            code = rMQR.fit(data, ecc=getattr(ErrorCorrectionLevel, level), fit_strategy=strategy)
+            code = rMQR.fit(data, ecc=getattr(ErrorCorrectionLevel, level), fit_strategy=FitStrategy.MINIMIZE_HEIGHT)
         except DataTooLongError:
             raise too_long from None
         return code.to_list(with_quiet_zone=False), 1

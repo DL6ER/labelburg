@@ -1537,7 +1537,6 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         with_code=with_code,
         fixed_length=length is not None,
         vertical_align=context['vertical_align'],
-        tape_width=size.tape_size[0],
         **_flag_wrap(label_size, diameter, context['high_res']),
     )
     if (label_type == LabelType.DIE_CUT_LABEL and image_label and image is not None

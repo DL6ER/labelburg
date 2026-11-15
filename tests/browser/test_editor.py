@@ -334,18 +334,6 @@ def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(d
     assert 'Error correction can be chosen for QR, Micro QR and rMQR codes.' in designer.inner_text('.ed-panel')
 
 
-def test_a_wide_code_lies_across_wide_tape(designer):
-    # Across the 62 mm tape, the label is about 6 cm long
-    designer.click('[data-lay="codetext"]')
-    designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
-    type_line(designer, 0, 'Pantry shelf 3')
-    designer.select_option('#edBarcode', 'RMQR')
-    wait_for_preview(designer)
-    width, height = preview_size(designer)
-    assert height == 696 and width < 800
-    assert 'Everything fits.' in fits_note(designer)
-
-
 def test_a_date_typed_into_a_template_keeps_its_format(designer):
     # Typed into the wizard, [today] got the format of the printer panel
     # unless it was at the same place as the date of the template
