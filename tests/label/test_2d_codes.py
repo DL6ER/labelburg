@@ -78,7 +78,7 @@ def test_a_dot_has_the_size_set(tmp_path, code_type, rows, high):
 def test_a_2d_code_without_content_of_its_own_holds_all_lines(tmp_path, monkeypatch):
     held = []
     original = codes.matrix
-    monkeypatch.setattr(codes, 'matrix', lambda code_type, data, level: held.append(data) or original(code_type, data, level))
+    monkeypatch.setattr(codes, 'matrix', lambda code_type, data, *args: held.append(data) or original(code_type, data, *args))
     client = make_client(tmp_path)
     lines = [dict(LINES[0], text='Shelf 4'), dict(LINES[0], text='Box 2')]
     assert preview(client, barcode_type='DATAMATRIX', text=json.dumps(lines)).status_code == 200
@@ -119,7 +119,7 @@ def test_a_code_too_small_for_its_content_is_refused(tmp_path, code_type, conten
 ])
 def test_error_correction_of_the_codes_that_have_a_choice(tmp_path, monkeypatch, code_type, given, used):
     levels = []
-    monkeypatch.setattr(codes, 'matrix', lambda code_type, data, level, original=codes.matrix: levels.append(level) or original(code_type, data, level))
+    monkeypatch.setattr(codes, 'matrix', lambda code_type, data, level, *args, original=codes.matrix: levels.append(level) or original(code_type, data, level, *args))
     client = make_client(tmp_path)
     settings = {'barcode_type': code_type, 'code_text': '12345'}
     if given is not None:
@@ -214,14 +214,14 @@ def dark_columns(image: Image.Image) -> tuple[int, int, int]:
     return end - start, top, bottom
 
 
-@pytest.mark.parametrize('code_type, settings, length, short_side', [
-    # An rMQR code of 7 x 139 dots, about 0.4 mm each on 62 mm tape, a
-    # PDF417 code of 6 rows three dots high and 171 dots
-    ('RMQR', {}, 649, 7),
-    ('PDF417', {}, 686, 18),
-    ('RMQR', {'label_size': '29'}, 630, 7),
+@pytest.mark.parametrize('code_type, settings, length, dots', [
+    # An rMQR code of 11 x 77 dots, about 0.7 mm each on 62 mm tape, 0.3 mm
+    # on 29 mm tape. A PDF417 code of 6 rows three dots high and 171 dots.
+    ('RMQR', {}, 712, (11, 77)),
+    ('RMQR', {'label_size': '29'}, 656, (11, 77)),
+    ('PDF417', {}, 686, (18, 171)),
 ])
-def test_a_wide_code_lies_across_wide_endless_tape(tmp_path, code_type, settings, length, short_side):
+def test_a_wide_code_lies_across_wide_endless_tape(tmp_path, code_type, settings, length, dots):
     client = make_client(tmp_path)
     response = along_tape(client, barcode_type=code_type, **settings)
     assert response.status_code == 200
@@ -230,7 +230,7 @@ def test_a_wide_code_lies_across_wide_endless_tape(tmp_path, code_type, settings
     width, top, bottom = dark_columns(image)
     # From margin to margin across the tape
     assert top == 12 and bottom == image.height - 12
-    assert width == short_side * (bottom - top) // (171 if code_type == 'PDF417' else 139)
+    assert width == dots[0] * (bottom - top) // dots[1]
 
 
 def test_a_wide_code_next_to_an_image_lies_across_wide_endless_tape(tmp_path):

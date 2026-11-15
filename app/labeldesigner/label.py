@@ -940,12 +940,15 @@ class SimpleLabel:
                 raise ValueError("The code is empty until its blanks are filled in.") from None
             raise
 
+    def _lies_across(self) -> bool:
+        """Whether a wide 2D code lies across the tape: on endless tape wider
+        than WIDE_CODES_ALONG_UP_TO mm, fitted to a label that grows along
+        it."""
+        return self._image_fit and self._grows()[0] and self._tape_width > WIDE_CODES_ALONG_UP_TO
+
     def _across_tape(self, code: Image.Image) -> Image.Image:
-        """A 2D code wider than high turned to lie across endless tape wider
-        than WIDE_CODES_ALONG_UP_TO mm, where it is fitted to a label that
-        grows along the tape."""
-        if (self._image_fit and self._grows()[0] and self._tape_width > WIDE_CODES_ALONG_UP_TO
-                and code.width > code.height):
+        """A 2D code wider than high turned where it lies across the tape."""
+        if self._lies_across() and code.width > code.height:
             return code.transpose(Image.Transpose.ROTATE_90)
         return code
 
@@ -964,7 +967,8 @@ class SimpleLabel:
             raise ValueError(codes.empty_problem(self.barcode_type))
         # Black and red by name, a color as RGB gives another image mode
         names = {color: name for name, color in COLORS.items()}
-        return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size, names.get(self._fore_color, self._fore_color))
+        return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size,
+                           names.get(self._fore_color, self._fore_color), self._lies_across())
 
     def _draw_text(self, img = None, bboxes = [], text_offset = (0, 0)):
         """
@@ -1559,13 +1563,14 @@ class _ImageCache:
 _CODES = _ImageCache(8_000_000)
 
 
-def _code_image(code_type: str, data: str, level: str | None, box_size: int, fill_color) -> Image.Image:
-    """A QR code or another 2D code, each of its dots box_size wide."""
+def _code_image(code_type: str, data: str, level: str | None, box_size: int, fill_color, across: bool = False) -> Image.Image:
+    """A QR code or another 2D code, each of its dots box_size wide, made to
+    lie across the tape with across."""
     def make():
-        rows, ratio = codes.matrix(code_type, data, level)
+        rows, ratio = codes.matrix(code_type, data, level, across)
         check_image_size(len(rows[0]) * box_size, len(rows) * box_size * ratio)
         return codes.image(rows, ratio, box_size, fill_color)
-    return _CODES.get(('2d', code_type, data, level, box_size, fill_color), make)
+    return _CODES.get(('2d', code_type, data, level, box_size, fill_color, across), make)
 
 
 def _barcode_image(barcode_class, barcode_type: str, value: str, color: Tuple[int, int, int] = (0, 0, 0)) -> Image.Image:

@@ -335,14 +335,14 @@ def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(d
 
 
 def test_a_wide_code_lies_across_wide_tape(designer):
-    # Across the 62 mm tape, the label is as long as the text needs
+    # Across the 62 mm tape, the label is about 6 cm long
     designer.click('[data-lay="codetext"]')
     designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
     type_line(designer, 0, 'Pantry shelf 3')
     designer.select_option('#edBarcode', 'RMQR')
     wait_for_preview(designer)
     width, height = preview_size(designer)
-    assert height == 696 and width < height
+    assert height == 696 and width < 800
     assert 'Everything fits.' in fits_note(designer)
 
 
