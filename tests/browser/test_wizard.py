@@ -345,3 +345,23 @@ def test_undo_brings_back_the_tags_given_in_the_tags_dialog(designer):
     designer.wait_for_function("() => S.saved.some(s => s.name === 'Undo_after.json')")
     assert designer.evaluate("() => S.saved.find(s => s.name === 'Undo_after.json').tags") == ['After']
     designer.evaluate("() => deleteLabel('Undo_after.json')")
+
+
+def test_a_label_given_another_name_instead_of_replacing_gets_only_the_tags_typed(designer):
+    designer.evaluate("() => saveLabel('Taken', normalize({ text: [{ text: 'x' }] }), null, ['Theirs'])")
+    designer.click('[data-tab="wizard"]')
+    designer.click('.lib-nav [data-cat="all"]')
+    designer.locator('#libGrid .thumb').first.click()
+    designer.click('#libMore')
+    designer.click('#libKeep')
+    designer.fill('#saveName', 'Taken')
+    designer.fill('#saveTags', 'Mine')
+    designer.press('#saveName', 'Enter')
+    designer.wait_for_selector('#saveGo:has-text("Replace it")')
+    designer.fill('#saveName', 'Not taken')
+    assert designer.input_value('#saveTags') == 'Mine'
+    assert 'on' not in designer.get_attribute('#tagChips [data-tag="Theirs"]', 'class').split()
+    designer.press('#saveName', 'Enter')
+    designer.wait_for_selector('#saveForm', state='detached')
+    assert designer.evaluate("() => S.saved.find(s => s.name === 'Not_taken.json').tags") == ['Mine']
+    designer.evaluate("async () => { await deleteLabel('Taken.json'); await deleteLabel('Not_taken.json'); }")

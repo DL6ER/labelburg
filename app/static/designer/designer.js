@@ -1251,10 +1251,15 @@ function saveDialog(title, save, design, tags = []) {
             if (taken && replacing !== taken.name) {
                 replacing = taken.name;
                 go.textContent = 'Replace it';
-                // The label it replaces keeps its tags, those typed here are added
-                const tags = taken.tags.concat(chosenTags().filter(t => !hasTag(taken, t)));
-                $('#saveTags').value = tags.join(', ');
-                $$('#tagChips [data-tag]').forEach(b => b.classList.toggle('on', hasTag({ tags }, b.dataset.tag)));
+                // The label it replaces keeps its tags, those typed here are added.
+                // Given another name instead, its tags go again.
+                const typed = chosenTags();
+                const show = tags => {
+                    $('#saveTags').value = tags.join(', ');
+                    $$('#tagChips [data-tag]').forEach(b => b.classList.toggle('on', hasTag({ tags }, b.dataset.tag)));
+                };
+                show(taken.tags.concat(typed.filter(t => !hasTag(taken, t))));
+                name.addEventListener('input', () => show(chosenTags().filter(t => hasTag({ tags: typed }, t) || !hasTag(taken, t))), { once: true });
                 return tell(`"${taken.title}" is one of your saved labels already. Replace it, or give this label another name.`);
             }
             go.disabled = true;
