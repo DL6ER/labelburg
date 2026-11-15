@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app.labeldesigner.drivers import escpos
+from app.labeldesigner.drivers import backends, escpos
 from app.labeldesigner.drivers.escpos import protocol
 from tests.helpers import make_client
 
@@ -49,7 +49,7 @@ def fake(monkeypatch):
 def client(tmp_path):
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'TM-T20II'
+    client.application.config['PRINTER_MODEL'] = 'Epson/TM-T20II'
     return client
 
 
@@ -82,6 +82,29 @@ def test_answer_kept_from_before_is_not_taken_for_the_status(monkeypatch):
     assert c.ask(protocol.PAPER) == QUIET
     thread.join()
     ours.close(), printer.close()
+
+
+def test_printer_through_pyusb(monkeypatch):
+    class Printer:
+        def __init__(self, device):
+            assert device == 'usb://0x04b8:0x0e15/TM1'
+            self.reads, self.written, self.disposed = [bytes([QUIET | 0x20]), b'', b'', bytes([QUIET])], [], False
+
+        def read(self, length):
+            return self.reads.pop(0) if self.reads else b''
+
+        def write(self, data):
+            self.written.append(data)
+
+        def dispose(self):
+            self.disposed = True
+    monkeypatch.setattr(protocol.backends, 'UsbPrinter', Printer)
+    monkeypatch.setattr(protocol, 'WRITE_CHUNK', 4)
+    with protocol.connect('usb://0x04b8:0x0e15/TM1') as c:
+        # An answer kept from before is not taken for the status
+        assert c.ask(protocol.PAPER) == QUIET
+        c.write(b'0123456789')
+    assert c.printer.written == [protocol.PAPER, b'0123', b'4567', b'89'] and c.printer.disposed
 
 
 def test_status_bytes():
@@ -125,15 +148,32 @@ def test_no_paper_does_not_print(client, fake):
     assert protocol.INIT not in printer.sent
 
 
+@pytest.mark.parametrize('error, message', [
+    (FileNotFoundError(2, 'No such file or directory', '/dev/usb/lp3'),
+     'Could not send the label to the printer: The printer is switched off or not connected'),
+    (backends.NoLibusb('No backend available'),
+     'Could not send the label to the printer: Printers on usb:// need libusb, please install it'),
+    (OSError('/app/instance/secret.json is gone'),
+     'Could not send the label to the printer, the log of the server names the reason'),
+])
+def test_send_errors_are_told_as_on_the_other_printers(client, monkeypatch, error, message):
+    # The reason where it is known, never the text of the error
+    def fail(device):
+        raise error
+    monkeypatch.setattr(protocol, 'connect', fail)
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': False, 'message': message}
+
+
 def test_paper_is_cut_at_least_after_the_last_label(client, fake):
     fake()
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT, 'cut': 'none'})
-    assert response.get_json() == {'success': False, 'message': 'The TM-T20II cuts the paper at least after the last label'}
+    assert response.get_json() == {'success': False, 'message': 'The Epson TM-T20II cuts the paper at least after the last label'}
 
 
 def test_status_through_the_label_designer(client, fake):
     fake(offline=QUIET | 0x04)
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert (printer_['model'], printer_['path']) == ('TM-T20II', DEVICE)
+    assert (printer_['model'], printer_['path']) == ('Epson/TM-T20II', DEVICE)
     assert printer_['errors'] == ['The cover of the printer is open']
