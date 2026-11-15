@@ -87,7 +87,7 @@ PATTERNS = (
     (re.compile(r'(?s)Unknown font (family|style): .*'), 'Unknown font'),
     (re.compile(r'(?s)Unknown label size: .*'), 'Unknown label size'),
     (re.compile(r'(?s)Unknown color: .*'), 'Unknown color'),
-    (re.compile(r'(?s)The label size .* cannot be printed on a .*'), 'The label size cannot be printed on this printer'),
+    (re.compile(r'(?s)The label size .* cannot be printed on an? .*'), 'The label size cannot be printed on this printer'),
     (re.compile(r'(?s)".*" is not a page selection, give pages like 1-3, 5 or all'),
      'Not a page selection, give pages like 1-3, 5 or all'),
     (re.compile(r'(?s)The PDF has .*, there is no page .*'), 'The PDF has no such page'),

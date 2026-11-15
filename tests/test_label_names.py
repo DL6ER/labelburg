@@ -143,6 +143,8 @@ def test_vc500w_takes_only_its_tapes():
     assert label_size_problem('vc50', 'VC-500W') == ''
     assert label_size_problem('62', 'VC-500W') == 'The label size 62 mm endless (DK-22205 / DK-2205) cannot be printed on a VC-500W'
     assert label_size_problem('vc12', 'QL-800') == 'The label size 12 mm full color tape (VC-500W) cannot be printed on a QL-800'
+    # A model told with a vowel first takes "an"
+    assert label_size_problem('62', 'Epson/TM-T20II') == 'The label size 62 mm endless (DK-22205 / DK-2205) cannot be printed on an Epson TM-T20II'
 
 
 @pytest.mark.parametrize('label_size, model', [('vc25', 'QL-800'), ('62', 'VC-500W')])
