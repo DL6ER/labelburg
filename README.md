@@ -20,7 +20,7 @@ Design and print labels 100% offline. Labelburg is a web interface and REST API 
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 
-USB printers are detected automatically, network printers with some limits. A USB printer plugged into another device, e.g., an ESP32, is named as `usbip://<host>` ([USB/IP](docs/usbip.md)). The label designer shows and prints every label on the tape loaded in the printer and offers only the label sizes it can print.
+USB printers are detected automatically, network printers with some limits. A USB printer plugged into another device, e.g., an ESP32, is named as `usbip://<host>` ([USB/IP](docs/usbip.md)). The label designer shows and prints every label on the tape loaded in the printer and offers only the label sizes it can print. On the QL-800 series it also knows whether the roll is black and red.
 
 ## Features
 
