@@ -377,13 +377,45 @@ def test_printer_that_is_not_connected_is_reported(designer):
 
 
 def test_black_and_red_roll_is_not_a_mismatch(designer):
-    # A QL-800 reports a black and red roll as 62 mm endless, without a color
+    # A printer that does not tell the color of its roll reports a black and
+    # red one as 62 mm endless
     fake_printer(designer, media_width=62, media_length=0, media_type='Continuous length tape')
     designer.evaluate("() => openEditor({ title: 'Red', design: Object.assign(baseDesign('62red'), { text: [L('Red', 40, false, 'center', { color: 'red' })] }) })")
     wait_for_preview(designer)
     assert designer.evaluate('() => S.edit.design.label_size') == '62red'
     assert designer.locator('#edMade, .tape-note.warn').count() == 0
     assert designer.evaluate("() => fitsTape('62red') && onTape(S.edit.design).label_size === '62red'")
+
+
+def test_black_and_red_roll_is_detected(designer):
+    # The QL-800 series tells the color of the roll
+    fake_printer(designer, media_width=62, media_length=0, media_type='Continuous length tape', red_roll=True)
+    assert designer.inner_text('#printerChip .tape') == '62 mm endless, black and red'
+    # A label for black tape takes the name of the roll, red prints red on it
+    designer.evaluate("() => openEditor({ title: 'Red', design: Object.assign(baseDesign('62'), { text: [L('Red', 40, false, 'center', { color: 'red' })] }) })")
+    wait_for_preview(designer)
+    assert designer.evaluate('() => S.edit.design.label_size') == '62red'
+    assert designer.inner_text('.tape-note').strip() == 'In the printer'
+    assert designer.locator('#edMade, .tape-note.warn').count() == 0
+    assert designer.evaluate("() => JSON.parse(formFor(S.edit.design).get('text'))[0].color") == 'red'
+
+
+def test_black_roll_is_no_black_and_red_one(designer):
+    fake_printer(designer, media_width=62, media_length=0, media_type='Continuous length tape', red_roll=False)
+    assert designer.inner_text('#printerChip .tape') == '62 mm endless'
+    # A label for black and red tape is placed on it, its red prints black
+    designer.evaluate("() => openEditor({ title: 'Red', design: Object.assign(baseDesign('62red'), { text: [L('Red', 40, false, 'center', { color: 'red' })] }) })")
+    wait_for_preview(designer)
+    assert designer.evaluate('() => S.edit.design.label_size') == '62'
+    assert designer.inner_text('#edMade').strip() == 'Made for 62 mm endless, black and red, shown as it prints on the 62 mm endless in the Brother QL-800.'
+    assert 'red parts print black' in fits_note(designer)
+    assert designer.evaluate("() => JSON.parse(formFor(S.edit.design).get('text'))[0].color") == 'black'
+
+
+def test_tape_with_red_text_is_found(designer):
+    # The color of the text on TZe tape says nothing about black and red rolls
+    fake_printer(designer, model='PT-P750W', media_width=12, media_length=0, media_type='Laminated tape', tape_color='White', text_color='Red')
+    assert designer.evaluate('() => [S.tape, S.tapeUnknown]') == ['pt12', '']
 
 
 def test_loaded_label_that_is_not_offered(designer):

@@ -6,7 +6,7 @@ import os
 import select
 import time
 
-from .. import backends
+from .. import backends, usbip
 
 DPI = 203
 # Rows per raster image, the printer takes them in pieces
@@ -90,10 +90,11 @@ class Connection:
 
 
 class UsbConnection(Connection):
-    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>]."""
+    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>], or
+    shared by another device, usbip://<host>."""
 
     def __init__(self, device: str):
-        self.printer = backends.UsbPrinter(device)
+        self.printer = backends.open_printer(device)
 
     def __exit__(self, *args):
         self.printer.dispose()
@@ -115,7 +116,7 @@ class UsbConnection(Connection):
 
 
 def connect(device: str) -> Connection:
-    return UsbConnection(device) if device.startswith('usb://') else Connection(device)
+    return UsbConnection(device) if device.startswith('usb://') or usbip.is_address(device) else Connection(device)
 
 
 def get_errors(c: Connection) -> list[str]:
