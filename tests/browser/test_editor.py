@@ -989,3 +989,22 @@ def test_dates_moved_from_today_are_typed_and_shown(designer):
     assert designer.evaluate("() => fromDisplay('[today+6m] x', '{{datetime+5d:%d.%m.}} x', null, true)") == '{{datetime+6m:%d.%m.}} x'
     # Not a blank of that name
     assert designer.evaluate("() => ['today+5d', 'Today - 1 month', 'counter:3', 'id', 'today 5d'].map(isVariable)") == [True, True, True, True, False]
+
+
+def test_counters_with_a_start_and_step_are_typed_and_shown(designer):
+    # [counter:001] is a counter, no blank of that name
+    type_line(designer, 0, 'Box [counter:001:5], shelf [Counter : A]')
+    assert designer.evaluate('() => S.edit.design.text[0].text') == 'Box {{counter:001:5}}, shelf {{counter:A}}'
+    assert 'Everything fits.' in fits_note(designer)
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == 'Box [counter:001:5], shelf [counter:A]'
+    assert designer.evaluate("() => ['counter', 'counter:7', 'Counter:a:2', 'counter:', 'counters', 'today', 'id'].map(isVariable)") == [True, True, True, False, False, True, True]
+    # Next to a blank and a date moved from today
+    fmt = designer.evaluate('() => dateFormat()')
+    type_line(designer, 0, '[Room] [counter:A][counter:001:5] [today+1m]')
+    assert designer.evaluate('() => S.edit.design.text[0].text') == f'{{{{blank:Room}}}} {{{{counter:A}}}}{{{{counter:001:5}}}} {{{{datetime+1m:{fmt}}}}}'
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == '[Room] [counter:A][counter:001:5] [today+1m]'
+    # One that cannot count shows why
+    type_line(designer, 0, 'Box [counter:A1]')
+    designer.wait_for_function("() => document.querySelector('#edStage').innerText.includes('A counter starts at a number or at letters, e.g., 001 or A')")

@@ -16,7 +16,7 @@ from PIL import Image
 from qrcode.exceptions import DataOverflowError
 
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
-from .label import MAX_BARCODE_LENGTH, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong, check_digit_problems
+from .label import MAX_BARCODE_LENGTH, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong, check_digit_problems
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, resolution_problem
 
@@ -60,6 +60,7 @@ MESSAGES = (
     'Image rotation must be between 0 and 360 inclusive.',
     'The distance between image and text must be non-negative.',
     f'Random text length must not exceed {MAX_RANDOM_LENGTH}',
+    f'A counter starts at {MAX_COUNTER_START_LENGTH} digits or letters at most',
     'Invalid border rectangle',
     'The barcode is empty',
     f'Barcode value must not exceed {MAX_BARCODE_LENGTH} characters',
@@ -96,6 +97,10 @@ PATTERNS = (
     (re.compile(r'(?s)A date offset is a sign, a number and d, w, m or y, e\.g\., \+5d, not .*'),
      'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
     (re.compile(r'(?s)A date offset is at most a hundred years, not .*'), 'A date offset is at most a hundred years'),
+    (re.compile(r'(?s)A counter starts at a number or at letters, e\.g\., 001 or A, not .*'),
+     'A counter starts at a number or at letters, e.g., 001 or A'),
+    (re.compile(r'(?s)The step of a counter is a whole number from 1 to \d+, not .*'),
+     f'The step of a counter is a whole number from 1 to {MAX_COUNTER_STEP}'),
 )
 
 # Errors by their kind, the first that applies
