@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from app.labeldesigner import printer
+from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import devices
 
 
@@ -19,3 +19,6 @@ def printer_output(tmp_path, monkeypatch):
     # Nor are the device IDs of its USB printers read
     monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'no-usb-device-id-{name}'))
     monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', False)
+    # Nor the printer settings of a server run from here, e.g. with
+    # docker-compose.yml, which keeps them in labels/
+    monkeypatch.setattr(printer_settings, 'FILE', '.printers-of-the-tests.json')

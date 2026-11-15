@@ -234,7 +234,7 @@ function browserDateFormat() {
         return ['%d', '%m', '%Y'].every(x => f.includes(x)) ? f : '%Y-%m-%d';
     } catch (e) { return '%Y-%m-%d'; }
 }
-const dateFormat = () => kept().date_format || browserDateFormat();
+const dateFormat = () => (S.settings && S.settings.dateFmt) || browserDateFormat();
 // A date like 2026-11-01 written in that format
 function formatDate(iso, fmt = dateFormat()) {
     const [y, m, d] = iso.split('-');
@@ -426,7 +426,7 @@ function cutStrip(c, k, files = 1) {
 
 // The files of copies in the order they are printed: as sets, ABAB, or
 // grouped, AABB, two copies of several files, three of one
-const collated = () => kept().collate !== '0';
+const collated = () => S.settings.collate !== '0';
 const printOrder = files => {
     const ids = [...Array(files).keys()], copies = files > 1 ? 2 : 3;
     return collated() ? Array(copies).fill(ids).flat() : ids.flatMap(i => Array(copies).fill(i));
@@ -733,8 +733,9 @@ const S = {
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
     fitsOnly: true,
     libCatChosen: false, typedGen: 0,
-    // Of this browser only, the settings of the printer are kept on the server
-    settings: { largePreview: !!load(own('designer_settings'), {}).largePreview },
+    // Of this browser: the order of copies, the date format and the large
+    // preview, the settings of the printer are kept on the server
+    settings: (({ collate, dateFmt, largePreview }) => ({ collate, dateFmt, largePreview: !!largePreview }))(load(own('designer_settings'), {})),
     wizardText: '',
     libCat: 'saved', libSel: null,
     fillValues: {},
@@ -829,11 +830,18 @@ const madeDesign = E => unchangedSincePlaced(E) ? Object.assign({}, E.design, E.
 
 // look: also look for Bluetooth printers that did not answer before, which
 // the status every 20 s leaves alone
+// Changes of the printer settings on their way to the server, and those it
+// answered: a status asked for before keeps the settings as shown
+let settingsPending = 0, settingsAnswered = 0;
 async function refreshPrinters(look = false) {
     try {
+        const answered = settingsAnswered;
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
-        S.printers = Array.isArray(data.printers) ? data.printers : [data];
+        const printers = Array.isArray(data.printers) ? data.printers : [data];
+        if (settingsPending || answered !== settingsAnswered)
+            printers.forEach(p => { const shown = [S.printer, ...S.printers].find(o => o && o.path === p.path); if (shown) p.settings = shown.settings; });
+        S.printers = printers;
         const chosen = load(own('designer_printer'), null);
         const kept = S.printers.find(p => p.path === chosen);
         S.printer = kept || S.printers.find(p => p.path === data.selected) || S.printers[0] || null;
@@ -876,7 +884,7 @@ const thePrinter = (p, start = false) => p && p.name ? p.name : `${start ? 'The'
 // The settings of the printer kept on the server, the common ones with its own
 const kept = () => (S.printer && S.printer.settings) || {};
 const manualTape = () => kept().label_size || '';
-const COMMON_SETTINGS = ['quality', 'collate', 'date_format'];
+const COMMON_SETTINGS = ['quality'];
 
 // Whether the printer takes a label size, any size if its model is unknown
 function printerTakes(s) {
@@ -3193,6 +3201,8 @@ function bindPrinterPanel() {
     // Shown at once, then kept on the server. Only the setting changed goes
     // there, another browser may change another one at the same time.
     const saveSettings = changes => {
+        // No printer is listed where its status did not come
+        if (!S.printer) return toast('The label designer could not be reached');
         const printers = [...new Set([S.printer, ...S.printers])], before = printers.map(p => p.settings);
         const shown = () => {
             detectTape(); renderPrinterChip(); tapeChanged = true;
@@ -3201,7 +3211,7 @@ function bindPrinterPanel() {
         };
         printers.forEach(p => {
             p.settings = Object.assign({}, p.settings);
-            // The quality, collating and the date format are the same for all
+            // The quality is the same for all
             Object.entries(changes).filter(([k]) => p === S.printer || COMMON_SETTINGS.includes(k))
                 .forEach(([k, v]) => { if (v) p.settings[k] = v; else delete p.settings[k]; });
         });
@@ -3210,13 +3220,14 @@ function bindPrinterPanel() {
         fd.set('printer', printerKey());
         if (C.models[S.printer.model]) fd.set('model', S.printer.model);
         Object.entries(changes).forEach(([k, v]) => fd.set(k, v));
-        post('/settings', fd).then(async r => {
+        settingsPending++;
+        post('/settings', fd).catch(() => { throw new Error('The label designer could not be reached'); }).then(async r => {
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The settings could not be saved');
         }).catch(e => {
             printers.forEach((p, i) => { p.settings = before[i]; });
             toast(e.message);
             shown();
-        });
+        }).finally(() => { settingsPending--; settingsAnswered++; });
     };
     $$('[data-printer]', box).forEach(b => b.onclick = () => {
         S.printer = S.printers.find(p => p.path === b.dataset.printer) || S.printer;
@@ -3228,14 +3239,16 @@ function bindPrinterPanel() {
     });
     $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
     $('#setTape', box).onchange = e => saveSettings({ label_size: e.target.value });
-    $('#setDate', box).onchange = e => saveSettings({ date_format: e.target.value });
+    // Of this browser only
+    const keepHere = () => { store(own('designer_settings'), S.settings); tapeChanged = true; redraw(); };
+    $('#setDate', box).onchange = e => { S.settings.dateFmt = e.target.value; keepHere(); };
     $('#qInfoBtn', box).onclick = () => {
         S.qualityInfo = !S.qualityInfo;
         $('#qInfo', box).hidden = !S.qualityInfo;
         $('#qInfoBtn', box).setAttribute('aria-expanded', String(S.qualityInfo));
     };
     $$('[data-q]', box).forEach(b => b.onclick = () => saveSettings({ quality: b.dataset.q }));
-    $$('[data-col]', box).forEach(b => b.onclick = () => saveSettings({ collate: b.dataset.col }));
+    $$('[data-col]', box).forEach(b => b.onclick = () => { S.settings.collate = b.dataset.col; keepHere(); });
     $$('[data-c]', box).forEach(b => b.onclick = () => saveSettings({ [b.dataset.c]: b.dataset.v }));
     $('a.link', box).onclick = () => closeLayer(true);
 }
@@ -3280,7 +3293,7 @@ function settingsCard() {
             <span class="muted small">For several images or PDF pages printed more than once.</span></div>
         <div><label class="label-s" for="setDate">Dates on labels</label>
             <select class="field" id="setDate">${[['', 'Like the browser: ' + formatDate('2026-11-01', browserDateFormat())], ['%Y-%m-%d', '2026-11-01'], ['%d.%m.%Y', '01.11.2026'], ['%d/%m/%Y', '01/11/2026'], ['%m/%d/%Y', '11/01/2026']]
-                .map(([v, n]) => `<option value="${esc(v)}"${(kept().date_format || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+                .map(([v, n]) => `<option value="${esc(v)}"${(S.settings.dateFmt || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
             <span class="muted small">For "Today's date" and date blanks. Labels that already contain a date keep its format.</span></div>
         <div class="cutting">${cutSettings('c', c, caps)}
             <div class="cut-show">${cutStrip(c, caps)}<span class="muted small">${esc(cutText(c, caps))}${noCutter(caps) ? '' : ' Labels saved with their own cutting keep it.'}</span></div></div>

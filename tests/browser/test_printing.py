@@ -721,12 +721,58 @@ def test_settings_are_kept_on_the_server_for_every_browser(designer, browser, se
     try:
         other.goto(server + '/labeldesigner/#edit')
         wait_for_preview(other)
-        assert other.evaluate("() => [kept().quality, printerCut().cut, collated()]") == ['fast', 'last', True]
+        assert other.evaluate("() => [kept().quality, printerCut().cut]") == ['fast', 'last']
         # A change in one browser keeps the change of the other
         other.click('#printerChip')
         with other.expect_response('**/api/settings'):
-            other.click('[data-col="0"]')
+            other.click('[data-c="cut"][data-v="each"]')
         designer.evaluate("() => refreshPrinters()")
-        assert designer.evaluate("() => [kept().quality, printerCut().cut, collated()]") == ['fast', 'last', False]
+        assert designer.evaluate("() => [kept().quality, printerCut().cut]") == ['fast', 'each']
     finally:
         other.context.close()
+
+
+def test_the_order_of_copies_and_the_date_format_stay_in_each_browser(designer, browser, server):
+    designer.click('#printerChip')
+    designer.select_option('#setDate', '%d.%m.%Y')
+    designer.click('[data-col="0"]')
+    other = browser.new_context(locale='en-US').new_page()
+    try:
+        other.goto(server + '/labeldesigner/#edit')
+        wait_for_preview(other)
+        other.evaluate('() => refreshPrinters()')
+        assert other.evaluate('() => [dateFormat() === browserDateFormat(), collated()]') == [True, True]
+    finally:
+        other.context.close()
+    # This browser keeps them
+    designer.reload()
+    wait_for_preview(designer)
+    assert designer.evaluate('() => [dateFormat(), collated()]') == ['%d.%m.%Y', False]
+
+
+def test_a_change_the_server_does_not_get_is_taken_back_in_plain_words(designer):
+    designer.click('#printerChip')
+    designer.route('**/api/settings', lambda route: route.abort())
+    designer.click('[data-q="fast"]')
+    designer.wait_for_selector('#toast:has-text("The label designer could not be reached")', timeout=5000)
+    assert designer.inner_text('.pp [data-q].on') == 'Quality'
+    # Nor without a printer, as where its status did not come either
+    designer.evaluate("() => { $('#toast').hidden = true; S.printers = []; S.printer = null; closeLayer(true); openPrinterPanel(); }")
+    designer.click('[data-q="fast"]')
+    designer.wait_for_selector('#toast:has-text("The label designer could not be reached")', timeout=5000)
+
+
+def test_a_status_asked_for_before_a_change_keeps_it(designer):
+    # The status polled every 20 s may have been read on the server before
+    # the change was saved
+    designer.click('#printerChip')
+    before = designer.evaluate("() => fetch(API + '/printer_status').then(r => r.text())")
+    held = []
+    designer.route('**/api/printer_status*', lambda route: held.append(route) if not held else route.continue_())
+    designer.evaluate('() => { window.polled = refreshPrinters(); }')
+    with designer.expect_response('**/api/settings'):
+        designer.click('[data-q="fast"]')
+    held[0].fulfill(content_type='application/json', body=before)
+    designer.evaluate('() => window.polled')
+    assert designer.inner_text('.pp [data-q].on') == 'Fast'
+    assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('fast_printing')") == '1'

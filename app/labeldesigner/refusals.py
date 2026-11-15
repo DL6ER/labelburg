@@ -21,6 +21,8 @@ from .label_names import cut_problems, label_length_problems, label_size_problem
 from .drivers import DRIVERS, MODELS, resolution_problem
 from .printer_settings import SETTINGS_MESSAGE, TOO_MANY_PRINTERS
 
+SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
+
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
 # A detected printer whose status names no model this server knows
 UNKNOWN_MODEL = 'The printer does not report a model this server knows. Name its model in PRINTERS, e.g. QL-700=file:///dev/usb/lp0'
