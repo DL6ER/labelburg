@@ -283,6 +283,12 @@ input[type=range] { width: 100%; accent-color: var(--ink); }
 .fits { font-size: .85rem; display: flex; align-items: center; gap: .45rem; color: var(--muted); }
 .fits i { color: var(--ok); }
 .fits.warn i { color: var(--warn); }
+/* A problem with the label: a box in the warning colors */
+.fits.warn { flex-wrap: wrap; align-items: flex-start; font-size: .95rem; line-height: 1.4; color: var(--warn); background: var(--warn-soft);
+    box-shadow: inset 3px 0 0 var(--warn); border-radius: 10px; padding: .6rem .8rem .6rem 1rem; }
+.fits.warn > i { font-size: 1.05rem; margin-top: .1rem; }
+.fits.warn .say { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.ed-top .fits.warn { flex-basis: 100%; }
 
 /* Label thumbnails */
 .thumb { display: flex; flex-direction: column; gap: .4rem; min-width: 0; text-align: left; border: 0; background: none; padding: 0; cursor: pointer; }

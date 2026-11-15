@@ -392,6 +392,16 @@ def test_a_choice_blank_without_choices_asks_for_them(designer):
     assert not designer.is_disabled('#edPrint') and not designer.is_disabled('#edSave')
 
 
+def test_a_choice_blank_without_choices_is_asked_for_in_the_warning_box(designer):
+    type_line(designer, 0, 'Shelf [Room]')
+    designer.click('#blankSet')
+    designer.click('[data-bname="Room"] [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields.Room.type === 'choice'")
+    wait_for_preview(designer)
+    assert designer.inner_text('#edFits.warn .say b') == 'Type the choices of [Room] in Blank settings.'
+    assert designer.is_visible('#edFits .fa-triangle-exclamation')
+
+
 def test_a_date_blank_made_a_choice_starts_without_choices(designer):
     # The date it shows is no choice, the text of a text blank is (see above)
     type_line(designer, 0, 'Frozen on [Frozen on]')

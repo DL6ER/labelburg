@@ -329,6 +329,86 @@ def test_a_barcode_of_a_fixed_size_can_be_scaled(designer):
     assert designer.is_enabled('#edQrSize') and designer.locator('#edCodeScale').count() == 0
 
 
+def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(designer):
+    design = '() => [S.edit.design.barcode_type, S.edit.design.qrcode_correction]'
+    designer.click('[data-lay="codetext"]')
+    designer.fill('#edCode', '4006381333931')
+    type_line(designer, 0, 'Shelf 4')
+    groups = designer.evaluate("() => [...document.querySelectorAll('#edBarcode optgroup')].map(g => [g.label, [...g.children].map(o => o.textContent)])")
+    assert [label for label, _ in groups] == ['2D codes', 'Barcodes']
+    assert groups[0][1] == ['QR', 'DataMatrix', 'Micro QR', 'rMQR', 'Aztec', 'PDF417']
+    assert 'EAN13' in groups[1][1]
+    # A level the next code lacks becomes the next lower one it has
+    designer.select_option('#edQrCorr', 'H')
+    designer.select_option('#edBarcode', 'MICROQR')
+    wait_for_preview(designer)
+    assert designer.evaluate(design) == ['MICROQR', 'Q']
+    assert designer.eval_on_selector_all('#edQrCorr option', 'os => os.map(o => o.value)') == ['L', 'M', 'Q']
+    designer.select_option('#edBarcode', 'RMQR')
+    wait_for_preview(designer)
+    assert designer.evaluate(design) == ['RMQR', 'M']
+    assert designer.eval_on_selector_all('#edQrCorr option', 'os => os.map(o => o.value)') == ['M', 'H']
+    # Fitted along the 62 mm tape it makes a long label
+    assert 'This code makes the label' in fits_note(designer)
+    # The others choose it themselves, they have the size of a dot as well
+    designer.select_option('#edBarcode', 'DATAMATRIX')
+    wait_for_preview(designer)
+    assert designer.is_disabled('#edQrCorr') and designer.input_value('#edQrCorr') == 'Automatic'
+    assert 'DataMatrix codes set their own error correction. It can be chosen for QR, Micro QR and rMQR codes.' in designer.inner_text('.ed-panel')
+    designer.click('[data-fit="0"]')
+    assert designer.is_enabled('#edQrSize') and designer.locator('#edCodeScale').count() == 0
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    # Barcodes have none
+    designer.select_option('#edBarcode', 'EAN13')
+    wait_for_preview(designer)
+    assert designer.input_value('#edQrCorr') == 'None'
+    assert 'Error correction can be chosen for QR, Micro QR and rMQR codes.' in designer.inner_text('.ed-panel')
+
+
+def test_a_wide_code_that_makes_a_long_label_is_said_so(designer):
+    designer.click('[data-lay="codetext"]')
+    designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
+    type_line(designer, 0, 'Pantry shelf 3')
+    designer.select_option('#edBarcode', 'PDF417')
+    wait_for_preview(designer)
+    # Above the preview in a box of the warning colors, its first sentence in
+    # bold. The label can be printed anyway.
+    length = designer.inner_text('#edStage .dim-x')
+    assert fits_note(designer).strip() == f'This code makes the label {length} long. A QR code, or a fixed size for this code, gives a shorter label.'
+    assert designer.inner_text('#edFits.warn .say b') == f'This code makes the label {length} long.'
+    assert designer.is_visible('#edFits .fa-triangle-exclamation')
+    box = designer.eval_on_selector('#edFits', "el => { const s = getComputedStyle(el); return [s.backgroundColor, s.color, el.getBoundingClientRect().width]; }")
+    assert box[:2] == ['rgb(251, 240, 217)', 'rgb(138, 90, 0)']
+    assert box[2] > designer.eval_on_selector('.ed-top', 'el => el.clientWidth') - 2
+    assert designer.is_enabled('#edPrint')
+    # On a phone, without scrolling sideways
+    designer.set_viewport_size({'width': 390, 'height': 844})
+    assert designer.is_visible('#edFits .say')
+    assert designer.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
+    designer.set_viewport_size({'width': 1400, 'height': 900})
+    # The way out it names
+    designer.click('[data-fit="0"]')
+    wait_for_preview(designer)
+    assert 'Everything fits.' in fits_note(designer)
+    assert 'warn' not in designer.get_attribute('#edFits', 'class').split()
+
+
+def test_a_mirrored_wide_code_is_said_to_make_a_long_label(designer):
+    designer.click('[data-lay="codetext"]')
+    designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
+    type_line(designer, 0, 'Pantry shelf 3')
+    designer.select_option('#edBarcode', 'PDF417')
+    wait_for_preview(designer)
+    warning = fits_note(designer).strip()
+    assert warning.startswith('This code makes the label')
+    designer.check('#edMirror')
+    designer.wait_for_function("() => S.edit.design.mirror === '1'")
+    wait_for_preview(designer)
+    assert fits_note(designer).strip() == warning
+    assert designer.inner_text('#edFits.warn .say b').startswith('This code makes the label')
+
+
 def test_a_date_typed_into_a_template_keeps_its_format(designer):
     # Typed into the wizard, [today] got the format of the printer panel
     # unless it was at the same place as the date of the template
