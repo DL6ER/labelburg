@@ -290,8 +290,9 @@ def test_image_follows_ready_to_receive_after_a_pause(fake):
     assert fake.data_at[0] - fake.ready_at[0] >= vc500w.DATA_DELAY
 
 
-def test_lost_data_is_filled_up(fake):
+def test_lost_data_is_filled_up(fake, monkeypatch):
     # The printer waits for the bytes it lost, zeros make up for them
+    monkeypatch.setattr(vc500w, 'DATA_TIMEOUT', 0.1)
     fake.lose = 700
     assert vc500w.print_image(fake.target, Image.new('RGB', (100, 1), (255, 216, 0)), port=fake.port) == vc500w.DAMAGED
     assert fake.images[0][-200:] == bytes(200)
@@ -678,21 +679,18 @@ def test_vc500w_among_the_configured_printers(client, fake, monkeypatch):
     assert (simulator['model'], simulator['color_support']) == ('QL-800', False)
 
 
-def test_vc500w_configured_as_a_tcp_printer(tmp_path):
+@pytest.mark.parametrize('fake', ['network'], indirect=True)
+def test_vc500w_configured_as_a_tcp_printer(fake, tmp_path):
     # Reached on port 9100 like vc500w://<host>, not asked over SNMP or IPP
-    printer_ = FakeVC500W()
-    try:
-        device = f'tcp://127.0.0.1:{printer_.port}'
-        client = make_client(tmp_path)
-        client.application.config['PRINTERS'] = [('VC-500W', device)]
-        vc = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-        assert (vc['media_width'], vc['tape_remaining_mm'], vc['weak_connection']) == (25, 4596, False)
-        response = client.post('/labeldesigner/api/print', data={
-            'printer': device, 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
-        assert response.get_json() == {'success': True}
-        assert len(printer_.images) == 1
-    finally:
-        printer_.close()
+    device = f'tcp://127.0.0.1:{fake.port}'
+    client = make_client(tmp_path)
+    client.application.config['PRINTERS'] = [('VC-500W', device)]
+    vc = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (vc['media_width'], vc['tape_remaining_mm'], vc['weak_connection']) == (25, 4596, False)
+    response = client.post('/labeldesigner/api/print', data={
+        'printer': device, 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    assert len(fake.images) == 1
 
 
 def test_vc500w_on_usb_is_detected_by_its_device_id(tmp_path, monkeypatch):

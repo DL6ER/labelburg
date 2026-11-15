@@ -14,7 +14,7 @@ jobs:
         with:
           runCmd: |
             pip install -r requirements-dev.txt
-            pytest
+            pytest -n auto
 
   # The label designer in a browser, see tests/browser. Not in the devcontainer:
   # Playwright's Chromium does not run on Alpine.
@@ -34,7 +34,7 @@ jobs:
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
       - name: Run browser tests
-        run: pytest tests/browser
+        run: pytest -n auto tests/browser
 
   # Typos and British spellings in code, comments and docs, see .codespellrc,
   # and the spelling of the German demo labels
