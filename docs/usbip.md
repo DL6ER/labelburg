@@ -12,7 +12,7 @@ USB/IP has neither encryption nor passwords: whoever reaches port 3240 of the sh
 
 ## Printer on an ESP32 (ESPHome, Home Assistant)
 
-Tried with a QL-810W on a Waveshare ESP32-P4-NANO with ESPHome 2026.10.2 and the component [esphome-usbip-server](https://github.com/PedroPerfecto/esphome-usbip-server) 0.2.1, on Wi-Fi: status, printing, cover and roll errors, switching the printer and the board off and on, 500 status queries and 100 new connections in a row, data at 290 to 480 KiB/s. The Ethernet example uses the pins from Waveshare's schematic of the board. It builds with the same ESPHome, but was not tried on the board yet.
+Tried with a QL-810W on a Waveshare ESP32-P4-NANO with ESPHome 2026.10.2 and the component [esphome-usbip-server](https://github.com/PedroPerfecto/esphome-usbip-server) 0.2.1, on Wi-Fi: status, printing, cover and roll errors, switching the printer and the board off and on, 500 status queries and 100 new connections in a row, data at 290 to 480 KiB/s. The Ethernet part uses the pins from Waveshare's schematic of the board.
 
 ### What you need
 
@@ -25,16 +25,16 @@ Tried with a QL-810W on a Waveshare ESP32-P4-NANO with ESPHome 2026.10.2 and the
 
 1. Open the ESPHome Device Builder, on its own or as the ESPHome add-on of Home Assistant. Create a new device for the board "Waveshare ESP32-P4-Nano".
 2. Copy the encryption key under `api:` from the YAML it created and save it under Secrets as `api_encryption_key`. For Wi-Fi, save `wifi_ssid` and `wifi_password` there too.
-3. Replace the whole YAML of the device with one of the two examples below.
+3. Replace the whole YAML of the device with the one below.
 4. Install it the first time over the USB-C port of the board: download the firmware in the factory format, open [web.esphome.io](https://web.esphome.io) in Chrome or Edge, click Connect, choose the port and install the file. Later updates go over the network.
 5. Give the board a fixed address: reserve the one it got in your router (DHCP reservation). Names like `label-printer.local` mostly do not resolve inside a Docker container.
 6. Plug the printer into the USB-A port and switch it on.
 
 Home Assistant finds the board by itself. Once added there, it shows whether a printer and the label designer are connected. Printing does not need Home Assistant.
 
-### Wi-Fi (tried)
+### The configuration
 
-The ESP32-P4 has no radio of its own. Wi-Fi goes through the ESP32-C6 on the board.
+Wi-Fi goes through the ESP32-C6 on the board, as the ESP32-P4 has no radio of its own. For Ethernet, the comment in the middle says what to swap.
 
 ```yaml
 esphome:
@@ -96,78 +96,18 @@ update:
     source: https://esphome.github.io/esp-hosted-firmware/manifest/esp32c6.json
     name: C6 firmware
 
-external_components:
-  - source: github://PedroPerfecto/esphome-usbip-server@v0.2.1
-    components: [usbip_server]
-
-# Any Brother printer on the USB-A port, 0x04B8 for an Epson one
-usbip_server:
-  vid: 0x04F9
-
-# Optional, shown in Home Assistant
-binary_sensor:
-  - platform: usbip_server
-    usb_connected:
-      name: Printer connected
-    client_connected:
-      name: Label designer connected
-
-text_sensor:
-  - platform: usbip_server
-    client_address:
-      name: Label designer address
-
-sensor:
-  - platform: usbip_server
-    import_count:
-      name: Label designer connections
-```
-
-### Ethernet (not tried yet)
-
-```yaml
-esphome:
-  name: label-printer
-  friendly_name: Label printer
-
-esp32:
-  variant: esp32p4
-  # true only for a chip of revision 1 ("revision v1.x" when flashing)
-  engineering_sample: false
-  # ESPHome calls 400MHz experimental on the ESP32-P4
-  cpu_frequency: 360MHz
-  flash_size: 16MB
-  framework:
-    type: esp-idf
-
-# The 32 MB in the chip, for the transfer buffers of usbip_server
-psram:
-  mode: hex
-  speed: 100MHz
-
-# Logs on the USB-C port
-logger:
-  hardware_uart: UART0
-
-api:
-  encryption:
-    key: !secret api_encryption_key
-  # Else ESPHome restarts the board every 15 minutes without Home Assistant
-  reboot_timeout: 0s
-
-ota:
-  - platform: esphome
-
-# The IP101 on the board, which sends the 50 MHz clock to GPIO50
-ethernet:
-  type: IP101
-  mdc_pin: GPIO31
-  mdio_pin: GPIO52
-  power_pin: GPIO51
-  clk:
-    mode: CLK_EXT_IN
-    pin: GPIO50
-  phy_addr: 1
+# Ethernet instead of Wi-Fi: comment out the Wi-Fi part above (esp32_hosted,
+# wifi, http_request and update) and uncomment this. The IP101 on the board
+# sends the 50 MHz clock to GPIO50.
+# ethernet:
+#   type: IP101
+#   mdc_pin: GPIO31
+#   mdio_pin: GPIO52
+#   power_pin: GPIO51
+#   clk:
+#     mode: CLK_EXT_IN
+#     pin: GPIO50
+#   phy_addr: 1
 
 external_components:
   - source: github://PedroPerfecto/esphome-usbip-server@v0.2.1
