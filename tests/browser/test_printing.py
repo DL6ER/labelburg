@@ -238,13 +238,27 @@ def test_no_600_dpi_on_the_ql1100(designer):
     assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('high_res')") == '0'
     designer.click('#printerChip')
     assert designer.is_disabled('[data-q="high"]') and 'on' in designer.get_attribute('[data-q="high"]', 'class')
-    assert 'The Brother QL-1100 cannot print at 600 dpi.' in designer.inner_text('.settings')
+    assert 'The Brother QL-1100 cannot print "Dense".' in designer.inner_text('.settings')
     # Nor can a P-touch printer
     designer.keyboard.press('Escape')
     fake_printer(designer, model='PT-P750W', media_width=24)
     designer.click('#printerChip')
     assert designer.is_disabled('[data-q="high"]')
-    assert 'The Brother PT-P750W cannot print at 600 dpi.' in designer.inner_text('.settings')
+    assert 'The Brother PT-P750W cannot print "Dense".' in designer.inner_text('.settings')
+
+
+def test_dense_printing_is_named_without_dpi(designer):
+    # The resolution of a printer head is nothing users need to know
+    designer.click('#printerChip')
+    designer.click('#qInfoBtn')
+    assert designer.inner_text('[data-q="high"]') == 'Dense, slow'
+    assert '"Dense" prints twice as many lines along the label' in designer.inner_text('#qInfo')
+    assert 'dpi' not in designer.inner_text('.settings')
+    designer.keyboard.press('Escape')
+    fake_printer(designer, model='QL-1100', media_width=62)
+    designer.click('#printerChip')
+    assert designer.get_attribute('[data-q="high"]', 'title') == 'This printer cannot print "Dense"'
+    assert 'dpi' not in designer.inner_text('.settings')
 
 
 def test_ptouch_tape_is_shown_at_180_dpi(designer):
@@ -541,11 +555,45 @@ def test_labels_of_a_q00_leave_it_turned(designer):
     wait_for_preview(designer)
     classes = designer.get_attribute('#edStage', 'class').split()
     assert 'side' in classes and 'turned' not in classes
-    # As those of a QL or P-touch printer, their top first, unlike the VC-500W
-    for model, tape, turned in (('QL-700', '62', True), ('PT-P700', 'pt12', True), ('VC-500W', 'vc25', False)):
+    # As those of a QL or P-touch printer and the VC-500W, their top first
+    for model, tape, turned in (('QL-700', '62', True), ('PT-P700', 'pt12', True), ('VC-500W', 'vc25', True)):
         designer.evaluate(f"() => {{ S.printer = Object.assign({{}}, S.printer, {{ model: '{model}' }}); S.tape = '{tape}'; openEditor({{ title: 'Q', design: Object.assign(baseDesign('{tape}'), {{ text: [L('Q', 40)] }}) }}); }}")
         wait_for_preview(designer)
         assert ('turned' in designer.get_attribute('#edStage', 'class').split()) is turned, model
+
+
+def test_labels_can_leave_the_printer_bottom_first(designer):
+    designer.route('**/api/print', lambda route: route.fulfill(content_type='application/json', body='{"success": true}'))
+    q00 = """tape => { S.printer = Object.assign({}, S.printer, { model: 'PUQU/Q00' }); S.tape = tape;
+        openEditor({ title: 'Q', design: Object.assign(baseDesign(tape), { text: [L('Q', 40)] }) }); }"""
+    designer.evaluate(q00, 'puqu50x30')
+    wait_for_preview(designer)
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#edPrint')
+    # As the driver prints them until set
+    assert b'leaves_first' not in request.value.post_data_buffer
+    designer.evaluate("() => openPrinterPanel()")
+    designer.click('.pp [data-lf="bottom"]')
+    assert designer.locator('.pp [data-lf="bottom"].on').count() == 1
+    # The test label names its ends, printed as set
+    with designer.expect_request('**/api/print') as request:
+        designer.click('.pp #setLfTest')
+    body = request.value.post_data_buffer
+    assert b'leaves_first=bottom' in body and b'TOP' in body and b'BOTTOM' in body
+    designer.keyboard.press('Escape')
+    wait_for_preview(designer)
+    # The printer stands above the label, which leaves it downwards
+    assert 'turned' not in designer.get_attribute('#edStage', 'class').split()
+    assert designer.locator('#edStage .flow .fa-arrow-down-long').count() == 1
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#edPrint')
+    assert b'leaves_first=bottom' in request.value.post_data_buffer
+    # Labels that leave it sideways have the printer to their right
+    designer.evaluate(q00, 'puqu50x80')
+    wait_for_preview(designer)
+    assert {'side', 'back'} <= set(designer.get_attribute('#edStage', 'class').split())
+    assert designer.evaluate("() => getComputedStyle(document.querySelector('#edStage')).flexDirection") == 'row-reverse'
+    assert designer.locator('#edStage .flow .fa-arrow-left-long').count() == 1
 
 
 def test_receipt_shows_the_blank_paper_before_it(designer):
@@ -740,3 +788,49 @@ def test_sheet_after_printing_on_a_phone_names_the_printer_with_its_maker(design
     designer.set_viewport_size({'width': 700, 'height': 900})
     designer.evaluate("() => announce({ state: 'printed', copies: 1, title: 'Q', values: {}, design: baseDesign('puqu50x30'), printer: 'PUQU/Q00' })")
     assert 'Q on the PUQU Q00' in designer.inner_text('body')
+
+
+def test_labels_of_a_printer_that_prints_the_bottom_first_leave_it_as_set(designer):
+    # As its driver prints them, bottom first, until set otherwise
+    designer.evaluate("""() => { C.models['VC-500W'] = Object.assign({}, C.models['VC-500W'], { leaves_turned: false });
+        S.printer = Object.assign({}, S.printer, { model: 'VC-500W' }); S.tape = 'vc25'; S.settings.leaves = {};
+        openEditor({ title: 'V', design: Object.assign(baseDesign('vc25'), { text: [L('V', 40)] }) }); }""")
+    wait_for_preview(designer)
+    assert 'turned' not in designer.get_attribute('#edStage', 'class').split()
+    assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('leaves_first')") is None
+    designer.evaluate("() => openPrinterPanel()")
+    assert designer.locator('.pp [data-lf="bottom"].on').count() == 1
+    designer.click('.pp [data-lf="top"]')
+    designer.keyboard.press('Escape')
+    wait_for_preview(designer)
+    assert 'turned' in designer.get_attribute('#edStage', 'class').split()
+    assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('leaves_first')") == 'top'
+
+
+def test_test_label_names_the_ends_of_a_label_that_leaves_sideways(designer):
+    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'QL-800' }); S.tape = '29x90'; S.settings.leaves = {};
+        openEditor({ title: 'T', design: endsTest() }); }""")
+    wait_for_preview(designer)
+    # The printer on its left, its right end leaves first
+    classes = designer.get_attribute('#edStage', 'class').split()
+    assert 'side' in classes and 'back' not in classes
+    ends = "tape => { S.tape = tape; return endsTest().text.map(l => [l.text, l.align]); }"
+    assert designer.evaluate(ends, '29x90') == [['TOP', 'right'], ['Which end came out first?', 'center'], ['BOTTOM', 'left']]
+    assert designer.evaluate(ends, '62') == [['TOP', 'center'], ['Which end came out first?', 'center'], ['BOTTOM', 'center']]
+
+
+def test_receipt_shows_the_blank_paper_at_the_end_that_leaves_first(designer):
+    receipt = """leaves => { S.printer = Object.assign({}, S.printer, { model: 'Epson/TM-T20II' }); S.tape = 'escpos80';
+        S.settings.leaves = { [printerKey()]: leaves };
+        openEditor({ title: 'R', design: Object.assign(baseDesign('escpos80'), { text: [L('R', 40)] }) }); }"""
+    paper = "() => [...document.querySelectorAll('#edStage .paper > *')].map(e => e.tagName === 'IMG' ? 'label' : e.className)"
+    for leaves, order in (('top', ['lead', 'label']), ('bottom', ['label', 'lead'])):
+        designer.evaluate(receipt, leaves)
+        wait_for_preview(designer)
+        assert designer.evaluate(paper) == order, leaves
+
+
+def test_test_label_button_says_why_it_is_disabled(designer):
+    designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
+    button = designer.locator('.pp #setLfTest')
+    assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'

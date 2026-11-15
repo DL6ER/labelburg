@@ -49,7 +49,7 @@ class VC500W(Driver):
 
     def capabilities(self, model):
         # A label takes about 40 s, the label designer shows its stages
-        return dict(super().capabilities(model), half_cut=True, job_stages=True, never_cut=NEVER_WHY)
+        return dict(super().capabilities(model), half_cut=True, job_stages=True, never_cut=NEVER_WHY, leaves_turned=True)
 
     def status(self, device, model, unconfirmed=False):
         return status.query_status(device)
