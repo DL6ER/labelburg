@@ -289,3 +289,74 @@ def test_printer_on_the_network_that_takes_nothing_more(monkeypatch):
     thread.join(5)
     assert not still_sending
     assert isinstance(failed[0], TimeoutError)
+
+
+def test_size_names_without_dpi():
+    from app.labeldesigner.label_names import label_name
+    # Each model lists only its own sizes
+    assert [label_name(label) for label in escpos.LABELS] == ['80 mm receipt paper', '58 mm receipt paper'] * 2
+
+
+def test_both_models_are_shown_alike():
+    from app.labeldesigner.drivers.base import shown
+    # PRINTER_MODEL and the API keep Epson/ESC-POS-180
+    assert shown('Epson/ESC-POS-180') == shown('Epson/ESC-POS') == 'Epson ESC-POS'
+    assert escpos.DRIVER.capabilities('Epson/ESC-POS-180')['model_shown'] == 'ESC-POS'
+
+
+@pytest.mark.parametrize('mdl, model', [
+    ('TM-T88V', 'Epson/ESC-POS-180'),
+    ('TM-T81', 'Epson/ESC-POS-180'),
+    ('TM-T83II', 'Epson/ESC-POS-180'),
+    ('TM-T90', 'Epson/ESC-POS-180'),
+    ('TM-T70II', 'Epson/ESC-POS-180'),
+    ('TM-T20II', 'Epson/ESC-POS'),
+    ('TM-m30', 'Epson/ESC-POS'),
+    ('TM-T81III', 'Epson/ESC-POS'),
+])
+def test_heads_of_180_dpi_by_their_model(monkeypatch, mdl, model):
+    from app.labeldesigner.drivers import devices
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: f'MFG:EPSON;CMD:ESC/POS;MDL:{mdl};')
+    assert escpos.DRIVER.model_of('usb://0x04b8:0x0202') == model
+
+
+@pytest.mark.parametrize('saved, model, printed, row_bytes', [
+    ('escpos80', 'Epson/ESC-POS-180', 'escpos80-180', 64),
+    ('escpos58-180', 'Epson/ESC-POS', 'escpos58', 48),
+])
+@pytest.mark.parametrize('through', ['print', 'repository', 'webhook'])
+def test_label_for_the_paper_of_the_other_model(tmp_path, monkeypatch, through, saved, model, printed, row_bytes):
+    import base64
+    import io
+    from PIL import Image
+    # The same paper: the label is printed on the size of the printer
+    printed_on = []
+    original = escpos.Escpos.render
+
+    def render(self, queue, entries, keep=None):
+        job = original(self, queue, entries, keep)
+        printed_on.append((queue.label_size, job[0][2]))
+        return job
+    monkeypatch.setattr(escpos.Escpos, 'render', render)
+    client = make_client(tmp_path, empty_repo=True)
+    if through == 'print':
+        response = client.post('/labeldesigner/api/print', data={
+            'printer': 'simulation', 'model': model, 'label_size': saved, 'print_type': 'text', 'text': TEXT})
+    elif through == 'repository':
+        (tmp_path / 'label_repo' / 'receipt.json').write_text(json.dumps(
+            {'label_size': saved, 'print_type': 'text', 'text': json.loads(TEXT)}))
+        response = client.post('/labeldesigner/api/repository/print', json={
+            'name': 'receipt.json', 'printer': 'simulation', 'model': model})
+    else:
+        client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+        image = io.BytesIO()
+        Image.new('RGB', (300, 100), 'black').save(image, 'PNG')
+        response = client.post('/labeldesigner/api/webhook/print', json={
+            'password': 'secret', 'printer': 'simulation', 'model': model, 'label_size': saved,
+            'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on == [(printed, row_bytes)]
+    # Other paper stays refused
+    response = client.post('/labeldesigner/api/print', data={
+        'printer': 'simulation', 'model': model, 'label_size': '62', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['success'] is False

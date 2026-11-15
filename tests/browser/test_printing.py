@@ -708,3 +708,13 @@ def test_sheet_after_printing_on_a_phone_names_the_printer_with_its_maker(design
     designer.set_viewport_size({'width': 700, 'height': 900})
     designer.evaluate("() => announce({ state: 'printed', copies: 1, title: 'Q', values: {}, design: baseDesign('puqu50x30'), printer: 'PUQU/Q00' })")
     assert 'Q on the PUQU Q00' in designer.inner_text('body')
+
+
+def test_receipt_printers_are_named_alike(designer):
+    assert designer.evaluate("() => printerName({ model: 'Epson/ESC-POS-180' })") == 'Epson ESC-POS'
+
+
+def test_label_for_the_other_receipt_paper_is_shown_on_the_printers(designer):
+    # The paper in the printer is not set: shown and printed on its size of the same paper
+    assert designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/ESC-POS-180' }); S.tapeAssumed = true;
+        return ['escpos80', 'escpos58', '62'].map(id => onTape(baseDesign(id)).label_size); }""") == ['escpos80-180', 'escpos58-180', '62']

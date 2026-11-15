@@ -16,8 +16,10 @@ from . import protocol
 
 logger = logging.getLogger(__name__)
 
-# Most heads print 203 dpi, those of the TM-T88 series 180 dpi
 MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
+# Most heads print 203 dpi, Epson's TM-T88, TM-T90, TM-T70, TM-T81 and
+# TM-T83(II) 180 dpi, by the model in the device ID; a TM-T81III prints 203
+HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
 DPI = {MODELS[0]: 203, MODELS[1]: 180}
 # Paper width in mm and the dots across it, the first one assumed, as the
 # printer does not tell. 384 on 58 mm paper as most printers print, a
@@ -34,8 +36,7 @@ LABELS = tuple(Label(f'escpos{width}' + ('-180' if model == MODELS[1] else ''), 
 LEAD_MM = 12
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
-NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper (ESC/POS, {DPI[label.models[0]]} dpi)'
-         for label in LABELS}
+NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
@@ -63,6 +64,8 @@ class Escpos(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
+    # Both models are shown alike
+    shown_as = {MODELS[1]: MODELS[0]}
     # usblp's device, also a name a udev rule gives it, e.g. /dev/usb/lp_epson,
     # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, or
     # on the network on the port of raw printing, as the other drivers
@@ -78,10 +81,15 @@ class Escpos(Driver):
         commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
         if 'ESC/POS' not in commands:
             return None
-        return MODELS[1] if fields.get('MDL', '').startswith('TM-T88') else MODELS[0]
+        return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
+
+    def label_for(self, label_size, model):
+        # escpos80 and escpos80-180 are the same paper
+        paper = next((label.tape_size for label in LABELS if label.identifier == label_size), None)
+        return next((label.identifier for label in LABELS if label.tape_size == paper and model in label.models), label_size)
 
     def dpi(self, high_res):
         return DPI[MODELS[0]]
@@ -98,7 +106,9 @@ class Escpos(Driver):
     def capabilities(self, model):
         return dict(super().capabilities(model), qualities=['quality'], never_cut=NEVER_WHY,
                     # The top of the label leaves it first
-                    leaves_turned=True, lead_mm=LEAD_MM)
+                    leaves_turned=True, lead_mm=LEAD_MM,
+                    # The model as shown, without its maker
+                    model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)

@@ -29,8 +29,10 @@ def network_status(device: str, model: str, red_support: bool = False) -> dict:
 
 
 def shown(model: str) -> str:
-    """A model as texts name it, PUQU Q00 for PUQU/Q00."""
-    return model.replace('/', ' ')
+    """A model as texts name it, PUQU Q00 for PUQU/Q00, by the name its
+    driver shows it with."""
+    from . import for_model
+    return for_model(model).shown_as.get(model, model).replace('/', ' ')
 
 
 class Driver:
@@ -47,6 +49,8 @@ class Driver:
     # lists them, and the names it shows for them
     labels: tuple = ()
     label_names: dict = {}
+    # Models shown by the name of another one, e.g. one for each resolution
+    shown_as: dict = {}
     # Label sizes the label designer shows only while they are selected
     hidden_labels: frozenset = frozenset()
     # Regular expressions for the addresses of its printers a request may
@@ -92,6 +96,11 @@ class Driver:
         paper fed before and after its print, each, and the shortest and the
         longest print. None where labels are as long as their content."""
         return None
+
+    def label_for(self, label_size: str, model: str) -> str:
+        """The label size the model prints a label made for label_size on:
+        the same paper of another model, else label_size."""
+        return label_size
 
     def capabilities(self, model: str) -> dict:
         """What the label designer offers for the model: the qualities it
