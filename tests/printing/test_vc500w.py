@@ -113,7 +113,8 @@ class FakeVC500W:
         if usbip:
             self.host = FakeHost(SharedDevice(product=0x2112, device_id=VC500W_ID, interfaces=((7, 4), (7, 2))))
             self.target, self.port = self.host.address(), vc500w.PORT
-            threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True).start()
+            self._thread = threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True)
+            self._thread.start()
         elif usb:
             self._master, self._slave = os.openpty()
             tty.setraw(self._slave)
@@ -191,7 +192,13 @@ class FakeVC500W:
     def close(self):
         if hasattr(self, 'host'):
             self.host.close()
-            self.host.devices[0].unplug()
+            # Its thread stops reading and closes the printer's end itself
+            try:
+                self.host.devices[0].printer.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                # Closed before
+                pass
+            self._thread.join(5)
         elif hasattr(self, 'server'):
             self.server.close()
         elif self._slave >= 0:
