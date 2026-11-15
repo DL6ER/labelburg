@@ -3242,13 +3242,13 @@ function settingsCard() {
             <div class="seg">
             <button type="button" data-q="fast" class="${q === 'fast' ? 'on' : ''}"${oneQuality ? ONE : ''}>Fast</button>
             <button type="button" data-q="quality" class="${q === 'quality' ? 'on' : ''}"${oneQuality ? ONE : ''}>Quality</button>
-            ${!offersHigh ? '' : `<button type="button" data-q="high" class="${q === 'high' ? 'on' : ''}"${noHigh ? ' disabled title="This printer cannot print at 600 dpi"' : ''}>600 dpi, slow</button>`}</div>
-            ${noHigh ? `<span class="muted small">${esc(thePrinter(p, true))} cannot print at 600 dpi.</span>` : ''}
+            ${!offersHigh ? '' : `<button type="button" data-q="high" class="${q === 'high' ? 'on' : ''}"${noHigh ? ' disabled title="This printer cannot print &quot;Dense&quot;"' : ''}>Dense, slow</button>`}</div>
+            ${noHigh ? `<span class="muted small">${esc(thePrinter(p, true))} cannot print "Dense".</span>` : ''}
             <div class="info-box" id="qInfo"${S.qualityInfo ? '' : ' hidden'}>
                 ${caps.colors === 'color' ? `<p>Fast printing is a few seconds quicker, colors come out lighter. Quality heats the paper longer for stronger colors.</p>
                 <p>A label takes about 40 seconds, most of it to prepare and preheat. With "After each label" take every label out of the printer, the next one waits for that. "After the last label" keeps the labels together on a strip.</p>`
                 : `<p>Fast printing is quicker, the print is a little less sharp.</p>
-                <p>600 dpi prints twice as many lines along the label. Labels usually come out much darker, printing is slower, and the result is often worse than at 300 dpi. It is only confirmed for the QL-800. The ${esc(listJoin(without600))} cannot print at 600 dpi.</p>`}
+                <p>"Dense" prints twice as many lines along the label. Labels usually come out much darker, printing is slower, and the result is often worse than with "Quality". It is only confirmed for the QL-800. The ${esc(listJoin(without600))} cannot print "Dense".</p>`}
             </div></div>
         <div><span class="label-s">Copies of several files</span>
             <div class="seg">
