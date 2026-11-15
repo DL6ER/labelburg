@@ -28,7 +28,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
+from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
 from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
@@ -443,18 +443,18 @@ def _as_numbers(value):
 
 
 def _defaults_written(fields):
-    """The settings of blanks of a JSON body, their defaults as they are
-    written, all other numbers as numbers."""
+    """The settings of blanks of a JSON body, their defaults and choices as
+    they are written, all other numbers as numbers."""
     if not isinstance(fields, dict):
         return _as_numbers(fields)
-    return {name: {key: value if key == 'default' else _as_numbers(value) for key, value in field.items()} if isinstance(field, dict) else _as_numbers(field)
+    return {name: {key: value if key in ('default', 'choices') else _as_numbers(value) for key, value in field.items()} if isinstance(field, dict) else _as_numbers(field)
             for name, field in fields.items()}
 
 
 def _json_body() -> dict:
     """The JSON body of the request as object, else empty. Read once. The
-    values of blanks and their defaults keep their numbers as they are
-    written, e.g. 2.50, all other numbers are numbers."""
+    values of blanks, their defaults and choices keep their numbers as they
+    are written, e.g. 2.50, all other numbers are numbers."""
     body = request.environ.get('labeldesigner.json_body')
     if body is None:
         data = None
@@ -542,6 +542,9 @@ def repo_save():
                     data[key] = value
                 else:
                     del data[key]
+        # A value saved for a choice blank is one of its choices
+        for blank, value in data.get('blanks', {}).items():
+            check_blank_choice(blank, data.get('fields', {}).get(blank, {}), value)
         _image_text_gap(data.get('image_text_gap'))
         _text_fit(data)
         cut = _cutting(data.get)[0]
@@ -1619,18 +1622,19 @@ def _blank_values(value) -> dict[str, str]:
     return {name: str(v) for name, v in values.items()}
 
 
-BLANK_TYPES = ('text', 'number', 'date')
+BLANK_TYPES = ('text', 'number', 'date', 'choice')
 
 
 def _blank_setting(field) -> bool:
     """Whether field is the settings of a blank: an object, its type one of
-    BLANK_TYPES, its format a text and its default a text or number, each
-    where given."""
+    BLANK_TYPES, its format a text, its default a text or number and its
+    choices a list, each where given."""
     if not isinstance(field, dict):
         return False
     default = field.get('default')
     return (field.get('type') in (None, *BLANK_TYPES) and isinstance(field.get('format'), (str, type(None)))
-            and (default is None or (isinstance(default, (str, int, float)) and not isinstance(default, bool))))
+            and (default is None or (isinstance(default, (str, int, float)) and not isinstance(default, bool)))
+            and isinstance(field.get('choices'), (list, type(None))))
 
 
 def _blank_fields(value) -> dict:
@@ -1638,18 +1642,21 @@ def _blank_fields(value) -> dict:
     "date", "format": "%d.%m.%Y"}}. A date may start at a day moved from
     today, e.g., {"Best before": {"type": "date", "default": "+5d"}}."""
     fields = _json_object(value, _blank_setting, refusals.FIELDS_MESSAGE)
-    # A date moved from today must be one it can be moved by
-    for field in fields.values():
+    for name, field in fields.items():
         default = field.get('default')
+        # A date moved from today must be one it can be moved by
         if field.get('type') == 'date' and isinstance(default, str) and default.strip()[:1] in ('+', '-'):
             shift_date(datetime.date.today(), default.strip())
+        # A blank with a fixed list of choices
+        if field.get('type') == 'choice':
+            check_blank_choices(name, field)
     return fields
 
 
 # Parameters of the requests for stored labels, never values of blanks of
 # the same name
 STORED_LABEL_PARAMETERS = ('name', 'id', 'printer', 'model', 'print_count', 'cut', 'cut_once', 'half_cut', 'chain',
-                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'blanks', 'return_format')
+                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'mirror', 'blanks', 'return_format')
 
 
 def _requested_blanks(data: dict) -> dict[str, str]:
