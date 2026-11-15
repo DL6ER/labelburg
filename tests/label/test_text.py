@@ -532,3 +532,77 @@ def test_dates_moved_too_far_are_refused(tmp_path, caplog, template, offset):
     # A hundred years are fine
     data['text'] = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{datetime+36525d:%Y}} {{datetime-100y:%Y}}'}])
     assert client.post('/labeldesigner/api/preview', data=data).status_code == 200
+
+
+@pytest.mark.parametrize('template, values', [
+    ('{{counter}}', ['1', '2', '3']),
+    ('{{counter:5}}', ['5', '6', '7']),
+    # Written as the values should look
+    ('{{counter:001}}', ['001', '002', '003']),
+    ('{{counter:098}}', ['098', '099', '100']),
+    ('{{counter:A}}', ['A', 'B', 'C']),
+    ('{{counter:Y}}', ['Y', 'Z', 'AA']),
+    ('{{counter:z}}', ['z', 'aa', 'ab']),
+    # In steps
+    ('{{counter:10:5}}', ['10', '15', '20']),
+    ('{{counter:0010:250}}', ['0010', '0260', '0510']),
+    ('{{counter:AZ:2}}', ['AZ', 'BB', 'BD']),
+    ('Box {{counter:1:2}}/{{counter:A}}', ['Box 1/A', 'Box 3/B', 'Box 5/C']),
+])
+def test_counters_count_as_their_start_looks(tmp_path, monkeypatch, template, values):
+    # A counter keeps the leading zeros or letters of its start and counts in
+    # its steps. Each copy of a print gets the next value.
+    from app.labeldesigner import label as label_module
+    printed = []
+    original = label_module.SimpleLabel.process_templates
+    monkeypatch.setattr(label_module.SimpleLabel, 'process_templates', lambda self: original(self) or printed.append(self.text[0]['text']))
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, print_count='3', text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}]))
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert printed == values
+
+
+COUNTER_START = 'A counter starts at a number or at letters, e.g., 001 or A'
+COUNTER_STEP = 'The step of a counter is a whole number from 1 to 1000000'
+
+
+@pytest.mark.parametrize('template, message, logged', [
+    ('{{counter:A1}}', COUNTER_START, COUNTER_START + ', not A1'),
+    ('{{counter:Ab}}', COUNTER_START, COUNTER_START + ', not Ab'),
+    ('{{counter:1234567890123}}', 'A counter starts at 12 digits or letters at most', 'A counter starts at 12 digits or letters at most'),
+    ('{{counter:1:0}}', COUNTER_STEP, COUNTER_STEP + ', not 0'),
+    ('{{counter:1:-1}}', COUNTER_STEP, COUNTER_STEP + ', not -1'),
+    ('{{counter:1:1000001}}', COUNTER_STEP, COUNTER_STEP + ', not 1000001'),
+])
+def test_counters_that_cannot_count_are_refused(tmp_path, caplog, template, message, logged):
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}]))
+    response = client.post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 400 and response.get_json()['message'] == message
+    # What was given is named in the log only
+    assert any(logged in record.getMessage() for record in caplog.records)
+    data['text'] = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{counter:123456789012:1000000}} {{counter:ZZZZZZZZZZZZ}}'}])
+    assert client.post('/labeldesigner/api/preview', data=data).status_code == 200
+
+
+def test_counters_dates_and_blanks_in_one_line(tmp_path):
+    # Each copy counts on, the date is moved from today of the label and a
+    # value is put in as given, in the text and in the code. The line wraps
+    # as filled in.
+    client = make_client(tmp_path)
+    template = 'Box {{blank:Room}} {{counter:A}}{{counter:001:5}} use by {{datetime+1m:%Y-%m-%d}}'
+    data = {'print_type': 'qrcode_text', 'label_size': '62x29', 'text_wrap': '1', 'text_fit': 'none', 'code_text': template,
+            'timestamp': str(int(datetime(2024, 1, 31, 12, 15).timestamp())), 'blanks': {'Room': 'Garage {{counter}}'},
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}])}
+    with client.application.test_request_context():
+        for copy, value in enumerate(['A001', 'B006', 'C011']):
+            label = create_label_from_request(data, {}, copy)
+            label.generate()
+            expected = f'Box Garage {{{{counter}}}} {value} use by 2024-02-29'
+            assert label.code_text == expected
+            drawn = [entry[2]['text'] for entry in label._measure()[0]]
+            assert len(drawn) > 1 and ' '.join(drawn) == expected
+        # A preview marks the blank without a value
+        label = create_label_from_request(dict(data, blanks={}), {}, 2, mark_blanks=True)
+        label.process_templates()
+        assert label.text[0]['text'] == 'Box Room? C011 use by 2024-02-29'

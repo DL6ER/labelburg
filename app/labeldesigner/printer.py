@@ -87,12 +87,19 @@ class PrinterQueue:
         self.cut = 'each'
         self.half_cut = True
         self.chain = False
+        # The end of the labels that leaves the printer first, top or bottom,
+        # None as the driver prints them
+        self.leaves_first = None
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):
         problem = self.driver.resolution_problem(self.model, high_res)
         if problem:
             raise ValueError(problem)
+        # Turned once for all drivers where the other end than the driver's
+        # leaves first, the preview stays upright
+        driver_end = 'top' if self.driver.capabilities(self.model)['leaves_turned'] else 'bottom'
+        label.turned = self.leaves_first not in (None, driver_end)
         self._print_queue.append({
             'label': label,
             'high_res': high_res,
@@ -241,7 +248,8 @@ def get_ptr_status(config: Config):
         'status_type': 'Simulator',
         'tape_color': '',
         'text_color': '',
-        'red_support': _red_support(default_model)
+        'red_support': _red_support(default_model),
+        'red_roll': None,
     }
 
     status = {
@@ -260,7 +268,8 @@ def get_ptr_status(config: Config):
         "status_type": "Unknown",
         "tape_color": "",
         "text_color": "",
-        "red_support": False
+        "red_support": False,
+        "red_roll": None
     }
     try:
         if config.get('PRINTERS'):
