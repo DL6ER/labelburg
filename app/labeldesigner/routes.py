@@ -1829,6 +1829,7 @@ def webhook_print():
         - high_res: 0 or 1 for 600 DPI (default: 0)
         - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: 0)
         - image_contrast: 0 or 1, 1 prints the images with stronger contrast on the tapes of the VC-500W (default: 0)
+        - leaves_first: "top" or "bottom", the end of the labels that leaves the printer first (default: as the driver prints them)
         - printer: printer device specifier (default: from config)
         - model: printer model (default: from config)
 

@@ -92,7 +92,7 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                                  'half_cut': True, 'chain': False, 'feed_waste': False, 'job_stages': True, 'colors': 'color',
-                                 'never_cut': NEVER_WHY, 'leaves_turned': False, 'lead_mm': 0, 'vendor': 'Brother'}
+                                 'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother'}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
     assert models['PUQU/Q00']['cutter'] is False and models['PUQU/Q00']['leaves_turned'] is True

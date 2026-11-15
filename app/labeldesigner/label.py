@@ -745,7 +745,7 @@ class SimpleLabel:
         except ValueError:
             return date.isoformat()
 
-    # Printed with its bottom leaving the printer first, set by the queue
+    # Turned by 180 degrees for printing, set by the queue
     turned = False
 
     def generate(self):

@@ -334,11 +334,13 @@ def test_leaves_first_is_not_taken_from_a_saved_label(tmp_path):
     assert bottom == side != requested
 
 
-def test_vc500w_labels_are_turned_only_for_the_other_end(tmp_path, monkeypatch):
-    # Its driver prints them bottom first, leaves_turned is false
-    from app.labeldesigner import routes
+def test_labels_of_a_driver_that_prints_the_bottom_first_are_turned_only_for_the_top(tmp_path, monkeypatch):
+    from app.labeldesigner import drivers, routes
     turned = []
     monkeypatch.setattr(routes.PrinterQueue, 'process_queue', lambda self: turned.extend(job['label'].turned for job in self._print_queue) or '')
+    # The VC-500W as a driver that prints the bottom first
+    caps = drivers.VC500W.capabilities
+    monkeypatch.setattr(drivers.VC500W, 'capabilities', lambda model: dict(caps(model), leaves_turned=False))
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, printer='simulation', model='VC-500W', label_size='vc25', cut='last')
     for leaves_first in ('', 'bottom', 'top'):
