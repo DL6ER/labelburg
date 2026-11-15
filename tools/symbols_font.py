@@ -11,6 +11,7 @@ fails when the committed one differs.
 """
 import json
 import os
+import re
 import sys
 
 from fontTools.fontBuilder import FontBuilder
@@ -29,6 +30,9 @@ OUT = os.path.join(ROOT, 'app', 'static', 'symbols')
 # The sets, their folders and first code points, in Supplementary Private
 # Use Area-B, since Material Design Icons are in A
 SETS = {'fastener': ('fasteners', 0x100000), 'electronic': ('electronics', 0x101000)}
+# Lines made thicker than drawn, so that they look as heavy as the icons
+# next to them: the electronic symbols are drawn 5 wide in 150
+STROKES = {'electronic': 2}
 UPEM = 512
 # As in Material Design Icons: the em from 64 below the baseline to 448
 # above, a symbol 20/24 of it high in the middle
@@ -45,9 +49,12 @@ def name_of(file: str) -> str:
     return '-'.join(part for part in parts if part != 'com')
 
 
-def glyph(path: str):
-    """The glyph and its advance of an SVG, its viewBox the symbol's box."""
-    svg = SVG.parse(path).topicosvg()
+def glyph(path: str, stroke: float = 1):
+    """The glyph and its advance of an SVG, its viewBox the symbol's box,
+    its lines stroke times as wide."""
+    with open(path, encoding='utf-8') as f:
+        text = re.sub(r'stroke-width="([0-9.]+)"', lambda m: f'stroke-width="{float(m.group(1)) * stroke:g}"', f.read())
+    svg = SVG.fromstring(text).topicosvg()
     x, y, w, h = svg.view_box()
     scale = (UPEM - 2 * PAD) / h
     tt = TTGlyphPen(None)
@@ -69,7 +76,7 @@ def build():
             if name in names[set_name]:
                 sys.exit(f'{file} is named {name} as another {set_name}')
             glyph_name = f'{set_name}.{name}'
-            glyphs[glyph_name], width = glyph(os.path.join(SOURCES, folder, file))
+            glyphs[glyph_name], width = glyph(os.path.join(SOURCES, folder, file), STROKES.get(set_name, 1))
             # The left side bearing as drawn, overlaps are removed keeping it
             glyphs[glyph_name].recalcBounds(None)
             advances[glyph_name] = (width, glyphs[glyph_name].xMin)
