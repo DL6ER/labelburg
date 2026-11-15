@@ -400,5 +400,9 @@ def test_choice_blanks_of_saved_labels_are_chosen_where_they_are_printed(designe
             assert designer.evaluate('() => S.libSel.values.Room') == shown
             assert designer.input_value(field) == shown
         assert designer.inner_text('#toast') == '"Attic" is none of the choices for Room.'
+        # The example link names one of them
+        designer.click('#libMore')
+        designer.click('#libLinks')
+        assert designer.input_value('#linkUrl').endswith('#fill/Shelf.json?Room=Garage')
     finally:
         designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Shelf.json'})

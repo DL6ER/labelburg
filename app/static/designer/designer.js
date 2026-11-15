@@ -2169,7 +2169,9 @@ function linksDialog(m) {
     if (!m) return;
     const blanks = blanksOf(m.design);
     const url = `${location.origin}${location.pathname}#fill/${encodeURIComponent(m.id)}`;
-    const example = blanks.length ? `${url}?${encodeURIComponent(blanks[0])}=${encodeURIComponent(blanks[0] === 'What' ? 'Chili' : 'Example')}` : url;
+    // A choice blank is filled in with one of its choices
+    const sample = !blanks.length ? '' : fieldType(m, blanks[0]) === 'choice' ? blankChoices(m, blanks[0])[0] || '' : blanks[0] === 'What' ? 'Chili' : 'Example';
+    const example = blanks.length ? `${url}?${encodeURIComponent(blanks[0])}=${encodeURIComponent(sample)}` : url;
     const sticker = setWide(Object.assign(baseDesign(S.tape), {
         print_type: 'qrcode_text', code_text: url, qrcode_size: '12', margin_left: '30', margin_right: '30',
         text: [L('Scan to print a', 56, false, 'left'), L(m.title + ' label', 84, true, 'left')]
