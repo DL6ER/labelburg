@@ -474,3 +474,24 @@ def test_text_as_written_filled_in_and_drawn(tmp_path):
         label = create_label_from_request(dict(data, print_type='qrcode', blanks=json.dumps({'Room': 'Garage'})))
         label.process_templates()
         assert (label.has_lines(), label.has_text(), label.want_text(code)) == (False, True, False)
+
+
+def test_choice_blanks_counters_and_dates_in_one_line(tmp_path):
+    # Each copy counts on with the same choice and dates, in the text and in
+    # the code; a preview shows the first choice, not a mark
+    client = make_client(tmp_path)
+    template = '{{blank:Room}} {{counter:A}}{{counter:001:5}} {{blank:Frozen on}} use by {{datetime+1m:%Y-%m-%d}}'
+    data = {'print_type': 'qrcode_text', 'label_size': '62', 'code_text': template,
+            'timestamp': str(int(datetime(2024, 1, 31, 12, 15).timestamp())), 'blanks': {'Room': 'Attic'},
+            'fields': {'Room': {'type': 'choice', 'choices': ['Garage', 'Attic']}, 'Frozen on': {'type': 'date', 'format': '%d.%m.%Y'}},
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}])}
+    with client.application.test_request_context():
+        for copy, value in enumerate(['A001', 'B006', 'C011']):
+            label = create_label_from_request(data, {}, copy)
+            label.process_templates()
+            assert label.text[0]['text'] == label.code_text == f'Attic {value} 31.01.2024 use by 2024-02-29'
+        label = create_label_from_request(dict(data, blanks={}), {}, 1, mark_blanks=True)
+        label.process_templates()
+        assert label.text[0]['text'] == 'Garage B006 31.01.2024 use by 2024-02-29'
+        with pytest.raises(ValueError, match='is none of the choices'):
+            create_label_from_request(dict(data, blanks={'Room': 'Cellar'}), {}, 1).process_templates()

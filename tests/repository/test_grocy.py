@@ -128,6 +128,17 @@ def test_a_mirrored_label_stays_mirrored(printed, monkeypatch):
     assert queued[0]._mirror
 
 
+def test_fields_fill_choice_blanks_with_one_of_their_choices(printed):
+    fields = {'location': {'type': 'choice', 'choices': ['Fridge', 'Pantry']}}
+    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:product}} {{counter:01}} {{blank:location}}'}], fields=fields)
+    assert printed.client.post(SAVE_URL, json=label).status_code == 200
+    assert printed(json=dict(GROCY_REQUEST, location='Pantry'))[0] == ['Pesto 01 Pantry']
+    assert printed(json=GROCY_REQUEST)[0] == ['Pesto 01 Fridge']
+    # Another one is refused, as in blanks
+    response = printed.client.post('/labeldesigner/api/repository/preview', json=dict(GROCY_REQUEST, location='Cellar'))
+    assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
+
+
 def test_the_preview_takes_the_fields_as_well(printed):
     client = printed.client
     by_fields = client.get('/labeldesigner/api/repository/preview', query_string={'name': 'Grocy.json', 'product': 'Pesto', 'grocycode': 'grcy:p:12'})
