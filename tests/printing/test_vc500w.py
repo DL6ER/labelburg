@@ -937,13 +937,16 @@ def test_refused_label_through_the_label_designer(client, fake):
     assert response.get_json()['message'] == 'The printer refused the label (label 1 of 2), the log of the server names the reason'
 
 
-def test_printer_gone_through_the_label_designer(client, fake):
+def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
     if fake.target == '127.0.0.1':
         with socket.socket() as unused:
             unused.bind(('127.0.0.1', 0))
             client.application.config['PRINTER_PRINTER'] = f'vc500w://127.0.0.1:{unused.getsockname()[1]}'
-    else:
+    elif fake.target.startswith('usbip://'):
         fake.close()
+    else:
+        # Not the closed terminal: a test running alongside may get it next
+        client.application.config['PRINTER_PRINTER'] = f'file://{tmp_path}/lp0'
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
     assert response.status_code == 503
