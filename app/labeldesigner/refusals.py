@@ -41,6 +41,7 @@ MESSAGES = (
     'cut must be each, last or none',
     'leaves_first must be top or bottom',
     'text_wrap must be 0 or 1',
+    'mirror must be 0 or 1',
     'image_text_gap must be a whole number of dots or empty',
     'image_text_gap must not be negative',
     CABLE_FLAG_REFUSED,

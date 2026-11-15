@@ -105,6 +105,37 @@ def test_lines_wrap_only_where_the_label_limits_them(designer):
     assert why() == ''
 
 
+def test_a_label_can_be_mirrored(designer, server):
+    # For clear tape stuck behind glass: previewed and printed so
+    type_line(designer, 0, 'Pull')
+    kept(designer)
+    assert not designer.is_checked('#edMirror')
+    designer.click('#edMirror')
+    wait_for_preview(designer)
+    assert designer.is_checked('#edMirror')
+    assert designer.evaluate("() => [formFor(S.edit.design).get('mirror'), formFor(S.edit.design, 1, true).get('mirror')]") == ['1', '1']
+    # A step to undo
+    kept(designer)
+    designer.click('#edUndo')
+    wait_for_preview(designer)
+    assert not designer.is_checked('#edMirror')
+    designer.click('#edRedo')
+    wait_for_preview(designer)
+    assert designer.is_checked('#edMirror')
+    # Saved with the label and opened with it
+    save_as(designer, 'Door')
+    designer.wait_for_function("() => document.getElementById('toast').innerText.includes('Saved \"Door\" to your labels')")
+    try:
+        designer.click('#edNew')
+        wait_for_preview(designer)
+        assert not designer.is_checked('#edMirror')
+        edit_saved_label(designer, 'Door')
+        assert designer.is_checked('#edMirror')
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Door.json'})
+    assert designer.evaluate("() => [normalize({ mirror: '1' }).mirror, normalize({}).mirror]") == ['1', '0']
+
+
 def test_text_next_to_a_code_on_a_small_die_cut_label(designer):
     # The note was guessed from the size of the label, also where the text
     # fits. The code fitted to the label took all of it, it leaves the text
