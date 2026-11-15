@@ -28,7 +28,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
+from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
 from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
@@ -546,6 +546,7 @@ def repo_save():
         _text_fit(data)
         cut = _cutting(data.get)[0]
         _text_wrap(data)
+        _mirror(data)
         check_image_position(data.get('image_position'))
         check_vertical_align(data.get('vertical_align'))
         check_image_mode(data.get('image_mode'))
@@ -697,7 +698,7 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
     # Flags and the text size read as when the label is printed, e.g. "true"
     # as 1, a text size from shrink_text of labels of before. One that is
     # refused stays as it is, the preview tells why.
-    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('text_wrap', 0)):
+    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('text_wrap', 0), ('mirror', 0)):
         try:
             data[key] = '1' if _whole_or(data.get(key), default) > 0 else '0'
         except (TypeError, ValueError):
@@ -915,17 +916,18 @@ def repo_preview():
     return _preview_response(data, _get_repo_dir(), image_bytes)
 
 
-def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None):
+def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None, mark_blanks: bool = False):
     """The preview of a stored label whose image is in image_dir, or of
     image_bytes where it was read with the label, as PNG or base64
-    (return_format)."""
+    (return_format). With mark_blanks, blanks without a value show their
+    name."""
     # allow override printer, in a JSON body or the form or query
     printer = _requested('printer')
     if printer:
         data['printer'] = printer
     try:
-        data['blanks'] = _requested_blanks(data.get('blanks'))
-        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes))
+        data['blanks'] = _requested_blanks(data)
+        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks)
         im = label.generate()
     except Exception as e:
         _log_refused_request('Preview', e)
@@ -963,7 +965,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data['printer'] = requested_printer
     # Prepare printer queue using requested or default device/model and label_size from data
     try:
-        data['blanks'] = _requested_blanks(data.get('blanks'))
+        data['blanks'] = _requested_blanks(data)
         device, model = _printer(requested_printer, _requested('model'))
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
@@ -1046,7 +1048,9 @@ def demo_load():
 
 @bp.route('/api/demos/preview', methods=['GET'])
 def demo_preview():
-    return _demo_response(_requested_name('id'), lambda data: _preview_response(data, demos.IMAGE_DIR))
+    # As the label designer draws saved labels: a blank without a default,
+    # e.g., the name Grocy sends, shows its name
+    return _demo_response(_requested_name('id'), lambda data: _preview_response(data, demos.IMAGE_DIR, mark_blanks=True))
 
 
 @bp.route('/api/demos/print', methods=['POST'])
@@ -1365,6 +1369,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         # Empty: an endless label grows with its content
         'label_length': _label_length(d.get('label_length')),
         'text_wrap': _text_wrap(d),
+        'mirror': _mirror(d),
         'image_text_gap': _image_text_gap(d.get('image_text_gap')),
         # Left out or empty: above the text across the tape, left of it along
         'image_position': check_image_position(d.get('image_position')),
@@ -1496,6 +1501,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         fixed_length=length is not None,
         vertical_align=context['vertical_align'],
         **_flag_wrap(label_size, diameter, context['high_res']),
+        mirror=context['mirror'],
     )
     if (label_type == LabelType.DIE_CUT_LABEL and image_label and image is not None
             and context['image_fit'] and not label.has_lines() and not with_code):
@@ -1559,6 +1565,15 @@ def _text_wrap(d: dict) -> bool:
         return _whole_or(d.get('text_wrap'), 0) != 0
     except (TypeError, ValueError):
         raise ValueError("text_wrap must be 0 or 1") from None
+
+
+def _mirror(d: dict) -> bool:
+    """Whether the label is printed mirror-inverted: mirror 1, also true.
+    Left out or empty it is not."""
+    try:
+        return _whole_or(d.get('mirror'), 0) != 0
+    except (TypeError, ValueError):
+        raise ValueError("mirror must be 0 or 1") from None
 
 
 def _image_text_gap(value) -> int | None:
@@ -1631,11 +1646,63 @@ def _blank_fields(value) -> dict:
     return fields
 
 
-def _requested_blanks(stored=None) -> dict[str, str]:
+# Parameters of the requests for stored labels, never values of blanks of
+# the same name
+STORED_LABEL_PARAMETERS = ('name', 'id', 'printer', 'model', 'print_count', 'cut', 'cut_once', 'half_cut', 'chain',
+                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'blanks', 'return_format')
+
+
+def _requested_blanks(data: dict) -> dict[str, str]:
     """The values for the blanks of a stored label: those stored with it,
-    over them those of the request, blanks of a JSON body or else of the form
-    or query."""
-    return {**_blank_values(stored), **_blank_values(_requested('blanks'))}
+    over them fields of the request named like a blank, e.g., product as
+    Grocy sends it, and over these the blanks of the request, of a JSON body
+    or else of the form or query."""
+    requested = _blank_values(_requested('blanks'))
+    fields = {}
+    for name in _blank_names(data):
+        if name not in requested and name.split('.')[0] not in STORED_LABEL_PARAMETERS:
+            value = _request_field(name)
+            if value is not None:
+                fields[name] = value
+    return {**_blank_values(data.get('blanks')), **fields, **requested}
+
+
+def _blank_names(data: dict) -> list[str]:
+    """The names of the blanks in the text and code of a stored label."""
+    text = data.get('text', [])
+    if isinstance(text, str):
+        try:
+            text = json.loads(text)
+        except (ValueError, RecursionError):
+            text = []
+    lines = [line.get('text') for line in text if isinstance(line, dict)] if isinstance(text, list) else []
+    names = []
+    for value in lines + [data.get('code_text')]:
+        for name in BLANK_TEMPLATE.findall(str(value or '')):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _request_field(name: str) -> str | None:
+    """The request field named like a blank, as text, from the form or query or
+    else a JSON body; dots reach into objects, in a form as brackets, e.g.,
+    stock_entry[best_before_date]. None where it is missing or no text or number."""
+    keys = name.split('.')
+    form = _address_or_form()
+    for key in (name, keys[0] + ''.join(f'[{key}]' for key in keys[1:])):
+        if key in form:
+            return form[key]
+    body = _json_body()
+    if name in body:
+        value = body[name]
+    else:
+        value = body
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    return str(value)
 
 
 def _font_name(font: str) -> str:
