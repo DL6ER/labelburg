@@ -113,10 +113,10 @@ def test_parameters_and_objects_are_no_blanks(printed):
 
 
 def test_printing_options_are_no_blanks(printed):
-    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}|{{blank:collate}}'}], fields={})
+    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}|{{blank:collate}}|{{blank:leaves_first}}'}], fields={})
     assert printed.client.post(SAVE_URL, json=label).status_code == 200
-    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0, collate=0))
-    assert lines == ['|||']
+    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0, collate=0, leaves_first='top'))
+    assert lines == ['||||']
 
 
 def test_the_preview_takes_the_fields_as_well(printed):
