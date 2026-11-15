@@ -1,15 +1,23 @@
 """The connections to printers on USB, through the printer interface of
-the kernel (/dev/usb/lp<N>, Linux only) or PyUSB
-(usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested), after the
-backends of brother_ql by Philipp Klaus."""
+the kernel (/dev/usb/lp<N>, Linux only), PyUSB
+(usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested) or
+USB/IP (usbip://<host>), after the backends of brother_ql by Philipp Klaus."""
 
+import ctypes.util
 import errno
 import logging
 import os
 import select
+import sys
 import time
 
+from . import usbip
+
 logger = logging.getLogger(__name__)
+
+
+class NoLibusb(OSError):
+    """PyUSB finds no libusb to reach usb:// printers through."""
 
 
 class Printer:
@@ -130,13 +138,49 @@ class UsbPrinter(Printer):
         del self.dev
 
 
+class UsbipPrinter(Printer):
+    """A printer another device shares over USB/IP, as
+    usbip://<host>[:<port>][/<bus ID>]. The connection stays open after
+    dispose, see usbip.connect()."""
+
+    # In seconds
+    read_timeout = 0.01
+    write_timeout = 15.
+
+    def __init__(self, device_specifier: str):
+        self.dev = usbip.connect(device_specifier)
+
+    def _write(self, data: bytes):
+        self.dev.write(data, self.write_timeout)
+
+    def _read(self, length: int) -> bytes:
+        return self.dev.read(length, self.read_timeout)
+
+    def _dispose(self):
+        usbip.release(self.dev)
+
+
 def _usb_printers(usb, vendor: int):
     """The devices of a maker with a printer interface (class 7)."""
     def is_printer(device):
         if device.bDeviceClass == 7:
             return True
         return any(usb.util.find_descriptor(config, bInterfaceClass=7) is not None for config in device)
-    return usb.core.find(find_all=True, custom_match=is_printer, idVendor=vendor)
+    try:
+        return usb.core.find(find_all=True, custom_match=is_printer, idVendor=vendor, backend=_libusb())
+    except usb.core.NoBackendError as e:
+        raise NoLibusb(str(e)) from e
+
+
+def _libusb():
+    """PyUSB's libusb backend, None without libusb. On Alpine Linux, ctypes
+    does not find libusb by its name, so on Linux its file name is the
+    fallback; elsewhere PyUSB looks in more places by itself."""
+    import usb.backend.libusb1
+    if sys.platform != 'linux':
+        return usb.backend.libusb1.get_backend()
+    return usb.backend.libusb1.get_backend(
+        find_library=lambda name: ctypes.util.find_library(name) or 'libusb-1.0.so.0')
 
 
 def _same_serial(told: str | None, given: str) -> bool:
@@ -156,8 +200,11 @@ def _serial_number(usb, device) -> str | None:
 
 
 def open_printer(device_specifier: str) -> Printer:
-    """A connection to the printer on USB, usb://... through PyUSB, any other
-    device through the printer interface of the kernel."""
+    """A connection to the printer on USB, usb://... through PyUSB,
+    usbip://... shared by another device, any other device through the
+    printer interface of the kernel."""
     if device_specifier.startswith(('usb://', '0x')):
         return UsbPrinter(device_specifier)
+    if usbip.is_address(device_specifier):
+        return UsbipPrinter(device_specifier)
     return KernelPrinter(device_specifier)

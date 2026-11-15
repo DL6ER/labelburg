@@ -149,7 +149,9 @@ function baseDesign(size) {
         // length in millimeters as cut
         label_length: '',
         // Where the content is on a label with room to spare
-        vertical_align: 'center'
+        vertical_align: 'center',
+        // Printed mirror-inverted, to be read through clear tape behind glass
+        mirror: '0'
     };
 }
 
@@ -195,7 +197,7 @@ function normalize(raw) {
     // label. One it refuses stays as it is, the preview tells why, until
     // another is chosen.
     const given = v => v !== undefined && v !== null && v !== '';
-    for (const [k, def] of [['image_fit', '1'], ['image_crop', '0'], ['text_wrap', '0']]) d[k] = given(raw[k]) ? String(raw[k]) : def;
+    for (const [k, def] of [['image_fit', '1'], ['image_crop', '0'], ['text_wrap', '0'], ['mirror', '0']]) d[k] = given(raw[k]) ? String(raw[k]) : def;
     d.text_fit = given(raw.text_fit) ? String(raw.text_fit) : '';
     // Cutting saved through the API e.g. as half_cut: 0 or chain: true
     for (const k of CUT_KEYS) d[k] = !given(raw[k]) ? '' : raw[k] === true ? '1' : raw[k] === false ? '0' : String(raw[k]);
@@ -242,8 +244,9 @@ function formatDate(iso, fmt = dateFormat()) {
 }
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
-// moved, e.g., [today+5d]), [counter] and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:\d+)?|short-uuid)\}\}/g;
+// moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
+// [counter:001:5]) and [id]
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
     if (m[2]) return `[today${m[3] || ''}]`;
@@ -254,8 +257,11 @@ function shownAs(m) {
 // weeks]: the offset as the server takes it, e.g., +5d or +2w
 const TODAY_RE = /^today(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?))?$/i;
 const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
+// [counter], or one with a start and a step as typed, e.g., [counter:001:5]
+// or [Counter : A]
+const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
 // Names of variables, a blank cannot have them
-const isVariable = n => TODAY_RE.test(n) || /^(counter(:\d+)?|id)$/i.test(n);
+const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || /^id$/i.test(n);
 // The text as its field shows it, and where each template is shown
 function displayed(text) {
     text = String(text || '');
@@ -300,8 +306,8 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         const n = name.trim();
         const day = n.match(TODAY_RE);
         if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
-        const counter = n.match(/^counter(:\d+)?$/i);
-        if (counter) return `{{counter${counter[1] || ''}}}`;
+        const counter = n.match(COUNTER_RE);
+        if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
         if (n.toLowerCase() === 'id') return '{{short-uuid}}';
         return `{{blank:${n}}}`;
     });
@@ -319,12 +325,19 @@ function blanksOf(design) {
 const blankFields = item => (item.design && item.design.fields) || {};
 
 // Kinds of blanks and the kind a name suggests
-const BLANK_KINDS = [['text', 'Text'], ['number', 'Number'], ['date', 'Date']];
+const BLANK_KINDS = [['text', 'Text'], ['number', 'Number'], ['date', 'Date'], ['choice', 'Choice']];
 const guessKind = name => /(^|\s)on$|\bdate\b/i.test(name) ? 'date' : /^(box|number|portions|no\.?|count)$/i.test(name) ? 'number' : 'text';
 
 function fieldType(item, name) {
     return (blankFields(item)[name] || {}).type || guessKind(name);
 }
+
+// The choices of a blank with a fixed list of them, numbers as written
+const blankChoices = (item, name) => ((blankFields(item)[name] || {}).choices || []).map(String);
+// Choices as typed, one per line: each once, empty lines left out
+const choicesOf = text => [...new Set(String(text).split('\n').map(c => c.trim()).filter(Boolean))];
+// Choice blanks without choices yet: the label waits for them to print or save
+const choicesMissing = item => blanksOf(item.design).filter(b => fieldType(item, b) === 'choice' && !blankChoices(item, b).length);
 
 // The blanks of a design as the server fills them in: the values given, and
 // the settings of each blank. A date is written in its format, else as set
@@ -379,6 +392,18 @@ const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 // Printers without a setting of their own cut as set before for all
 const printerCut = () => usableCut(Object.assign({ cut: S.settings.cut || 'each', half_cut: '1', chain: '0' }, (S.settings.cuts || {})[printerKey()]), printerCaps());
+// The end of the labels that leaves the printer first, set for each printer,
+// else as its driver prints them
+const leavesSet = () => (S.settings.leaves || {})[printerKey()] || '';
+const leavesFirst = (k = printerCaps()) => leavesSet() || (k.leaves_turned ? 'top' : 'bottom');
+// A label on the tape in the printer with its ends named, to see which one
+// comes out first, at its left and right end where it leaves sideways
+const endsTest = () => {
+    const d = baseDesign(S.tape), ask = L('Which end came out first?', 20);
+    if (!runsAlong(d)) return Object.assign(d, { text: [L('TOP', 40, true), ask, L('BOTTOM', 40, true)] });
+    const [top, bottom] = printerCaps().leaves_turned ? ['right', 'left'] : ['left', 'right'];
+    return Object.assign(d, { text: [L('TOP', 40, true, top), ask, L('BOTTOM', 40, true, bottom)] });
+};
 // P-touch printers cut after the last label unless chain printing, so not
 // cutting at all is chain printing, as the server decides it too
 const chainOf = (c, k) => k.chain && (c.chain === '1' || c.cut === 'none');
@@ -476,6 +501,7 @@ function formFor(design, copies = 1, forPrint = false, values = null, marks = fa
         fd.set('cut', c.cut);
         fd.set('half_cut', c.half_cut);
         fd.set('chain', c.chain);
+        if (leavesSet()) fd.set('leaves_first', leavesSet());
     }
     if (S.printer && S.printer.path) fd.append('printer', S.printer.path);
     if (S.printer && S.printer.model) fd.append('model', S.printer.model);
@@ -593,6 +619,10 @@ function preview(design, values, stale, first = false) {
     // Dates the server fills in, e.g. of a [today], change with the time: a
     // preview kept from another minute is not used
     const blanks = blankRequest(asked, values || {});
+    // A choice blank without choices yet shows as one still to fill in
+    for (const [name, f] of Object.entries(blanks.fields)) {
+        if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
+    }
     const shown = JSON.stringify(Object.assign({}, asked, { image: design.image ? imageKey(design.image) : null, more_images: undefined },
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
@@ -729,7 +759,7 @@ async function typedThumb(img, job) {
 
 const S = {
     printers: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
-    demos: null, demoList: [], saved: [], barcodes: ['QR'],
+    demos: null, demoList: [], saved: [], codes: [{ type: 'QR', name: 'QR', two_d: true, corrections: ['L', 'M', 'Q', 'H'] }],
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
     fitsOnly: true,
@@ -897,11 +927,12 @@ function detectTape() {
     S.tapeManual = false;
     let found = null;
     if (p && p.media_width) {
-        // The width and length of DK and TZe tape can be the same
-        const red = /red/i.test(p.text_color || '') || /red/i.test(p.media_type || '');
+        // The width and length of DK and TZe tape can be the same. The color
+        // of the text on TZe tape is no black and red roll.
+        const red = p.red_roll === true || /red/i.test(p.media_type || '');
         found = C.label_sizes.find(s => printerTakes(s) && s.tape[0] === p.media_width && s.tape[1] === (p.media_length || 0) && !!s.red === red);
-        // QL printers do not tell whether a roll is black and red
-        S.tapeRedUnknown = !!found && !red && !p.text_color;
+        // Only the QL-800 series tells whether a roll is black and red
+        S.tapeRedUnknown = !!found && !red && p.red_roll == null;
         if (!found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
     }
     // Assumed is the default size, or the first one the printer takes if it
@@ -1290,8 +1321,19 @@ async function loadBarcodes() {
     try {
         const r = await fetch(API + '/barcodes');
         const data = await r.json();
-        if (Array.isArray(data.barcodes) && data.barcodes.length) S.barcodes = data.barcodes;
+        if (Array.isArray(data.codes) && data.codes.length) S.codes = data.codes;
     } catch (e) { }
+}
+// What the server tells of a kind of code: its name, whether it is a 2D code
+// and the levels of error correction it has
+const codeKind = type => S.codes.find(c => c.type === type) || { type, name: type, two_d: false, corrections: [] };
+const LEVELS = [['L', 'Low, 7 %'], ['M', 'Medium, 15 %'], ['Q', 'Quartile, 25 %'], ['H', 'High, 30 %']];
+// The level of error correction kept for another kind of code: the same, else
+// the next lower one it has, else its lowest
+function levelFor(kind, level) {
+    const order = LEVELS.map(([v]) => v), has = kind.corrections || [];
+    if (!has.length || has.includes(level)) return level;
+    return has.filter(v => order.indexOf(v) < order.indexOf(level)).pop() || has[0];
 }
 
 // An "item" is anything that can be printed: one of your labels, a saved
@@ -1347,6 +1389,8 @@ function blankStart(item, name) {
 // at today, one moved from today (e.g., +5d) at that day
 function startOf(item, name) {
     const start = blankStart(item, name);
+    // One of the choices: its default, else the first one
+    if (fieldType(item, name) === 'choice') return blankChoices(item, name).includes(String(start)) ? String(start) : blankChoices(item, name)[0] || '';
     if (fieldType(item, name) === 'date' && DATE_OFFSET_RE.test(start)) return shiftDate(today(), start);
     return start || name in ((item.design && item.design.blanks) || {}) || fieldType(item, name) !== 'date' ? start : today();
 }
@@ -1521,8 +1565,12 @@ async function showOnStage(el, design, values, onWarning, blank = false) {
     // An endless label of a given length is as long as that when cut
     const lengthMm = !isEndless(size) ? size.tape[1] : hasLength(design) && +design.label_length > 0 ? +design.label_length : along + lead;
     // Labels that leave the printer top first are shown leaving it upwards,
-    // the printer below them. Those that leave sideways have it to their left.
-    const turned = !side && sizeCaps(design.label_size).leaves_turned;
+    // the printer below them. Those that leave sideways have it to their
+    // left, with the other end first to their right.
+    const k = sizeCaps(design.label_size), top = leavesFirst(k) === 'top';
+    const turned = !side && top;
+    // Turned for printing where the other end than the driver's leaves first
+    const back = top !== !!k.leaves_turned;
     // The cut after the label, and how copies are cut
     const caps = sizeCaps(design.label_size), cutNow = cutOf(design);
     // The selected pages of a PDF print like files, of those not shown as
@@ -1533,7 +1581,7 @@ async function showOnStage(el, design, values, onWarning, blank = false) {
     if (outdated()) return;
     // Kept to fit the label again when the stage changes its size
     el._view = {
-        url: p.url, w, h, side, turned, dpi, blank, color: isColorTape(design.label_size),
+        url: p.url, w, h, side, turned, back: side && back, dpi, blank, color: isColorTape(design.label_size),
         lead, leadDots: lead / 25.4 * dpi,
         form: (isEndless(size) ? '' : ' diecut') + (size.form === 'round_die_cut' ? ' round' : ''),
         dims: [side ? lengthMm : size.tape[0], side ? size.tape[0] : lengthMm],
@@ -1593,7 +1641,7 @@ function placeOnStage(el, redraw = false) {
     // Short labels keep the arrow clear of the scissors at the cut
     const short = side ? dw : dh;
     const busy = el.classList.contains('busy');
-    el.className = 'stage' + (side ? ' side' : '') + v.form + (turned ? ' turned' : '') + (large ? ' large' : '')
+    el.className = 'stage' + (side ? ' side' : '') + (v.back ? ' back' : '') + v.form + (turned ? ' turned' : '') + (large ? ' large' : '')
         + (short < 30 ? ' tiny' : short < 50 ? ' short' : '') + (busy ? ' busy' : '');
     // The front of the printer with its exit slot, its name and status light
     const st = printerState(S.printer);
@@ -1602,11 +1650,12 @@ function placeOnStage(el, redraw = false) {
     const printer = side
         ? `<div class="printer side" style="height:${dh + 64}px" aria-hidden="true">${led}${model}<span class="mouth" style="height:${dh + 16}px"></span></div>`
         : `<div class="printer top" style="width:${dw + 72}px" aria-hidden="true">${led}${model}<span class="mouth" style="width:${dw + 16}px"></span></div>`;
-    const flow = `<div class="flow" title="Printing direction"><i class="fa-solid fa-${side ? 'arrow-right-long' : turned ? 'arrow-up-long' : 'arrow-down-long'}"></i></div>`;
+    const flow = `<div class="flow" title="Printing direction"><i class="fa-solid fa-${side ? (v.back ? 'arrow-left-long' : 'arrow-right-long') : turned ? 'arrow-up-long' : 'arrow-down-long'}"></i></div>`;
     const leadPx = Math.round(v.leadDots * k);
     const lead = leadPx ? `<div class="lead" style="${side ? 'width' : 'height'}:${leadPx}px" title="Blank paper, ${v.lead} mm"></div>` : '';
     const label = v.blank ? `<div class="blank-paper" style="aspect-ratio:${w} / ${h}"></div>` : `<img alt="Label preview" src="${v.url}"${sharp ? ' class="dots"' : ''}>`;
-    const paper = side ? label + lead : lead + label;
+    // The blank paper is at the end that leaves first
+    const paper = (side ? v.back : turned) ? lead + label : label + lead;
     // How copies are cut: in the corner, or below the large label
     const cuts = `<div class="cuts">${v.cuts}</div>`;
     const zoom = 'zoom' in el.dataset ? `<button class="btn quiet icon zoom" type="button" aria-pressed="${large}" title="${large ? 'Smaller preview' : 'Larger preview'}">
@@ -1629,12 +1678,18 @@ function layoutProblem(d) {
     return '';
 }
 
+// A problem with the label, its first sentence in bold
+function problemHTML(text) {
+    const [, first, rest] = text.match(/^(.*?[.!?])(?:\s+|$)(.*)$/s) || [null, text, ''];
+    return `<i class="fa-solid fa-triangle-exclamation"></i> <span class="say"><b>${esc(first)}</b>${rest ? ' ' + esc(rest) : ''}</span>`;
+}
+
 function fitsNote(el, warning, error, design, onShrink) {
     if (!el) return;
     if (!warning && !error && design) warning = layoutProblem(onTape(design));
-    if (error) { el.className = 'fits warn'; el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Fix the label to print it.'; return; }
+    if (error) { el.className = 'fits warn'; el.innerHTML = problemHTML('Fix the label to print it.'); return; }
     el.className = warning ? 'fits warn' : 'fits';
-    el.innerHTML = warning ? `<i class="fa-solid fa-triangle-exclamation"></i> ${esc(warning)}` : '<i class="fa-solid fa-circle-check"></i> Everything fits.';
+    el.innerHTML = warning ? problemHTML(warning) : '<i class="fa-solid fa-circle-check"></i> Everything fits.';
     if (warning && /text does not fit/i.test(warning) && design && textFit(design) === 'none' && onShrink) {
         // Long lines are wrapped where they can be, the text keeps its size
         const wrap = design.text_wrap !== '1' && !wrapWhy(design);
@@ -1774,13 +1829,13 @@ function varsHelpHTML() {
             <li><code>[Name]</code> - a blank: whoever prints the label fills it in, in the editor or in the wizard. A name ending in "on" or containing "date" (like <code>[Frozen on]</code>) asks for a date, <code>[Box]</code>, <code>[Number]</code>, <code>[Portions]</code> and <code>[Count]</code> ask for a number, every other name for text.</li>
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
             <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
-            <li><code>[counter]</code> - a number that counts up, each copy gets the next one.</li>
+            <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
             <li><code>[id]</code> - a short random ID.</li>
         </ul>
         <p>The variables of the server work as well:</p>
         <ul>
             <li><code>{{datetime:&lt;format&gt;}}</code> - the current date and time. The format uses <button type="button" class="link" data-dtcodes>date and time codes</button>, e.g., <code>%H:%M:%S %d.%m.%Y</code>. <code>{{datetime+5d:&lt;format&gt;}}</code> is 5 days later, like <code>[today+5d]</code>.</li>
-            <li><code>{{counter[:&lt;start&gt;]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1). When you print several labels at once, each gets the next number.</li>
+            <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1) in steps of &lt;step&gt; (default 1), like <code>[counter]</code>. When you print several labels at once, each gets the next number.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
@@ -2192,6 +2247,10 @@ function fieldHTML(item, name, value, i) {
     if (t === 'date') {
         return `<div><label class="label-s" for="${id}">${esc(name)}</label><input class="field" id="${id}" type="date" data-blank="${esc(name)}" value="${esc(value || today())}"></div>`;
     }
+    if (t === 'choice') {
+        const choices = blankChoices(item, name);
+        return `<div><label class="label-s" for="${id}">${esc(name)}</label><select class="field${choices.length ? '' : ' need'}" id="${id}" data-blank="${esc(name)}"${choices.length ? '' : ' disabled'}>${choices.length ? choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('') : '<option value="">No choices yet</option>'}</select></div>`;
+    }
     const used = [];
     if (item.kind === 'saved') {
         for (const h of S.history) {
@@ -2225,7 +2284,12 @@ async function openFill(id, params) {
     try { item.design = await itemDesign(item); } catch (e) { toast(e.message); return; }
     item.values = defaults(item);
     item.starts = Object.assign({}, item.values);
-    for (const [k, v] of params.entries()) if (blanksOf(item.design).includes(k)) item.values[k] = v;
+    for (const [k, v] of params.entries()) {
+        if (!blanksOf(item.design).includes(k)) continue;
+        // The choice shown is the one printed
+        if (fieldType(item, k) === 'choice' && !blankChoices(item, k).includes(v)) { toast(`"${v}" is none of the choices for ${k}.`); continue; }
+        item.values[k] = v;
+    }
     S.libSel = item;
     renderLabels('saved');
 }
@@ -2236,7 +2300,9 @@ function linksDialog(m) {
     if (!m) return;
     const blanks = blanksOf(m.design);
     const url = `${location.origin}${location.pathname}#fill/${encodeURIComponent(m.id)}`;
-    const example = blanks.length ? `${url}?${encodeURIComponent(blanks[0])}=${encodeURIComponent(blanks[0] === 'What' ? 'Chili' : 'Example')}` : url;
+    // A choice blank is filled in with one of its choices
+    const sample = !blanks.length ? '' : fieldType(m, blanks[0]) === 'choice' ? blankChoices(m, blanks[0])[0] || '' : blanks[0] === 'What' ? 'Chili' : 'Example';
+    const example = blanks.length ? `${url}?${encodeURIComponent(blanks[0])}=${encodeURIComponent(sample)}` : url;
     const sticker = setWide(Object.assign(baseDesign(S.tape), {
         print_type: 'qrcode_text', code_text: url, qrcode_size: '12', margin_left: '30', margin_right: '30',
         text: [L('Scan to print a', 56, false, 'left'), L(m.title + ' label', 84, true, 'left')]
@@ -2416,15 +2482,16 @@ function renderEditor() {
                 ${[['text', 'Text', '<i class="t"></i>'], ['image', 'Image', '<i class="q" style="border-radius:50%"></i><i class="t"></i>'], ['codetext', 'Code', '<i class="q"></i><i class="t"></i>'], ['imagecode', 'Image + Code', '<i class="q s" style="border-radius:50%"></i><i class="t"></i><i class="q s"></i>']]
                     .map(([id, name, sch]) => `<button class="lay${lay === id ? ' on' : ''}" type="button" data-lay="${id}"><span class="sch">${sch}</span>${name}</button>`).join('')}
             </div></div>
-            ${hasCode ? `<div class="block"><div class="block-h"><i class="fa-solid fa-qrcode"></i>Code<select id="edBarcode" aria-label="Kind of code">${S.barcodes.map(b => `<option${b === d.barcode_type ? ' selected' : ''}>${esc(b)}</option>`).join('')}</select></div>
+            ${hasCode ? `<div class="block"><div class="block-h"><i class="fa-solid fa-qrcode"></i>Code<select id="edBarcode" aria-label="Kind of code">${[['2D codes', true], ['Barcodes', false]].map(([group, twoD]) => `<optgroup label="${group}">${S.codes.filter(c => !!c.two_d === twoD).map(c => `<option value="${esc(c.type)}"${c.type === d.barcode_type ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}</select></div>
                 <div class="block-b">${codeField('edCode', d.code_text, ' placeholder="Link or text, empty for the text of the label" aria-label="Content of the code"')}
                 ${lay === 'imagecode' ? '<span class="muted small">Fitted to the label when the image is, see Size under Image.</span>'
                     : `<div><span class="label-s">Size</span><div class="seg">${fitButton(d)}<button type="button" data-fit="0" class="${fitted(d) ? '' : 'on'}">Fixed</button></div></div>`}
-                ${((qr, fixed) => `<div class="pair">
-                    ${qr ? `<label${fixed ? '' : ' title="The code fits the label"'}><span class="label-s${fixed ? '' : ' off'}">Size of a dot</span><input class="field" type="number" min="1" max="40" id="edQrSize" value="${esc(d.qrcode_size)}"${fixed ? '' : ' disabled'}></label>`
+                ${((kind, fixed, choosable) => `<div class="pair">
+                    ${kind.two_d ? `<label${fixed ? '' : ' title="The code fits the label"'}><span class="label-s${fixed ? '' : ' off'}">Size of a dot</span><input class="field" type="number" min="1" max="40" id="edQrSize" value="${esc(d.qrcode_size)}"${fixed ? '' : ' disabled'}></label>`
                         : lay === 'imagecode' ? '' : `<label${fixed ? '' : ' title="The code fits the label"'}><span class="label-s${fixed ? '' : ' off'}">Scale in %</span><input class="field" type="number" min="1" max="500" id="edCodeScale" value="${esc(d.image_scaling_factor)}"${fixed ? '' : ' disabled'}></label>`}
-                    <label${qr ? '' : ' title="Only for QR codes"'}><span class="label-s${qr ? '' : ' off'}">Error correction</span><select class="field" id="edQrCorr"${qr ? '' : ' disabled'}>${[['L', 'Low, 7 %'], ['M', 'Medium, 15 %'], ['Q', 'Quartile, 25 %'], ['H', 'High, 30 %']].map(([v, n]) => `<option value="${v}"${d.qrcode_correction === v ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
-                </div>${qr ? '' : '<span class="muted small">Error correction exists for QR codes only.</span>'}`)(d.barcode_type === 'QR', !fitted(d))}
+                    ${kind.corrections.length ? `<label><span class="label-s">Error correction</span><select class="field" id="edQrCorr">${LEVELS.filter(([v]) => kind.corrections.includes(v)).map(([v, n]) => `<option value="${v}"${d.qrcode_correction === v ? ' selected' : ''}>${n}</option>`).join('')}</select></label>`
+                        : `<label title="Only for ${esc(choosable)} codes"><span class="label-s off">Error correction</span><select class="field" id="edQrCorr" disabled><option>${kind.two_d ? 'Automatic' : 'None'}</option></select></label>`}
+                </div>${kind.corrections.length ? '' : `<span class="muted small">${kind.two_d ? `${esc(kind.name)} codes set their own error correction. It` : 'Error correction'} can be chosen for ${esc(choosable)} codes.</span>`}`)(codeKind(d.barcode_type), !fitted(d), listJoin(S.codes.filter(c => (c.corrections || []).length).map(c => c.name)))}
                 ${isColorTape(d.label_size) ? `<div><span class="label-s">Color</span>${colorField('edCodeColor', d.print_color, 'Color of the code')}</div>` : ''}
                 ${lay === 'codetext' ? sideField(d, 'code') + gapField(d) : ''}</div></div>` : ''}
             ${lay === 'image' || lay === 'imagecode' ? imageBlock(d) : ''}
@@ -2445,6 +2512,7 @@ function renderEditor() {
                     <div class="tape-row"><span class="label-s">Tape</span>${lengthLabel(d)}<div class="tape-box" id="edTapeBox">${tapeLine(d)}</div>${lengthInput(d)}</div>
                     ${flagRow(d)}
                     <div><span class="label-s">Text runs</span><div class="seg"><button type="button" data-along="0" class="${runsAlong(d) ? '' : 'on'}">Across the tape</button><button type="button" data-along="1" class="${runsAlong(d) ? 'on' : ''}">Along</button></div></div>
+                    <div class="row" title="Prints mirror-inverted, to be read through clear tape stuck behind glass"><label class="check"><input type="checkbox" id="edMirror"${d.mirror === '1' ? ' checked' : ''}><span>Mirrored</span></label></div>
                     <div><span class="label-s">Text size</span><div class="seg">${TEXT_FITS.map(([v, n]) => `<button type="button" data-tfit="${v}" class="${textFit(d) === v ? 'on' : ''}"${v === 'fill' ? ' title="As large as fits on the label, the lines keep the ratio of their sizes"' : ''}>${n}</button>`).join('')}</div></div>
                     ${wrapRow(d)}
                     ${(room => `<div title="${room ? 'Where the content is on the label, as the text reads' : NO_ROOM}"><span class="label-s${room ? '' : ' off'}">Vertical position</span><div class="seg">${VERTICAL_ALIGNS.map(([v, n]) => `<button type="button" data-valign="${v}" class="${verticalAlign(d) === v ? 'on' : ''}"${room ? '' : ' disabled'}>${n}</button>`).join('')}</div></div>`)(hasRoom(d))}
@@ -2779,7 +2847,7 @@ const keepEditor = debounce(() => { if (S.edit) { recordHistory(S.edit); storeEd
 // does not refuse. What it cannot draw it cannot print either, nor an empty
 // label. One that took too long may still print.
 let editorFailed = false;
-const printable = empty => { $('#edPrint').disabled = empty || editorFailed; };
+const printable = empty => { $('#edPrint').disabled = empty || editorFailed || !!(S.edit && choicesMissing(editItem(S.edit)).length); };
 // The fields and buttons follow each change at once, the preview after the
 // one on its way
 function drawEditor() {
@@ -2806,6 +2874,7 @@ function drawEditor() {
         for (const b of blanks) {
             const v = E.values[b], def = startOf(item, b);
             if (v === undefined || (oldTypes[b] && fieldType(item, b) !== oldTypes[b])) continue;
+            if (fieldType(item, b) === 'choice' && !blankChoices(item, b).includes(v)) continue;
             if ((v === '' || v === (oldDefs[b] || '')) && def !== (oldDefs[b] || '')) continue;
             vals[b] = v;
         }
@@ -2818,7 +2887,8 @@ function drawEditor() {
             const k = fieldType(item, b);
             return `<div class="bset-row" data-bname="${esc(b)}"><b>[${esc(b)}]</b>
                 <div class="seg">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-kind="${v}" class="${k === v ? 'on' : ''}">${n}</button>`).join('')}</div>
-                ${k !== 'date' ? `<input class="field" data-default="1" type="${k === 'number' ? 'number' : 'text'}" placeholder="Default, optional" value="${esc(blankStart(item, b))}">`
+                ${k === 'choice' ? `<textarea class="field choices${blankChoices(item, b).length ? '' : ' need'}" data-choices rows="2" placeholder="Type the choices, one per line, the first is the default" aria-label="Choices of ${esc(b)}, one per line">${esc(blankChoices(item, b).join('\n'))}</textarea>`
+                    : k !== 'date' ? `<input class="field" data-default="1" type="${k === 'number' ? 'number' : 'text'}" placeholder="Default, optional" value="${esc(blankStart(item, b))}">`
                     : blankStart(item, b) && !DATE_OFFSET_RE.test(blankStart(item, b)) ? `<span class="muted small">Starts at ${esc(blankStart(item, b))}</span><button type="button" class="btn sm quiet" data-today="1">Start at today</button>`
                     : offsetFields(blankStart(item, b), undefined, (E.offsetUnits || {})[b])}</div>`;
         }).join('')}</div><p class="muted small" style="margin:0">Stored with the label. Rename a blank in its line, between the brackets.</p>`
@@ -2829,6 +2899,7 @@ function drawEditor() {
             E.design.fields = Object.assign({}, E.design.fields);
             E.design.fields[name] = Object.assign({}, blankFields(item)[name] || { type: guessKind(name) }, patch);
             if (E.design.fields[name].default === '') delete E.design.fields[name].default;
+            if (E.design.fields[name].type !== 'choice') delete E.design.fields[name].choices;
             // They replace a value saved with the label through the API
             if (E.design.blanks && name in E.design.blanks) {
                 E.design.blanks = Object.assign({}, E.design.blanks);
@@ -2838,7 +2909,14 @@ function drawEditor() {
             redrawEditor();
         };
         $$('.bset-row', box).forEach(r => {
-            $$('[data-kind]', r).forEach(b => b.onclick = () => setField(r.dataset.bname, { type: b.dataset.kind, default: '' }));
+            // A list of choices starts with the current value, empty for a date
+            $$('[data-kind]', r).forEach(b => b.onclick = () => {
+                const was = fieldType(item, r.dataset.bname), toChoice = b.dataset.kind === 'choice' && was !== 'choice';
+                if (toChoice) S.focusChoices = r.dataset.bname;
+                setField(r.dataset.bname, Object.assign({ type: b.dataset.kind, default: '' }, toChoice ? { choices: was === 'date' ? [] : choicesOf(E.values[r.dataset.bname] || '') } : {}));
+            });
+            const choices = $('[data-choices]', r);
+            if (choices) choices.addEventListener('change', () => setField(r.dataset.bname, { choices: choicesOf(choices.value) }));
             const dv = $('[data-default]', r);
             if (dv) dv.addEventListener('change', () => setField(r.dataset.bname, { default: dv.value.trim() }));
             const now = $('[data-today]', r);
@@ -2854,6 +2932,10 @@ function drawEditor() {
             inp.dispatchEvent(new Event('input', { bubbles: true }));
         });
         markBlanks(box.parentElement);
+        // Made a list of choices, they are typed next
+        const typing = S.focusChoices && $(`[data-bname="${CSS.escape(S.focusChoices)}"] [data-choices]`, box);
+        S.focusChoices = null;
+        if (typing) { typing.focus(); typing.setSelectionRange(typing.value.length, typing.value.length); }
         if (S.focusBlank && window.matchMedia('(min-width: 761px)').matches) { const f = $('input.need', box); if (f) f.focus(); }
         S.focusBlank = false;
         $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { E.values[inp.dataset.blank] = inp.value; redrawEditor(); }));
@@ -2864,7 +2946,7 @@ function drawEditor() {
     // first line's size makes it, and cannot be printed or saved yet
     const empty = isEmptyDesign(E.design);
     printable(empty);
-    $('#edSave').disabled = empty;
+    $('#edSave').disabled = empty || choicesMissing(item).length > 0;
     // Typing the first line of text, or deleting the last, changes whether
     // the position and the distance to the text apply
     const on = paired(E.design), gap = $('#edGap'), side = $('#edSide');
@@ -2906,7 +2988,10 @@ const drawStage = latest(async () => {
         // The server finds the image light, stronger contrast would help it
         if ($('#edContrastHint')) $('#edContrastHint').hidden = !(p && p.faint && !empty);
         if (empty) { const n = $('#edFits'); n.className = 'fits'; n.innerHTML = ''; }
-        else fitsNote($('#edFits'), w, err, E.design, () => renderEditor());
+        else {
+            const missing = choicesMissing(editItem(E));
+            fitsNote($('#edFits'), missing.length ? `Type the choices of [${missing[0]}] in Blank settings.` : w, err, E.design, () => renderEditor());
+        }
         editorFailed = !!refused;
         printable(empty);
     }, empty);
@@ -2965,8 +3050,10 @@ function bindEditor() {
     if ($('#edCode')) $('#edCode').oninput = e => { e.target.rows = codeRows(e.target.value); d.code_text = fromDisplay(e.target.value, d.code_text, e.target.selectionStart); redrawEditor(); };
     if ($('#edBarcode')) $('#edBarcode').onchange = e => {
         d.barcode_type = e.target.value;
-        // A QR code has the size of a dot instead of a scale
-        if (d.barcode_type === 'QR' && d.print_type !== 'image_qrcode_text') d.image_scaling_factor = '100';
+        const kind = codeKind(d.barcode_type);
+        // A 2D code has the size of a dot instead of a scale
+        if (kind.two_d && d.print_type !== 'image_qrcode_text') d.image_scaling_factor = '100';
+        d.qrcode_correction = levelFor(kind, d.qrcode_correction);
         renderEditor();
     };
     if ($('#edCodeScale')) $('#edCodeScale').addEventListener('input', e => { const v = Math.round(+e.target.value); if (v > 0) { d.image_scaling_factor = String(v); redrawEditor(); } });
@@ -3039,6 +3126,7 @@ function bindEditor() {
         renderEditor();
     });
     $$('[data-along]').forEach(b => b.onclick = () => { setRunsAlong(d, b.dataset.along === '1'); renderEditor(); });
+    $('#edMirror').onchange = e => { d.mirror = e.target.checked ? '1' : '0'; renderEditor(); };
     $$('[data-frame]').forEach(b => b.onclick = () => { setFrame(d, b.dataset.frame); renderEditor(); });
     $$('[data-tfit]').forEach(b => b.onclick = () => { setTextFit(d, b.dataset.tfit); renderEditor(); });
     $('#edCut').onchange = e => {
@@ -3134,6 +3222,7 @@ function openBlankDialog(d, target) {
             <label><span class="label-s">Name, shown next to the field</span><input class="field" id="bName" value="${esc(suggest)}" autocomplete="off"></label>
             <div><span class="label-s">Kind</span><div class="seg" id="bKinds">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-bkind="${v}">${n}</button>`).join('')}</div></div>
             <label id="bDefWrap"><span class="label-s">Default value, optional</span><input class="field" id="bDef" autocomplete="off" placeholder="Empty"></label>
+            <label id="bChoicesWrap" hidden><span class="label-s">Choices, one per line, the first is the default</span><textarea class="field choices" id="bChoices" rows="3"></textarea></label>
             <div id="bDateStart" hidden><span class="label-s">Starts at</span>${offsetFields('', 'Today +')}</div>
             <p class="err small" id="bErr" hidden style="padding:0;text-align:left"></p>
             <div class="acts"><button class="btn-print" type="submit" id="bInsert"></button></div>
@@ -3142,7 +3231,8 @@ function openBlankDialog(d, target) {
     const sync = () => {
         if (!chosen) kind = guessKind(name.value.trim());
         $$('[data-bkind]').forEach(b => b.classList.toggle('on', b.dataset.bkind === kind));
-        $('#bDefWrap').hidden = kind === 'date';
+        $('#bDefWrap').hidden = kind === 'date' || kind === 'choice';
+        $('#bChoicesWrap').hidden = kind !== 'choice';
         $('#bDateStart').hidden = kind !== 'date';
         def.type = kind === 'number' ? 'number' : 'text';
         $('#bInsert').textContent = `Insert [${name.value.trim() || '...'}]`;
@@ -3155,12 +3245,14 @@ function openBlankDialog(d, target) {
     $('#blankForm').onsubmit = e => {
         e.preventDefault();
         const n = name.value.trim();
+        const choices = choicesOf($('#bChoices').value);
         const err = !n ? 'Give the blank a name.' : /[\[\]{}\n]/.test(n) ? 'Brackets cannot be part of the name.'
-            : isVariable(n) ? `[${n}] is a variable already, choose another name.` : '';
+            : isVariable(n) ? `[${n}] is a variable already, choose another name.`
+            : kind === 'choice' && !choices.length ? 'Give the blank its choices, one per line.' : '';
         if (err) { $('#bErr').textContent = err; $('#bErr').hidden = false; return; }
         d.fields = d.fields || {};
         const start = kind === 'date' ? offsetIn($('#bDateStart')) : def.value.trim();
-        d.fields[n] = Object.assign({ type: kind }, start ? { default: start } : {});
+        d.fields[n] = Object.assign({ type: kind }, kind === 'choice' ? { choices } : start ? { default: start } : {});
         closeLayer(true);
         const input = target();
         if (input) insertAt(input, `[${n}]`);
@@ -3293,6 +3385,11 @@ function bindPrinterPanel() {
     };
     $$('[data-q]', box).forEach(b => b.onclick = () => { S.settings.quality = b.dataset.q; saveSettings(); });
     $$('[data-col]', box).forEach(b => b.onclick = () => { S.settings.collate = b.dataset.col; saveSettings(); });
+    $('#setLfTest', box).onclick = () => printJob({ title: 'Which end first', design: endsTest(), values: {}, copies: 1, source: { kind: 'test' } });
+    $$('[data-lf]', box).forEach(b => b.onclick = () => {
+        S.settings.leaves = Object.assign({}, S.settings.leaves, { [printerKey()]: b.dataset.lf });
+        saveSettings();
+    });
     $$('[data-c]', box).forEach(b => b.onclick = () => {
         S.settings.cuts = Object.assign({}, S.settings.cuts, { [printerKey()]: Object.assign(printerCut(), { [b.dataset.c]: b.dataset.v }) });
         saveSettings();
@@ -3324,13 +3421,13 @@ function settingsCard() {
             <div class="seg">
             <button type="button" data-q="fast" class="${q === 'fast' ? 'on' : ''}"${oneQuality ? ONE : ''}>Fast</button>
             <button type="button" data-q="quality" class="${q === 'quality' ? 'on' : ''}"${oneQuality ? ONE : ''}>Quality</button>
-            ${!offersHigh ? '' : `<button type="button" data-q="high" class="${q === 'high' ? 'on' : ''}"${noHigh ? ' disabled title="This printer cannot print at 600 dpi"' : ''}>600 dpi, slow</button>`}</div>
-            ${noHigh ? `<span class="muted small">${esc(thePrinter(p, true))} cannot print at 600 dpi.</span>` : ''}
+            ${!offersHigh ? '' : `<button type="button" data-q="high" class="${q === 'high' ? 'on' : ''}"${noHigh ? ' disabled title="This printer cannot print &quot;Dense&quot;"' : ''}>Dense, slow</button>`}</div>
+            ${noHigh ? `<span class="muted small">${esc(thePrinter(p, true))} cannot print "Dense".</span>` : ''}
             <div class="info-box" id="qInfo"${S.qualityInfo ? '' : ' hidden'}>
                 ${caps.colors === 'color' ? `<p>Fast printing is a few seconds quicker, colors come out lighter. Quality heats the paper longer for stronger colors.</p>
                 <p>A label takes about 40 seconds, most of it to prepare and preheat. With "After each label" take every label out of the printer, the next one waits for that. "After the last label" keeps the labels together on a strip.</p>`
                 : `<p>Fast printing is quicker, the print is a little less sharp.</p>
-                <p>600 dpi prints twice as many lines along the label. Labels usually come out much darker, printing is slower, and the result is often worse than at 300 dpi. It is only confirmed for the QL-800. The ${esc(listJoin(without600))} cannot print at 600 dpi.</p>`}
+                <p>"Dense" prints twice as many lines along the label. Labels usually come out much darker, printing is slower, and the result is often worse than with "Quality". It is only confirmed for the QL-800. The ${esc(listJoin(without600))} cannot print "Dense".</p>`}
             </div></div>
         <div><span class="label-s">Copies of several files</span>
             <div class="seg">
@@ -3341,6 +3438,12 @@ function settingsCard() {
             <select class="field" id="setDate">${[['', 'Like the browser: ' + formatDate('2026-11-01', browserDateFormat())], ['%Y-%m-%d', '2026-11-01'], ['%d.%m.%Y', '01.11.2026'], ['%d/%m/%Y', '01/11/2026'], ['%m/%d/%Y', '11/01/2026']]
                 .map(([v, n]) => `<option value="${esc(v)}"${(S.settings.dateFmt || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
             <span class="muted small">For "Today's date" and date blanks. Labels that already contain a date keep its format.</span></div>
+        <div><span class="label-s">Leaves the printer first</span>
+            <div class="row" style="gap:.5rem;align-items:center"><div class="seg">
+            <button type="button" data-lf="top" class="${leavesFirst() === 'top' ? 'on' : ''}">Top</button>
+            <button type="button" data-lf="bottom" class="${leavesFirst() === 'bottom' ? 'on' : ''}">Bottom</button></div>
+            <button type="button" class="btn quiet" id="setLfTest"${S.printer ? '' : ' disabled title="No printer answered"'}><i class="fa-solid fa-print"></i>Print a test label</button></div>
+            <div class="muted small">The end to take first, e.g. to stick the labels on as they come out.</div></div>
         <div class="cutting">${cutSettings('c', c, caps)}
             <div class="cut-show">${cutStrip(c, caps)}<span class="muted small">${esc(cutText(c, caps))}${noCutter(caps) ? '' : ' Labels saved with their own cutting keep it.'}</span></div></div>
     </div>`;

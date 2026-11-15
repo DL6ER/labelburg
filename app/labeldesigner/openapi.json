@@ -98,7 +98,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, or when a font is not installed and the default font is used instead.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
                 "schema": {
                   "type": "string"
                 }
@@ -224,6 +224,14 @@
                         "default": 1,
                         "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC)."
                       },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+                      },
                       "cut_once": {
                         "type": "integer",
                         "enum": [
@@ -280,6 +288,14 @@
                         "enum": [0, 1],
                         "default": 1,
                         "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC)."
+                      },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -377,7 +393,7 @@
         "operationId": "barcodes",
         "responses": {
           "200": {
-            "description": "The code types for `barcode_type`.",
+            "description": "The code types for `barcode_type`: the 2D codes first (QR, DATAMATRIX, MICROQR, RMQR, AZTEC, PDF417), then the barcodes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -391,8 +407,71 @@
                       "examples": [
                         [
                           "QR",
+                          "DATAMATRIX",
+                          "MICROQR",
+                          "RMQR",
+                          "AZTEC",
+                          "PDF417",
                           "CODE128",
                           "EAN13"
+                        ]
+                      ]
+                    },
+                    "codes": {
+                      "type": "array",
+                      "description": "The same code types with their names, whether they are 2D codes and the levels of error correction (`qrcode_correction`) they can have. Codes without levels choose it themselves or have none.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "description": "The value for `barcode_type`."
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "two_d": {
+                            "type": "boolean"
+                          },
+                          "corrections": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "L",
+                                "M",
+                                "Q",
+                                "H"
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "examples": [
+                        [
+                          {
+                            "type": "QR",
+                            "name": "QR",
+                            "two_d": true,
+                            "corrections": [
+                              "L",
+                              "M",
+                              "Q",
+                              "H"
+                            ]
+                          },
+                          {
+                            "type": "DATAMATRIX",
+                            "name": "DataMatrix",
+                            "two_d": true,
+                            "corrections": []
+                          },
+                          {
+                            "type": "EAN13",
+                            "name": "EAN13",
+                            "two_d": false,
+                            "corrections": []
+                          }
                         ]
                       ]
                     }
@@ -629,7 +708,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The saved label, its image as base64 in `image_data`. `image_fit`, `image_crop` and `text_wrap` come as `1` or `0` and `text_fit` also for a label saved with `shrink_text` only, as the label is printed. A value that is refused stays as it is.",
+            "description": "The saved label, its image as base64 in `image_data`. `image_fit`, `image_crop`, `text_wrap` and `mirror` come as `1` or `0` and `text_fit` also for a label saved with `shrink_text` only, as the label is printed. A value that is refused stays as it is.",
             "content": {
               "application/json": {
                 "schema": {
@@ -813,7 +892,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, or when a font is not installed and the default font is used instead.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
                 "schema": {
                   "type": "string"
                 }
@@ -939,7 +1018,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, or when a font is not installed and the default font is used instead.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
                 "schema": {
                   "type": "string"
                 }
@@ -996,7 +1075,7 @@
     "/labeldesigner/api/repository/print": {
       "post": {
         "summary": "Print a saved label",
-        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three.",
+        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md).",
         "operationId": "repositoryPrint",
         "parameters": [
           {
@@ -1046,6 +1125,14 @@
                           0,
                           1
                         ]
+                      },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
                       },
                       "printer": {
                         "type": "string",
@@ -1331,7 +1418,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, or when a font is not installed and the default font is used instead.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
                 "schema": {
                   "type": "string"
                 }
@@ -1438,6 +1525,14 @@
                           0,
                           1
                         ]
+                      },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
                       },
                       "printer": {
                         "type": "string",
@@ -1712,7 +1807,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}`, `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}` and `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}` and `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
@@ -1839,10 +1934,19 @@
             "default": 0,
             "description": "1 wraps lines wider than the room for the text at spaces into several lines with the same settings, before `text_fit` shrinks or fills the text. A word longer than a line is broken only where the text keeps its size. Lines do not wrap along endless tape (`orientation` `rotated`), which grows with them, nor filled on endless tape, where each line fills the width of the tape."
           },
+          "mirror": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "default": 0,
+            "description": "1 prints the label mirror-inverted, left and right swapped as the text reads, e.g., on clear tape stuck on the inside of a window to be read through the glass. The preview shows it mirrored as well."
+          },
           "image_text_gap": {
             "type": "integer",
             "minimum": 0,
-            "description": "Distance between the image or code and the text in dots, for labels with both, with `image_qrcode_text` on both sides of the text (between image and code without text). Empty or left out chooses two fifths of the largest text size, for a QR code at least two of its modules."
+            "description": "Distance between the image or code and the text in dots, for labels with both, with `image_qrcode_text` on both sides of the text (between image and code without text). Empty or left out chooses two fifths of the largest text size, for a 2D code at least two of its modules."
           },
           "image_position": {
             "type": "string",
@@ -1892,12 +1996,12 @@
           "barcode_type": {
             "type": "string",
             "default": "QR",
-            "description": "One of `/labeldesigner/api/barcodes`. Of a code with a check digit, e.g. EAN13, ISBN10 or UPCA, give the digits without it, which calculates it, or with the right one. A wrong one is refused."
+            "description": "One of `/labeldesigner/api/barcodes`. The 2D codes DATAMATRIX, MICROQR, RMQR, AZTEC and PDF417 are made like QR codes: of dots of the size `qrcode_size`, of the text of all lines where `code_text` is left out. DataMatrix codes hold ASCII characters only. Of a code with a check digit, e.g., EAN13, ISBN10 or UPCA, give the digits without it, which calculates it, or with the right one. A wrong one is refused."
           },
           "qrcode_size": {
             "type": "integer",
             "default": 10,
-            "description": "Size of a QR code module in dots."
+            "description": "Size of a dot of a 2D code in dots of the label. The rows of a PDF417 code are three times as high."
           },
           "qrcode_correction": {
             "type": "string",
@@ -1907,7 +2011,7 @@
               "Q",
               "H"
             ],
-            "default": "L"
+            "description": "Error correction of QR (L, M, Q or H), Micro QR (L, M or Q) and rMQR codes (M or H). Left out or empty: the lowest the code has. Another level is refused, other codes ignore it."
           },
           "image": {
             "type": "string",
@@ -2187,6 +2291,10 @@
             "type": "boolean",
             "description": "The printer prints red."
           },
+          "red_roll": {
+            "type": ["boolean", "null"],
+            "description": "Whether the loaded roll is a black and red one, as the QL-800 series reports it. `null` where the printer does not tell."
+          },
           "color_support": {
             "type": "boolean",
             "description": "The printer prints in color (VC-500W), the label designer then offers any color."
@@ -2284,6 +2392,14 @@
             ],
             "description": "Another one is refused. `bw` is read as `black_and_white`."
           },
+          "leaves_first": {
+            "type": "string",
+            "enum": [
+              "top",
+              "bottom"
+            ],
+            "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+          },
           "bw_threshold": {
             "type": "integer",
             "minimum": 1,
@@ -2324,7 +2440,7 @@
       "BlankValues": {
         "type": "string",
         "contentMediaType": "application/json",
-        "description": "Values for the blanks (`{{blank:<name>}}`) in the text and the code as JSON object of texts or numbers, e.g., `{\"Room\": \"Garage\"}`. They are inserted as given, numbers as they are written, also an empty text. Blanks not given get their default from `fields`, dates today's date in the time zone of the server (environment variable `TZ`), others stay empty. A date like 2026-11-03, or one moved from today like `+5d` (`d` days, `w` weeks, `m` months, `y` years), is written in the format from `fields`, else as it is. A blank is a date if `fields` says so, else text.",
+        "description": "Values for the blanks (`{{blank:<name>}}`) in the text and the code as JSON object of texts or numbers, e.g., `{\"Room\": \"Garage\"}`. They are inserted as given, numbers as they are written, also an empty text. Blanks not given get their default from `fields`, dates today's date in the time zone of the server (environment variable `TZ`), others stay empty. A date like 2026-11-03, or one moved from today like `+5d` (`d` days, `w` weeks, `m` months, `y` years), is written in the format from `fields`, else as it is. A blank is a date if `fields` says so, else text. A blank of the type `choice` takes one of its choices, another value is refused.",
         "examples": [
           "{\"Room\": \"Garage\"}"
         ]
@@ -2332,13 +2448,14 @@
       "BlankSettings": {
         "type": "string",
         "contentMediaType": "application/json",
-        "description": "Settings of the blanks by name as JSON object, as the label designer saves them with a label: `type` (`text`, `number` or `date`), `default` (for a date also one moved from today, e.g., `+5d`), and for a date its `format` (strftime, e.g., `%d.%m.%Y`). Another type, a format that is no text, a default that is no text or number, or a date moved by another offset is refused.",
+        "description": "Settings of the blanks by name as JSON object, as the label designer saves them with a label: `type` (`text`, `number`, `date` or `choice`), `default` (for a date also one moved from today, e.g., `+5d`), for a date its `format` (strftime, e.g., `%d.%m.%Y`), and for a choice its `choices` (1 to 50 texts of at most 200 characters, none twice; the default is one of them, else the first one). Another type, a format that is no text, a default that is no text or number, a date moved by another offset, or choices that are no such list are refused.",
         "examples": [
-          "{\"Frozen on\": {\"type\": \"date\", \"format\": \"%d.%m.%Y\"}}"
+          "{\"Frozen on\": {\"type\": \"date\", \"format\": \"%d.%m.%Y\"}}",
+          "{\"Room\": {\"type\": \"choice\", \"choices\": [\"Garage\", \"Kitchen\", \"Attic\"]}}"
         ]
       },
       "SavedLabelBlanks": {
-        "description": "Values for the blanks (`{{blank:<name>}}`) of the label as JSON object of texts or numbers, e.g., `{\"Room\": \"Garage\"}`. They are inserted as given, numbers as they are written, also an empty text. Blanks not given get their default saved with the label, dates today's date in the time zone of the server (environment variable `TZ`), others stay empty. A date like 2026-11-03, or one moved from today like `+5d` (`d` days, `w` weeks, `m` months, `y` years), is written in the format saved with the label, else as it is. A blank is a date if its saved type says so, else text.",
+        "description": "Values for the blanks (`{{blank:<name>}}`) of the label as JSON object of texts or numbers, e.g., `{\"Room\": \"Garage\"}`. They are inserted as given, numbers as they are written, also an empty text. Blanks not given get their default saved with the label, dates today's date in the time zone of the server (environment variable `TZ`), others stay empty. A date like 2026-11-03, or one moved from today like `+5d` (`d` days, `w` weeks, `m` months, `y` years), is written in the format saved with the label, else as it is. A blank is a date if its saved type says so, else text. A blank of the type `choice` takes one of its choices, another value is refused. A blank not given here takes a field of the request named like it, e.g., `product` as Grocy sends it; a name with dots one inside an object, e.g., `stock_entry.best_before_date` (in a form `stock_entry[best_before_date]`). The parameters of the request, e.g., `name` or `printer`, are never taken for blanks.",
         "oneOf": [
           {
             "type": "string",

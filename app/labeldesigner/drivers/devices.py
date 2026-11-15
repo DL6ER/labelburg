@@ -14,6 +14,9 @@ import time
 
 from werkzeug.security import safe_join
 
+from . import usbip
+from .backends import NoLibusb
+
 try:
     import fcntl
 except ImportError:  # Not available on Windows
@@ -91,10 +94,13 @@ def lock_key(device_specifier: str) -> str:
     it, so it should be addressed in one way only. A host without port is
     one on port 9100, also an IPv6 address in brackets. A Bluetooth printer
     is one device whatever RFCOMM channel names it, and drivers differ in the
-    channel they take when none is named, so its key is its MAC address only."""
+    channel they take when none is named, so its key is its MAC address only.
+    A printer shared over USB/IP is one on port 3240."""
     key = device_specifier.strip()
     if key.startswith('file://'):
         key = key[len('file://'):]
+    elif usbip.is_address(key) and usbip.ADDRESS.fullmatch(key):
+        key = usbip.key(key)
     elif key.lower().startswith('bt://'):
         key = 'bt://' + key.lower().split('/')[2]
     elif '://' in key:
@@ -111,6 +117,8 @@ USB_DEVICE_ID = '/sys/class/usbmisc/{name}/device/ieee1284_id'
 
 
 def usb_device_id(device_specifier: str) -> str:
+    if usbip.is_address(device_specifier):
+        return usbip.device_id(device_specifier)
     path = os.path.normpath(device_specifier[len('file://'):] if device_specifier.startswith('file://') else device_specifier)
     if not path.startswith('/dev/usb/lp'):
         return ''
@@ -226,6 +234,8 @@ def unanswered_reason(error: Exception) -> str:
     the server."""
     if isinstance(error, TimeoutError):
         return 'The printer does not answer'
+    if isinstance(error, NoLibusb):
+        return 'Printers on usb:// need libusb, please install it'
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -248,6 +258,7 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_width': known.get('media_width'),
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
+        'red_roll': known.get('red_roll'),
         'errors': [unanswered(error)],
         'status_type': 'Error',
         'phase_type': 'Unknown',
