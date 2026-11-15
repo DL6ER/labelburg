@@ -149,7 +149,9 @@ function baseDesign(size) {
         // length in millimeters as cut
         label_length: '',
         // Where the content is on a label with room to spare
-        vertical_align: 'center'
+        vertical_align: 'center',
+        // Printed mirror-inverted, to be read through clear tape behind glass
+        mirror: '0'
     };
 }
 
@@ -195,7 +197,7 @@ function normalize(raw) {
     // label. One it refuses stays as it is, the preview tells why, until
     // another is chosen.
     const given = v => v !== undefined && v !== null && v !== '';
-    for (const [k, def] of [['image_fit', '1'], ['image_crop', '0'], ['text_wrap', '0']]) d[k] = given(raw[k]) ? String(raw[k]) : def;
+    for (const [k, def] of [['image_fit', '1'], ['image_crop', '0'], ['text_wrap', '0'], ['mirror', '0']]) d[k] = given(raw[k]) ? String(raw[k]) : def;
     d.text_fit = given(raw.text_fit) ? String(raw.text_fit) : '';
     // Cutting saved through the API e.g. as half_cut: 0 or chain: true
     for (const k of CUT_KEYS) d[k] = !given(raw[k]) ? '' : raw[k] === true ? '1' : raw[k] === false ? '0' : String(raw[k]);
@@ -242,8 +244,9 @@ function formatDate(iso, fmt = dateFormat()) {
 }
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
-// moved, e.g., [today+5d]), [counter] and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:\d+)?|short-uuid)\}\}/g;
+// moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
+// [counter:001:5]) and [id]
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
     if (m[2]) return `[today${m[3] || ''}]`;
@@ -254,8 +257,11 @@ function shownAs(m) {
 // weeks]: the offset as the server takes it, e.g., +5d or +2w
 const TODAY_RE = /^today(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?))?$/i;
 const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
+// [counter], or one with a start and a step as typed, e.g., [counter:001:5]
+// or [Counter : A]
+const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
 // Names of variables, a blank cannot have them
-const isVariable = n => TODAY_RE.test(n) || /^(counter(:\d+)?|id)$/i.test(n);
+const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || /^id$/i.test(n);
 // The text as its field shows it, and where each template is shown
 function displayed(text) {
     text = String(text || '');
@@ -300,8 +306,8 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         const n = name.trim();
         const day = n.match(TODAY_RE);
         if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
-        const counter = n.match(/^counter(:\d+)?$/i);
-        if (counter) return `{{counter${counter[1] || ''}}}`;
+        const counter = n.match(COUNTER_RE);
+        if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
         if (n.toLowerCase() === 'id') return '{{short-uuid}}';
         return `{{blank:${n}}}`;
     });
@@ -921,11 +927,12 @@ function detectTape() {
     S.tapeManual = false;
     let found = null;
     if (p && p.media_width) {
-        // The width and length of DK and TZe tape can be the same
-        const red = /red/i.test(p.text_color || '') || /red/i.test(p.media_type || '');
+        // The width and length of DK and TZe tape can be the same. The color
+        // of the text on TZe tape is no black and red roll.
+        const red = p.red_roll === true || /red/i.test(p.media_type || '');
         found = C.label_sizes.find(s => printerTakes(s) && s.tape[0] === p.media_width && s.tape[1] === (p.media_length || 0) && !!s.red === red);
-        // QL printers do not tell whether a roll is black and red
-        S.tapeRedUnknown = !!found && !red && !p.text_color;
+        // Only the QL-800 series tells whether a roll is black and red
+        S.tapeRedUnknown = !!found && !red && p.red_roll == null;
         if (!found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
     }
     // Assumed is the default size, or the first one the printer takes if it
@@ -1731,13 +1738,13 @@ function varsHelpHTML() {
             <li><code>[Name]</code> - a blank: whoever prints the label fills it in, in the editor or in the wizard. A name ending in "on" or containing "date" (like <code>[Frozen on]</code>) asks for a date, <code>[Box]</code>, <code>[Number]</code>, <code>[Portions]</code> and <code>[Count]</code> ask for a number, every other name for text.</li>
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
             <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
-            <li><code>[counter]</code> - a number that counts up, each copy gets the next one.</li>
+            <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
             <li><code>[id]</code> - a short random ID.</li>
         </ul>
         <p>The variables of the server work as well:</p>
         <ul>
             <li><code>{{datetime:&lt;format&gt;}}</code> - the current date and time. The format uses <button type="button" class="link" data-dtcodes>date and time codes</button>, e.g., <code>%H:%M:%S %d.%m.%Y</code>. <code>{{datetime+5d:&lt;format&gt;}}</code> is 5 days later, like <code>[today+5d]</code>.</li>
-            <li><code>{{counter[:&lt;start&gt;]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1). When you print several labels at once, each gets the next number.</li>
+            <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1) in steps of &lt;step&gt; (default 1), like <code>[counter]</code>. When you print several labels at once, each gets the next number.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
@@ -2405,6 +2412,7 @@ function renderEditor() {
                     <div class="tape-row"><span class="label-s">Tape</span>${lengthLabel(d)}<div class="tape-box" id="edTapeBox">${tapeLine(d)}</div>${lengthInput(d)}</div>
                     ${flagRow(d)}
                     <div><span class="label-s">Text runs</span><div class="seg"><button type="button" data-along="0" class="${runsAlong(d) ? '' : 'on'}">Across the tape</button><button type="button" data-along="1" class="${runsAlong(d) ? 'on' : ''}">Along</button></div></div>
+                    <div class="row" title="Prints mirror-inverted, to be read through clear tape stuck behind glass"><label class="check"><input type="checkbox" id="edMirror"${d.mirror === '1' ? ' checked' : ''}><span>Mirrored</span></label></div>
                     <div><span class="label-s">Text size</span><div class="seg">${TEXT_FITS.map(([v, n]) => `<button type="button" data-tfit="${v}" class="${textFit(d) === v ? 'on' : ''}"${v === 'fill' ? ' title="As large as fits on the label, the lines keep the ratio of their sizes"' : ''}>${n}</button>`).join('')}</div></div>
                     ${wrapRow(d)}
                     ${(room => `<div title="${room ? 'Where the content is on the label, as the text reads' : NO_ROOM}"><span class="label-s${room ? '' : ' off'}">Vertical position</span><div class="seg">${VERTICAL_ALIGNS.map(([v, n]) => `<button type="button" data-valign="${v}" class="${verticalAlign(d) === v ? 'on' : ''}"${room ? '' : ' disabled'}>${n}</button>`).join('')}</div></div>`)(hasRoom(d))}
@@ -3016,6 +3024,7 @@ function bindEditor() {
         renderEditor();
     });
     $$('[data-along]').forEach(b => b.onclick = () => { setRunsAlong(d, b.dataset.along === '1'); renderEditor(); });
+    $('#edMirror').onchange = e => { d.mirror = e.target.checked ? '1' : '0'; renderEditor(); };
     $$('[data-frame]').forEach(b => b.onclick = () => { setFrame(d, b.dataset.frame); renderEditor(); });
     $$('[data-tfit]').forEach(b => b.onclick = () => { setTextFit(d, b.dataset.tfit); renderEditor(); });
     $('#edCut').onchange = e => {

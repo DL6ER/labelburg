@@ -3,7 +3,7 @@ import os
 import pytest
 
 from app.labeldesigner import printer
-from app.labeldesigner.drivers import devices
+from app.labeldesigner.drivers import devices, usbip
 
 
 @pytest.fixture(autouse=True)
@@ -19,3 +19,13 @@ def printer_output(tmp_path, monkeypatch):
     # Nor are the device IDs of its USB printers read
     monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'no-usb-device-id-{name}'))
     monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', False)
+
+
+@pytest.fixture(autouse=True)
+def shared_printers(monkeypatch):
+    # Printers shared over USB/IP stay imported, each test begins without any
+    printers = {}
+    monkeypatch.setattr(usbip, '_printers', printers)
+    yield
+    for shared in printers.values():
+        shared.close()

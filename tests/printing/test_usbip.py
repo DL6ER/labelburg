@@ -1,0 +1,351 @@
+"""Printers another device shares over USB/IP, against a fake host that
+answers like Linux's usbip-host."""
+
+import errno
+import json
+import socket
+import threading
+import time
+
+import pytest
+
+from app.labeldesigner.drivers import backends, devices, usbip
+from app.labeldesigner.drivers.brother import usb
+from app.labeldesigner.drivers.escpos import protocol as escpos
+from app.labeldesigner.drivers.vc500w import DRIVER as VC500W
+from app.labeldesigner.drivers.vc500w import protocol as vc500w
+from tests.helpers import make_client
+from tests.printing.test_vc500w import FakeVC500W
+from tests.printing.test_usb_jobs import COMPLETED, PHASE_CHANGE, PRINTING, REPLY, WAITING, status
+from tests.printing.usbip_host import QL1100_ID, VC500W_ID, FakeHost, SharedDevice
+
+TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Shared', 'size': '40'}])
+
+
+class FakeQL:
+    """The printer behind a shared device: answers a status request, and a
+    job, which ends with "print with feed", with the messages of a page."""
+
+    def __init__(self, device):
+        self.received = b''
+        self._printer = device.printer
+        threading.Thread(target=self._answer, daemon=True).start()
+
+    def _answer(self):
+        while True:
+            try:
+                data = self._printer.recv(65536)
+                if not data:
+                    return
+                self.received += data
+                if data.endswith(b'\x1biS'):
+                    self._printer.sendall(status(REPLY))
+                elif data.endswith(b'\x1a'):
+                    self._printer.sendall(status(PHASE_CHANGE, PRINTING) + status(COMPLETED) + status(PHASE_CHANGE, WAITING))
+            except OSError:
+                return
+
+
+class FakeTM:
+    """An Epson receipt printer behind a shared device: answers the status
+    requests with the bytes in 'replies', keeps the job."""
+
+    def __init__(self, device):
+        self.received = b''
+        self.replies = {escpos.OFFLINE: 0x12, escpos.PAPER: 0x12}
+        self._printer = device.printer
+        threading.Thread(target=self._answer, daemon=True).start()
+
+    def _answer(self):
+        while True:
+            try:
+                data = self._printer.recv(65536)
+                if not data:
+                    return
+                if data in self.replies:
+                    self._printer.sendall(bytes([self.replies[data]]))
+                else:
+                    self.received += data
+            except OSError:
+                return
+
+    def wait_for(self, end: bytes):
+        deadline = time.monotonic() + 5
+        while not self.received.endswith(end) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return self.received
+
+
+@pytest.fixture
+def host():
+    shared = FakeHost(SharedDevice())
+    yield shared
+    shared.close()
+
+
+def test_status_of_a_shared_printer(host):
+    ql = FakeQL(host.devices[0])
+    state = usb.query_status(host.address())
+    assert (state['model'], state['media_width'], state['errors']) == ('QL-800', 62, [])
+    assert ql.received == b'\x1biS'
+    # Asked again on the same connection: the host resets a printer it lets go
+    usb.query_status(host.address())
+    assert (host.devices[0].imports, host.devices[0].resets) == (1, 0)
+
+
+def test_job_on_a_shared_printer(host):
+    ql = FakeQL(host.devices[0])
+    job = b'\x00' * 40000 + b'job\x1a'
+    info = usb.send_job(job, host.address(), [30])
+    assert info['did_print'] and info['ready_for_next_job']
+    assert ql.received == job
+
+
+def test_printer_found_among_the_shared_devices():
+    keyboard, printer_ = SharedDevice('1-1', interfaces=((3, 1),)), SharedDevice('1-2')
+    host = FakeHost(keyboard, printer_)
+    try:
+        FakeQL(printer_)
+        usb.query_status(host.address())
+        assert (keyboard.imports, printer_.imports) == (0, 1)
+    finally:
+        host.close()
+
+
+def test_shared_devices_with_their_classes():
+    host = FakeHost(SharedDevice('1-1'), SharedDevice('1-2', interfaces=((3, 1),), device_class=0xEF))
+    try:
+        assert [(device['busid'], device['device_class'], device['interface_classes'])
+                for device in usbip.shared_devices('127.0.0.1', host.port)] == [('1-1', 0, [7]), ('1-2', 0xEF, [3])]
+    finally:
+        host.close()
+
+
+def test_printer_named_by_its_bus_id():
+    first, second = SharedDevice('1-1'), SharedDevice('1-2')
+    host = FakeHost(first, second)
+    try:
+        FakeQL(second)
+        usb.query_status(host.address('1-2'))
+        assert (first.imports, second.imports) == (0, 1)
+    finally:
+        host.close()
+
+
+@pytest.mark.parametrize('interfaces', [
+    # The VC-500W and others also offer IPP over USB on a printer interface
+    ((7, 4), (7, 2)),
+    # The bidirectional interface tells the status
+    ((7, 1), (7, 2)),
+])
+def test_bidirectional_printer_interface_is_taken(interfaces):
+    device = SharedDevice(interfaces=interfaces)
+    host = FakeHost(device)
+    try:
+        FakeQL(device)
+        assert usb.query_status(host.address())['errors'] == []
+        assert (0xA1, 0, 0, 1 << 8) in device.requests
+    finally:
+        host.close()
+
+
+def test_printer_not_configured_by_the_host_is_configured():
+    device = SharedDevice(configuration=0)
+    host = FakeHost(device)
+    try:
+        FakeQL(device)
+        usb.query_status(host.address())
+        assert (0x00, 9, 1, 0) in device.requests
+    finally:
+        host.close()
+
+
+def test_device_id_names_the_model():
+    vc, ql = SharedDevice('1-1', device_id=VC500W_ID), SharedDevice('1-2')
+    host = FakeHost(vc, ql)
+    try:
+        assert devices.usb_device_id(host.address('1-1')) == VC500W_ID
+        assert VC500W.model_of(host.address('1-1')) == 'VC-500W'
+        assert devices.usb_device_id(host.address('1-2')) == QL1100_ID
+        assert VC500W.model_of(host.address('1-2')) is None
+    finally:
+        host.close()
+
+
+def test_printer_that_cannot_be_reached_has_no_device_id():
+    with socket.create_server(('127.0.0.1', 0)) as closed:
+        port = closed.getsockname()[1]
+    assert devices.usb_device_id(f'usbip://127.0.0.1:{port}') == ''
+
+
+def test_printer_switched_off_and_on_again(host):
+    device = host.devices[0]
+    FakeQL(device)
+    usb.query_status(host.address())
+    device.unplug()
+    with pytest.raises(OSError) as error:
+        usb.query_status(host.address())
+    assert devices.unanswered_reason(error.value) == 'The printer is switched off or not connected'
+    device.plug_in()
+    FakeQL(device)
+    assert usb.query_status(host.address())['errors'] == []
+    assert device.imports == 2
+
+
+def test_printer_used_by_another_client(host):
+    FakeQL(host.devices[0])
+    usb.query_status(host.address())
+    with pytest.raises(OSError) as error:
+        usbip.SharedPrinter(host.address('1-1'))
+    assert devices.unanswered_reason(error.value) == 'The printer is in use by another program'
+
+
+@pytest.mark.parametrize('shared, address', [((SharedDevice('1-1', interfaces=((3, 1),)),), ''), ((SharedDevice(),), '9-9')])
+def test_no_printer_shared(shared, address):
+    host = FakeHost(*shared)
+    try:
+        with pytest.raises(OSError) as error:
+            usb.query_status(host.address(address))
+        assert devices.unanswered_reason(error.value) == 'The printer is switched off or not connected'
+    finally:
+        host.close()
+
+
+def test_printer_that_takes_no_data(host, monkeypatch):
+    monkeypatch.setattr(backends.UsbipPrinter, 'write_timeout', 0.2)
+    FakeQL(host.devices[0])
+    usb.query_status(host.address())
+    host.silent = True
+    with pytest.raises(OSError) as error:
+        usb.query_status(host.address())
+    assert devices.unanswered_reason(error.value) == 'The printer does not answer'
+    # The connection is given up, the next query imports the printer again
+    host.silent = False
+    assert usb.query_status(host.address())['errors'] == []
+    assert host.devices[0].imports == 2
+
+
+def test_answer_between_queries_is_kept(host):
+    # One read stays submitted: what the printer sends meanwhile is not lost
+    shared = usbip.connect(host.address())
+    assert shared.read(32, 0.05) == b''
+    host.devices[0].printer.sendall(b'unasked')
+    assert shared.read(3, 1) == b'una'
+    assert shared.read(32, 1) == b'sked'
+
+
+def test_answer_longer_than_asked_ends_the_connection(host):
+    shared = usbip.connect(host.address())
+    host.extra = bytes(usbip.READ_SIZE)
+    host.devices[0].printer.sendall(b'status')
+    with pytest.raises(OSError):
+        shared.read(32, 1)
+    assert shared.broken
+
+
+@pytest.mark.skipif(not hasattr(socket, 'TCP_USER_TIMEOUT'), reason='Linux only')
+def test_host_that_acknowledges_nothing_is_given_up(host):
+    shared = usbip.connect(host.address())
+    assert shared._socket.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == usbip.USER_TIMEOUT * 1000
+
+
+class Answers:
+    """A connection that receives the bytes or raises the errors given."""
+
+    def __init__(self, *answers):
+        self.answers = list(answers)
+
+    def recv(self, size):
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def test_quiet_host_is_waited_for():
+    assert usbip._receive(Answers(TimeoutError('timed out'), b'data'), 4, lambda: False) == b'data'
+
+
+def test_connection_the_kernel_gave_up_ends():
+    with pytest.raises(TimeoutError) as error:
+        usbip._receive(Answers(TimeoutError(errno.ETIMEDOUT, 'Connection timed out'), b'data'), 4, lambda: False)
+    assert error.value.errno == errno.ETIMEDOUT
+
+
+@pytest.mark.parametrize('one, other, same', [
+    ('USBIP://Printer-Pi', 'usbip://printer-pi:3240', True),
+    ('usbip://printer-pi/1-1', 'usbip://printer-pi:3240/1-1', True),
+    ('usbip://printer-pi/1-1', 'usbip://printer-pi/1-2', False),
+    ('usbip://[2001:DB8::1]', 'usbip://[2001:db8::1]:3240', True),
+    ('usbip://printer-pi', 'tcp://printer-pi', False),
+])
+def test_one_lock_for_each_shared_printer(one, other, same):
+    assert (devices.lock_key(one) == devices.lock_key(other)) is same
+
+
+def test_shared_printer_in_the_label_designer(host, tmp_path):
+    ql = FakeQL(host.devices[0])
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (shown['path'], shown['media_width'], shown['errors']) == (host.address(), 62, [])
+    response = client.post('/labeldesigner/api/print', data={'label_size': '62', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    assert ql.received.endswith(b'\x1a') and len(ql.received) > 1000
+
+
+def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):
+    for name, value in (('POLL_INTERVAL', 0.01), ('DATA_DELAY', 0.05), ('FILL_WAIT', 0.05), ('START_TIMEOUT', 0.05)):
+        monkeypatch.setattr(vc500w, name, value)
+    vc = FakeVC500W(usbip=True)
+    try:
+        client = make_client(tmp_path)
+        client.application.config.update(PRINTER_PRINTER=vc.target, PRINTER_MODEL='QL-800')
+
+        def ql_commands(*args):
+            raise AssertionError('A VC-500W must not get the commands of a QL printer')
+        monkeypatch.setattr(usb, 'query_status', ql_commands)
+        monkeypatch.setattr(usb, 'send_job', ql_commands)
+        shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (shown['model'], shown['media_width']) == ('VC-500W', 25)
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
+        assert response.get_json() == {'success': True}
+        assert len(vc.images) == 1
+    finally:
+        vc.close()
+
+
+def test_shared_receipt_printer(tmp_path):
+    device = SharedDevice(product=0x0E15, device_id='MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;')
+    host = FakeHost(device)
+    try:
+        tm = FakeTM(device)
+        client = make_client(tmp_path)
+        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/TM-T20II')
+        tm.replies[escpos.PAPER] = 0x12 | 0x60
+        shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (shown['model'], shown['errors']) == ('Epson/TM-T20II', ['The printer has no paper'])
+        tm.replies[escpos.PAPER] = 0x12
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+        assert response.get_json() == {'success': True}
+        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')
+        assert (device.imports, device.resets) == (1, 0)
+    finally:
+        host.close()
+
+
+def test_shared_printer_that_cannot_be_reached(tmp_path):
+    with socket.create_server(('127.0.0.1', 0)) as closed:
+        address = f'usbip://127.0.0.1:{closed.getsockname()[1]}'
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER=address, PRINTER_MODEL='QL-800')
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (shown['path'], shown['errors']) == (address, ['The printer refuses the connection'])
+
+
+def test_requests_name_only_configured_shared_printers(tmp_path):
+    # The server connects only to hosts the configuration names
+    client = make_client(tmp_path)
+    response = client.post('/labeldesigner/api/print', data={
+        'printer': 'usbip://192.0.2.1', 'label_size': '62', 'print_type': 'text', 'text': TEXT})
+    assert 'Unsupported printer' in response.get_json()['message']

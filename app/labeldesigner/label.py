@@ -4,7 +4,7 @@ from .cable_flag import flag_strip
 import os
 import uuid
 from qrcode import QRCode, constants
-from PIL import Image, ImageDraw, ImageFont, ImageChops
+from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
 import logging
 import barcode
 from barcode.errors import BarcodeError
@@ -238,6 +238,42 @@ def datetime_codes() -> dict:
             'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
 
 
+# The start of a counter is at most this long, its step at most this large
+MAX_COUNTER_START_LENGTH = 12
+MAX_COUNTER_STEP = 1000000
+
+
+def counter_value(start: str, step: int, index: int) -> str:
+    """The counter on copy index (0 is the first): start, written as the values
+    should look, plus step per copy. Digits keep their count (001, 002, ...),
+    letters count A ... Z, AA, AB, ... in their case."""
+    if start.isdigit():
+        return str(int(start) + step * index).zfill(len(start))
+    # Letters as a number: A is 1, Z 26, AA 27
+    number = 0
+    for letter in start.upper():
+        number = number * 26 + ord(letter) - ord('A') + 1
+    number += step * index
+    letters = ''
+    while number:
+        number, rest = divmod(number - 1, 26)
+        letters = chr(ord('A') + rest) + letters
+    return letters if start.isupper() else letters.lower()
+
+
+def check_counter(start: str, step: str) -> int:
+    """The step of a counter that starts at start, ValueError for a start
+    that is neither digits nor letters of one case, or one too long, and a
+    step that is no whole number from 1 to MAX_COUNTER_STEP."""
+    if not re.fullmatch(r"[0-9]+|[A-Z]+|[a-z]+", start):
+        raise ValueError(f"A counter starts at a number or at letters, e.g., 001 or A, not {start}")
+    if len(start) > MAX_COUNTER_START_LENGTH:
+        raise ValueError(f"A counter starts at {MAX_COUNTER_START_LENGTH} digits or letters at most")
+    if not step.isdigit() or not 1 <= int(step) <= MAX_COUNTER_STEP:
+        raise ValueError(f"The step of a counter is a whole number from 1 to {MAX_COUNTER_STEP}, not {step}")
+    return int(step)
+
+
 # A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months) or +1y
 # (years), at most a hundred years
 DATE_OFFSET = re.compile(r"([+-])(\d{1,6})([dwmy])", re.ASCII)
@@ -360,6 +396,7 @@ class SimpleLabel:
         flag_dpi: int = 300,
         fixed_length: bool = False,
         vertical_align: str = 'center',
+        mirror: bool = False,
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -467,6 +504,9 @@ class SimpleLabel:
         self._shown_code = code_text
         # The value of each blank, made once for the label
         self._blank_cache: dict[str, str] = {}
+        # Printed mirror-inverted, to be read through clear tape stuck behind
+        # glass
+        self._mirror = mirror
 
     @property
     def label_content(self):
@@ -604,12 +644,13 @@ class SimpleLabel:
         def substitute(pattern, replacement):
             pieces[:] = [re.sub(pattern, replacement, piece) for piece in pieces]
 
-        # Replace {{counter[:<start>]}} with current label counter (<start> is
-        # an optional offset defaulting to 1)
+        # Replace {{counter[:<start>[:<step>]]}} with the counter of the copy:
+        # it starts at <start> and adds <step> per copy, both 1 by default
+        # (see counter_value)
         def counter_replacer(match):
-            offset = int(match.group(1)) if match.group(1) else 1
-            return str(self._counter + offset)
-        substitute(r"\{\{counter(?:\:(\d+))?\}\}", counter_replacer)
+            start, step = match.group(1) or '1', match.group(2) or '1'
+            return counter_value(start, check_counter(start, step), self._counter)
+        substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
 
         # Replace {{datetime:<format>}} with current datetime formatted as
         # <format>, {{datetime+5d:<format>}} with the one 5 days later (see
@@ -964,6 +1005,9 @@ class SimpleLabel:
 
             # Draw (rounded) rectangle
             draw.rounded_rectangle(rect, radius=self._border_roundness, outline=self._border_color, width=self._border_thickness)
+        # Left and right swapped as the text reads, the preview shows it so
+        if self._mirror:
+            imgResult = ImageOps.mirror(imgResult)
         return imgResult
 
     def _sized(self, img: Image.Image, width: int, height: int, parts: int, own_look: bool = True) -> tuple[Image.Image, float]:

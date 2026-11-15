@@ -19,6 +19,8 @@ import socket
 import time
 import xml.etree.ElementTree as ET
 
+from .. import usbip
+
 PORT = 9100
 # Resolution across the tape (crossweb_dpi in /config.xml)
 DPI = 320
@@ -121,8 +123,9 @@ def _text(element: ET.Element, path: str, default: str = '') -> str:
 
 
 def is_device(target: str) -> bool:
-    """Whether target is the path of a printer on USB, not a host."""
-    return target.startswith('/')
+    """Whether target is a printer on USB, its path or usbip://<host> for one
+    shared by another device, not a host."""
+    return target.startswith('/') or usbip.is_address(target)
 
 
 def device_id_is_vc500w(device_id: str) -> bool:
@@ -138,13 +141,6 @@ class _Device:
             raise OSError(f'{path} is not a printer device')
         # Never the controlling terminal of the server, also not a pty
         self._fd = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)
-        # An answer someone before did not read would be taken for ours
-        self._timeout = 0.1
-        try:
-            while self.recv(65536):
-                pass
-        except TimeoutError:
-            pass
         self._timeout = timeout
 
     def settimeout(self, timeout: float):
@@ -197,7 +193,15 @@ class Connection:
             self._socket = None
         self._buffer = b''
         if is_device(self._target):
-            self._socket = _Device(self._target, self._timeout)
+            self._socket = (usbip.Socket if usbip.is_address(self._target) else _Device)(self._target, self._timeout)
+            # An answer someone before did not read would be taken for ours
+            self._socket.settimeout(0.1)
+            try:
+                while self._socket.recv(65536):
+                    pass
+            except TimeoutError:
+                pass
+            self._socket.settimeout(self._timeout)
         else:
             self._socket = socket.create_connection((self._target, self._port), timeout=self._timeout)
 
