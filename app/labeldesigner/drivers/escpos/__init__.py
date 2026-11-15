@@ -7,14 +7,14 @@ import re
 from PIL import Image
 
 from .. import devices
-from ..base import Driver, network_status
+from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('TM-T20II',)
+MODELS = ('Epson/TM-T20II',)
 # Paper width in mm and the dots across it the TM-T20II prints, the first
 # one assumed, as the printer does not tell
 WIDTHS = {80: 576, 58: 420}
@@ -55,8 +55,10 @@ class Escpos(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
-    # Also a name a udev rule gives it, e.g. /dev/usb/lp_epson
-    device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),)
+    # usblp's device, also a name a udev rule gives it, e.g. /dev/usb/lp_epson,
+    # on Linux only, or the printer through PyUSB, e.g. usb://0x04b8:0x0e15
+    device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
+                       re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.EscposError)
 
     def fits(self, label, model):
@@ -66,10 +68,10 @@ class Escpos(Driver):
         return protocol.DPI
 
     def resolution_problem(self, model, high_res):
-        return f'The {model} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
+        return f'The {shown(model)} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
 
     def cut_problem(self, cut, model):
-        return f'The {model} cuts the paper at least after the last label' if cut == 'none' else ''
+        return f'The {shown(model)} cuts the paper at least after the last label' if cut == 'none' else ''
 
     def capabilities(self, model):
         return dict(super().capabilities(model), qualities=['quality'], never_cut=NEVER_WHY,
@@ -112,7 +114,9 @@ class Escpos(Driver):
             return 'The printer does not answer'
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
-            return 'Could not send the label to the printer, the log of the server names the reason'
+            reason = devices.unanswered_reason(e)
+            return (f'Could not send the label to the printer: {reason}' if reason
+                    else 'Could not send the label to the printer, the log of the server names the reason')
         return ''
 
 

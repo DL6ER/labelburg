@@ -10,6 +10,7 @@ import secrets
 import barcode
 import threading
 import contextlib
+import datetime
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
@@ -27,7 +28,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color
+from .label import MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
 from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
@@ -544,6 +545,7 @@ def repo_save():
         _image_text_gap(data.get('image_text_gap'))
         _text_fit(data)
         cut = _cutting(data.get)[0]
+        _text_wrap(data)
         _mirror(data)
         check_image_position(data.get('image_position'))
         check_vertical_align(data.get('vertical_align'))
@@ -694,7 +696,7 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
     # Flags and the text size read as when the label is printed, e.g. "true"
     # as 1, a text size from shrink_text of labels of before. One that is
     # refused stays as it is, the preview tells why.
-    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('mirror', 0)):
+    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('text_wrap', 0), ('mirror', 0)):
         try:
             data[key] = '1' if _whole_or(data.get(key), default) > 0 else '0'
         except (TypeError, ValueError):
@@ -962,6 +964,9 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         check_cut(printer.cut, printer.model)
         high_res = _whole(_option('high_res', data, 0)) != 0
         fast = _whole(_option('fast_printing', data, 0)) != 0
+        # Saved with the label, the request overrides it
+        collate = _requested('collate')
+        collate = _whole_or(collate if collate is not None else data.get('collate'), 1) != 0
         # The label and its image have to be generated with the resolution
         # it is printed with
         data['high_res'] = high_res
@@ -973,7 +978,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
     try:
         # Of a PDF each selected page is a label of its own
         images, _ = load_label_images(data, {}, copies=print_count, image_dir=image_dir, image_bytes=image_bytes)
-        labels = [image for _ in range(print_count) for image in images]
+        labels = _copies(images, print_count, collate)
         _queue_labels(printer, labels, data, {}, high_res, fast)
         status = printer.process_queue()
     except Exception as e:
@@ -1037,6 +1042,14 @@ def demo_print():
     return _demo_response(_requested_name('id'), lambda data: _print_stored_label(data, demos.IMAGE_DIR))
 
 
+def _copies(images: list, count: int, collate: bool) -> list:
+    """The labels of count copies of several files or pages: as sets, ABC
+    ABC, collated, else grouped, AA BB CC."""
+    if collate:
+        return [image for _ in range(count) for image in images]
+    return [image for image in images for _ in range(count)]
+
+
 def _check_print_count(print_count: int) -> int:
     if print_count < 1:
         raise ValueError("print_count must be greater than 0")
@@ -1077,6 +1090,8 @@ def preview_from_image():
     # The label designer offers to choose pages of a PDF with several
     if page_count:
         response.headers.set('X-PDF-Pages', str(page_count))
+        # and shows how the selected ones print
+        response.headers.set('X-PDF-Selected-Pages', str(len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count))))
     # It suggests stronger contrast for a light image on the tapes of the VC-500W
     if (images[0] is not None and _palette(values.get('label_size', DEFAULT_LABEL_SIZE)) == 'color'
             and not _image_contrast(values) and looks_faint(images[0])):
@@ -1156,6 +1171,7 @@ def print_label():
         check_cut(printer.cut, printer.model)
         high_res = _whole_or(request.values.get('high_res'), 0) != 0
         fast = _whole_or(request.values.get('fast_printing'), 0) != 0
+        collate = _whole_or(request.values.get('collate'), 1) != 0
     except HTTPException:
         raise
     except Exception as e:
@@ -1169,9 +1185,9 @@ def print_label():
         # Every uploaded image, not only the first
         files = request.files
         # Decode the image once, all labels of the job share it. Of a PDF
-        # each selected page is a label of its own, the copies are collated.
+        # each selected page is a label of its own.
         images, _ = load_label_images(values, files, copies=print_count)
-        labels = [image for _ in range(print_count) for image in images]
+        labels = _copies(images, print_count, collate)
         _queue_labels(printer, labels, values, files, high_res, fast)
         status = printer.process_queue()
     except Exception as e:
@@ -1209,7 +1225,7 @@ def _printer(requested_device, requested_model) -> tuple[str, str]:
     if printers:
         configured, model = printers[0][1], printers[0][0]
     else:
-        configured, model = current_app.config['PRINTER_PRINTER'], current_app.config['PRINTER_MODEL']
+        configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
     device = requested_device or configured
     named = {n.casefold(): d for _, d, n in printers if n}
     device = named.get(device.casefold(), device)
@@ -1217,7 +1233,7 @@ def _printer(requested_device, requested_model) -> tuple[str, str]:
     if device not in (configured, 'simulation', '?', *listed) and \
             not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
         raise ValueError(f"Unsupported printer: {device}")
-    model = requested_model or next((m for m, d, _ in printers if d == device), model)
+    model = drivers.canonical(requested_model) if requested_model else next((m for m, d, _ in printers if d == device), model)
     if model not in PRINTER_MODELS:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
@@ -1335,6 +1351,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'text_fit': _text_fit(d),
         # Empty: an endless label grows with its content
         'label_length': _label_length(d.get('label_length')),
+        'text_wrap': _text_wrap(d),
         'mirror': _mirror(d),
         'image_text_gap': _image_text_gap(d.get('image_text_gap')),
         # Left out or empty: above the text across the tape, left of it along
@@ -1456,6 +1473,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         warnings=warnings,
         shrink_text=context['text_fit'] == 'shrink',
         fill_text=context['text_fit'] == 'fill',
+        text_wrap=context['text_wrap'],
         image_text_gap=context['image_text_gap'],
         image_position=context['image_position'],
         blanks=context['blanks'],
@@ -1521,6 +1539,15 @@ def _printed_length(length: float | None, label, diameter: float | None, high_re
     if problem:
         raise ValueError(problem)
     return round((length - 2 * limits[2]) / 25.4 * label_dpi(label.identifier, high_res))
+
+
+def _text_wrap(d: dict) -> bool:
+    """Whether lines wider than the label wrap into several lines: text_wrap
+    1, also true. Left out or empty they do not."""
+    try:
+        return _whole_or(d.get('text_wrap'), 0) != 0
+    except (TypeError, ValueError):
+        raise ValueError("text_wrap must be 0 or 1") from None
 
 
 def _mirror(d: dict) -> bool:
@@ -1591,8 +1618,15 @@ def _blank_setting(field) -> bool:
 
 def _blank_fields(value) -> dict:
     """The settings of the blanks by name, e.g. {"Frozen on": {"type":
-    "date", "format": "%d.%m.%Y"}}."""
-    return _json_object(value, _blank_setting, refusals.FIELDS_MESSAGE)
+    "date", "format": "%d.%m.%Y"}}. A date may start at a day moved from
+    today, e.g., {"Best before": {"type": "date", "default": "+5d"}}."""
+    fields = _json_object(value, _blank_setting, refusals.FIELDS_MESSAGE)
+    # A date moved from today must be one it can be moved by
+    for field in fields.values():
+        default = field.get('default')
+        if field.get('type') == 'date' and isinstance(default, str) and default.strip()[:1] in ('+', '-'):
+            shift_date(datetime.date.today(), default.strip())
+    return fields
 
 
 def _requested_blanks(stored=None) -> dict[str, str]:
