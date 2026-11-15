@@ -261,6 +261,7 @@ def test_fixed_messages_of_refusals():
     assert 'The check digit of ISBN-10 must be X' in refusals.MESSAGES
     assert 'The PT-P750W cannot print at 600 dpi, turn off 600 dpi printing' in refusals.MESSAGES
     assert 'The label size 62 mm endless, black/red/white (DK-22251 / DK-2251) cannot be printed on a QL-500' in refusals.MESSAGES
+    assert 'The label size 62 mm endless (DK-22205 / DK-2205) cannot be printed on an Epson TM-T20II' in refusals.MESSAGES
 
 
 def test_fixed_messages_of_the_configured_limits(tmp_path):

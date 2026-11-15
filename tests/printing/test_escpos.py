@@ -6,7 +6,7 @@ import select
 
 import pytest
 
-from app.labeldesigner.drivers import escpos
+from app.labeldesigner.drivers import backends, escpos
 from app.labeldesigner.drivers.escpos import protocol
 from tests.helpers import make_client
 
@@ -147,6 +147,23 @@ def test_no_paper_does_not_print(client, fake):
     response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': False, 'message': 'The printer has no paper'}
     assert protocol.INIT not in printer.sent
+
+
+@pytest.mark.parametrize('error, message', [
+    (FileNotFoundError(2, 'No such file or directory', '/dev/usb/lp3'),
+     'Could not send the label to the printer: The printer is switched off or not connected'),
+    (backends.NoLibusb('No backend available'),
+     'Could not send the label to the printer: Printers on usb:// need libusb, please install it'),
+    (OSError('/app/instance/secret.json is gone'),
+     'Could not send the label to the printer, the log of the server names the reason'),
+])
+def test_send_errors_are_told_as_on_the_other_printers(client, monkeypatch, error, message):
+    # The reason where it is known, never the text of the error
+    def fail(device):
+        raise error
+    monkeypatch.setattr(protocol, 'connect', fail)
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': False, 'message': message}
 
 
 def test_paper_is_cut_at_least_after_the_last_label(client, fake):
