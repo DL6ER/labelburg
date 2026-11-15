@@ -400,6 +400,7 @@ img[data-lazy]:not([src]) { visibility: hidden; }
 /* Each set of symbols opens on its own, those open share the height of the screen */
 .sym-set { border-top: 1px solid var(--line-soft); padding-top: .55rem; }
 .sym-set > summary { cursor: pointer; font-weight: 600; }
+.sym-group { margin: .4rem 0 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .sym-body { display: flex; flex-direction: column; gap: .55rem; margin-top: .55rem; }
 .dialog.symbols .sym-grid { max-height: 26vh; }
 /* Two rows per line: the text on top, its settings below */

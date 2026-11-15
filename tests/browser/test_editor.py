@@ -776,6 +776,9 @@ def test_fasteners_and_electronic_components_are_offered(designer):
     type_line(designer, 0, 'M3 ')
     designer.click('#edSym')
     designer.wait_for_selector('[data-section="fastener"]')
+    # The symbols first, then the sets inserted by name by their titles
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].map(d => d.dataset.section)"
+    assert designer.evaluate(sections) == ['symbols', 'electronic', 'fastener', 'mdi']
     assert not designer.is_visible('[data-tpl="fastener:head-torx"]')
     designer.click('[data-section="fastener"] summary')
     designer.click('[data-tpl="fastener:head-torx"]')

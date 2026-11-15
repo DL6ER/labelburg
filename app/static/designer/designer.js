@@ -1673,17 +1673,22 @@ async function openSymbols(input) {
             <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
     const setGrid = (set, symbols) => `<div class="sym-grid">${Object.entries(symbols).map(([name, code]) =>
         `<button type="button" class="sym sx${name.startsWith('bolt-') ? ' wide' : ''}" data-tpl="${set}:${esc(name)}" title="${set}:${esc(name)}">${String.fromCodePoint(parseInt(code, 16))}</button>`).join('')}</div>`;
+    // The sets inserted by name, {{<set>:<name>}}, by their titles
+    const named = [
+        ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', body: `
+            <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
+            <div class="sym-grid" id="icoGrid"></div>
+            <p class="muted small" id="icoHint" style="margin:0"></p>
+            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button>` }] : []),
+        ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title, body:
+            `${setGrid(set, sets[set])}<p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${set}:${esc(Object.keys(sets[set])[0])}}}</code>. Point at a symbol to see its name.</p>` })),
+    ].sort((a, b) => a.title.localeCompare(b.title));
     openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
         <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
         ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
-        ${icons.length ? section('mdi', 'Icons <span class="muted small">Material Design Icons, in every font</span>', `
-            <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
-            <div class="sym-grid" id="icoGrid"></div>
-            <p class="muted small" id="icoHint" style="margin:0"></p>
-            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button>`) : ''}
-        ${Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => section(set, `${title} <span class="muted small">in every font</span>`,
-            `${setGrid(set, sets[set])}<p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${set}:${esc(Object.keys(sets[set])[0])}}}</code>. Point at a symbol to see its name.</p>`)).join('')}</div>`);
+        ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
+        ${named.map(x => section(x.id, x.title + (x.note ? ` <span class="muted small">${x.note}</span>` : ''), x.body)).join('')}` : ''}</div>`);
     $$('#layer .sym-set').forEach(d => d.addEventListener('toggle', () => openSymbolSections[d.open ? 'add' : 'delete'](d.dataset.section)));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
     $$('[data-tpl]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); });
