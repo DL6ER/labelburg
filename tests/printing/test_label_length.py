@@ -57,7 +57,6 @@ def test_a_preview_says_that_the_printer_refuses_a_label_as_too_long(tmp_path, v
     data = dict(EXAMPLE_FORMDATA, text=TEXT, **values)
     response = client.post('/labeldesigner/api/preview', data=data)
     assert response.status_code == 200
-    model = values.get('model', 'QL-800')
-    assert (f'Labels on the {model} can be at most 1000 mm long' in response.headers.get('X-Label-Warning', '')) == refused
+    assert response.headers.get('X-Label-Warning', '') == ('Labels on the QL-800 can be at most 1000 mm long.' if refused else '')
     printed = client.post('/labeldesigner/api/print', data=dict(data, printer='simulation'))
     assert printed.status_code == (400 if refused else 200)

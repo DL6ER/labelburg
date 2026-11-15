@@ -226,7 +226,7 @@ def test_a_wide_code_that_makes_a_long_label_is_said_so(tmp_path, code_type, set
     warning = response.headers['X-Label-Warning']
     assert LONG_LABEL.format(length) in warning
     # Longer than the printer prints, it says that as well
-    assert ('Labels on the QL-800 can be at most 1000 mm long' in warning) == (length > 1000)
+    assert warning.endswith(' Labels on the QL-800 can be at most 1000 mm long.' if length > 1000 else 'gives a shorter label.')
 
 
 def test_a_wide_code_next_to_an_image_that_makes_a_long_label_is_said_so(tmp_path):

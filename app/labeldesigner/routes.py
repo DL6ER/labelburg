@@ -1116,7 +1116,7 @@ def preview_from_image():
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im):
-            label.warnings.append(too_long)
+            label.warnings.append(f'{too_long}.')
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise

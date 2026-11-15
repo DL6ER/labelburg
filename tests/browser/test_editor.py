@@ -341,12 +341,21 @@ def test_a_wide_code_that_makes_a_long_label_is_said_so(designer):
     type_line(designer, 0, 'Pantry shelf 3')
     designer.select_option('#edBarcode', 'PDF417')
     wait_for_preview(designer)
-    # Above the preview as a problem, the label can be printed anyway
+    # Above the preview in a box of the warning colors, its first sentence in
+    # bold. The label can be printed anyway.
     length = designer.inner_text('#edStage .dim-x')
     assert fits_note(designer).strip() == f'This code makes the label {length} long. A QR code, or a fixed size for this code, gives a shorter label.'
-    assert 'warn' in designer.get_attribute('#edFits', 'class').split()
+    assert designer.inner_text('#edFits.warn .say b') == f'This code makes the label {length} long.'
     assert designer.is_visible('#edFits .fa-triangle-exclamation')
+    box = designer.eval_on_selector('#edFits', "el => { const s = getComputedStyle(el); return [s.backgroundColor, s.color, el.getBoundingClientRect().width]; }")
+    assert box[:2] == ['rgb(251, 240, 217)', 'rgb(138, 90, 0)']
+    assert box[2] > designer.eval_on_selector('.ed-top', 'el => el.clientWidth') - 2
     assert designer.is_enabled('#edPrint')
+    # On a phone, without scrolling sideways
+    designer.set_viewport_size({'width': 390, 'height': 844})
+    assert designer.is_visible('#edFits .say')
+    assert designer.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
+    designer.set_viewport_size({'width': 1400, 'height': 900})
     # The way out it names
     designer.click('[data-fit="0"]')
     wait_for_preview(designer)

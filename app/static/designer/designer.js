@@ -1584,12 +1584,18 @@ function layoutProblem(d) {
     return '';
 }
 
+// A problem with the label, its first sentence in bold
+function problemHTML(text) {
+    const [, first, rest] = text.match(/^(.*?[.!?])(?:\s+|$)(.*)$/s) || [null, text, ''];
+    return `<i class="fa-solid fa-triangle-exclamation"></i> <span class="say"><b>${esc(first)}</b>${rest ? ' ' + esc(rest) : ''}</span>`;
+}
+
 function fitsNote(el, warning, error, design, onShrink) {
     if (!el) return;
     if (!warning && !error && design) warning = layoutProblem(onTape(design));
-    if (error) { el.className = 'fits warn'; el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> Fix the label to print it.'; return; }
+    if (error) { el.className = 'fits warn'; el.innerHTML = problemHTML('Fix the label to print it.'); return; }
     el.className = warning ? 'fits warn' : 'fits';
-    el.innerHTML = warning ? `<i class="fa-solid fa-triangle-exclamation"></i> ${esc(warning)}` : '<i class="fa-solid fa-circle-check"></i> Everything fits.';
+    el.innerHTML = warning ? problemHTML(warning) : '<i class="fa-solid fa-circle-check"></i> Everything fits.';
     if (warning && /text does not fit/i.test(warning) && design && textFit(design) === 'none' && onShrink) {
         // Long lines are wrapped where they can be, the text keeps its size
         const wrap = design.text_wrap !== '1' && !wrapWhy(design);
