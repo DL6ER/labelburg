@@ -7,10 +7,14 @@ import json
 import pytest
 from PIL import Image, ImageOps
 
+from app.labeldesigner import printer
+from app.labeldesigner.label import SimpleLabel
 from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, pixels, verify_image
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Pull', 'size': '60', 'align': 'left'},
                    {'font': 'DejaVu Sans,Book', 'text': 'Open from 9 to 5', 'size': '30', 'align': 'left'}])
+# Fits the smallest labels
+SHORT_TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Pull', 'size': '30', 'align': 'left'}])
 
 
 def mirrored(data: bytes) -> bytes:
@@ -44,18 +48,27 @@ def test_a_mirrored_label_is_the_label_mirrored(tmp_path, settings):
         verify_image(label, 'mirrored.png')
 
 
+@pytest.mark.parametrize('model, label_size', [
+    ('QL-800', '62'), ('PT-P750W', 'pt12'), ('VC-500W', 'vc25'), ('PUQU/Q00', 'puqu50x30'),
+    ('Niimbot/D110_M', 'niimbot12x40'), ('Epson/TM-T20II', 'escpos58'),
+])
 @pytest.mark.parametrize('orientation', ['standard', 'rotated'])
-def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, orientation):
-    from app.labeldesigner.drivers.brother import raster
+def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, model, label_size, orientation):
+    # Each driver prints the label mirrored once, as it prints that image
     printed = []
-    original = raster.convert
-    monkeypatch.setattr(raster, 'convert', lambda job, images, *args, **kwargs: printed.extend(images) or original(job, images, *args, **kwargs))
+    monkeypatch.setattr(printer._Simulator, '__call__', lambda self, image, name: printed.append((image.size, image.tobytes())))
     client = make_client(tmp_path)
-    for mirror in ('0', '1'):
-        response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, text=TEXT, orientation=orientation, mirror=mirror, printer='simulation'))
+
+    def print_label(mirror):
+        response = client.post('/labeldesigner/api/print', data={
+            'label_size': label_size, 'orientation': orientation, 'text': SHORT_TEXT, 'mirror': mirror,
+            'printer': 'simulation', 'model': model})
         assert response.get_json()['success'] is True
-    normal, inverted = printed
-    assert inverted.size == normal.size and inverted.tobytes() == ImageOps.mirror(normal).tobytes()
+        return printed.pop()
+    inverted, normal = print_label('1'), print_label('0')
+    generate = SimpleLabel.generate
+    monkeypatch.setattr(SimpleLabel, 'generate', lambda label: ImageOps.mirror(generate(label)))
+    assert inverted == print_label('0') != normal
 
 
 @pytest.mark.parametrize('value, mirrors', [('1', True), ('true', True), ('0', False), ('', False), (None, False)])
