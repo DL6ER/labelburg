@@ -150,6 +150,16 @@ def datetime_codes() -> dict:
             'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
 
 
+# {{asn}}, an archive serial number of Paperless-ngx (paperless.py), or
+# {{asn:5}} with as many digits, e.g., 00042
+ASN_TEMPLATE = re.compile(r'\{\{asn(?::(\d{1,2}))?\}\}')
+
+
+def asn_text(start: int, index: int, digits: str | None) -> str:
+    """The ASN of the label index (0 is the first) of a job starting at start."""
+    return str(start + index).zfill(int(digits or 0))
+
+
 # The start of a counter is at most this long, its step at most this large
 MAX_COUNTER_START_LENGTH = 12
 MAX_COUNTER_STEP = 1000000
@@ -283,6 +293,7 @@ class SimpleLabel:
         border_color: Tuple[int, int, int] = (0, 0, 0),
         timestamp: int = 0,
         counter: int = 0,
+        asn: int | None = None,
         red_support: bool = False,
         code_text: str = '',
         template_env_vars: frozenset = frozenset(),
@@ -355,6 +366,8 @@ class SimpleLabel:
         self._border_distance = border_distance
         self._border_color = border_color
         self._counter = counter
+        # The archive serial number of the first label of the job, see paperless.py
+        self._asn = asn
         self._timestamp = timestamp
         self._red_support = red_support
         self._code_text = code_text
@@ -548,6 +561,10 @@ class SimpleLabel:
             start, step = match.group(1) or '1', match.group(2) or '1'
             return counter_value(start, check_counter(start, step), self._counter)
         substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
+
+        # Replace {{asn[:<digits>]}} with the archive serial number of the copy
+        if self._asn is not None:
+            substitute(ASN_TEMPLATE, lambda match: asn_text(self._asn, self._counter, match.group(1)))
 
         # Replace {{datetime:<format>}} with current datetime formatted as
         # <format>, {{datetime+5d:<format>}} with the one 5 days later (see

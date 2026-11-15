@@ -33,7 +33,7 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one.
 - **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
 - **Several printers:** use several printers at once, each with a name of your choice, or try everything without a printer.
-- **Other programs:** e.g., [Grocy](docs/grocy.md) can print its labels through Labelburg.
+- **Other programs:** e.g., [Grocy](docs/grocy.md) can print its labels through Labelburg, and labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents.
 
 ## Screenshots
 
@@ -85,6 +85,7 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `LABEL_DEFAULT_ORIENTATION` | `standard` or `rotated` | `standard` |
 | `LABEL_TEMPLATE_ENV_VARS` | Environment variables labels may insert with `{{env:<var>}}`, comma-separated. All others stay empty, so that nobody can read secrets of the server through a label. | none |
 | `WEBHOOK_PASSWORD` | Turns on the webhook, see [API](#api) | off |
+| `PAPERLESS_URL`, `PAPERLESS_TOKEN` | Address and API token of Paperless-ngx, whose next archive serial number `[ASN]` continues from, see [Paperless-ngx](docs/paperless.md) | none |
 | `TRUSTED_HOSTS` | Host names you open the label designer with, comma-separated, e.g. `labels.local,192.168.0.10`. Requests for other names are refused, which protects against DNS rebinding. | all |
 | `PROXY_COUNT` | Number of reverse proxies in front of the server, e.g. to serve the label designer below a path, see [Reverse proxy](docs/reverse-proxy.md). Only then the `X-Forwarded-*` headers they set are used, others could fake them. | `0` |
 | `PRINT_MAX_COUNT` | Most labels per print request | `100` |
@@ -140,7 +141,7 @@ The label designer offers all `.ttf` and `.otf` fonts it finds in the system fon
 
 ### Label designer
 
-Besides blanks, counters and dates, labels can insert UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/). The Variables button in the label designer explains them all.
+Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/). The Variables button in the label designer explains them all.
 
 Images can be PNG, JPG, WEBP, AVIF, GIF, TIFF, BMP and many more formats. A PDF gives one label per page if you like.
 

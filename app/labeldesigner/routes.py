@@ -14,7 +14,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import bp, codes, demos, refusals
+from . import bp, codes, demos, paperless, refusals
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound
@@ -827,10 +827,17 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
 
 def _queue_labels(printer, labels, data, files, high_res, fast):
     """Adds the labels to the queue, the printer cuts them as printer.cut says."""
+    # Taken before printing: labels of a job that fails may have come out
+    asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(labels)) if paperless.uses_asn(data) else None
     # The copies share the text measured, alike where nothing changes
     layouts = {}
     for i, image in enumerate(labels):
-        printer.add_label_to_queue(create_label_from_request(data, files, i, image, layouts=layouts), high_res=high_res, fast=fast)
+        printer.add_label_to_queue(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn), high_res=high_res, fast=fast)
+
+
+def _next_asn(data: dict) -> int | None:
+    """The archive serial number a preview shows, None without {{asn}}."""
+    return paperless.next_asn(current_app.config, _get_repo_dir()) if paperless.uses_asn(data) else None
 
 
 def _given(value, default):
@@ -951,7 +958,8 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
         data['printer'] = printer
     try:
         data['blanks'] = _requested_blanks(data)
-        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks)
+        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks,
+                                          asn=_next_asn(data))
         im = label.generate()
     except Exception as e:
         _log_refused_request('Preview', e)
@@ -1119,7 +1127,8 @@ def preview_from_image():
         images, page_count = load_label_images(values, files, first_only=True)
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0)
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0,
+                                          asn=_next_asn(values))
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im):
@@ -1373,7 +1382,8 @@ def _image_contrast(d: dict) -> bool:
     return _palette(d.get('label_size', DEFAULT_LABEL_SIZE)) == 'color' and _whole_or(d.get('image_contrast'), 0) != 0
 
 
-def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None):
+def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
+                              asn: int | None = None):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = next((label for label in LABELS if label.identifier == label_size), None)
     if size is None:
@@ -1530,6 +1540,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         border_color=border_color,
         timestamp=context['timestamp'],
         counter=counter,
+        asn=asn,
         code_text=context['code_text'],
         template_env_vars=_template_env_vars(),
         warnings=warnings,

@@ -245,12 +245,13 @@ function formatDate(iso, fmt = dateFormat()) {
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
 // moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
-// [counter:001:5]) and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|short-uuid)\}\}/g;
+// [counter:001:5]), [ASN] (also with digits, e.g., [ASN:5]) and [id]
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
     if (m[2]) return `[today${m[3] || ''}]`;
     if (m[0].startsWith('{{counter')) return `[counter${m[4] || ''}]`;
+    if (m[0].startsWith('{{asn')) return `[ASN${m[5] || ''}]`;
     return '[id]';
 }
 // [today], or a day moved from it as typed, e.g., [today+5d] or [today + 2
@@ -260,8 +261,10 @@ const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
 // [counter], or one with a start and a step as typed, e.g., [counter:001:5]
 // or [Counter : A]
 const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
+// [ASN], or one with digits as typed, e.g., [ASN:5] or [asn : 5]
+const ASN_RE = /^asn(?:\s*:\s*(\d{1,2}))?$/i;
 // Names of variables, a blank cannot have them
-const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || /^id$/i.test(n);
+const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || ASN_RE.test(n) || /^id$/i.test(n);
 // The text as its field shows it, and where each template is shown
 function displayed(text) {
     text = String(text || '');
@@ -308,6 +311,8 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
         const counter = n.match(COUNTER_RE);
         if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
+        const asn = n.match(ASN_RE);
+        if (asn) return `{{asn${asn[1] ? ':' + asn[1] : ''}}}`;
         if (n.toLowerCase() === 'id') return '{{short-uuid}}';
         return `{{blank:${n}}}`;
     });
@@ -1756,12 +1761,14 @@ function varsHelpHTML() {
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
             <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
             <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
+            <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx: each label gets the next free one, also when labels are printed again before their documents are scanned. <code>[ASN:5]</code> writes it with 5 digits, e.g., 00042.</li>
             <li><code>[id]</code> - a short random ID.</li>
         </ul>
         <p>The variables of the server work as well:</p>
         <ul>
             <li><code>{{datetime:&lt;format&gt;}}</code> - the current date and time. The format uses <button type="button" class="link" data-dtcodes>date and time codes</button>, e.g., <code>%H:%M:%S %d.%m.%Y</code>. <code>{{datetime+5d:&lt;format&gt;}}</code> is 5 days later, like <code>[today+5d]</code>.</li>
             <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1) in steps of &lt;step&gt; (default 1), like <code>[counter]</code>. When you print several labels at once, each gets the next number.</li>
+            <li><code>{{asn}}</code>, <code>{{asn:&lt;digits&gt;}}</code> - the next archive serial number for Paperless-ngx, like <code>[ASN]</code>.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
