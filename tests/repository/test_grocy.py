@@ -42,7 +42,7 @@ def printed(tmp_path, monkeypatch):
     from app.labeldesigner import printer
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
-    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self, batch_size=0: '')
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json=GROCY_LABEL).status_code == 200
 
@@ -112,11 +112,11 @@ def test_parameters_and_objects_are_no_blanks(printed):
     assert lines == ['P||D||7']
 
 
-def test_cutting_options_are_no_blanks(printed):
-    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}'}], fields={})
+def test_printing_options_are_no_blanks(printed):
+    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}|{{blank:collate}}'}], fields={})
     assert printed.client.post(SAVE_URL, json=label).status_code == 200
-    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0))
-    assert lines == ['||']
+    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0, collate=0))
+    assert lines == ['|||']
 
 
 def test_the_preview_takes_the_fields_as_well(printed):

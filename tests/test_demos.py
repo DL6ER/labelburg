@@ -73,7 +73,7 @@ def test_a_blank_without_a_default_shows_its_name(client, monkeypatch):
     from app.labeldesigner import printer
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
-    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self, batch_size=0: '')
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     assert client.post('/labeldesigner/api/demos/print', json={'id': label_id}).get_json() == {'success': True}
     label, = queued
     label.process_templates()
