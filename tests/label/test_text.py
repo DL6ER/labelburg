@@ -557,3 +557,26 @@ def test_counters_that_cannot_count_are_refused(tmp_path, caplog, template, mess
     assert any(logged in record.getMessage() for record in caplog.records)
     data['text'] = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{counter:123456789012:1000000}} {{counter:ZZZZZZZZZZZZ}}'}])
     assert client.post('/labeldesigner/api/preview', data=data).status_code == 200
+
+
+def test_counters_dates_and_blanks_in_one_line(tmp_path):
+    # Each copy counts on, the date is moved from today of the label and a
+    # value is put in as given, in the text and in the code. The line wraps
+    # as filled in.
+    client = make_client(tmp_path)
+    template = 'Box {{blank:Room}} {{counter:A}}{{counter:001:5}} use by {{datetime+1m:%Y-%m-%d}}'
+    data = {'print_type': 'qrcode_text', 'label_size': '62x29', 'text_wrap': '1', 'text_fit': 'none', 'code_text': template,
+            'timestamp': str(int(datetime(2024, 1, 31, 12, 15).timestamp())), 'blanks': {'Room': 'Garage {{counter}}'},
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}])}
+    with client.application.test_request_context():
+        for copy, value in enumerate(['A001', 'B006', 'C011']):
+            label = create_label_from_request(data, {}, copy)
+            label.generate()
+            expected = f'Box Garage {{{{counter}}}} {value} use by 2024-02-29'
+            assert label.code_text == expected
+            drawn = [entry[2]['text'] for entry in label._measure()[0]]
+            assert len(drawn) > 1 and ' '.join(drawn) == expected
+        # A preview marks the blank without a value
+        label = create_label_from_request(dict(data, blanks={}), {}, 2, mark_blanks=True)
+        label.process_templates()
+        assert label.text[0]['text'] == 'Box Room? C011 use by 2024-02-29'
