@@ -62,9 +62,24 @@ function toast(text, action, ms = 0) {
     const el = $('#toast');
     el.innerHTML = esc(text) + (action ? ` <button class="btn sm quiet" style="color:inherit;text-decoration:underline" type="button">${esc(action.label)}</button>` : '');
     el.hidden = false;
+    placeToast(el);
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; action.run(); };
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
+}
+
+// In the editor over the label preview, above the cutting shown below the
+// label and the large preview button
+function placeToast(el) {
+    Object.assign(el.style, { left: '', bottom: '', maxWidth: '' });
+    const stage = $('#edStage');
+    if (!stage || !stage.offsetParent) return;
+    const box = stage.getBoundingClientRect();
+    if (box.width < innerWidth - 1) Object.assign(el.style, { left: `${box.left + box.width / 2}px`, maxWidth: `${box.width - 32}px` });
+    const t = el.getBoundingClientRect();
+    const covered = [...stage.querySelectorAll('.cuts, .zoom')].map(c => c.getBoundingClientRect())
+        .filter(r => r.width && t.left < r.right && r.left < t.right && t.top < r.bottom && r.top < t.bottom);
+    if (covered.length) el.style.bottom = `${innerHeight - Math.min(...covered.map(r => r.top)) + 8}px`;
 }
 
 function fmtTime(ts) {

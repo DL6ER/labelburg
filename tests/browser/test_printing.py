@@ -846,21 +846,51 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
 
 
+def print_held(page, job, large=False):
+    """Print on a QL-800 that tells the job, the answer held back, with large
+    the preview shown large. The held request is returned."""
+    printer = {'errors': [], 'model': 'QL-800', 'path': 'file:///dev/usb/lp0', 'media_width': 62, 'media_length': 0, 'job': job}
+    body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
+    page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    page.reload()
+    wait_for_preview(page)
+    type_line(page, 0, 'Spices')
+    if large:
+        page.click('#edStage .zoom')
+        wait_for_preview(page)
+    pending = []
+    page.route('**/api/print', lambda route: pending.append(route))
+    page.click('#edPrint')
+    return pending
+
+
 def test_time_left_is_shown_while_printing(designer):
     # On every printer, not only the VC-500W that tells its stages
-    printer = {'errors': [], 'model': 'QL-800', 'path': 'file:///dev/usb/lp0', 'media_width': 62, 'media_length': 0,
-               'job': {'labels': 3, 'label': 2, 'seconds_left': 40}}
-    body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
-    designer.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
-    designer.reload()
-    wait_for_preview(designer)
-    type_line(designer, 0, 'Spices')
-    pending = []
-    designer.route('**/api/print', lambda route: pending.append(route))
-    designer.click('#edPrint')
+    pending = print_held(designer, {'labels': 3, 'label': 2, 'seconds_left': 40})
     designer.wait_for_function("() => document.querySelector('#toast').textContent === 'Label 2 of 3, about 40 s left'")
     pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
     assert printed(designer) == ['printed']
+
+
+def overlap(a, b) -> bool:
+    return a['x'] < b['x'] + b['width'] and b['x'] < a['x'] + a['width'] and a['y'] < b['y'] + b['height'] and b['y'] < a['y'] + a['height']
+
+
+@pytest.mark.parametrize('width, height, large', [(1326, 924, False), (1326, 924, True), (1600, 900, False), (390, 844, False)])
+def test_messages_leave_the_preview_controls_visible(designer, width, height, large):
+    # Neither the cutting below the label nor the large preview button
+    designer.set_viewport_size({'width': width, 'height': height})
+    pending = print_held(designer, {'labels': 30, 'label': 12, 'stage': 'Waiting for the printer to cool down', 'seconds_left': 400}, large)
+    designer.wait_for_function("() => document.querySelector('#toast').textContent.startsWith('Waiting')")
+    toast = designer.locator('#toast').bounding_box()
+    for selector in ('#edStage .cuts', '#edStage .zoom'):
+        if designer.locator(selector).is_visible():
+            assert not overlap(toast, designer.locator(selector).bounding_box()), selector
+    if width > 900:
+        # Over the preview, not over the settings beside it
+        stage = designer.locator('#edStage').bounding_box()
+        assert stage['x'] <= toast['x'] and toast['x'] + toast['width'] <= stage['x'] + stage['width']
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
 
 
 @pytest.mark.parametrize('job, text', [
