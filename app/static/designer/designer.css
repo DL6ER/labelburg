@@ -530,6 +530,7 @@ textarea.field.choices { field-sizing: content; min-height: 3.6em; max-height: 1
 .pp h2 { text-align: left; font-size: 1.15rem; }
 .pp .link { color: var(--select); font-weight: 600; text-decoration: none; font-size: .92rem; }
 .plist { display: flex; flex-direction: column; gap: .3rem; }
+.plist .hint { color: var(--warn); }
 .prow { display: flex; align-items: center; gap: .7rem; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: .55rem .75rem; text-align: left; cursor: pointer; width: 100%; }
 .prow .sm { display: block; font-size: .8rem; color: var(--muted); word-break: break-all; }
 .prow .sm.warn { color: var(--warn); word-break: normal; }

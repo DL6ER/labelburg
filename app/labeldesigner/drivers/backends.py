@@ -211,6 +211,9 @@ def found_printers() -> list[tuple[str, str]]:
         import usb.core
         import usb.util
         printers = list(_usb_printers(usb))
+    except NoLibusb:
+        # The printer list tells it
+        raise
     except Exception:
         logger.debug('No printers through PyUSB', exc_info=True)
         return []
