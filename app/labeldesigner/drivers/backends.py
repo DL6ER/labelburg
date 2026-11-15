@@ -3,15 +3,21 @@ the kernel (/dev/usb/lp<N>, Linux only), PyUSB
 (usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested) or
 USB/IP (usbip://<host>), after the backends of brother_ql by Philipp Klaus."""
 
+import ctypes.util
 import errno
 import logging
 import os
 import select
+import sys
 import time
 
 from . import usbip
 
 logger = logging.getLogger(__name__)
+
+
+class NoLibusb(OSError):
+    """PyUSB finds no libusb to reach usb:// printers through."""
 
 
 class Printer:
@@ -160,7 +166,21 @@ def _usb_printers(usb, vendor: int):
         if device.bDeviceClass == 7:
             return True
         return any(usb.util.find_descriptor(config, bInterfaceClass=7) is not None for config in device)
-    return usb.core.find(find_all=True, custom_match=is_printer, idVendor=vendor)
+    try:
+        return usb.core.find(find_all=True, custom_match=is_printer, idVendor=vendor, backend=_libusb())
+    except usb.core.NoBackendError as e:
+        raise NoLibusb(str(e)) from e
+
+
+def _libusb():
+    """PyUSB's libusb backend, None without libusb. On Alpine Linux, ctypes
+    does not find libusb by its name, so on Linux its file name is the
+    fallback; elsewhere PyUSB looks in more places by itself."""
+    import usb.backend.libusb1
+    if sys.platform != 'linux':
+        return usb.backend.libusb1.get_backend()
+    return usb.backend.libusb1.get_backend(
+        find_library=lambda name: ctypes.util.find_library(name) or 'libusb-1.0.so.0')
 
 
 def _same_serial(told: str | None, given: str) -> bool:

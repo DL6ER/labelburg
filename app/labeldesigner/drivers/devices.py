@@ -15,6 +15,7 @@ import time
 from werkzeug.security import safe_join
 
 from . import usbip
+from .backends import NoLibusb
 
 try:
     import fcntl
@@ -233,6 +234,8 @@ def unanswered_reason(error: Exception) -> str:
     the server."""
     if isinstance(error, TimeoutError):
         return 'The printer does not answer'
+    if isinstance(error, NoLibusb):
+        return 'Printers on usb:// need libusb, please install it'
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
