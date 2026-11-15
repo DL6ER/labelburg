@@ -598,6 +598,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Another label was being saved or deleted for longer than 10 seconds, e.g. on a slow network share. Try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
           }
         }
       }

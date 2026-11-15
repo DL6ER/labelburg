@@ -716,6 +716,8 @@ def repo_tags():
     if not filename:
         return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
     try:
+        if 'tags' not in _json_body() and 'tags' not in _address_or_form():
+            raise ValueError(refusals.TAGS_MISSING)
         tags = _tags(_requested('tags'))
     except ValueError as e:
         _log_refused_request('Changing the tags', e)

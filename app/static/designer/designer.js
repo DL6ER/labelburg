@@ -1124,7 +1124,6 @@ function serverName(title) {
     const base = String(title).normalize('NFKD').replace(/[^\x00-\x7F]/g, '').replace(/[^\w\s.-]/g, '').trim().replace(/\s+/g, '_').replace(/^[._]+|[._]+$/g, '');
     return (base || 'label') + '.json';
 }
-// tags: those to save it with, else the ones of the label it replaces
 // Changes only the tags of a saved label, the rest stays as saved
 async function saveTags(name, tags) {
     const r = await fetch(API + '/repository/tags', { method: 'POST', body: JSON.stringify({ name, tags }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
@@ -1132,6 +1131,7 @@ async function saveTags(name, tags) {
     if (!r.ok || !data.success) throw new Error(data.message || 'The tags could not be saved');
     await loadSaved();
 }
+// tags: those to save it with, else the ones of the label it replaces
 async function saveLabel(title, design, overwrite = null, tags = null) {
     let name = overwrite;
     if (!name) {
@@ -1251,6 +1251,10 @@ function saveDialog(title, save, design, tags = []) {
             if (taken && replacing !== taken.name) {
                 replacing = taken.name;
                 go.textContent = 'Replace it';
+                // The label it replaces keeps its tags, those typed here are added
+                const tags = taken.tags.concat(chosenTags().filter(t => !hasTag(taken, t)));
+                $('#saveTags').value = tags.join(', ');
+                $$('#tagChips [data-tag]').forEach(b => b.classList.toggle('on', hasTag({ tags }, b.dataset.tag)));
                 return tell(`"${taken.title}" is one of your saved labels already. Replace it, or give this label another name.`);
             }
             go.disabled = true;
@@ -2118,10 +2122,12 @@ async function showDetail(item) {
     if ($('#libLinks')) $('#libLinks').onclick = () => { $('#libMenu').hidden = true; linksDialog({ id: item.id, title: item.title, design: work.design }); };
     if ($('#libDelete')) $('#libDelete').onclick = async () => {
         const kept = clone(item.design);
+        // As listed now, the Tags dialog may have changed them since
+        const tags = (S.saved.find(x => x.name === item.id) || item).tags;
         try { await deleteLabel(item.id); } catch (e) { toast(e.message); return; }
         S.libSel = null;
         renderLabels();
-        toast(`Removed "${item.title}"`, { label: 'Undo', run: async () => { await saveLabel(item.title, kept, item.id, item.tags); renderLabels(); } });
+        toast(`Removed "${item.title}"`, { label: 'Undo', run: async () => { await saveLabel(item.title, kept, item.id, tags); renderLabels(); } });
     };
 }
 

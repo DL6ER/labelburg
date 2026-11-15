@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from app.labeldesigner import refusals
+from app.labeldesigner import refusals, routes
 from tests.helpers import make_client
 from tests.repository.helpers import SAVE_URL, TEXT
 
@@ -99,3 +99,27 @@ def test_changing_the_tags_keeps_the_label_as_saved(tmp_path):
     assert _tags_listed(client, 'Shelf.json') == []
     assert client.post(tags_url, json={'name': 'Gone.json', 'tags': []}).status_code == 404
     assert client.post(tags_url, json={'name': 'Shelf.json', 'tags': 7}).status_code == 400
+
+
+def test_changing_the_tags_while_another_label_is_saved_is_answered_as_documented(tmp_path, monkeypatch):
+    monkeypatch.setattr(routes, 'SAVE_LOCK_TIMEOUT', 0.1)
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(SAVE_URL, json={'name': 'Shelf', 'label_size': '62', 'text': TEXT})
+    with routes._SAVING:
+        response = client.post('/labeldesigner/api/repository/tags', json={'name': 'Shelf.json', 'tags': []})
+    assert response.status_code == 503
+    with open(os.path.join(os.path.dirname(routes.__file__), 'openapi.json'), encoding='utf-8') as fh:
+        documented = json.load(fh)['paths']['/labeldesigner/api/repository/tags']['post']['responses']
+    assert '503' in documented
+
+
+def test_changing_the_tags_without_tags_is_refused(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(SAVE_URL, json={'name': 'Shelf', 'label_size': '62', 'text': TEXT, 'tags': ['Kitchen']})
+    tags_url = '/labeldesigner/api/repository/tags'
+    response = client.post(tags_url, json={'name': 'Shelf.json'})
+    assert response.status_code == 400
+    assert response.get_json()['message'] == refusals.TAGS_MISSING
+    assert _tags_listed(client, 'Shelf.json') == ['Kitchen']
+    assert client.post(tags_url, json={'name': 'Shelf.json', 'tags': []}).status_code == 200
+    assert _tags_listed(client, 'Shelf.json') == []

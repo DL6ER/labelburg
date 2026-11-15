@@ -309,3 +309,39 @@ def test_undo_of_removing_a_label_brings_back_its_tags(designer):
     designer.wait_for_function("() => S.saved.some(s => s.name === 'Undo.json')")
     assert designer.evaluate("() => S.saved.find(s => s.name === 'Undo.json').tags") == ['Undo']
     designer.evaluate("() => deleteLabel('Undo.json')")
+
+
+def test_a_label_replaced_from_the_save_dialog_keeps_its_tags(designer):
+    designer.evaluate("() => saveLabel('Replaced', normalize({ text: [{ text: 'x' }] }), null, ['Kept'])")
+    designer.click('[data-tab="wizard"]')
+    designer.click('.lib-nav [data-cat="all"]')
+    designer.locator('#libGrid .thumb').first.click()
+    designer.click('#libMore')
+    designer.click('#libKeep')
+    designer.fill('#saveName', 'Replaced')
+    designer.fill('#saveTags', 'Added')
+    designer.press('#saveName', 'Enter')
+    designer.wait_for_selector('#saveGo:has-text("Replace it")')
+    assert designer.input_value('#saveTags') == 'Kept, Added'
+    designer.press('#saveName', 'Enter')
+    designer.wait_for_selector('#saveForm', state='detached')
+    assert designer.evaluate("() => S.saved.find(s => s.name === 'Replaced.json').tags") == ['Kept', 'Added']
+    designer.evaluate("() => deleteLabel('Replaced.json')")
+
+
+def test_undo_brings_back_the_tags_given_in_the_tags_dialog(designer):
+    designer.evaluate("() => saveLabel('Undo after', normalize({ text: [{ text: 'x' }] }), null, ['Before'])")
+    designer.click('[data-tab="wizard"]')
+    designer.click('.lib-nav [data-cat="tag:Before"]')
+    designer.click('#libGrid .thumb')
+    designer.click('#libMore')
+    designer.click('#libTags')
+    designer.fill('#saveTags', 'After')
+    designer.click('#tagsGo')
+    designer.wait_for_selector('#tagsForm', state='detached')
+    designer.click('#libMore')
+    designer.click('#libDelete')
+    designer.click('#toast button:has-text("Undo")')
+    designer.wait_for_function("() => S.saved.some(s => s.name === 'Undo_after.json')")
+    assert designer.evaluate("() => S.saved.find(s => s.name === 'Undo_after.json').tags") == ['After']
+    designer.evaluate("() => deleteLabel('Undo_after.json')")
