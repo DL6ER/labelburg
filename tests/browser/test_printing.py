@@ -238,13 +238,27 @@ def test_no_600_dpi_on_the_ql1100(designer):
     assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('high_res')") == '0'
     designer.click('#printerChip')
     assert designer.is_disabled('[data-q="high"]') and 'on' in designer.get_attribute('[data-q="high"]', 'class')
-    assert 'The Brother QL-1100 cannot print at 600 dpi.' in designer.inner_text('.settings')
+    assert 'The Brother QL-1100 cannot print "Dense".' in designer.inner_text('.settings')
     # Nor can a P-touch printer
     designer.keyboard.press('Escape')
     fake_printer(designer, model='PT-P750W', media_width=24)
     designer.click('#printerChip')
     assert designer.is_disabled('[data-q="high"]')
-    assert 'The Brother PT-P750W cannot print at 600 dpi.' in designer.inner_text('.settings')
+    assert 'The Brother PT-P750W cannot print "Dense".' in designer.inner_text('.settings')
+
+
+def test_dense_printing_is_named_without_dpi(designer):
+    # The resolution of a printer head is nothing users need to know
+    designer.click('#printerChip')
+    designer.click('#qInfoBtn')
+    assert designer.inner_text('[data-q="high"]') == 'Dense, slow'
+    assert '"Dense" prints twice as many lines along the label' in designer.inner_text('#qInfo')
+    assert 'dpi' not in designer.inner_text('.settings')
+    designer.keyboard.press('Escape')
+    fake_printer(designer, model='QL-1100', media_width=62)
+    designer.click('#printerChip')
+    assert designer.get_attribute('[data-q="high"]', 'title') == 'This printer cannot print "Dense"'
+    assert 'dpi' not in designer.inner_text('.settings')
 
 
 def test_ptouch_tape_is_shown_at_180_dpi(designer):
