@@ -5,11 +5,13 @@ import errno
 import json
 import socket
 import threading
+import time
 
 import pytest
 
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
+from app.labeldesigner.drivers.escpos import protocol as escpos
 from app.labeldesigner.drivers.vc500w import DRIVER as VC500W
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from tests.helpers import make_client
@@ -42,6 +44,36 @@ class FakeQL:
                     self._printer.sendall(status(PHASE_CHANGE, PRINTING) + status(COMPLETED) + status(PHASE_CHANGE, WAITING))
             except OSError:
                 return
+
+
+class FakeTM:
+    """An Epson receipt printer behind a shared device: answers the status
+    requests with the bytes in 'replies', keeps the job."""
+
+    def __init__(self, device):
+        self.received = b''
+        self.replies = {escpos.OFFLINE: 0x12, escpos.PAPER: 0x12}
+        self._printer = device.printer
+        threading.Thread(target=self._answer, daemon=True).start()
+
+    def _answer(self):
+        while True:
+            try:
+                data = self._printer.recv(65536)
+                if not data:
+                    return
+                if data in self.replies:
+                    self._printer.sendall(bytes([self.replies[data]]))
+                else:
+                    self.received += data
+            except OSError:
+                return
+
+    def wait_for(self, end: bytes):
+        deadline = time.monotonic() + 5
+        while not self.received.endswith(end) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return self.received
 
 
 @pytest.fixture
@@ -281,6 +313,25 @@ def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):
         assert len(vc.images) == 1
     finally:
         vc.close()
+
+
+def test_shared_receipt_printer(tmp_path):
+    device = SharedDevice(product=0x0E15, device_id='MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;')
+    host = FakeHost(device)
+    try:
+        tm = FakeTM(device)
+        client = make_client(tmp_path)
+        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/TM-T20II')
+        tm.replies[escpos.PAPER] = 0x12 | 0x60
+        shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (shown['model'], shown['errors']) == ('Epson/TM-T20II', ['The printer has no paper'])
+        tm.replies[escpos.PAPER] = 0x12
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+        assert response.get_json() == {'success': True}
+        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')
+        assert (device.imports, device.resets) == (1, 0)
+    finally:
+        host.close()
 
 
 def test_shared_printer_that_cannot_be_reached(tmp_path):

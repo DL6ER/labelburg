@@ -27,7 +27,7 @@ echo usbip-host | sudo tee /etc/modules-load.d/usbip.conf
 sudo modprobe usbip-host
 ```
 
-The printer is shared whenever it is switched on by a rule for Brother printers and a service that shares one, the daemon runs as another service. `/etc/udev/rules.d/90-usbip-printer.rules`:
+The printer is shared whenever it is switched on by a rule for Brother printers (`04b8` in place of `04f9` for an Epson one) and a service that shares one, the daemon runs as another service. `/etc/udev/rules.d/90-usbip-printer.rules`:
 
 ```
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04f9", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usbip-bind@%k.service"
@@ -86,7 +86,7 @@ external_components:
   - source: github://PedroPerfecto/esphome-usbip-server@v0.2.1
     components: [usbip_server]
 
-# Any Brother printer on the USB-A port
+# Any Brother printer on the USB-A port, 0x04B8 for an Epson one
 usbip_server:
   vid: 0x04F9
 ```
