@@ -1,5 +1,6 @@
 """The settings made in the printer settings of the label designer: the
-label size set by hand, the cutting and the quality. They are kept on the
+label size set by hand, the cutting, which end of the labels leaves first
+and the quality. They are kept on the
 server, so that every browser, the API and the MCP tools use the same: a
 print request takes what it leaves out from them. The roll is in the
 printer, its settings belong to it rather than to a browser. The order of
@@ -19,9 +20,10 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
+ENDS = ('top', 'bottom')
 # Printers come and go, a few hundred are a lot already
 MAX_PRINTERS = 200
 # What a print request names a setting by: one that names any of them is
@@ -29,8 +31,9 @@ MAX_PRINTERS = 200
 NAMED_BY = {'cut': ('cut', 'cut_once'), 'half_cut': ('cut', 'cut_once', 'half_cut'),
             'chain': ('cut', 'cut_once', 'chain'), 'quality': ('high_res', 'fast_printing')}
 
-SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1) of a printer '
-                    'and quality (quality, high or fast), an empty value removes one')
+SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1) and '
+                    'leaves_first (top or bottom) of a printer and quality (quality, high or fast), '
+                    'an empty value removes one')
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 
 
@@ -62,7 +65,8 @@ def _key(data: dict, device: str) -> str:
     """key(device), of a USB printer switched off, which tells no device ID,
     the one last seen on its device."""
     printer, seen = key(device), data.get('seen')
-    return seen.get(printer, printer) if isinstance(seen, dict) else printer
+    off = isinstance(seen, dict) and not usb_device_id(device)
+    return seen.get(printer, printer) if off else printer
 
 
 def of_printer(data: dict, device: str) -> dict:
@@ -87,6 +91,9 @@ def checked(changes: dict, model: str) -> dict:
             check_cut(value, model)
         elif name in ('half_cut', 'chain'):
             if value not in ('0', '1'):
+                raise ValueError(SETTINGS_MESSAGE)
+        elif name == 'leaves_first':
+            if value not in ENDS:
                 raise ValueError(SETTINGS_MESSAGE)
         elif value not in QUALITIES:
             raise ValueError(SETTINGS_MESSAGE)

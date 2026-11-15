@@ -3,7 +3,7 @@ import os
 import pytest
 
 from app.labeldesigner import printer, printer_settings
-from app.labeldesigner.drivers import devices
+from app.labeldesigner.drivers import devices, usbip
 
 
 @pytest.fixture(autouse=True)
@@ -22,3 +22,13 @@ def printer_output(tmp_path, monkeypatch):
     # Nor the printer settings of a server run from here, e.g. with
     # docker-compose.yml, which keeps them in labels/
     monkeypatch.setattr(printer_settings, 'FILE', '.printers-of-the-tests.json')
+
+
+@pytest.fixture(autouse=True)
+def shared_printers(monkeypatch):
+    # Printers shared over USB/IP stay imported, each test begins without any
+    printers = {}
+    monkeypatch.setattr(usbip, '_printers', printers)
+    yield
+    for shared in printers.values():
+        shared.close()

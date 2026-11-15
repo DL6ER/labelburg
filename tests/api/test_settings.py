@@ -152,3 +152,89 @@ def test_print_requests_take_what_they_leave_out_as_set(tmp_path, monkeypatch):
     client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': 'simulation',
                                                           'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
     assert jobs == [('29', 'none', [True]), ('62', 'each', [False]), ('62', 'none', [True]), ('29', 'each', [True])]
+
+
+def test_another_usb_printer_without_a_serial_has_settings_of_its_own(tmp_path, monkeypatch):
+    # Only a printer switched off, which tells no device ID, is the one last
+    # seen on its device
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
+    lp0 = {'printer': 'file:///dev/usb/lp0'}
+    client.post(URL, data={**lp0, 'label_size': '62'})
+    device_id = 'MFG:Brother;CMD:PT-CBP;MDL:QL-1100;CLS:PRINTER;'
+    assert client.get(URL, query_string=lp0).get_json() == {}
+    client.post(URL, data={**lp0, 'label_size': '29'})
+    device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
+    assert client.get(URL, query_string=lp0).get_json() == {'label_size': '62'}
+
+
+def test_a_saved_label_prints_with_the_quality_set(tmp_path, monkeypatch):
+    # The label designer saves high_res 0 with every label, the quality is
+    # one of the printer
+    from app.labeldesigner import printer
+    fast = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue',
+                        lambda self: fast.extend(entry['fast'] for entry in self._print_queue) or '')
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'quality': 'fast'})
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+    client.post('/labeldesigner/api/repository/save', json={'name': 'Shelf', 'label_size': '62', 'high_res': '0', 'text': text})
+    for given in ({}, {'fast_printing': '0'}):
+        client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation', **given})
+    assert fast == [True, False]
+
+
+def test_settings_refuse_a_printer_that_is_no_text(tmp_path):
+    # As printing does, not with an error page
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    for printer in (5.5, ['tcp://a'], {'path': 'tcp://a'}):
+        assert client.post(URL, json={'printer': printer, 'quality': 'fast'}).status_code == 400, printer
+
+
+def test_a_preview_takes_what_it_leaves_out_as_set(tmp_path):
+    # As printing does, so that it shows the label printed
+    import io
+    from PIL import Image
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'label_size': '29', 'quality': 'high'})
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+
+    def size(**given):
+        r = client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text, **given})
+        return Image.open(io.BytesIO(r.data)).size
+    assert size() == size(label_size='29', high_res='1') != size(label_size='29', high_res='0')
+    assert size(label_size='62') == size(label_size='62', high_res='1') != size()
+
+
+def test_which_end_leaves_first_is_a_setting_of_each_printer(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    r = client.post(URL, data={'printer': 'tcp://a', 'leaves_first': 'top'})
+    assert r.get_json() == {'success': True, 'settings': {'leaves_first': 'top'}}
+    assert client.get(URL, query_string={'printer': 'tcp://b'}).get_json() == {}
+    assert client.post(URL, data={'printer': 'tcp://a', 'leaves_first': 'left'}).status_code == 400
+    assert client.post(URL, data={'printer': 'tcp://a', 'leaves_first': ''}).get_json()['settings'] == {}
+
+
+def test_print_requests_that_leave_out_which_end_leaves_first_take_it_as_set(tmp_path, monkeypatch):
+    # Of the request, else of the printer settings, never of a saved label
+    import base64
+    import io
+    from PIL import Image
+    from app.labeldesigner import printer
+    ends = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: ends.append(self.leaves_first) or '')
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'leaves_first': 'top'})
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+    client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text})
+    client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text, 'leaves_first': 'bottom'})
+    client.post('/labeldesigner/api/repository/save', json={'name': 'Shelf', 'label_size': '62', 'text': text, 'leaves_first': 'bottom'})
+    client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation'})
+    client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation', 'leaves_first': 'bottom'})
+    client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+    image = io.BytesIO()
+    Image.new('RGB', (200, 100), 'white').save(image, 'PNG')
+    client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': 'simulation',
+                                                          'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+    assert ends == ['top', 'bottom', 'top', 'bottom', 'top']

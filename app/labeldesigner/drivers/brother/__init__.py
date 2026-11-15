@@ -58,6 +58,12 @@ class BrotherRaster(Driver):
         # The printer feeds the margin before and after the print
         return label.feed_margin / self.label_dpi(label)[0] * 25.4, shortest, longest
 
+    def length_problem(self, model, dots, high_res):
+        # As raster.py counts the lines, at 600 dpi a label has twice as many
+        if dots // (2 if high_res else 1) > MODELS[model].max_length_dots:
+            return length_problem(model)
+        return ''
+
     def capabilities(self, model):
         ptouch = model.startswith('PT-')
         # The QL-500 takes no cut commands, its labels are cut with a lever
