@@ -105,6 +105,37 @@ def test_lines_wrap_only_where_the_label_limits_them(designer):
     assert why() == ''
 
 
+def test_a_label_can_be_mirrored(designer, server):
+    # For clear tape stuck behind glass: previewed and printed so
+    type_line(designer, 0, 'Pull')
+    kept(designer)
+    assert not designer.is_checked('#edMirror')
+    designer.click('#edMirror')
+    wait_for_preview(designer)
+    assert designer.is_checked('#edMirror')
+    assert designer.evaluate("() => [formFor(S.edit.design).get('mirror'), formFor(S.edit.design, 1, true).get('mirror')]") == ['1', '1']
+    # A step to undo
+    kept(designer)
+    designer.click('#edUndo')
+    wait_for_preview(designer)
+    assert not designer.is_checked('#edMirror')
+    designer.click('#edRedo')
+    wait_for_preview(designer)
+    assert designer.is_checked('#edMirror')
+    # Saved with the label and opened with it
+    save_as(designer, 'Door')
+    designer.wait_for_function("() => document.getElementById('toast').innerText.includes('Saved \"Door\" to your labels')")
+    try:
+        designer.click('#edNew')
+        wait_for_preview(designer)
+        assert not designer.is_checked('#edMirror')
+        edit_saved_label(designer, 'Door')
+        assert designer.is_checked('#edMirror')
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Door.json'})
+    assert designer.evaluate("() => [normalize({ mirror: '1' }).mirror, normalize({}).mirror]") == ['1', '0']
+
+
 def test_text_next_to_a_code_on_a_small_die_cut_label(designer):
     # The note was guessed from the size of the label, also where the text
     # fits. The code fitted to the label took all of it, it leaves the text
@@ -1023,3 +1054,22 @@ def test_dates_moved_from_today_are_typed_and_shown(designer):
     assert designer.evaluate("() => fromDisplay('[today+6m] x', '{{datetime+5d:%d.%m.}} x', null, true)") == '{{datetime+6m:%d.%m.}} x'
     # Not a blank of that name
     assert designer.evaluate("() => ['today+5d', 'Today - 1 month', 'counter:3', 'id', 'today 5d'].map(isVariable)") == [True, True, True, True, False]
+
+
+def test_counters_with_a_start_and_step_are_typed_and_shown(designer):
+    # [counter:001] is a counter, no blank of that name
+    type_line(designer, 0, 'Box [counter:001:5], shelf [Counter : A]')
+    assert designer.evaluate('() => S.edit.design.text[0].text') == 'Box {{counter:001:5}}, shelf {{counter:A}}'
+    assert 'Everything fits.' in fits_note(designer)
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == 'Box [counter:001:5], shelf [counter:A]'
+    assert designer.evaluate("() => ['counter', 'counter:7', 'Counter:a:2', 'counter:', 'counters', 'today', 'id'].map(isVariable)") == [True, True, True, False, False, True, True]
+    # Next to a blank and a date moved from today
+    fmt = designer.evaluate('() => dateFormat()')
+    type_line(designer, 0, '[Room] [counter:A][counter:001:5] [today+1m]')
+    assert designer.evaluate('() => S.edit.design.text[0].text') == f'{{{{blank:Room}}}} {{{{counter:A}}}}{{{{counter:001:5}}}} {{{{datetime+1m:{fmt}}}}}'
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == '[Room] [counter:A][counter:001:5] [today+1m]'
+    # One that cannot count shows why
+    type_line(designer, 0, 'Box [counter:A1]')
+    designer.wait_for_function("() => document.querySelector('#edStage').innerText.includes('A counter starts at a number or at letters, e.g., 001 or A')")
