@@ -53,8 +53,10 @@ def test_a_mirrored_label_is_the_label_mirrored(tmp_path, settings):
     ('Niimbot/D110_M', 'niimbot12x40'), ('Epson/TM-T20II', 'escpos58'),
 ])
 @pytest.mark.parametrize('orientation', ['standard', 'rotated'])
-def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, model, label_size, orientation):
-    # Each driver prints the label mirrored once, as it prints that image
+@pytest.mark.parametrize('leaves_first', ['top', 'bottom'])
+def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, model, label_size, orientation, leaves_first):
+    # Each driver prints the label mirrored once, as it prints that image,
+    # also turned for the other end first
     printed = []
     monkeypatch.setattr(printer._Simulator, '__call__', lambda self, image, name: printed.append((image.size, image.tobytes())))
     client = make_client(tmp_path)
@@ -62,7 +64,7 @@ def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, model, labe
     def print_label(mirror):
         response = client.post('/labeldesigner/api/print', data={
             'label_size': label_size, 'orientation': orientation, 'text': SHORT_TEXT, 'mirror': mirror,
-            'printer': 'simulation', 'model': model})
+            'printer': 'simulation', 'model': model, 'leaves_first': leaves_first})
         assert response.get_json()['success'] is True
         return printed.pop()
     inverted, normal = print_label('1'), print_label('0')
