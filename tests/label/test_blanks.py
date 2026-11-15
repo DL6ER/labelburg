@@ -200,7 +200,18 @@ def test_choice_blanks_are_filled_in_with_one_of_their_choices(tmp_path, caplog)
     assert response.get_json() == {'success': True}
     response = client.post('/labeldesigner/api/repository/print', json={'name': 'Room.json', 'printer': 'simulation', 'blanks': {'Room': 'Cellar'}})
     assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
-
+    # A value saved with the label is one of them as well
+    saved = {'name': 'Attic.json', 'label_size': '62', 'text': text, 'fields': fields}
+    for value in ('Cellar', ''):
+        response = client.post('/labeldesigner/api/repository/save', json=dict(saved, blanks={'Room': value}))
+        assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
+    assert sorted(os.listdir(client.application.config['LABEL_REPOSITORY_DIR'])) == ['Room.json']
+    assert client.post('/labeldesigner/api/repository/save', json=dict(saved, blanks={'Room': 'Attic', 'Shelf': 1})).get_json() == {'success': True, 'name': 'Attic.json'}
+    with client.application.test_request_context():
+        stored = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Attic.json'}).get_json()
+        label = create_label_from_request(dict(stored, text=text))
+        label.process_templates()
+        assert label.text[0]['text'] == 'Attic|1'
 
 
 def test_choices_in_a_json_body_are_numbers_as_written(tmp_path):
@@ -214,6 +225,7 @@ def test_choices_in_a_json_body_are_numbers_as_written(tmp_path):
     response = client.post('/labeldesigner/api/repository/print', data='{"name": "Shelf.json", "printer": "simulation", "blanks": {"Shelf": 2.50}}',
                            content_type='application/json')
     assert response.get_json() == {'success': True}
+
 
 CHOICES_NEEDED = 'A choice blank needs 1 to 50 choices, each a text of at most 200 characters'
 

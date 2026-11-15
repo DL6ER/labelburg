@@ -277,6 +277,12 @@ def check_blank_choices(name: str, field: dict) -> None:
         raise ValueError(f"The default of the blank {name} is none of its choices")
 
 
+def check_blank_choice(name: str, field: dict, value: str) -> None:
+    """ValueError if field is a choice blank and value none of its choices."""
+    if field.get('type') == 'choice' and value not in map(str, field.get('choices') or []):
+        raise ValueError(f'"{value}" is none of the choices of the blank {name}')
+
+
 def _iso_date(value: str) -> datetime.date | None:
     """value as a date if it is one like 2026-11-03."""
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value, re.ASCII):
@@ -748,8 +754,7 @@ class SimpleLabel:
             choices = [str(choice) for choice in field.get('choices') or []]
             if value == '' and not given:
                 return choices[0] if choices else ''
-            if value not in choices:
-                raise ValueError(f'"{value}" is none of the choices of the blank {name}')
+            check_blank_choice(name, field, value)
             return value
         # Without a type a blank is text, the label designer saves the type
         if field.get('type') != 'date':
