@@ -1,14 +1,11 @@
 from .enums import LabelContent, LabelOrientation, LabelType
-from . import icons
+from . import codes, icons
 from .cable_flag import flag_strip
 import os
 import uuid
-from qrcode import QRCode, constants
-from PIL import Image, ImageDraw, ImageFont, ImageChops
+from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
 import logging
-import barcode
 from barcode.errors import BarcodeError
-from barcode.writer import ImageWriter
 import calendar
 import collections
 import datetime
@@ -35,9 +32,6 @@ MAX_IMAGE_SCALING_FACTOR = 500.0
 # Upper limit for the label and every image created on the way, enough for a
 # 62 mm wide label of about 2 m length at 600 dpi
 MAX_LABEL_PIXELS = 64_000_000
-# Barcode values are rendered before the label size is known, a long value
-# would create a huge image. 1000 characters are far more than a label holds.
-MAX_BARCODE_LENGTH = 1000
 # Text filled into the label grows to at most this font size, e.g. a short
 # word along endless tape
 MAX_FILL_SIZE = 2000
@@ -45,6 +39,9 @@ MAX_FILL_SIZE = 2000
 # long as the tape is wide, about a meter on 62 mm tape at any resolution,
 # e.g. many lines across the tape
 MAX_FILLED_RATIO = 16
+# Fitted, the short side of a wide 2D code fills the tape, along wide tape it
+# makes a label of up to a meter. Longer than this, in mm, it is said so.
+LONG_CODE_LABEL = 200
 # Where an image or code can be next to the text
 IMAGE_POSITIONS = ('above', 'below', 'left', 'right')
 # The contents of labels with an image, by its colors
@@ -54,6 +51,10 @@ VERTICAL_ALIGNMENTS = ('top', 'center', 'bottom')
 # The date format of a blank, e.g. %d.%m.%Y. A long one would make a long
 # date of every blank.
 MAX_DATE_FORMAT_LENGTH = 100
+# A blank with a fixed list of choices has at most this many, each at most
+# this long
+MAX_BLANK_CHOICES = 50
+MAX_BLANK_CHOICE_LENGTH = 200
 DEFAULT_FONT_SIZE = 12
 
 # Pillow refuses to open images with more than twice this number of pixels,
@@ -106,95 +107,10 @@ def check_image_size(width: int, height: int) -> None:
         raise ValueError(f"Label is too large ({int(width)} x {int(height)} pixels)")
 
 
-def _gtin_check_digit(digits: str) -> str:
-    """Check digit of EAN, UPC, GTIN and ISBN-13: the digits weighted 3 and
-    1 from the right."""
-    total = sum(int(digit) * (3 if i % 2 == 0 else 1) for i, digit in enumerate(reversed(digits)))
-    return str(-total % 10)
-
-
-def _isbn10_check_digit(digits: str) -> str:
-    check = sum(weight * int(digit) for weight, digit in enumerate(digits, start=1)) % 11
-    return 'X' if check == 10 else str(check)
-
-
-def _issn_check_digit(digits: str) -> str:
-    check = -sum(weight * int(digit) for weight, digit in zip(range(8, 1, -1), digits)) % 11
-    return 'X' if check == 10 else str(check)
-
-
-def _pzn_check_digit(digits: str) -> str:
-    # 10 is none, python-barcode refuses such a number
-    return str(sum(weight * int(digit) for weight, digit in enumerate(digits, start=2)) % 11)
-
-
-# The codes with a check digit, by type: their name, the number of digits
-# without it, how it is calculated and whether hyphens may separate the
-# digits (python-barcode leaves them out). python-barcode calculates the
-# check digit itself and ignores what follows the digits it needs, so a wrong
-# check digit or a typo at the end made another valid code.
-CHECK_DIGIT_CODES = {
-    'ean': ('EAN-13', 12, _gtin_check_digit, False),
-    'ean13': ('EAN-13', 12, _gtin_check_digit, False),
-    'ean13-guard': ('EAN-13', 12, _gtin_check_digit, False),
-    'ean8': ('EAN-8', 7, _gtin_check_digit, False),
-    'ean8-guard': ('EAN-8', 7, _gtin_check_digit, False),
-    'ean14': ('EAN-14', 13, _gtin_check_digit, False),
-    'gtin': ('GTIN', 13, _gtin_check_digit, False),
-    'jan': ('JAN', 12, _gtin_check_digit, False),
-    'upc': ('UPC-A', 11, _gtin_check_digit, False),
-    'upca': ('UPC-A', 11, _gtin_check_digit, False),
-    'gs1': ('GS1', 12, _gtin_check_digit, True),
-    'isbn': ('ISBN-13', 12, _gtin_check_digit, True),
-    'isbn13': ('ISBN-13', 12, _gtin_check_digit, True),
-    'isbn10': ('ISBN-10', 9, _isbn10_check_digit, True),
-    'issn': ('ISSN', 7, _issn_check_digit, True),
-    'pzn': ('PZN', 6, _pzn_check_digit, False),
-}
-
-
-def check_check_digit(barcode_type: str, value: str) -> None:
-    """ValueError if value is no number of the type: the digits without the
-    check digit, which is calculated, or with the right one."""
-    if barcode_type.lower() not in CHECK_DIGIT_CODES:
-        return
-    name, length, check_digit, hyphens = CHECK_DIGIT_CODES[barcode_type.lower()]
-    number = value.replace('-', '') if hyphens else value
-    digits, given = number[:length], number[length:].upper()
-    may_be_x = _may_be_x(check_digit)
-    if not (len(digits) == length and _is_digits(digits)
-            and (given == '' or len(given) == 1 and (_is_digits(given) or may_be_x and given == 'X'))):
-        raise ValueError(_length_problem(name, length, may_be_x))
-    expected = check_digit(digits)
-    if given and given != expected and expected != '10':
-        raise ValueError(_check_digit_problem(name, expected))
-
-
-def check_digit_problems() -> list[str]:
-    """Every message check_check_digit can refuse a value with."""
-    problems = []
-    for name, length, check_digit, _ in CHECK_DIGIT_CODES.values():
-        may_be_x = _may_be_x(check_digit)
-        problems.append(_length_problem(name, length, may_be_x))
-        problems += [_check_digit_problem(name, digit) for digit in '0123456789X' if digit != 'X' or may_be_x]
-    return list(dict.fromkeys(problems))
-
-
-def _may_be_x(check_digit) -> bool:
-    return check_digit in (_isbn10_check_digit, _issn_check_digit)
-
-
-def _length_problem(name: str, length: int, may_be_x: bool) -> str:
-    return f"{name} takes {length} digits, or {length + 1} with the check digit{', which may be an X' if may_be_x else ''}"
-
-
-def _check_digit_problem(name: str, expected: str) -> str:
-    # Without the value, which the designer shows next to it anyway
-    return f"The check digit of {name} must be {expected}"
-
-
-def _is_digits(text: str) -> bool:
-    return text.isascii() and text.isdigit()
+def long_code_warning(length: int) -> str:
+    """What the label designer says of a fitted wide 2D code that makes the
+    label length mm long."""
+    return f"This code makes the label {length} mm long. A QR code, or a fixed size for this code, gives a shorter label."
 
 
 # The codes of {{datetime:<format>}} the label designer explains. Their
@@ -234,6 +150,42 @@ def datetime_codes() -> dict:
             'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
 
 
+# The start of a counter is at most this long, its step at most this large
+MAX_COUNTER_START_LENGTH = 12
+MAX_COUNTER_STEP = 1000000
+
+
+def counter_value(start: str, step: int, index: int) -> str:
+    """The counter on copy index (0 is the first): start, written as the values
+    should look, plus step per copy. Digits keep their count (001, 002, ...),
+    letters count A ... Z, AA, AB, ... in their case."""
+    if start.isdigit():
+        return str(int(start) + step * index).zfill(len(start))
+    # Letters as a number: A is 1, Z 26, AA 27
+    number = 0
+    for letter in start.upper():
+        number = number * 26 + ord(letter) - ord('A') + 1
+    number += step * index
+    letters = ''
+    while number:
+        number, rest = divmod(number - 1, 26)
+        letters = chr(ord('A') + rest) + letters
+    return letters if start.isupper() else letters.lower()
+
+
+def check_counter(start: str, step: str) -> int:
+    """The step of a counter that starts at start, ValueError for a start
+    that is neither digits nor letters of one case, or one too long, and a
+    step that is no whole number from 1 to MAX_COUNTER_STEP."""
+    if not re.fullmatch(r"[0-9]+|[A-Z]+|[a-z]+", start):
+        raise ValueError(f"A counter starts at a number or at letters, e.g., 001 or A, not {start}")
+    if len(start) > MAX_COUNTER_START_LENGTH:
+        raise ValueError(f"A counter starts at {MAX_COUNTER_START_LENGTH} digits or letters at most")
+    if not step.isdigit() or not 1 <= int(step) <= MAX_COUNTER_STEP:
+        raise ValueError(f"The step of a counter is a whole number from 1 to {MAX_COUNTER_STEP}, not {step}")
+    return int(step)
+
+
 # A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months) or +1y
 # (years), at most a hundred years
 DATE_OFFSET = re.compile(r"([+-])(\d{1,6})([dwmy])", re.ASCII)
@@ -255,6 +207,28 @@ def shift_date(when, offset: str):
         return when + datetime.timedelta(days=amount * 7 if unit == 'w' else amount)
     year, month = divmod(when.year * 12 + when.month - 1 + (amount * 12 if unit == 'y' else amount), 12)
     return when.replace(year=year, month=month + 1, day=min(when.day, calendar.monthrange(year, month + 1)[1]))
+
+
+def check_blank_choices(name: str, field: dict) -> None:
+    """ValueError unless a choice blank has 1 to MAX_BLANK_CHOICES different
+    choices, texts or numbers (as written) of at most MAX_BLANK_CHOICE_LENGTH
+    characters, and its default, if any, among them."""
+    choices = field.get('choices')
+    if (not isinstance(choices, list) or not 1 <= len(choices) <= MAX_BLANK_CHOICES
+            or not all(isinstance(choice, (str, int, float)) and not isinstance(choice, bool)
+                       and str(choice).strip() and len(str(choice)) <= MAX_BLANK_CHOICE_LENGTH for choice in choices)):
+        raise ValueError(f"The blank {name} needs 1 to {MAX_BLANK_CHOICES} choices, "
+                         f"each a text of at most {MAX_BLANK_CHOICE_LENGTH} characters")
+    if len(set(map(str, choices))) < len(choices):
+        raise ValueError(f"The blank {name} has a choice twice")
+    if field.get('default') not in (None, '') and str(field['default']) not in map(str, choices):
+        raise ValueError(f"The default of the blank {name} is none of its choices")
+
+
+def check_blank_choice(name: str, field: dict, value: str) -> None:
+    """ValueError if field is a choice blank and value none of its choices."""
+    if field.get('type') == 'choice' and value not in map(str, field.get('choices') or []):
+        raise ValueError(f'"{value}" is none of the choices of the blank {name}')
 
 
 def _iso_date(value: str) -> datetime.date | None:
@@ -285,13 +259,6 @@ class SimpleLabel:
     Represents a label with text, image, barcode, and QR code support.
     Handles rendering, template processing, and layout.
     """
-    QR_CORRECTION_MAPPING = {
-        'M': constants.ERROR_CORRECT_M,
-        'L': constants.ERROR_CORRECT_L,
-        'H': constants.ERROR_CORRECT_H,
-        'Q': constants.ERROR_CORRECT_Q
-    }
-
     def __init__(
         self,
         width: int = 0,
@@ -332,8 +299,10 @@ class SimpleLabel:
         with_code: bool = False,
         flag_wrap: int = 0,
         flag_dpi: int = 300,
+        dpi: int = 300,
         fixed_length: bool = False,
         vertical_align: str = 'center',
+        mirror: bool = False,
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -346,7 +315,8 @@ class SimpleLabel:
         the other side of the text. With fixed_length an endless label has
         the size given, it does not grow with its content. vertical_align
         places the content at the top, in the center or at the bottom of a
-        label that does not grow with it in height."""
+        label that does not grow with it in height. dpi tells the length of
+        the label in mm, which warnings name."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -399,6 +369,7 @@ class SimpleLabel:
         # A cable flag with a wrap of this many dots at flag_dpi, 0 for none
         self._flag_wrap = flag_wrap
         self._flag_dpi = flag_dpi
+        self._dpi = dpi
         # Lines wider than the room for the text wrap at spaces into lines
         # with their settings. How wide the lines may be, None where they do
         # not wrap, is set before the text is laid out, see _wrap_room().
@@ -441,6 +412,9 @@ class SimpleLabel:
         self._shown_code = code_text
         # The value of each blank, made once for the label
         self._blank_cache: dict[str, str] = {}
+        # Printed mirror-inverted, to be read through clear tape stuck behind
+        # glass
+        self._mirror = mirror
 
     @property
     def label_content(self):
@@ -463,11 +437,11 @@ class SimpleLabel:
     def auto_image_text_gap(self) -> int:
         """The distance between an image or code and the text when none is
         given: two fifths of the largest text as printed, also when it is
-        shrunk to fit, for a QR code at least two of its modules as printed,
+        shrunk to fit, for a 2D code at least two of its modules as printed,
         so that it stays readable."""
         sizes = [self._line_size(line) for line in self.text if self._has_words(line)]
         gap = round(0.4 * max(sizes)) if sizes else 0
-        if self.barcode_type == "QR" and (self._label_content == LabelContent.TEXT_QRCODE or self._with_code):
+        if self.barcode_type in codes.NAMES and (self._label_content == LabelContent.TEXT_QRCODE or self._with_code):
             scale = self._code_scale if self._with_code else self._image_scale
             gap = max(gap, round(2 * self._qr_size * scale))
         return gap
@@ -488,17 +462,6 @@ class SimpleLabel:
     @text.setter
     def text(self, value):
         self._text = value
-
-    @property
-    def qr_correction(self):
-        for key, val in self.QR_CORRECTION_MAPPING.items():
-            if val == self._qr_correction:
-                return key
-        return 'L'
-
-    @qr_correction.setter
-    def qr_correction(self, value):
-        self._qr_correction = self.QR_CORRECTION_MAPPING.get(value, constants.ERROR_CORRECT_L)
 
     @property
     def label_orientation(self):
@@ -578,12 +541,13 @@ class SimpleLabel:
         def substitute(pattern, replacement):
             pieces[:] = [re.sub(pattern, replacement, piece) for piece in pieces]
 
-        # Replace {{counter[:<start>]}} with current label counter (<start> is
-        # an optional offset defaulting to 1)
+        # Replace {{counter[:<start>[:<step>]]}} with the counter of the copy:
+        # it starts at <start> and adds <step> per copy, both 1 by default
+        # (see counter_value)
         def counter_replacer(match):
-            offset = int(match.group(1)) if match.group(1) else 1
-            return str(self._counter + offset)
-        substitute(r"\{\{counter(?:\:(\d+))?\}\}", counter_replacer)
+            start, step = match.group(1) or '1', match.group(2) or '1'
+            return counter_value(start, check_counter(start, step), self._counter)
+        substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
 
         # Replace {{datetime:<format>}} with current datetime formatted as
         # <format>, {{datetime+5d:<format>}} with the one 5 days later (see
@@ -723,6 +687,13 @@ class SimpleLabel:
             value = str(self._blanks[name])
         else:
             value = '' if field.get('default') is None else str(field['default'])
+        # One of a fixed list: the default, else the first one
+        if field.get('type') == 'choice':
+            choices = [str(choice) for choice in field.get('choices') or []]
+            if value == '' and not given:
+                return choices[0] if choices else ''
+            check_blank_choice(name, field, value)
+            return value
         # Without a type a blank is text, the label designer saves the type
         if field.get('type') != 'date':
             return value
@@ -745,6 +716,9 @@ class SimpleLabel:
         except ValueError:
             return date.isoformat()
 
+    # Turned by 180 degrees for printing, set by the queue
+    turned = False
+
     def generate(self):
         """The image of the label, kept as generated where keep_generated is
         set: of the first label of a print job, which the print routes return."""
@@ -755,12 +729,11 @@ class SimpleLabel:
 
     def _generate(self):
         img = self._generate_label()
-        if not self._flag_wrap:
-            return img
-        # Both halves from one render, so random texts and counters match
-        strip = flag_strip(img, self._flag_wrap, self._flag_dpi, self._label_orientation == LabelOrientation.ROTATED)
-        check_image_size(*strip.size)
-        return strip
+        if self._flag_wrap:
+            # Both halves from one render, so random texts and counters match
+            img = flag_strip(img, self._flag_wrap, self._flag_dpi, self._label_orientation == LabelOrientation.ROTATED)
+            check_image_size(*img.size)
+        return img.rotate(180) if self.turned else img
 
     def _generate_label(self):
         # Process possible templates in the text and the code
@@ -775,7 +748,7 @@ class SimpleLabel:
             raise ValueError("The label has no image")
         code = None
         if self._draws_code():
-            code = self._generate_qr() if self.barcode_type == "QR" else self._generate_barcode()
+            code = self._generate_2d() if self.barcode_type in codes.NAMES else self._generate_barcode()
         if self._label_content in (LabelContent.QRCODE_ONLY, LabelContent.TEXT_QRCODE):
             img, code = code, None
         elif self._label_content in IMAGE_CONTENTS:
@@ -908,6 +881,10 @@ class SimpleLabel:
                 self.warnings.append(f'The {name} does not fit on the label, part of it is cut off.')
         if len(boxes) == 2 and self._overlaps(boxes[0][1], boxes[1][1]):
             self.warnings.append('The code does not fit next to the image, it overlaps it.')
+        if self._image_fit and self.barcode_type in codes.WIDE and self._draws_code() and (grows_wide or grows_high):
+            length = round((width if grows_wide else height) / self._dpi * 25.4)
+            if length > LONG_CODE_LABEL:
+                self.warnings.append(long_code_warning(length))
 
         logger.debug(f"Image resolution: {int(width)} x {int(height)} px")
         check_image_size(width, height)
@@ -937,6 +914,9 @@ class SimpleLabel:
 
             # Draw (rounded) rectangle
             draw.rounded_rectangle(rect, radius=self._border_roundness, outline=self._border_color, width=self._border_thickness)
+        # Left and right swapped as the text reads, the preview shows it so
+        if self._mirror:
+            imgResult = ImageOps.mirror(imgResult)
         return imgResult
 
     def _sized(self, img: Image.Image, width: int, height: int, parts: int, own_look: bool = True) -> tuple[Image.Image, float]:
@@ -1030,7 +1010,7 @@ class SimpleLabel:
 
     def _generate_barcode(self):
         # An unknown type is refused before the value is looked at
-        barcode_class = barcode.get_barcode_class(self.barcode_type)
+        barcode_class = codes.barcode_class(self.barcode_type)
         if self._code_given():
             value = self.code_text
         else:
@@ -1041,11 +1021,11 @@ class SimpleLabel:
                 self._code_of_marks = True
         if not value:
             raise ValueError("The barcode is empty")
-        if len(value) > MAX_BARCODE_LENGTH:
-            raise ValueError(f"Barcode value must not exceed {MAX_BARCODE_LENGTH} characters")
+        if len(value) > codes.MAX_BARCODE_LENGTH:
+            raise ValueError(codes.BARCODE_TOO_LONG)
         # The marks of blanks are said to be no code below
         if not self._code_of_marks:
-            check_check_digit(self.barcode_type, value)
+            codes.check_check_digit(self.barcode_type, value)
         try:
             return _barcode_image(barcode_class, self.barcode_type, value, self._fore_color)
         except BarcodeError:
@@ -1054,7 +1034,9 @@ class SimpleLabel:
                 raise ValueError("The code is empty until its blanks are filled in.") from None
             raise
 
-    def _generate_qr(self):
+    def _generate_2d(self):
+        """A QR code or another 2D code, of the text of all lines where the
+        code has none of its own."""
         if self._code_given():
             text = self.code_text
         else:
@@ -1064,10 +1046,10 @@ class SimpleLabel:
                 text = self._shown_marks(self.text)
                 self._code_of_marks = True
         if not text.strip():
-            raise ValueError("The QR code is empty")
+            raise ValueError(codes.empty_problem(self.barcode_type))
         # Black and red by name, a color as RGB gives another image mode
         names = {color: name for name, color in COLORS.items()}
-        return _qr_image(text, self._qr_correction, self._qr_size, names.get(self._fore_color, self._fore_color))
+        return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size, names.get(self._fore_color, self._fore_color))
 
     def _draw_text(self, img = None, bboxes = [], text_offset = (0, 0)):
         """
@@ -1662,20 +1644,17 @@ class _ImageCache:
 _CODES = _ImageCache(8_000_000)
 
 
-def _qr_image(data: str, correction: int, box_size: int, fill_color) -> Image.Image:
+def _code_image(code_type: str, data: str, level: str | None, box_size: int, fill_color) -> Image.Image:
+    """A QR code or another 2D code, each of its dots box_size wide."""
     def make():
-        qr = QRCode(version=1, error_correction=correction, box_size=box_size, border=0)
-        qr.add_data(data.encode("utf-8"))
-        qr.make(fit=True)
-        check_image_size(qr.modules_count * box_size, qr.modules_count * box_size)
-        return qr.make_image(fill_color=fill_color, back_color="white").get_image()
-    return _CODES.get(('qr', data, correction, box_size, fill_color), make)
+        rows, ratio = codes.matrix(code_type, data, level)
+        check_image_size(len(rows[0]) * box_size, len(rows) * box_size * ratio)
+        return codes.image(rows, ratio, box_size, fill_color)
+    return _CODES.get(('2d', code_type, data, level, box_size, fill_color), make)
 
 
 def _barcode_image(barcode_class, barcode_type: str, value: str, color: Tuple[int, int, int] = (0, 0, 0)) -> Image.Image:
-    def make():
-        return barcode_class(value, writer=ImageWriter()).render(writer_options={'foreground': '#%02x%02x%02x' % color})
-    return _CODES.get(('barcode', barcode_type, value, color), make)
+    return _CODES.get(('barcode', barcode_type, value, color), lambda: codes.barcode_image(barcode_class, value, color))
 
 
 # Bounded, requests can ask for any number of sizes

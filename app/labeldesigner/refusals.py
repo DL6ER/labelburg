@@ -14,10 +14,10 @@ from flask import current_app, has_app_context
 from barcode.errors import BarcodeError, BarcodeNotFoundError, IllegalCharacterError, NumberOfDigitsError, WrongCountryCodeError
 from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFPopplerTimeoutError, PDFSyntaxError
 from PIL import Image
-from qrcode.exceptions import DataOverflowError
 
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
-from .label import MAX_BARCODE_LENGTH, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong, check_digit_problems
+from .codes import BARCODE_TOO_LONG, check_digit_problems, code_problems
+from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, resolution_problem
 
@@ -25,8 +25,8 @@ IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_bla
 # A detected printer whose status names no model this server knows
 UNKNOWN_MODEL = 'The printer does not report a model this server knows. Name its model in PRINTERS, e.g. QL-700=file:///dev/usb/lp0'
 BLANKS_MESSAGE = 'blanks must be a JSON object with a text or number for each blank, e.g. {"Room": "Garage"}'
-FIELDS_MESSAGE = ('fields must be a JSON object with the settings of each blank: a type of text, number or date, '
-                  'a format as text and a default as text or number, e.g. {"Frozen on": {"type": "date"}}')
+FIELDS_MESSAGE = ('fields must be a JSON object with the settings of each blank: a type of text, number, date or choice, '
+                  'a format as text, a default as text or number and choices as a list, e.g., {"Frozen on": {"type": "date"}}')
 
 # Errors whose text is sent as it is
 MESSAGES = (
@@ -40,7 +40,9 @@ MESSAGES = (
     'shrink_text must be 0 or 1',
     'text_fit must be none, shrink or fill',
     'cut must be each, last or none',
+    'leaves_first must be top or bottom',
     'text_wrap must be 0 or 1',
+    'mirror must be 0 or 1',
     'image_text_gap must be a whole number of dots or empty',
     'image_text_gap must not be negative',
     CABLE_FLAG_REFUSED,
@@ -59,16 +61,17 @@ MESSAGES = (
     'Image rotation must be between 0 and 360 inclusive.',
     'The distance between image and text must be non-negative.',
     f'Random text length must not exceed {MAX_RANDOM_LENGTH}',
+    f'A counter starts at {MAX_COUNTER_START_LENGTH} digits or letters at most',
     'Invalid border rectangle',
     'The barcode is empty',
-    f'Barcode value must not exceed {MAX_BARCODE_LENGTH} characters',
+    BARCODE_TOO_LONG,
     'The code is empty until its blanks are filled in.',
-    'The QR code is empty',
     'The label has no image',
     IMAGE_MODE_REFUSED,
     UNKNOWN_MODEL,
     'print_count must be greater than 0',
     *check_digit_problems(),
+    *code_problems(),
     *(problem for model in MODELS if (problem := resolution_problem(model, True))),
     *label_size_problems(),
     *cut_problems(),
@@ -88,13 +91,22 @@ PATTERNS = (
     (re.compile(r'(?s)Unknown font (family|style): .*'), 'Unknown font'),
     (re.compile(r'(?s)Unknown label size: .*'), 'Unknown label size'),
     (re.compile(r'(?s)Unknown color: .*'), 'Unknown color'),
-    (re.compile(r'(?s)The label size .* cannot be printed on a .*'), 'The label size cannot be printed on this printer'),
+    (re.compile(r'(?s)The label size .* cannot be printed on an? .*'), 'The label size cannot be printed on this printer'),
     (re.compile(r'(?s)".*" is not a page selection, give pages like 1-3, 5 or all'),
      'Not a page selection, give pages like 1-3, 5 or all'),
     (re.compile(r'(?s)The PDF has .*, there is no page .*'), 'The PDF has no such page'),
     (re.compile(r'(?s)A date offset is a sign, a number and d, w, m or y, e\.g\., \+5d, not .*'),
      'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
     (re.compile(r'(?s)A date offset is at most a hundred years, not .*'), 'A date offset is at most a hundred years'),
+    (re.compile(r'(?s)A counter starts at a number or at letters, e\.g\., 001 or A, not .*'),
+     'A counter starts at a number or at letters, e.g., 001 or A'),
+    (re.compile(r'(?s)The step of a counter is a whole number from 1 to \d+, not .*'),
+     f'The step of a counter is a whole number from 1 to {MAX_COUNTER_STEP}'),
+    (re.compile(r'(?s)The blank .* needs 1 to \d+ choices, each a text of at most \d+ characters'),
+     f'A choice blank needs 1 to {MAX_BLANK_CHOICES} choices, each a text of at most {MAX_BLANK_CHOICE_LENGTH} characters'),
+    (re.compile(r'(?s)The blank .* has a choice twice'), 'A choice blank has a choice twice'),
+    (re.compile(r'(?s)The default of the blank .* is none of its choices'), 'The default of a choice blank is none of its choices'),
+    (re.compile(r'(?s)".*" is none of the choices of the blank .*'), 'A value is none of the choices of its blank'),
 )
 
 # The code types the API takes, also told by GET /api/barcodes
@@ -108,7 +120,6 @@ KINDS = (
     (WrongCountryCodeError, 'The barcode has a country code its type does not allow'),
     (BarcodeNotFoundError, f'Unknown barcode type, it is one of {", ".join(BARCODE_TYPES)}'),
     (BarcodeError, 'The barcode cannot be made of this value'),
-    (DataOverflowError, 'The QR code holds too much text'),
     (json.JSONDecodeError, 'The text lines are no valid JSON'),
     (Image.DecompressionBombError, 'The image is too large'),
     ((PDFInfoNotInstalledError, PDFPageCountError, PDFPopplerTimeoutError, PDFSyntaxError), 'The PDF cannot be read'),

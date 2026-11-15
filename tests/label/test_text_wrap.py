@@ -131,8 +131,8 @@ def test_a_word_longer_than_a_line(tmp_path):
 def test_a_code_that_takes_the_text_takes_it_as_written(tmp_path, monkeypatch):
     # Not as it is wrapped
     codes = []
-    original = label_module._qr_image
-    monkeypatch.setattr(label_module, '_qr_image', lambda data, *args: codes.append(data) or original(data, *args))
+    original = label_module._code_image
+    monkeypatch.setattr(label_module, '_code_image', lambda kind, data, *args: codes.append(data) or original(kind, data, *args))
     client = make_client(tmp_path)
     response = preview(client, label_size='62x29', print_type='qrcode_text', code_text='', image_position='left',
                        text=lines(SENTENCE, 'Pantry'), text_wrap='1', text_fit='shrink')
