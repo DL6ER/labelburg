@@ -2,7 +2,7 @@
 texts, the symbols of fasteners and electronic components for
 {{fastener:<name>}} and {{electronic:<name>}}. The fonts, their licenses and
 the names are in app/static/mdi and app/static/symbols, see
-tools/mdi_icons.py and tools/symbols_font.py."""
+tools/update_fonts.py and tools/symbols_font.py."""
 import functools
 import json
 import os

@@ -6,8 +6,9 @@ tools/symbols/<set>:
     pip install -r requirements-symbols.txt
     python3 tools/symbols_font.py
 
-The same SVGs and tool versions give the same font, CI builds it again and
-fails when the committed one differs.
+The same SVGs and tool versions give the same font: .github/workflows/fonts.yml
+builds it again and fails when the committed one differs, and builds it on
+Dependabot's pull requests that raise the tools.
 """
 import json
 import os
