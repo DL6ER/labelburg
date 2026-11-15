@@ -823,6 +823,8 @@ def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLa
     queued = []
     for i, image in enumerate(labels):
         queued.append(create_label_from_request(data, files, i, image, layouts=layouts))
+        # Only the first label keeps its image, the print routes return it
+        queued[-1].keep_generated = i == 0
         printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
     return queued
 

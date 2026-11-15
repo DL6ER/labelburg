@@ -424,4 +424,55 @@ def test_print_calls_are_logged_without_what_the_label_says(client, caplog):
         tool(client, 'print_text', printer='Kitchen', label_size='62', count=1, lines=['secret'])
         tool(client, 'print_label', name='QR-Example.json', printer='Kitchen', label_size='62', count=2, fillings=[{}])
     logged = [r.getMessage() for r in caplog.records if r.name == 'app.labeldesigner.mcp_tools']
-    assert logged == ['MCP print_text on Kitchen, 1 labels', 'MCP print_label QR-Example.json on Kitchen, 2 of each of 1 fillings']
+    assert logged == ['MCP print_text on Kitchen, count 1', 'MCP print_label QR-Example.json on Kitchen, count 2, fillings 1']
+
+
+def test_a_print_job_keeps_the_image_of_its_first_label_only(client, monkeypatch):
+    from app.labeldesigner.label import SimpleLabel
+    labels = []
+    generate = SimpleLabel.generate
+    monkeypatch.setattr(SimpleLabel, 'generate', lambda self: labels.append(self) or generate(self))
+    response = client.post('/labeldesigner/api/print?return_format=png', data={
+        'label_size': '62', 'print_type': 'text', 'printer': 'Kitchen', 'print_count': '3',
+        'text': '[{"text": "Jar", "size": "60"}]'})
+    assert response.status_code == 200 and response.get_json()['image']
+    assert [getattr(label, 'generated', None) is not None for label in labels] == [True, False, False]
+
+
+def test_a_preview_refuses_a_label_size_the_printer_has_not_loaded(client, monkeypatch):
+    monkeypatch.setattr(mcp_tools, 'loaded_label_sizes', lambda printer: ['62x29'])
+    for arguments in ({'name': 'QR-Example.json'}, {'lines': ['x']}):
+        result = tool(client, 'preview_label', printer='Kitchen', label_size='62', **arguments)
+        assert result['isError'] and 'The printer has 62x29 loaded, not 62' in result['content'][0]['text']
+
+
+def test_a_font_not_installed_prints_with_the_fallback_font(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    font = 'Not Installed,Regular'
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Jar.json', 'label_size': '62', 'text': [{'text': 'Chili', 'size': '60', 'font': font}]}).status_code == 200
+    result = tool(client, 'print_label', name='Jar.json', printer='Kitchen', label_size='62', count=1)
+    assert not result.get('isError') and printed(tmp_path) == 1
+    assert result['content'][0]['text'].startswith(
+        'Printed 1 label of Jar.json on Kitchen. The font Not Installed (Regular) is not installed, ')
+    # Text cut off still prints nothing
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Badge.json', 'label_size': '62x29', 'text_fit': 'none',
+        'text': [{'text': '{{blank:Name}}', 'size': '80', 'font': font}]}).status_code == 200
+    result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1,
+                  fillings=[{'Name': 'Maximilian-Alexander von Hohenzollern'}])
+    assert result['isError'] and 'part of it is cut off' in result['content'][0]['text'] and printed(tmp_path) == 1
+
+
+def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monkeypatch):
+    previews = []
+    monkeypatch.setattr(mcp_tools.Tools, 'preview', lambda self, spec, headers=None: previews.append(spec))
+    result = tool(client, 'print_label', name='QR-Example.json', printer='Kitchen', label_size='62', count=1, fillings=[{}] * 11)
+    assert result['isError'] and 'At most 10 labels per call' in result['content'][0]['text'] and previews == []
+
+
+def test_the_mcp_package_is_loaded_with_the_first_call_only():
+    import subprocess
+    import sys
+    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules)'
+    assert subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout.split()[-1] == 'False'

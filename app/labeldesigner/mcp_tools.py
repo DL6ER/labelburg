@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import threading
+from importlib.util import find_spec
 from urllib.parse import urlsplit
 
 from werkzeug.sansio.utils import host_is_trusted
@@ -252,12 +253,19 @@ class Tools:
         found = self._printer(printer)
         if found.get('errors'):
             raise ToolError(' '.join(found['errors']))
+        return found, self._size(found, label_size, saved)
+
+    def _size(self, found: dict, label_size: str | None, saved: str | None = None) -> str:
+        """The label size of the printer found that label_size names, refused
+        if it has another one loaded. Without label_size the one loaded, else
+        the user is to be asked."""
+        from mcp.server.mcpserver.exceptions import ToolError
         label_size = label_size_for(found.get('model'), label_size) if label_size else self._loaded(found, saved)
         loaded = loaded_label_sizes(found)
         if loaded and label_size not in loaded:
             on = loaded[0] if len(loaded) == 1 else 'the one loaded'
             raise ToolError(f'The printer has {" or ".join(loaded)} loaded, not {label_size}. Load {label_size} or print on {on}.')
-        return found, label_size
+        return label_size
 
     @staticmethod
     def _loaded(found: dict, saved: str | None = None) -> str:
@@ -376,19 +384,19 @@ class Tools:
         if name:
             saved = self._saved(name)
             self._filled(saved, [blanks or {}])
-            if label_size:
-                size = label_size_for(found.get('model') if found else None, label_size)
+            if found:
+                size = self._size(found, label_size, saved['label_size'])
             else:
-                size = self._loaded(found, saved['label_size']) if found else None
+                size = label_size_for(None, label_size) if label_size else None
             self._same_size(saved, found, size)
             body = {'name': saved['name'], 'blanks': blanks or {}}
             if device:
                 body['printer'] = device
             return {'path': '/repository/preview', 'json': body}
-        if label_size:
-            label_size = label_size_for(found.get('model') if found else None, label_size)
-        elif found:
-            label_size = self._loaded(found)
+        if found:
+            label_size = self._size(found, label_size)
+        elif label_size:
+            label_size = label_size_for(None, label_size)
         if not (lines or code) or not label_size:
             raise ToolError('Give the name of a saved label, or lines or a code and a label size')
         form = self._text_label(lines or [], label_size, font_size, code, code_type)
@@ -404,12 +412,14 @@ class Tools:
     def checked(self, spec: dict) -> dict:
         """The headers of the preview spec, what the API tells about the
         label. Refused where the label designer warns about it, e.g. text
-        cut off: nothing is printed then."""
+        cut off: nothing is printed then. A font that is not installed is
+        no refusal, the label prints with the fallback font as there."""
         from mcp.server.mcpserver.exceptions import ToolError
         headers = {}
         self.preview(spec, headers)
-        if headers.get('X-Label-Warning'):
-            raise ToolError(f'Nothing printed: {headers["X-Label-Warning"]}')
+        warning = ' '.join(FONT_MISSING.sub('', headers.get('X-Label-Warning') or '').split())
+        if warning:
+            raise ToolError(f'Nothing printed: {warning}')
         return headers
 
     def _printed(self, path: str, **kwargs) -> bytes:
@@ -420,8 +430,10 @@ class Tools:
                     count: int) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
         # As a print job of the label designer is logged, without what the label says
-        logger.info('MCP print_label %s on %s, %d of each of %d fillings', name, printer, count, len(fillings or [{}]))
+        logger.info('MCP print_label %s on %s, count %d, fillings %d', name, printer, count, len(fillings or [{}]))
         fillings = fillings or [{}]
+        # Each filling prints at least one label
+        self._cap(count * len(fillings))
         saved = self._saved(name)
         name = saved['name']
         self._filled(saved, fillings)
@@ -441,12 +453,12 @@ class Tools:
                 images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count)))
             except ToolError as e:
                 raise ToolError(f'{e} ({done * labels // len(specs)} of {_labels(labels)} printed)') from None
-        return f'Printed {_labels(labels)} of {name} on {printer}', specs, images
+        return _noted(f'Printed {_labels(labels)} of {name} on {printer}', told), specs, images
 
     def print_text(self, lines: list[str], printer: str, label_size: str | None, count: int, font_size: int,
                    code: str | None, code_type: str) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
-        logger.info('MCP print_text on %s, %d labels', printer, count)
+        logger.info('MCP print_text on %s, count %d', printer, count)
         if not (lines or code):
             raise ToolError('Give lines or a code to print')
         self._cap(count)
@@ -457,6 +469,17 @@ class Tools:
         self.checked(spec)
         image = self._printed('/print', data=dict(form, print_count=count))
         return f'Printed {_labels(count)} on {printer}', [spec], [image]
+
+
+# The note of the label designer about a font that is not installed
+FONT_MISSING = re.compile(r'The font .+? is not installed, .+? is used instead\.')
+
+
+def _noted(text: str, told: list[dict]) -> str:
+    """text with the notes of the previews told about fonts not installed,
+    each once."""
+    notes = dict.fromkeys(note for headers in told for note in FONT_MISSING.findall(headers.get('X-Label-Warning') or ''))
+    return '. '.join([text, ' '.join(notes)]) if notes else text
 
 
 def _server(app):
@@ -629,9 +652,7 @@ def install(app):
     """Serve /mcp if the mcp package is installed and MCP_ENABLED."""
     if not app.config.get('MCP_ENABLED', True):
         return
-    try:
-        import a2wsgi  # noqa: F401
-        import mcp  # noqa: F401
-    except ImportError:
+    # Looked up, not imported: they take about 40 MB, loaded with the first call
+    if find_spec('a2wsgi') is None or find_spec('mcp') is None:
         return
     app.wsgi_app = Endpoint(app, app.wsgi_app)
