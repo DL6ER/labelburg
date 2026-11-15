@@ -1425,10 +1425,12 @@ function stageHTML(id, zoom = false) {
 }
 // Shows the spinner at once, while an update still waits. The preview shown
 // stays until a newer one is there.
+function markBusy(el) {
+    if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+}
 function busyThen(getEl, fn) {
     return (...args) => {
-        const el = getEl();
-        if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+        markBusy(getEl());
         fn(...args);
     };
 }
@@ -3192,6 +3194,8 @@ function readImages(files) {
     });
     files = Array.from(files).filter(isImageFile);
     if (!files.length) return;
+    // The spinner shows at once, reading the files takes a moment
+    markBusy($('#edStage'));
     Promise.all(files.map(read)).then(([first, ...more]) => {
         const d = S.edit.design;
         d.image = first;
@@ -3199,7 +3203,10 @@ function readImages(files) {
         if (!withImage(d)) d.print_type = 'image';
         S.edit.fileShown = 0;
         renderEditor();
-    }).catch(() => toast('The file could not be read'));
+    }).catch(() => {
+        toast('The file could not be read');
+        redrawEditor();
+    });
 }
 
 // The file shown in the preview stays shown when another one is removed
