@@ -392,6 +392,18 @@ def test_a_choice_blank_without_choices_asks_for_them(designer):
     assert not designer.is_disabled('#edPrint') and not designer.is_disabled('#edSave')
 
 
+def test_a_date_blank_made_a_choice_starts_without_choices(designer):
+    # The date it shows is no choice, the text of a text blank is (see above)
+    type_line(designer, 0, 'Frozen on [Frozen on]')
+    designer.click('#blankSet')
+    row = '[data-bname="Frozen on"]'
+    designer.wait_for_selector(f'{row} [data-kind="date"].on')
+    designer.click(f'{row} [data-kind="choice"]')
+    designer.wait_for_function("() => S.edit.design.fields['Frozen on'].type === 'choice'")
+    assert designer.evaluate("() => S.edit.design.fields['Frozen on']") == {'type': 'choice', 'choices': []}
+    assert designer.input_value(f'{row} [data-choices]') == ''
+
+
 def test_a_new_choice_blank_needs_its_choices(designer):
     designer.click('#edBlank')
     designer.fill('#bName', 'Room')

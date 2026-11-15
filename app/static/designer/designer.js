@@ -2801,11 +2801,11 @@ function drawEditor() {
             redrawEditor();
         };
         $$('.bset-row', box).forEach(r => {
-            // A list of choices starts with the current value
+            // A list of choices starts with the current value, empty for a date
             $$('[data-kind]', r).forEach(b => b.onclick = () => {
-                const toChoice = b.dataset.kind === 'choice' && fieldType(item, r.dataset.bname) !== 'choice';
+                const was = fieldType(item, r.dataset.bname), toChoice = b.dataset.kind === 'choice' && was !== 'choice';
                 if (toChoice) S.focusChoices = r.dataset.bname;
-                setField(r.dataset.bname, Object.assign({ type: b.dataset.kind, default: '' }, toChoice ? { choices: choicesOf(E.values[r.dataset.bname] || '') } : {}));
+                setField(r.dataset.bname, Object.assign({ type: b.dataset.kind, default: '' }, toChoice ? { choices: was === 'date' ? [] : choicesOf(E.values[r.dataset.bname] || '') } : {}));
             });
             const choices = $('[data-choices]', r);
             if (choices) choices.addEventListener('change', () => setField(r.dataset.bname, { choices: choicesOf(choices.value) }));
