@@ -8,7 +8,6 @@ the log of the server.
 import json
 import re
 
-import barcode
 from flask import current_app, has_app_context
 
 from barcode.errors import BarcodeError, BarcodeNotFoundError, IllegalCharacterError, NumberOfDigitsError, WrongCountryCodeError
@@ -16,7 +15,7 @@ from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PD
 from PIL import Image
 
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
-from .codes import BARCODE_TOO_LONG, check_digit_problems, code_problems
+from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
 from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, resolution_problem
@@ -109,8 +108,6 @@ PATTERNS = (
     (re.compile(r'(?s)".*" is none of the choices of the blank .*'), 'A value is none of the choices of its blank'),
 )
 
-# The code types the API takes, also told by GET /api/barcodes
-BARCODE_TYPES = ['QR', *(code.upper() for code in barcode.PROVIDED_BARCODES)]
 
 # Errors by their kind, the first that applies
 KINDS = (

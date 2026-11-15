@@ -74,9 +74,10 @@ def loaded_label_sizes(printer: dict) -> list[str]:
     width, length = printer.get('media_width'), printer.get('media_length') or 0
     if not width and not length:
         return []
-    told = f"{printer.get('text_color') or ''} {printer.get('media_type') or ''}"
-    red = bool(re.search('red', told, re.IGNORECASE))
-    unknown = not red and not printer.get('text_color')
+    # As the label designer: red_roll tells a black and red roll, the text
+    # color of TZe tape does not
+    red = printer.get('red_roll') is True or bool(re.search('red', printer.get('media_type') or '', re.IGNORECASE))
+    unknown = not red and printer.get('red_roll') is None
     return [label.identifier for label in LABELS
             if label.tape_size[1] == length and (not width or label.tape_size[0] == width)
             and printer.get('model') in label_printers(label)
@@ -325,7 +326,7 @@ class Tools:
             defaults = data.get('blanks') if isinstance(data.get('blanks'), dict) else {}
             blanks = []
             for name in _blank_names(data):
-                blank = {'name': name, **{k: v for k, v in (fields.get(name) or {}).items() if k in ('type', 'format', 'default')}}
+                blank = {'name': name, **{k: v for k, v in (fields.get(name) or {}).items() if k in ('type', 'format', 'default', 'choices')}}
                 if name in defaults:
                     blank['default'] = defaults[name]
                 blanks.append(blank)

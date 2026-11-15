@@ -107,9 +107,29 @@ def test_list_labels_with_their_blanks(client, tmp_path):
                        'text': ['{{blank:Content}}', '{{blank:Made}}'], 'code': None}]
 
 
+
+def test_list_labels_with_the_choices_of_a_blank(client, tmp_path):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'Shelf.json').write_text('{"label_size": "62", "text": [{"text": "{{blank:Room}}", "size": "60"}],'
+                                     ' "fields": {"Room": {"type": "choice", "choices": ["Garage", "Cellar"]}}}')
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(repo)
+    blanks = tool(client, 'list_labels')['structuredContent']['result'][0]['blanks']
+    assert blanks == [{'name': 'Room', 'type': 'choice', 'choices': ['Garage', 'Cellar']}]
+
+
+def test_the_code_types_are_those_of_the_api(client):
+    _, answer = call(client, 'tools/list')
+    descriptions = {t['name']: t['description'] for t in answer['result']['tools']}
+    types = client.get('/labeldesigner/api/barcodes').get_json()['barcodes']
+    assert descriptions['print_text'].endswith(f' Code types: {", ".join(types)}.')
+
+
 @pytest.mark.parametrize('status, sizes', [
     ({'model': 'QL-800', 'media_width': 62, 'media_length': 0, 'text_color': ''}, ['62', '62red']),
-    ({'model': 'QL-800', 'media_width': 62, 'media_length': 0, 'text_color': 'Red'}, ['62red']),
+    ({'model': 'QL-800', 'media_width': 62, 'media_length': 0, 'red_roll': True}, ['62red']),
+    ({'model': 'QL-800', 'media_width': 62, 'media_length': 0, 'red_roll': False}, ['62']),
+    ({'model': 'PT-P750W', 'media_width': 12, 'media_length': 0, 'text_color': 'Red', 'red_roll': None}, ['pt12']),
     ({'model': 'QL-800', 'media_width': 29, 'media_length': 90, 'text_color': ''}, ['29x90']),
     ({'model': 'QL-800', 'media_width': None}, []),
     ({'model': 'QL-800', 'media_width': None, 'media_length': 90}, ['29x90', '39x90'])])
