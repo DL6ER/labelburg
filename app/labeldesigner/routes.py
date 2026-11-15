@@ -1656,7 +1656,7 @@ def _blank_fields(value) -> dict:
 # Parameters of the requests for stored labels, never values of blanks of
 # the same name
 STORED_LABEL_PARAMETERS = ('name', 'id', 'printer', 'model', 'print_count', 'cut', 'cut_once', 'half_cut', 'chain',
-                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'blanks', 'return_format')
+                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'mirror', 'blanks', 'return_format')
 
 
 def _requested_blanks(data: dict) -> dict[str, str]:

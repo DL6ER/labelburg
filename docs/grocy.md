@@ -13,7 +13,7 @@ Grocy sends every label to the same address, so one saved label serves products,
 | `[due_date]` | The due date as Grocy writes it in its language, e.g., `DD: 2026-11-10`, in German `MHD: 2026-11-10`. Only for stock entries, with due dates turned on in Grocy. |
 | `[stock_entry.best_before_date]` | The due date alone. Set the blank to Date in its settings, then it is printed in its format, e.g., `10.11.2026`. Products that never expire have `2999-12-31`. Only for stock entries: a date blank without a value prints today, so a label that also serves products takes `[due_date]`. |
 
-A name with dots takes a value inside one of the objects Grocy sends, e.g., `[details.location.name]` for the location of the product. Values that are given in `blanks` go first, and the parameters of the request (`name`, `printer`, `model`, `print_count`, `cut`, `cut_once`, `half_cut`, `chain`, `high_res`, `fast_printing`, `collate`, `leaves_first`, `blanks`) are never taken for blanks.
+A name with dots takes a value inside one of the objects Grocy sends, e.g., `[details.location.name]` for the location of the product. Values that are given in `blanks` go first, and the parameters of the request (`name`, `printer`, `model`, `print_count`, `cut`, `cut_once`, `half_cut`, `chain`, `high_res`, `fast_printing`, `collate`, `leaves_first`, `mirror`, `blanks`) are never taken for blanks.
 
 ## Grocy's settings
 

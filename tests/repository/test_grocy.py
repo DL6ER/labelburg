@@ -113,10 +113,19 @@ def test_parameters_and_objects_are_no_blanks(printed):
 
 
 def test_printing_options_are_no_blanks(printed):
-    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}|{{blank:collate}}|{{blank:leaves_first}}'}], fields={})
+    label = dict(GROCY_LABEL, text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:cut}}|{{blank:half_cut}}|{{blank:chain}}|{{blank:collate}}|{{blank:leaves_first}}|{{blank:mirror}}'}], fields={})
     assert printed.client.post(SAVE_URL, json=label).status_code == 200
-    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0, collate=0, leaves_first='top'))
-    assert lines == ['||||']
+    lines, _ = printed(json=dict(GROCY_REQUEST, cut='last', half_cut=0, chain=0, collate=0, leaves_first='top', mirror=1))
+    assert lines == ['|||||']
+
+
+def test_a_mirrored_label_stays_mirrored(printed, monkeypatch):
+    from app.labeldesigner import printer
+    queued = []
+    monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
+    assert printed.client.post(SAVE_URL, json=dict(GROCY_LABEL, mirror='1')).status_code == 200
+    assert printed.client.post(PRINT_URL, json=GROCY_REQUEST).get_json() == {'success': True}
+    assert queued[0]._mirror
 
 
 def test_the_preview_takes_the_fields_as_well(printed):
