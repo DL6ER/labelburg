@@ -1114,6 +1114,9 @@ def preview_from_image():
         # printed or saved
         label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0)
         im = label.generate()
+        # The printer would refuse it, the label designer says so before
+        if too_long := _length_problem(values, im):
+            label.warnings.append(too_long)
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
@@ -1134,6 +1137,20 @@ def preview_from_image():
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _length_problem(values: dict, im) -> str:
+    """Why the printer of a request refuses the label im as too long, or an
+    empty string, also where the request names no printer it knows."""
+    try:
+        _, model = _printer(values.get('printer') or '', values.get('model'))
+    except ValueError:
+        return ''
+    label_size = values.get('label_size', DEFAULT_LABEL_SIZE)
+    high_res = _high_res(values)
+    across = _get_label_dimensions(label_size, high_res)[0]
+    along = im.height if im.width == across else im.width
+    return drivers.for_model(model).length_problem(model, along, high_res)
 
 
 def _preview_of(label: SimpleLabel, im, return_format: str):
@@ -1384,7 +1401,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'print_color': d.get('print_color', 'black'),
         'timestamp': int(d.get('timestamp', 0)),
         # 600 dpi is for QL printers only
-        'high_res': _whole_or(d.get('high_res'), 0) != 0 and _palette(label_size) != 'color',
+        'high_res': _high_res(d),
         'code_text': d.get('code_text', '').strip(),
         'text_fit': _text_fit(d),
         # Empty: an endless label grows with its content
@@ -1576,6 +1593,11 @@ def _printed_length(length: float | None, label, diameter: float | None, high_re
     if problem:
         raise ValueError(problem)
     return round((length - 2 * limits[2]) / 25.4 * label_dpi(label.identifier, high_res))
+
+
+def _high_res(d: dict) -> bool:
+    """Whether a label is made at 600 dpi: high_res 1, not on color tape."""
+    return _whole_or(d.get('high_res'), 0) != 0 and _palette(d.get('label_size', DEFAULT_LABEL_SIZE)) != 'color'
 
 
 def _text_wrap(d: dict) -> bool:

@@ -8,7 +8,7 @@ from PIL import Image
 from app.labeldesigner.drivers.brother.commands import Raster
 from app.labeldesigner.drivers.brother.labels import BY_ID
 from app.labeldesigner.drivers.brother.raster import convert
-from tests.helpers import make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client, TEXT
 
 
 @pytest.mark.parametrize('model, label_size, longest, millimeters', [
@@ -41,3 +41,23 @@ def test_label_too_long_is_refused_with_its_reason(tmp_path):
         'image': (image, 'long.png')}, content_type='multipart/form-data')
     assert response.status_code == 400
     assert response.get_json()['message'] == 'Labels on the QL-800 can be at most 1000 mm long'
+
+
+@pytest.mark.parametrize('values, refused', [
+    # 1005 mm as cut is a print of 11800 lines, 1006 mm of 11812
+    ({'label_length': '1005'}, False),
+    ({'label_length': '1006'}, True),
+    ({'label_length': '1006', 'orientation': 'rotated'}, True),
+    ({'label_length': '1005', 'high_res': '1'}, False),
+    ({'label_length': '1006', 'high_res': '1'}, True),
+    ({'label_length': '1006', 'model': 'QL-1100'}, False),
+])
+def test_a_preview_says_that_the_printer_refuses_a_label_as_too_long(tmp_path, values, refused):
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, text=TEXT, **values)
+    response = client.post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 200
+    model = values.get('model', 'QL-800')
+    assert (f'Labels on the {model} can be at most 1000 mm long' in response.headers.get('X-Label-Warning', '')) == refused
+    printed = client.post('/labeldesigner/api/print', data=dict(data, printer='simulation'))
+    assert printed.status_code == (400 if refused else 200)

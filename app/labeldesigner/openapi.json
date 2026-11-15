@@ -98,7 +98,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, or when a font is not installed and the default font is used instead.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
                 "schema": {
                   "type": "string"
                 }
