@@ -7,7 +7,7 @@ import select
 import socket
 import time
 
-from .. import backends
+from .. import backends, usbip
 
 # Rows per raster image, the printer takes them in pieces
 BAND = 256
@@ -95,10 +95,11 @@ class Connection:
 
 
 class UsbConnection(Connection):
-    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>]."""
+    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>], or
+    shared by another device, usbip://<host>."""
 
     def __init__(self, device: str):
-        self.printer = backends.UsbPrinter(device)
+        self.printer = backends.open_printer(device)
 
     def __exit__(self, *args):
         self.printer.dispose()
@@ -161,7 +162,7 @@ class TcpConnection(Connection):
 
 
 def connect(device: str) -> Connection:
-    if device.startswith('usb://'):
+    if device.startswith('usb://') or usbip.is_address(device):
         return UsbConnection(device)
     if device.startswith('tcp://'):
         return TcpConnection(device)

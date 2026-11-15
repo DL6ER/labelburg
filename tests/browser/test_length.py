@@ -34,6 +34,14 @@ def test_a_length_that_cannot_be_printed_is_explained(designer):
     assert designer.is_enabled('#edPrint')
 
 
+def test_a_label_longer_than_the_printer_prints_is_said_so(designer):
+    type_line(designer, 0, 'Shelf')
+    set_length(designer, '1006')
+    assert 'Labels on the QL-800 can be at most 1000 mm long' in fits_note(designer)
+    set_length(designer, '1005')
+    assert 'Everything fits.' in fits_note(designer)
+
+
 def test_die_cut_labels_have_their_own_length(designer):
     type_line(designer, 0, 'Shelf')
     set_length(designer, '40')

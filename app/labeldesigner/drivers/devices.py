@@ -14,6 +14,7 @@ import time
 
 from werkzeug.security import safe_join
 
+from . import usbip
 from .backends import NoLibusb
 
 try:
@@ -93,10 +94,13 @@ def lock_key(device_specifier: str) -> str:
     it, so it should be addressed in one way only. A host without port is
     one on port 9100, also an IPv6 address in brackets. A Bluetooth printer
     is one device whatever RFCOMM channel names it, and drivers differ in the
-    channel they take when none is named, so its key is its MAC address only."""
+    channel they take when none is named, so its key is its MAC address only.
+    A printer shared over USB/IP is one on port 3240."""
     key = device_specifier.strip()
     if key.startswith('file://'):
         key = key[len('file://'):]
+    elif usbip.is_address(key) and usbip.ADDRESS.fullmatch(key):
+        key = usbip.key(key)
     elif key.lower().startswith('bt://'):
         key = 'bt://' + key.lower().split('/')[2]
     elif '://' in key:
@@ -124,9 +128,11 @@ def _usb_key(device_specifier: str) -> str:
 
 
 def usb_device_id(device_specifier: str) -> str:
-    """The IEEE 1284 device ID of a printer on USB, /dev/usb/lp<N> or
-    usb://..., e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., empty for other
-    printers or when it does not tell."""
+    """The IEEE 1284 device ID of a printer on USB, /dev/usb/lp<N>, usb://...
+    or usbip://..., e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., empty for
+    other printers or when it does not tell."""
+    if usbip.is_address(device_specifier):
+        return usbip.device_id(device_specifier)
     if device_specifier.startswith('usb://'):
         key = _usb_key(device_specifier)
         if key not in _usb_device_ids:
@@ -300,6 +306,7 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_width': known.get('media_width'),
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
+        'red_roll': known.get('red_roll'),
         'errors': [unanswered(error)],
         'status_type': 'Error',
         'phase_type': 'Unknown',

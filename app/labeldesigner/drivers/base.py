@@ -25,6 +25,7 @@ def network_status(device: str, model: str, red_support: bool = False) -> dict:
         'tape_color': '',
         'text_color': '',
         'red_support': red_support,
+        'red_roll': None,
     }
 
 
@@ -96,6 +97,11 @@ class Driver:
         paper fed before and after its print, each, and the shortest and the
         longest print. None where labels are as long as their content."""
         return None
+
+    def length_problem(self, model: str, dots: int, high_res: bool) -> str:
+        """Why the model refuses a label of dots along the tape, made at 600
+        dpi with high_res, as too long, or an empty string."""
+        return ''
 
     def label_for(self, label_size: str, model: str) -> str:
         """The label size the model prints a label made for label_size on:

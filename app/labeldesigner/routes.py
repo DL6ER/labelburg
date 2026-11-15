@@ -7,7 +7,6 @@ import uuid
 import time
 import base64
 import secrets
-import barcode
 import threading
 import contextlib
 import datetime
@@ -15,7 +14,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import bp, demos, refusals
+from . import bp, codes, demos, refusals
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound
@@ -28,7 +27,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
+from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
 from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
@@ -446,18 +445,18 @@ def _as_numbers(value):
 
 
 def _defaults_written(fields):
-    """The settings of blanks of a JSON body, their defaults as they are
-    written, all other numbers as numbers."""
+    """The settings of blanks of a JSON body, their defaults and choices as
+    they are written, all other numbers as numbers."""
     if not isinstance(fields, dict):
         return _as_numbers(fields)
-    return {name: {key: value if key == 'default' else _as_numbers(value) for key, value in field.items()} if isinstance(field, dict) else _as_numbers(field)
+    return {name: {key: value if key in ('default', 'choices') else _as_numbers(value) for key, value in field.items()} if isinstance(field, dict) else _as_numbers(field)
             for name, field in fields.items()}
 
 
 def _json_body() -> dict:
     """The JSON body of the request as object, else empty. Read once. The
-    values of blanks and their defaults keep their numbers as they are
-    written, e.g. 2.50, all other numbers are numbers."""
+    values of blanks, their defaults and choices keep their numbers as they
+    are written, e.g. 2.50, all other numbers are numbers."""
     body = request.environ.get('labeldesigner.json_body')
     if body is None:
         data = None
@@ -545,10 +544,14 @@ def repo_save():
                     data[key] = value
                 else:
                     del data[key]
+        # A value saved for a choice blank is one of its choices
+        for blank, value in data.get('blanks', {}).items():
+            check_blank_choice(blank, data.get('fields', {}).get(blank, {}), value)
         _image_text_gap(data.get('image_text_gap'))
         _text_fit(data)
         cut = _cutting(data.get)[0]
         _text_wrap(data)
+        _mirror(data)
         check_image_position(data.get('image_position'))
         check_vertical_align(data.get('vertical_align'))
         check_image_mode(data.get('image_mode'))
@@ -561,6 +564,7 @@ def repo_save():
                 check_cut(cut, model)
         size = next(label for label in LABELS if label.identifier == data.get('label_size', DEFAULT_LABEL_SIZE))
         _printed_length(_label_length(data.get('label_length')), size, _cable_flag(data, size.form_factor))
+        check_code_correction(check_code_type(data.get('barcode_type')), data.get('qrcode_correction'))
     except ValueError as e:
         _log_refused_request('Saving the label', e)
         return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
@@ -576,6 +580,8 @@ def repo_save():
     # Read like the other flags, e.g. true, false, 1 or 0, in the address
     # before the body
     data.pop('replace', None)
+    # Set for each printer and given with each print, never saved
+    data.pop('leaves_first', None)
     try:
         replace = _whole_or(_requested('replace'), 1)
     except (TypeError, ValueError):
@@ -698,7 +704,7 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
     # Flags and the text size read as when the label is printed, e.g. "true"
     # as 1, a text size from shrink_text of labels of before. One that is
     # refused stays as it is, the preview tells why.
-    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('text_wrap', 0)):
+    for key, default in (('image_fit', 1), ('image_crop', 0), ('image_contrast', 0), ('text_wrap', 0), ('mirror', 0)):
         try:
             data[key] = '1' if _whole_or(data.get(key), default) > 0 else '0'
         except (TypeError, ValueError):
@@ -708,6 +714,9 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
             data['text_fit'] = _text_fit(data)
         except ValueError:
             pass
+    # The kind of code as the label designer offers it, e.g., ean13 as EAN13
+    if 'barcode_type' in data:
+        data['barcode_type'] = check_code_type(data['barcode_type'])
     image_ref = data.get('image')
     if isinstance(image_ref, str) and len(image_ref) > 0:
         image_path = os.path.join(image_dir, secure_filename(image_ref))
@@ -725,12 +734,12 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
 def _code_with_text(data: dict, text) -> list:
     """A label of a code alone as a code with its text left empty, which
     prints the same. Its lines were not printed, a code without content of
-    its own took them: a QR code all of them, another code the first."""
+    its own took them: a 2D code all of them, a barcode the first."""
     data['print_type'] = 'qrcode_text'
     lines = [line for line in text if isinstance(line, dict)] if isinstance(text, list) else []
     if not str(data.get('code_text') or '').strip():
         code = '\n'.join(str(line.get('text', '')) for line in lines).replace('\r\n', '\n').replace('\r', '\n')
-        data['code_text'] = code if data.get('barcode_type', 'QR') == 'QR' else code.split('\n')[0]
+        data['code_text'] = code if check_code_type(data.get('barcode_type')) in codes.NAMES else code.split('\n')[0]
     return [dict(lines[0], text='')] if lines else []
 
 
@@ -832,6 +841,15 @@ def _given(value, default):
     return default if value is None or value == '' else value
 
 
+def _leaves_first(value) -> str | None:
+    """Which end of the labels leaves the printer first, None where it is
+    left out or empty: as the driver prints them."""
+    value = _given(value, None)
+    if value not in (None, 'top', 'bottom'):
+        raise ValueError('leaves_first must be top or bottom')
+    return value
+
+
 def _whole_or(value, default) -> int:
     """value as a whole number like _whole(), default where it is left out
     or empty."""
@@ -851,6 +869,24 @@ def check_image_mode(value, default: str = 'grayscale') -> str:
     if mode not in IMAGE_MODES:
         raise ValueError(IMAGE_MODE_REFUSED)
     return mode
+
+
+def check_code_type(value) -> str:
+    """The barcode_type of a request, QR where it is left out or empty, as
+    /api/barcodes names it, also when given in lowercase, e.g., ean13."""
+    value = _given(value, 'QR')
+    if isinstance(value, str) and value.upper() in codes.TYPES:
+        return value.upper()
+    return value
+
+
+def check_code_correction(code_type: str, value) -> str:
+    """The error correction of a request for a code of code_type, also in
+    lowercase. Where none is given the first level the code has, L for codes
+    without a choice. A level the code does not have raises ValueError."""
+    if isinstance(value, str):
+        value = value.strip().upper()
+    return codes.correction(code_type, value) or 'L'
 
 
 def _whole(value) -> int:
@@ -907,17 +943,18 @@ def repo_preview():
     return _preview_response(data, _get_repo_dir(), image_bytes)
 
 
-def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None):
+def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None, mark_blanks: bool = False):
     """The preview of a stored label whose image is in image_dir, or of
     image_bytes where it was read with the label, as PNG or base64
-    (return_format)."""
+    (return_format). With mark_blanks, blanks without a value show their
+    name."""
     # allow override printer, in a JSON body or the form or query
     printer = _requested('printer')
     if printer:
         data['printer'] = printer
     try:
-        data['blanks'] = _requested_blanks(data.get('blanks'))
-        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes))
+        data['blanks'] = _requested_blanks(data)
+        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks)
         im = label.generate()
     except Exception as e:
         _log_refused_request('Preview', e)
@@ -955,7 +992,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data['printer'] = requested_printer
     # Prepare printer queue using requested or default device/model and label_size from data
     try:
-        data['blanks'] = _requested_blanks(data.get('blanks'))
+        data['blanks'] = _requested_blanks(data)
         device, model = _printer(requested_printer, _requested('model'))
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
@@ -970,6 +1007,8 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         # Saved with the label, the request overrides it
         collate = _requested('collate')
         collate = _whole_or(collate if collate is not None else data.get('collate'), 1) != 0
+        # Of the request only, it is set for each printer
+        printer.leaves_first = _leaves_first(_requested('leaves_first'))
         # The label and its image have to be generated with the resolution
         # it is printed with
         data['high_res'] = high_res
@@ -1037,7 +1076,9 @@ def demo_load():
 
 @bp.route('/api/demos/preview', methods=['GET'])
 def demo_preview():
-    return _demo_response(_requested_name('id'), lambda data: _preview_response(data, demos.IMAGE_DIR))
+    # As the label designer draws saved labels: a blank without a default,
+    # e.g., the name Grocy sends, shows its name
+    return _demo_response(_requested_name('id'), lambda data: _preview_response(data, demos.IMAGE_DIR, mark_blanks=True))
 
 
 @bp.route('/api/demos/print', methods=['POST'])
@@ -1064,9 +1105,13 @@ def _check_print_count(print_count: int) -> int:
 
 @bp.route('/api/barcodes', methods=['GET'])
 def get_barcodes():
-    barcodes = [code.upper() for code in barcode.PROVIDED_BARCODES]
-    barcodes.insert(0, 'QR')  # Add QR at the top
-    return {'barcodes': barcodes}
+    # The 2D codes at the top, QR codes first. codes tells which are 2D and
+    # which levels of error correction each has.
+    return {
+        'barcodes': codes.TYPES,
+        'codes': [{'type': code, 'name': codes.NAMES.get(code, code), 'two_d': code in codes.NAMES,
+                   'corrections': list(codes.CORRECTIONS.get(code, ()))} for code in codes.TYPES],
+    }
 
 
 @bp.route('/api/preview', methods=['POST'])
@@ -1080,6 +1125,9 @@ def preview_from_image():
         # printed or saved
         label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0)
         im = label.generate()
+        # The printer would refuse it, the label designer says so before
+        if too_long := _length_problem(values, im):
+            label.warnings.append(f'{too_long}.')
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
@@ -1100,6 +1148,20 @@ def preview_from_image():
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _length_problem(values: dict, im) -> str:
+    """Why the printer of a request refuses the label im as too long, or an
+    empty string, also where the request names no printer it knows."""
+    try:
+        _, model = _printer(values.get('printer') or '', values.get('model'))
+    except ValueError:
+        return ''
+    label_size = values.get('label_size', DEFAULT_LABEL_SIZE)
+    high_res = _high_res(values)
+    across = _get_label_dimensions(label_size, high_res)[0]
+    along = im.height if im.width == across else im.width
+    return drivers.for_model(model).length_problem(model, along, high_res)
 
 
 def _preview_of(label: SimpleLabel, im, return_format: str):
@@ -1175,6 +1237,7 @@ def print_label():
         high_res = _whole_or(request.values.get('high_res'), 0) != 0
         fast = _whole_or(request.values.get('fast_printing'), 0) != 0
         collate = _whole_or(request.values.get('collate'), 1) != 0
+        printer.leaves_first = _leaves_first(request.values.get('leaves_first'))
     except HTTPException:
         raise
     except Exception as e:
@@ -1338,9 +1401,9 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'border_distanceY': int(d.get('border_distance_y', 0)),
         'border_color': d.get('border_color', 'black'),
         'text': json.loads(d.get('text', '[]')),
-        'barcode_type': d.get('barcode_type', 'QR'),
+        'barcode_type': check_code_type(d.get('barcode_type')),
         'qrcode_size': int(d.get('qrcode_size', 10)),
-        'qrcode_correction': d.get('qrcode_correction', 'L'),
+        'qrcode_correction': check_code_correction(check_code_type(d.get('barcode_type')), d.get('qrcode_correction')),
         'image_mode': _image_mode(d),
         'image_bw_threshold': int(d.get('image_bw_threshold', 70)),
         'image_fit': _whole_or(d.get('image_fit'), 1) > 0,
@@ -1350,12 +1413,13 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'print_color': d.get('print_color', 'black'),
         'timestamp': int(d.get('timestamp', 0)),
         # 600 dpi is for QL printers only
-        'high_res': _whole_or(d.get('high_res'), 0) != 0 and _palette(label_size) != 'color',
+        'high_res': _high_res(d),
         'code_text': d.get('code_text', '').strip(),
         'text_fit': _text_fit(d),
         # Empty: an endless label grows with its content
         'label_length': _label_length(d.get('label_length')),
         'text_wrap': _text_wrap(d),
+        'mirror': _mirror(d),
         'image_text_gap': _image_text_gap(d.get('image_text_gap')),
         # Left out or empty: above the text across the tape, left of it along
         'image_position': check_image_position(d.get('image_position')),
@@ -1486,7 +1550,9 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         with_code=with_code,
         fixed_length=length is not None,
         vertical_align=context['vertical_align'],
+        dpi=label_dpi(label_size, context['high_res']),
         **_flag_wrap(label_size, diameter, context['high_res']),
+        mirror=context['mirror'],
     )
     if (label_type == LabelType.DIE_CUT_LABEL and image_label and image is not None
             and context['image_fit'] and not label.has_lines() and not with_code):
@@ -1543,6 +1609,11 @@ def _printed_length(length: float | None, label, diameter: float | None, high_re
     return round((length - 2 * limits[2]) / 25.4 * label_dpi(label.identifier, high_res))
 
 
+def _high_res(d: dict) -> bool:
+    """Whether a label is made at 600 dpi: high_res 1, not on color tape."""
+    return _whole_or(d.get('high_res'), 0) != 0 and _palette(d.get('label_size', DEFAULT_LABEL_SIZE)) != 'color'
+
+
 def _text_wrap(d: dict) -> bool:
     """Whether lines wider than the label wrap into several lines: text_wrap
     1, also true. Left out or empty they do not."""
@@ -1550,6 +1621,15 @@ def _text_wrap(d: dict) -> bool:
         return _whole_or(d.get('text_wrap'), 0) != 0
     except (TypeError, ValueError):
         raise ValueError("text_wrap must be 0 or 1") from None
+
+
+def _mirror(d: dict) -> bool:
+    """Whether the label is printed mirror-inverted: mirror 1, also true.
+    Left out or empty it is not."""
+    try:
+        return _whole_or(d.get('mirror'), 0) != 0
+    except (TypeError, ValueError):
+        raise ValueError("mirror must be 0 or 1") from None
 
 
 def _image_text_gap(value) -> int | None:
@@ -1595,18 +1675,19 @@ def _blank_values(value) -> dict[str, str]:
     return {name: str(v) for name, v in values.items()}
 
 
-BLANK_TYPES = ('text', 'number', 'date')
+BLANK_TYPES = ('text', 'number', 'date', 'choice')
 
 
 def _blank_setting(field) -> bool:
     """Whether field is the settings of a blank: an object, its type one of
-    BLANK_TYPES, its format a text and its default a text or number, each
-    where given."""
+    BLANK_TYPES, its format a text, its default a text or number and its
+    choices a list, each where given."""
     if not isinstance(field, dict):
         return False
     default = field.get('default')
     return (field.get('type') in (None, *BLANK_TYPES) and isinstance(field.get('format'), (str, type(None)))
-            and (default is None or (isinstance(default, (str, int, float)) and not isinstance(default, bool))))
+            and (default is None or (isinstance(default, (str, int, float)) and not isinstance(default, bool)))
+            and isinstance(field.get('choices'), (list, type(None))))
 
 
 def _blank_fields(value) -> dict:
@@ -1614,19 +1695,74 @@ def _blank_fields(value) -> dict:
     "date", "format": "%d.%m.%Y"}}. A date may start at a day moved from
     today, e.g., {"Best before": {"type": "date", "default": "+5d"}}."""
     fields = _json_object(value, _blank_setting, refusals.FIELDS_MESSAGE)
-    # A date moved from today must be one it can be moved by
-    for field in fields.values():
+    for name, field in fields.items():
         default = field.get('default')
+        # A date moved from today must be one it can be moved by
         if field.get('type') == 'date' and isinstance(default, str) and default.strip()[:1] in ('+', '-'):
             shift_date(datetime.date.today(), default.strip())
+        # A blank with a fixed list of choices
+        if field.get('type') == 'choice':
+            check_blank_choices(name, field)
     return fields
 
 
-def _requested_blanks(stored=None) -> dict[str, str]:
+# Parameters of the requests for stored labels, never values of blanks of
+# the same name
+STORED_LABEL_PARAMETERS = ('name', 'id', 'printer', 'model', 'print_count', 'cut', 'cut_once', 'half_cut', 'chain',
+                           'high_res', 'fast_printing', 'collate', 'leaves_first', 'mirror', 'blanks', 'return_format')
+
+
+def _requested_blanks(data: dict) -> dict[str, str]:
     """The values for the blanks of a stored label: those stored with it,
-    over them those of the request, blanks of a JSON body or else of the form
-    or query."""
-    return {**_blank_values(stored), **_blank_values(_requested('blanks'))}
+    over them fields of the request named like a blank, e.g., product as
+    Grocy sends it, and over these the blanks of the request, of a JSON body
+    or else of the form or query."""
+    requested = _blank_values(_requested('blanks'))
+    fields = {}
+    for name in _blank_names(data):
+        if name not in requested and name.split('.')[0] not in STORED_LABEL_PARAMETERS:
+            value = _request_field(name)
+            if value is not None:
+                fields[name] = value
+    return {**_blank_values(data.get('blanks')), **fields, **requested}
+
+
+def _blank_names(data: dict) -> list[str]:
+    """The names of the blanks in the text and code of a stored label."""
+    text = data.get('text', [])
+    if isinstance(text, str):
+        try:
+            text = json.loads(text)
+        except (ValueError, RecursionError):
+            text = []
+    lines = [line.get('text') for line in text if isinstance(line, dict)] if isinstance(text, list) else []
+    names = []
+    for value in lines + [data.get('code_text')]:
+        for name in BLANK_TEMPLATE.findall(str(value or '')):
+            if name not in names:
+                names.append(name)
+    return names
+
+
+def _request_field(name: str) -> str | None:
+    """The request field named like a blank, as text, from the form or query or
+    else a JSON body; dots reach into objects, in a form as brackets, e.g.,
+    stock_entry[best_before_date]. None where it is missing or no text or number."""
+    keys = name.split('.')
+    form = _address_or_form()
+    for key in (name, keys[0] + ''.join(f'[{key}]' for key in keys[1:])):
+        if key in form:
+            return form[key]
+    body = _json_body()
+    if name in body:
+        value = body[name]
+    else:
+        value = body
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    return str(value)
 
 
 def _font_name(font: str) -> str:
@@ -1820,6 +1956,7 @@ def webhook_print():
         - high_res: 0 or 1 for 600 DPI (default: 0)
         - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: 0)
         - image_contrast: 0 or 1, 1 prints the images with stronger contrast on the tapes of the VC-500W (default: 0)
+        - leaves_first: "top" or "bottom", the end of the labels that leaves the printer first (default: as the driver prints them)
         - printer: printer device specifier (default: from config)
         - model: printer model (default: from config)
 
@@ -1876,6 +2013,10 @@ def webhook_print():
             image_mode = check_image_mode(image_mode, current_app.config['IMAGE_DEFAULT_MODE'])
         except ValueError:
             return make_response(jsonify({'success': False, 'message': IMAGE_MODE_REFUSED}), 400)
+        try:
+            leaves_first = _leaves_first(_requested('leaves_first'))
+        except ValueError as e:
+            return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
         # Images stay in color on the tapes of the VC-500W, printed at its resolution
         color = _palette(label_size) == 'color'
         if color:
@@ -1955,6 +2096,7 @@ def webhook_print():
     # Process and queue each image
     try:
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer.leaves_first = leaves_first
         for img, image_width, image_height, image_orientation in pil_images:
             label = SimpleLabel(
                 width=image_width,

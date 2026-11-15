@@ -1,7 +1,7 @@
 """The connections to printers on USB, through the printer interface of
-the kernel (/dev/usb/lp<N>, Linux only) or PyUSB
-(usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested), after the
-backends of brother_ql by Philipp Klaus."""
+the kernel (/dev/usb/lp<N>, Linux only), PyUSB
+(usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested) or
+USB/IP (usbip://<host>), after the backends of brother_ql by Philipp Klaus."""
 
 import ctypes.util
 import errno
@@ -11,6 +11,8 @@ import re
 import select
 import sys
 import time
+
+from . import usbip
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +130,28 @@ class UsbPrinter(Printer):
         del self.dev
 
 
+class UsbipPrinter(Printer):
+    """A printer another device shares over USB/IP, as
+    usbip://<host>[:<port>][/<bus ID>]. The connection stays open after
+    dispose, see usbip.connect()."""
+
+    # In seconds
+    read_timeout = 0.01
+    write_timeout = 15.
+
+    def __init__(self, device_specifier: str):
+        self.dev = usbip.connect(device_specifier)
+
+    def _write(self, data: bytes):
+        self.dev.write(data, self.write_timeout)
+
+    def _read(self, length: int) -> bytes:
+        return self.dev.read(length, self.read_timeout)
+
+    def _dispose(self):
+        usbip.release(self.dev)
+
+
 def _usb_printers(usb, vendor: int | None = None):
     """The devices with a printer interface (class 7), of a maker or all."""
     def is_printer(device):
@@ -240,8 +264,11 @@ def _serial_number(usb, device) -> str | None:
 
 
 def open_printer(device_specifier: str) -> Printer:
-    """A connection to the printer on USB, usb://... through PyUSB, any other
-    device through the printer interface of the kernel."""
+    """A connection to the printer on USB, usb://... through PyUSB,
+    usbip://... shared by another device, any other device through the
+    printer interface of the kernel."""
     if device_specifier.startswith(('usb://', '0x')):
         return UsbPrinter(device_specifier)
+    if usbip.is_address(device_specifier):
+        return UsbipPrinter(device_specifier)
     return KernelPrinter(device_specifier)
