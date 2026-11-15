@@ -33,24 +33,25 @@ jobs:
         run: python tools/update_fonts.py --check
 
   update:
-    # On Dependabot's pull requests for tools/fonts only, not on the push of this job
+    # On Dependabot's pull requests for tools/fonts only, not on the push of this job.
+    # Its actions are pinned to commits, as they handle the App's key.
     if: >-
       github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
       && startsWith(github.head_ref, 'dependabot/npm_and_yarn/')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app
         with:
           client-id: ${{ secrets.FONTS_APP_CLIENT_ID }}
           private-key: ${{ secrets.FONTS_APP_KEY }}
           permission-contents: write
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
           token: ${{ steps.app.outputs.token }}
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.15'
       - name: Copy the files of the new versions
