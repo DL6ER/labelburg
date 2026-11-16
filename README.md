@@ -19,6 +19,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Epson | TM-T20II (USB) | 80 and 58 mm receipt paper, cut |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
+| Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
 Labelburg finds printers plugged in with USB by itself, most network printers too. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
 
@@ -103,7 +104,7 @@ Other settings, e.g. the default font and margins, go into `instance/application
 |---|---|
 | `?` | Printers found automatically: on USB, also ones plugged in later, and on the network, see [Network printers](#network-printers) |
 | `file:///dev/usb/lp<N>` | A USB printer, Linux only |
-| `usb://<vendor>:<product>[/<serial number>]` | A Brother or Epson printer on USB, also on macOS. On Windows untested, PyUSB needs the WinUSB driver for the printer, e.g. installed with Zadig. The serial number tells printers of the same model apart. |
+| `usb://<vendor>:<product>[/<serial number>]` | A Brother, Epson or ZPL printer on USB, also on macOS. On Windows untested, PyUSB needs the WinUSB driver for the printer, e.g. installed with Zadig. The serial number tells printers of the same model apart. |
 | `tcp://<host>` | A network printer, an IPv6 address in brackets |
 | `vc500w://<host>` | A VC-500W on the network |
 | `usbip://<host>` | A USB printer another device shares, see [USB/IP](docs/usbip.md) |
