@@ -289,3 +289,19 @@ def test_device_ids_kept_once_per_printer(pyusb, monkeypatch):
         assert devices.usb_device_id(f"usb://0x04b8:0x0e15/{'0' * zeros}5443").endswith('MDL:TM-T20II;')
     assert devices.usb_device_id('usb://0x04B8:0x0E15/5443').endswith('MDL:TM-T20II;')
     assert len(devices._usb_device_ids) == 1
+
+
+def test_printer_list_tells_a_missing_libusb(detect, monkeypatch, tmp_path):
+    # e.g. on a Mac without libusb: said once, the simulator still offered
+    def no_libusb(usb, vendor=None):
+        raise backends.NoLibusb('No backend available')
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    with monkeypatch.context() as m:
+        m.setattr(backends, '_usb_printers', no_libusb)
+        status = client.get('/labeldesigner/api/printer_status').get_json()
+    assert [(p['path'], p['errors']) for p in status['printers']] == [('simulation', [])]
+    assert status['hints'] == ['Printers on usb:// need libusb, please install it']
+    # Gone once libusb is there
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    assert client.get('/labeldesigner/api/printer_status').get_json()['hints'] == []

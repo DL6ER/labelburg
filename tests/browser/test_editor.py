@@ -505,8 +505,13 @@ def test_label_with_a_font_that_is_not_installed(designer, app):
 def test_a_pause_in_typing_is_a_step_to_undo(designer):
     # Changes without a pause between them are one step. Undo right after a
     # change, before the pause, takes back that change.
-    for text in ('O', 'On', 'One'):
-        designer.fill('[data-row="0"] .tx', text)
+    designer.evaluate("""() => {
+        const tx = document.querySelector('[data-row="0"] .tx');
+        for (const text of ['O', 'On', 'One']) {
+            tx.value = text;
+            tx.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    }""")
     kept(designer)
     designer.evaluate("""() => {
         const tx = document.querySelector('[data-row="0"] .tx');

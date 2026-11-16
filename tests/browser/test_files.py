@@ -35,6 +35,29 @@ def test_pasted_or_dropped_image_becomes_the_label(designer, way, name):
     assert designer.evaluate('() => S.edit.design.image.name') == name
 
 
+def test_preview_waits_for_files_being_read(designer):
+    # Each file is read once the test lets it, or fails
+    designer.evaluate("""() => {
+        const read = FileReader.prototype.readAsDataURL;
+        window.held = [];
+        FileReader.prototype.readAsDataURL = function (file) { held.push(fail => fail ? this.onerror() : read.call(this, file)); };
+    }""")
+    designer.click('[data-lay="image"]')
+    wait_for_preview(designer)
+    image = {'name': 'one.png', 'mimeType': 'image/png', 'buffer': png()}
+    designer.set_input_files('#edFile', files=[image])
+    assert 'busy' in designer.get_attribute('#edStage', 'class')
+    designer.evaluate('() => held.pop()(true)')
+    wait_for_preview(designer)
+    assert designer.inner_text('#toast') == 'The file could not be read'
+    assert designer.evaluate('() => S.edit.design.image') is None
+    designer.set_input_files('#edFile', files=[image])
+    assert 'busy' in designer.get_attribute('#edStage', 'class')
+    designer.evaluate('() => held.pop()(false)')
+    wait_for_preview(designer)
+    assert designer.evaluate('() => S.edit.design.image.name') == 'one.png'
+
+
 def test_several_images_are_printed(designer, monkeypatch, tmp_path):
     monkeypatch.setattr('app.labeldesigner.printer.SIMULATED_LABELS_DIR', str(tmp_path))
     designer.click('[data-lay="image"]')

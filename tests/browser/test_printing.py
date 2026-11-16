@@ -854,3 +854,17 @@ def test_label_for_the_other_receipt_paper_is_shown_on_the_printers(designer):
     # The paper in the printer is not set: shown and printed on its size of the same paper
     assert designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/ESC-POS-180' }); S.tapeAssumed = true;
         return ['escpos80', 'escpos58', '62'].map(id => onTape(baseDesign(id)).label_size); }""") == ['escpos80-180', 'escpos58-180', '62']
+
+
+def test_printer_list_tells_a_missing_libusb(designer):
+    hint = 'Printers on usb:// need libusb, please install it'
+    simulator = {'errors': [], 'model': 'QL-800', 'path': 'simulation', 'status_type': 'Simulator'}
+    body = json.dumps({**simulator, 'printers': [simulator], 'selected': 'simulation', 'hints': [hint]})
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    designer.reload()
+    wait_for_preview(designer)
+    designer.click('#printerChip')
+    # Below the printers, the simulator is still offered and ready
+    assert designer.eval_on_selector_all('.plist [data-printer]', 'rows => rows.map(r => r.dataset.printer)') == ['simulation']
+    assert hint in designer.inner_text('.plist')
+    assert designer.evaluate('() => printerState(S.printer).text') == 'Ready (simulated)'

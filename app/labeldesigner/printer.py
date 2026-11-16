@@ -15,6 +15,7 @@ from flask import Config
 
 from . import drivers, mdns
 from .drivers import devices
+from .drivers.backends import NoLibusb
 from .label_names import check_label_size
 
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
@@ -164,6 +165,8 @@ def _red_support(model: str) -> bool:
 
 _last_scan_ts = 0
 _cached_printers = []
+# What the search for printers could not do, e.g. look on USB without libusb
+_cached_hints = []
 
 
 # The configured printers are asked at the same time, the answer waits at most
@@ -230,7 +233,7 @@ def _configured_states(printers) -> list[dict]:
 
 def get_ptr_status(config: Config):
     # Simple in-memory cache for detected printers
-    global _last_scan_ts, _cached_printers
+    global _last_scan_ts, _cached_printers, _cached_hints
 
     device_specifier = config['PRINTER_PRINTER']
     default_model = drivers.canonical(config['PRINTER_MODEL'])
@@ -303,7 +306,15 @@ def get_ptr_status(config: Config):
                 # that usblp does not hold, e.g. all on macOS,
                 # those of a maker without a driver here left out
                 specs = [f"file://{dev}" for dev in USB_PRINTER_DEVICES if os.path.exists(dev)]
-                for spec in devices.found_usb_printers():
+                hints = []
+                try:
+                    found_usb = devices.found_usb_printers()
+                except NoLibusb as e:
+                    # Told once below the printers, which are still listed
+                    logger.debug('No printers through PyUSB', exc_info=True)
+                    found_usb = []
+                    hints.append(devices.unanswered_reason(e))
+                for spec in found_usb:
                     fields = devices.device_id_fields(devices.usb_device_id(spec))
                     driver, model = drivers.resolve(spec, fields.get('MDL', 'Unknown'))
                     # Only where its driver reaches it, a VC-500W only through usblp
@@ -361,6 +372,7 @@ def get_ptr_status(config: Config):
                         logger.debug('Found network printer at %s -> %s', spec, printer.get('model'))
 
                 _cached_printers = found_list
+                _cached_hints = hints
                 # A printer busy with a job is scanned again with the next
                 # query instead of being shown as printing for 10 s
                 busy = any(p.get('status_type') == devices.BUSY_STATUS_TYPE for p in found_list)
@@ -380,6 +392,7 @@ def get_ptr_status(config: Config):
                 return {
                     'printers': printers,
                     'selected': status.get('path'),
+                    'hints': list(_cached_hints),
                     **status
                 }
             else:
@@ -388,8 +401,14 @@ def get_ptr_status(config: Config):
                 return {
                     'printers': [sim],
                     'selected': None,
+                    'hints': list(_cached_hints),
                     **status
                 }
+        if device_specifier == 'simulation':
+            status.update(SIMULATOR_PRINTER)
+            status['printers'] = [SIMULATOR_PRINTER.copy()]
+            status['selected'] = device_specifier
+            return status
         # The label designer offers only the printers of the list
         driver, model = drivers.resolve(device_specifier, default_model)
         try:
