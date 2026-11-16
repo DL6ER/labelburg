@@ -403,6 +403,11 @@ def get_ptr_status(config: Config):
                     'hints': list(_cached_hints),
                     **status
                 }
+        if device_specifier == 'simulation':
+            status.update(SIMULATOR_PRINTER)
+            status['printers'] = [SIMULATOR_PRINTER.copy()]
+            status['selected'] = device_specifier
+            return status
         # The label designer offers only the printers of the list
         driver, model = drivers.resolve(device_specifier, default_model)
         try:
