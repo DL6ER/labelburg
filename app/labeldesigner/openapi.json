@@ -2242,6 +2242,13 @@
                   "null"
                 ],
                 "description": "Printer used when a request names none."
+              },
+              "hints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\"."
               }
             }
           }

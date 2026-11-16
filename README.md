@@ -61,6 +61,7 @@ services:
     network_mode: host
     volumes:
       - /dev/usb:/dev/usb
+      - /dev/bus/usb:/dev/bus/usb
       - ./labels:/app/labels
     environment:
       - TZ=Europe/Berlin  # your time zone, for dates on labels
@@ -109,7 +110,9 @@ Other settings, e.g. the default font and margins, go into `instance/application
 | `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger or Niimbot D110_M on Bluetooth, channel 2 on a PUQU and 1 on a Niimbot if left out. A Niimbot has to be paired with the computer. In a container only with `network_mode: host`. |
 | `simulation` | The simulator, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them |
 
-The installation above gives the container all of USB and the network, so that it finds printers by itself, also Bluetooth ones. To give it a single printer instead, map that one and name it:
+The installation above gives the container all of USB and the network, so that it finds printers by itself, also Bluetooth ones. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
+
+To give it a single printer instead, map that one and name it:
 
 ``` yaml
 services:

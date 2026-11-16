@@ -844,3 +844,17 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
     button = designer.locator('.pp #setLfTest')
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
+
+
+def test_printer_list_tells_a_missing_libusb(designer):
+    hint = 'Printers on usb:// need libusb, please install it'
+    simulator = {'errors': [], 'model': 'QL-800', 'path': 'simulation', 'status_type': 'Simulator'}
+    body = json.dumps({**simulator, 'printers': [simulator], 'selected': 'simulation', 'hints': [hint]})
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    designer.reload()
+    wait_for_preview(designer)
+    designer.click('#printerChip')
+    # Below the printers, the simulator is still offered and ready
+    assert designer.eval_on_selector_all('.plist [data-printer]', 'rows => rows.map(r => r.dataset.printer)') == ['simulation']
+    assert hint in designer.inner_text('.plist')
+    assert designer.evaluate('() => printerState(S.printer).text') == 'Ready (simulated)'
