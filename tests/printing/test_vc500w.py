@@ -113,7 +113,8 @@ class FakeVC500W:
         if usbip:
             self.host = FakeHost(SharedDevice(product=0x2112, device_id=VC500W_ID, interfaces=((7, 4), (7, 2))))
             self.target, self.port = self.host.address(), vc500w.PORT
-            threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True).start()
+            self._thread = threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True)
+            self._thread.start()
         elif usb:
             self._master, self._slave = os.openpty()
             tty.setraw(self._slave)
@@ -191,7 +192,13 @@ class FakeVC500W:
     def close(self):
         if hasattr(self, 'host'):
             self.host.close()
-            self.host.devices[0].unplug()
+            # Its thread stops reading and closes the printer's end itself
+            try:
+                self.host.devices[0].printer.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                # Closed before
+                pass
+            self._thread.join(5)
         elif hasattr(self, 'server'):
             self.server.close()
         elif self._slave >= 0:
@@ -930,13 +937,16 @@ def test_refused_label_through_the_label_designer(client, fake):
     assert response.get_json()['message'] == 'The printer refused the label (label 1 of 2), the log of the server names the reason'
 
 
-def test_printer_gone_through_the_label_designer(client, fake):
+def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
     if fake.target == '127.0.0.1':
         with socket.socket() as unused:
             unused.bind(('127.0.0.1', 0))
             client.application.config['PRINTER_PRINTER'] = f'vc500w://127.0.0.1:{unused.getsockname()[1]}'
-    else:
+    elif fake.target.startswith('usbip://'):
         fake.close()
+    else:
+        # Not the closed terminal: a test running alongside may get it next
+        client.application.config['PRINTER_PRINTER'] = f'file://{tmp_path}/lp0'
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
     assert response.status_code == 503
