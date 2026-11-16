@@ -201,6 +201,22 @@ def test_a_request_that_names_the_quality_of_a_saved_label_decides_it_alone(tmp_
     assert jobs == [(False, True), (False, True), (True, False), (True, False)]
 
 
+def test_a_request_that_names_the_quality_of_a_saved_label_leaves_out_its_own(tmp_path, monkeypatch):
+    # A label saved with fast printing, e.g., by the previous label
+    # designer: high_res 1 in the request is 600 dpi, not 600 dpi and fast
+    from app.labeldesigner import printer
+    jobs = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue',
+                        lambda self: jobs.extend((entry['high_res'], entry['fast']) for entry in self._print_queue) or '')
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    text = [{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}]
+    (tmp_path / 'label_repo' / 'Shelf.json').write_text(json.dumps({'name': 'Shelf.json', 'label_size': '62', 'text': text,
+                                                                    'high_res': False, 'fast_printing': True}))
+    for given in ({}, {'high_res': '1'}, {'high_res': '0'}):
+        client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation', **given})
+    assert jobs == [(False, True), (True, False), (False, False)]
+
+
 def test_settings_refuse_a_printer_that_is_no_text(tmp_path):
     # As printing does, not with an error page
     client = make_client(tmp_path, empty_repo=True, model='QL-800')

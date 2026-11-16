@@ -995,6 +995,10 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         # quality and which end leaves first unless the request names them:
         # the label designer saves high_res 0 with each label
         requested = {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')}
+        # A quality the request names leaves out the label's own, e.g. one
+        # saved by the previous label designer
+        if any(requested[key] not in (None, '') for key in ('high_res', 'fast_printing')):
+            data = {key: value for key, value in data.items() if key not in ('high_res', 'fast_printing')}
         kept = printer_settings.for_printing(_kept_settings(), device, model, {
             **{key: value for key, value in data.items() if key not in requested}, **requested})
         data = {**data, **{key: value for key, value in kept.items() if value is not None}}
