@@ -758,7 +758,7 @@ async function typedThumb(img, job) {
 // --- State -------------------------------------------------------------------
 
 const S = {
-    printers: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
+    printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
     demos: null, demoList: [], saved: [], codes: [{ type: 'QR', name: 'QR', two_d: true, corrections: ['L', 'M', 'Q', 'H'] }],
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
@@ -865,6 +865,7 @@ async function refreshPrinters(look = false) {
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
         S.printers = Array.isArray(data.printers) ? data.printers : [data];
+        S.printerHints = Array.isArray(data.hints) ? data.hints : [];
         const chosen = load(own('designer_printer'), null);
         const kept = S.printers.find(p => p.path === chosen);
         S.printer = kept || S.printers.find(p => p.path === data.selected) || S.printers[0] || null;
@@ -1425,10 +1426,12 @@ function stageHTML(id, zoom = false) {
 }
 // Shows the spinner at once, while an update still waits. The preview shown
 // stays until a newer one is there.
+function markBusy(el) {
+    if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+}
 function busyThen(getEl, fn) {
     return (...args) => {
-        const el = getEl();
-        if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+        markBusy(getEl());
         fn(...args);
     };
 }
@@ -3192,6 +3195,8 @@ function readImages(files) {
     });
     files = Array.from(files).filter(isImageFile);
     if (!files.length) return;
+    // The spinner shows at once, reading the files takes a moment
+    markBusy($('#edStage'));
     Promise.all(files.map(read)).then(([first, ...more]) => {
         const d = S.edit.design;
         d.image = first;
@@ -3199,7 +3204,10 @@ function readImages(files) {
         if (!withImage(d)) d.print_type = 'image';
         S.edit.fileShown = 0;
         renderEditor();
-    }).catch(() => toast('The file could not be read'));
+    }).catch(() => {
+        toast('The file could not be read');
+        redrawEditor();
+    });
 }
 
 // The file shown in the preview stays shown when another one is removed
@@ -3269,8 +3277,10 @@ function printerPanelHTML() {
                 ${p.battery_low ? '<span class="sm warn">The battery is low, charge the printer.</span>' : ''}</span>
             ${on ? '<i class="fa-solid fa-check"></i>' : ''}</button>`;
     }).join('') || '<p class="empty">No printer answered.</p>';
+    // What the search for printers could not do, e.g. look on USB without libusb
+    const hints = S.printerHints.map(h => `<p class="small hint">${esc(h)}</p>`).join('');
     return `<div class="row"><h2 class="grow">Printer</h2><button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="plist">${list}</div>
+        <div class="plist">${list}${hints}</div>
         <button class="btn sm" type="button" id="ppRefresh" style="align-self:flex-start"><i class="fa-solid fa-magnifying-glass"></i>Look for printers</button>
         ${settingsCard()}
         <a class="link" href="#wizard/printed"><i class="fa-solid fa-clock-rotate-left"></i> Printed labels</a>`;
