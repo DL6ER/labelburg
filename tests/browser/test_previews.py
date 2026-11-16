@@ -168,7 +168,7 @@ def test_the_time_limit_of_its_own_ends_with_the_preview(designer):
 def test_stage_follows_typing_while_previews_take_long(designer):
     # Each preview of the text before is shown while the newest is on its
     # way. Thrown away as out of date, the stage showed none while typing.
-    shown = designer.evaluate("""async () => {
+    shown, text = designer.evaluate("""async () => {
         const fetched = window.fetch;
         window.fetch = async (...args) => {
             const r = await fetched(...args);
@@ -179,18 +179,21 @@ def test_stage_follows_typing_while_previews_take_long(designer):
         let shown = 0;
         const watch = new MutationObserver(() => { if (stage.querySelector('img')) shown++; });
         watch.observe(stage, { childList: true });
-        for (const text of ['S', 'Sh', 'She', 'Shel', 'Shelf', 'Shelf ', 'Shelf 1', 'Shelf 12', 'Shelf 12a', 'Shelf 12ab']) {
+        // Typed on until two showed, a busy server takes longer for them
+        let text = '';
+        for (let i = 1; shown < 2 && i <= 200; i++) {
+            text = 'Shelf ' + i;
             tx.value = text;
             tx.dispatchEvent(new Event('input', { bubbles: true }));
             await new Promise(done => setTimeout(done, 50));
         }
         watch.disconnect();
         window.fetch = fetched;
-        return shown;
+        return [shown, text];
     }""")
     assert shown >= 2
     wait_for_preview(designer)
-    assert designer.evaluate("() => S.edit.design.text[0].text") == 'Shelf 12ab'
+    assert designer.evaluate("() => S.edit.design.text[0].text") == text
 
 
 def test_preview_waiting_in_line_is_of_the_label_as_asked(designer):

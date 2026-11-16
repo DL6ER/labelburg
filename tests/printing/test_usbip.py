@@ -221,6 +221,10 @@ def test_printer_that_takes_no_data(host, monkeypatch):
     assert devices.unanswered_reason(error.value) == 'The printer does not answer'
     # The connection is given up, the next query imports the printer again
     host.silent = False
+    # The host lets the printer go only once it noticed the closed connection
+    deadline = time.monotonic() + 5
+    while host.devices[0].used and time.monotonic() < deadline:
+        time.sleep(0.01)
     assert usb.query_status(host.address())['errors'] == []
     assert host.devices[0].imports == 2
 
