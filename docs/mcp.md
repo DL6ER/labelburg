@@ -18,9 +18,9 @@ pip install -r requirements-mcp.txt
 |---|---|
 | `list_printers` | The printers with their alias, device, driver, the maker, model and serial number they report on USB, status, errors and the label size loaded |
 | `list_labels` | The saved labels with their label size, tags, what they say and their blanks |
-| `preview_label` | The image of a saved label with its blanks filled in, or of lines of text and a QR code or barcode |
+| `preview_label` | The image of a saved label with its blanks filled in, or of lines of text and a code, e.g. a QR code, DataMatrix code or barcode |
 | `print_label` | Prints a saved label, also once for each of several fillings of its blanks, e.g. 12 name badges from a list |
-| `print_text` | Prints lines of text and a QR code or barcode, e.g. of a URL or a Wi-Fi network |
+| `print_text` | Prints lines of text and a code, e.g. a QR code of a URL or a Wi-Fi network, a DataMatrix code or a barcode |
 
 The tools take a printer by any of these names or a part of one, e.g. "Datamax" or its serial number, and refuse one that names several printers.
 
