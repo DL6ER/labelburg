@@ -472,6 +472,13 @@ def test_status_errors_are_told_without_their_text(client, monkeypatch, caplog):
     assert any('/app/instance/secret.json is gone' in record.getMessage() for record in caplog.records)
 
 
+def test_the_simulator_as_the_printer_is_listed_once(client):
+    client.application.config['PRINTER_PRINTER'] = 'simulation'
+    status = printer.get_ptr_status(client.application.config)
+    assert [(p['path'], p['status_type'], p['errors']) for p in status['printers']] == [('simulation', 'Simulator', [])]
+    assert (status['selected'], status['status_type'], status['errors']) == ('simulation', 'Simulator', [])
+
+
 class _Label:
     """A label that notes when it is generated."""
     label_type = LabelType.ENDLESS_LABEL

@@ -763,7 +763,7 @@ async function typedThumb(img, job) {
 // --- State -------------------------------------------------------------------
 
 const S = {
-    printers: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
+    printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
     demos: null, demoList: [], saved: [], codes: [{ type: 'QR', name: 'QR', two_d: true, corrections: ['L', 'M', 'Q', 'H'] }],
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
@@ -870,6 +870,7 @@ async function refreshPrinters(look = false) {
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
         S.printers = Array.isArray(data.printers) ? data.printers : [data];
+        S.printerHints = Array.isArray(data.hints) ? data.hints : [];
         const chosen = load(own('designer_printer'), null);
         const kept = S.printers.find(p => p.path === chosen);
         S.printer = kept || S.printers.find(p => p.path === data.selected) || S.printers[0] || null;
@@ -1144,7 +1145,7 @@ async function loadSaved() {
     try {
         const r = await fetch(API + '/repository/list');
         const data = await r.json();
-        S.saved = (data.files || []).map(f => ({ name: f.name, title: f.title || f.name.replace(/\.json$/i, '').replace(/[-_]/g, ' '), size: f.label_size_id || C.default_label_size, mtime: f.mtime }));
+        S.saved = (data.files || []).map(f => ({ name: f.name, title: f.title || f.name.replace(/\.json$/i, '').replace(/[-_]/g, ' '), size: f.label_size_id || C.default_label_size, mtime: f.mtime, tags: f.tags || [] }));
     } catch (e) { S.saved = []; }
     updateCounts();
 }
@@ -1160,7 +1161,15 @@ function serverName(title) {
     const base = String(title).normalize('NFKD').replace(/[^\x00-\x7F]/g, '').replace(/[^\w\s.-]/g, '').trim().replace(/\s+/g, '_').replace(/^[._]+|[._]+$/g, '');
     return (base || 'label') + '.json';
 }
-async function saveLabel(title, design, overwrite = null) {
+// Changes only the tags of a saved label, the rest stays as saved
+async function saveTags(name, tags) {
+    const r = await fetch(API + '/repository/tags', { method: 'POST', body: JSON.stringify({ name, tags }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.success) throw new Error(data.message || 'The tags could not be saved');
+    await loadSaved();
+}
+// tags: those to save it with, else the ones of the label it replaces
+async function saveLabel(title, design, overwrite = null, tags = null) {
     let name = overwrite;
     if (!name) {
         name = serverName(title);
@@ -1168,8 +1177,10 @@ async function saveLabel(title, design, overwrite = null) {
     }
     // The name that was checked above, with ".json": the server only adds it
     // when it is missing, "a.json" would replace a.json instead of a.json.json.
-    // A new label replaces none saved under the name in the meantime.
+    // A new label replaces none saved under the name in the meantime. The
+    // server keeps the tags of a label saved again without them.
     const body = Object.assign({}, design, { name, title, text: design.text, replace: !!overwrite });
+    if (tags) body.tags = tags;
     // Each blank keeps its kind, the server does not guess it, and a date
     // the format it is shown in, like a [today], also when the label is
     // printed through the API: the settings previews send
@@ -1189,21 +1200,76 @@ async function saveLabel(title, design, overwrite = null) {
     await loadSaved();
     return data.name;
 }
+// All tags of the saved labels, each once, as first written
+function allTags() {
+    const seen = new Map();
+    for (const s of S.saved) for (const t of s.tags) if (!seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
+    return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+const tagsOf = text => text.split(',').map(t => t.trim()).filter(Boolean);
+const hasTag = (s, tag) => s.tags.some(t => t.toLowerCase() === tag.toLowerCase());
+// A field for tags with commas between them, the tags already given to
+// saved labels below it to add or take away with a click
+function tagsField(tags) {
+    const known = allTags();
+    return `<label><span class="label-s">Tags</span><input class="field" id="saveTags" value="${esc(tags.join(', '))}" placeholder="e.g. Kitchen, Freezer" autocomplete="off"></label>
+        ${known.length ? `<div class="adds" id="tagChips">${known.map(t => `<button type="button" class="pill${tags.some(x => x.toLowerCase() === t.toLowerCase()) ? ' on' : ''}" data-tag="${esc(t)}"><i class="fa-solid fa-tag"></i>${esc(t)}</button>`).join('')}</div>` : ''}`;
+}
+function bindTagsField() {
+    const input = $('#saveTags');
+    $$('#tagChips [data-tag]').forEach(b => b.onclick = () => {
+        const tags = tagsOf(input.value), t = b.dataset.tag.toLowerCase();
+        const had = tags.some(x => x.toLowerCase() === t);
+        input.value = (had ? tags.filter(x => x.toLowerCase() !== t) : tags.concat(b.dataset.tag)).join(', ');
+        b.classList.toggle('on', !had);
+        input.focus();
+    });
+    return () => tagsOf(input.value);
+}
+// The tags of a saved label are changed, its design stays
+function tagsDialog(item) {
+    const saved = S.saved.find(x => x.name === item.id);
+    openLayer(`<div class="dialog narrow" role="dialog" aria-label="Tags">
+        <div class="dialog-h"><div class="grow"><h2>Tags of "${esc(item.title)}"</h2><p>Your saved labels are grouped by them in the wizard.</p></div>
+            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        <form class="fields" id="tagsForm" novalidate>
+            ${tagsField(saved ? saved.tags : [])}
+            <p class="err small" id="tagsErr" hidden style="padding:0;text-align:left"></p>
+            <div class="acts"><button class="btn-print" type="submit" id="tagsGo">Save</button></div>
+        </form></div>`);
+    const tags = bindTagsField();
+    $('#tagsForm').onsubmit = async e => {
+        e.preventDefault();
+        $('#tagsGo').disabled = true;
+        try {
+            await saveTags(item.id, tags());
+            closeLayer(true);
+            renderLabels();
+        } catch (err) {
+            $('#tagsErr').textContent = err.message;
+            $('#tagsErr').hidden = false;
+        } finally {
+            if ($('#tagsGo')) $('#tagsGo').disabled = false;
+        }
+    };
+}
 // The tape a label is saved for, said wherever it is saved
 const savedAs = d => `as ${sizeName(d.label_size)} label`;
-// Asks for the name of a label saved for the first time, then calls
-// save(title, name), name that of the saved label it is to replace. A saved
-// label of the same name is only replaced when asked again.
-function saveDialog(title, save, design) {
+// Asks for the name of a label saved for the first time and its tags, then
+// calls save(title, name, tags), name that of the saved label it is to
+// replace. A saved label of the same name is only replaced when asked again.
+function saveDialog(title, save, design, tags = []) {
     openLayer(`<div class="dialog narrow" role="dialog" aria-label="Save to your labels">
         <div class="dialog-h"><div class="grow"><h2>Save to your labels</h2><p>It is saved ${esc(savedAs(design))} and listed under this name in the wizard and the search.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
         <form class="fields" id="saveForm" novalidate>
             <label><span class="label-s">Name</span><input class="field" id="saveName" value="${esc(title)}" autocomplete="off"></label>
+            ${tagsField(tags)}
             <p class="err small" id="saveErr" hidden style="padding:0;text-align:left"></p>
             <div class="acts"><button class="btn-print" type="submit" id="saveGo">Save</button></div>
         </form></div>`);
     const name = $('#saveName'), go = $('#saveGo');
+    const chosenTags = bindTagsField();
     let replacing = null;
     const say = text => { $('#saveErr').textContent = text; $('#saveErr').hidden = !text; };
     // Closed or replaced while saving, the dialog is gone
@@ -1222,11 +1288,20 @@ function saveDialog(title, save, design) {
             if (taken && replacing !== taken.name) {
                 replacing = taken.name;
                 go.textContent = 'Replace it';
+                // The label it replaces keeps its tags, those typed here are added.
+                // Given another name instead, its tags go again.
+                const typed = chosenTags();
+                const show = tags => {
+                    $('#saveTags').value = tags.join(', ');
+                    $$('#tagChips [data-tag]').forEach(b => b.classList.toggle('on', hasTag({ tags }, b.dataset.tag)));
+                };
+                show(taken.tags.concat(typed.filter(t => !hasTag(taken, t))));
+                name.addEventListener('input', () => show(chosenTags().filter(t => hasTag({ tags: typed }, t) || !hasTag(taken, t))), { once: true });
                 return tell(`"${taken.title}" is one of your saved labels already. Replace it, or give this label another name.`);
             }
             go.disabled = true;
             try {
-                await save(t, taken ? taken.name : null);
+                await save(t, taken ? taken.name : null, chosenTags());
                 if (name.isConnected) closeLayer(true);
                 return;
             } catch (err) {
@@ -1280,7 +1355,7 @@ async function itemDesign(item) {
     return item.design;
 }
 const demoItem = d => ({ kind: 'demo', id: d.id, title: d.title, size: d.label_size_id, sub: d.catName });
-const savedItem = s => ({ kind: 'saved', id: s.name, title: s.title, size: s.size, sub: 'Saved label' });
+const savedItem = s => ({ kind: 'saved', id: s.name, title: s.title, size: s.size, sub: s.tags && s.tags.length ? s.tags.join(', ') : 'Saved label', tags: s.tags || [] });
 const histItem = h => ({ kind: 'printed', id: h.id, title: entryName(h), design: h.design, values: h.values, size: h.design.label_size, sub: h.state === 'failed' ? `Failed: ${h.message}` : `${h.copies} x, ${fmtTime(h.time)}`, entry: h });
 
 function thumbSrc(item) {
@@ -1430,10 +1505,12 @@ function stageHTML(id, zoom = false) {
 }
 // Shows the spinner at once, while an update still waits. The preview shown
 // stays until a newer one is there.
+function markBusy(el) {
+    if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+}
 function busyThen(getEl, fn) {
     return (...args) => {
-        const el = getEl();
-        if (el) { el._seq = (el._seq || 0) + 1; el.classList.add('busy'); }
+        markBusy(getEl());
         fn(...args);
     };
 }
@@ -1698,50 +1775,96 @@ async function loadIcons() {
     } catch (e) { return []; }
     return iconList;
 }
-// Icons whose names contain all words of the search, exact and leading
-// matches first. Without a search all icons, by name.
+// Icons and symbols whose names contain all words of the search, exact and
+// leading matches first. Without a search all of them, by name.
 function findIcons(list, query) {
-    const words = query.toLowerCase().replace(/^mdi:/, '').split(/[\s:]+/).filter(Boolean);
+    const words = query.toLowerCase().replace(/^[a-z]+:/, '').split(/[\s:]+/).filter(Boolean);
     if (!words.length) return list;
     const rank = i => i.name === words.join('-') ? 0 : i.name.startsWith(words[0]) ? 1 : 2;
     return list.filter(i => words.every(w => i.name.includes(w)))
         .sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length || a.name.localeCompare(b.name));
 }
 
+// The symbols of fasteners and electronic components for {{fastener:<name>}}
+// and {{electronic:<name>}}, by set
+let symbolSets = null;
+async function loadSymbolSets() {
+    if (symbolSets) return symbolSets;
+    try {
+        symbolSets = await (await fetch(STATIC + 'symbols/symbols.json')).json();
+    } catch (e) { return {}; }
+    return symbolSets;
+}
+const SYMBOL_SETS = { fastener: 'Fasteners', electronic: 'Electronic components' };
+// The examples in the hints
+const SYMBOL_EXAMPLES = { mdi: 'power', fastener: 'head-torx', electronic: 'resistor-iec-standard' };
+// The sections of the dialog open, as left last time
+const openSymbolSections = new Set(['symbols', 'mdi']);
+
 async function openSymbols(input) {
     if (!input) return;
     // Open at once, so that Escape closes it while the lists load
     openLayer('<div class="dialog narrow" role="dialog" aria-label="Insert a symbol"><p class="muted">Loading the symbols</p></div>');
     const loading = $('#layer .dialog');
-    const [list, icons] = await Promise.all([loadSymbols(), loadIcons()]);
+    const [list, icons, sets] = await Promise.all([loadSymbols(), loadIcons(), loadSymbolSets()]);
     if (!loading.isConnected) return;
-    openLayer(`<div class="dialog narrow${icons.length ? ' symbols' : ''}" role="dialog" aria-label="Insert a symbol">
+    // The sets inserted by name, {{<set>:<name>}}: the icons first, then
+    // the symbols
+    const named = [
+        ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', items: icons }] : []),
+        ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title,
+            items: Object.entries(sets[set]).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) })) })),
+    ];
+    const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
+            <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
+    openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
         <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>
-        ${icons.length ? `<div class="sym-icons"><h3>Icons <span class="muted small">Material Design Icons, in every font</span></h3>
-            <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
-            <div class="sym-grid" id="icoGrid"></div>
-            <p class="muted small" id="icoHint" style="margin:0"></p>
-            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button></div>` : ''}</div>`);
+        ${named.length ? '<input class="field" type="search" id="symQ" placeholder="Search icons and symbols, e.g. lightbulb, torx or resistor" autocomplete="off" aria-label="Search the icons and symbols">' : ''}
+        ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
+        ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
+        ${named.map(x => section(x.id, `${x.title} <span class="muted small">${x.note || ''}</span>`, `<div class="sym-grid" data-grid="${x.id}"></div>
+            <p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${x.id}:${SYMBOL_EXAMPLES[x.id]}}}</code>. Point at one to see its name.</p>
+            <button class="btn sm" type="button" data-all="${x.id}" style="align-self:flex-start" hidden></button>`)).join('')}` : ''}
+        <p class="muted" id="symNone" hidden>Nothing found.</p></div>`);
+    const symbolsSection = $('#layer [data-section="symbols"]');
+    // Opened and closed by hand, not by the search, whose toggle events
+    // come only after draw()
+    $$('#layer .sym-set > summary').forEach(s => s.addEventListener('click', () => {
+        openSymbolSections[s.parentElement.open ? 'delete' : 'add'](s.parentElement.dataset.section);
+    }));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
-    if (!icons.length) return;
-    // The first ones, all of them on request
-    const draw = all => {
-        const found = findIcons(icons, $('#icoQ').value);
-        const shown = all ? found : found.slice(0, 120);
-        $('#icoGrid').innerHTML = shown.map(i => `<button type="button" class="sym ico" data-ico="${esc(i.name)}" title="mdi:${esc(i.name)}">${i.char}</button>`).join('');
-        $('#icoHint').innerHTML = found.length ? 'Inserts the name, e.g. <code>{{mdi:power}}</code>. Point at an icon to see its name.' : 'No icon found.';
-        $('#icoAll').hidden = shown.length >= found.length;
-        $('#icoAll').textContent = `Show all ${found.length} icons`;
+    $('#layer .dialog').addEventListener('click', e => {
+        const b = e.target.closest('[data-tpl]');
+        if (b) { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); }
+    });
+    if (!named.length) return;
+    // The first ones of each set, all of them on request. A search shows
+    // the sets with something found, "fastener:torx" only those of the set.
+    const showAll = new Set();
+    const draw = () => {
+        const query = $('#symQ').value.trim();
+        const only = (query.match(/^([a-z]+):/) || [])[1];
+        symbolsSection.hidden = !!query;
+        if (!query) symbolsSection.open = openSymbolSections.has('symbols');
+        let any = !query;
+        for (const x of named) {
+            const found = only && named.some(y => y.id === only) && only !== x.id ? [] : findIcons(x.items, query);
+            const shown = showAll.has(x.id) ? found : found.slice(0, 120);
+            $(`[data-grid="${x.id}"]`).innerHTML = shown.map(i => `<button type="button" class="sym ${x.id === 'mdi' ? 'ico' : 'sx'}${i.name.startsWith('bolt-') && x.id === 'fastener' ? ' wide' : ''}" data-tpl="${x.id}:${esc(i.name)}" title="${x.id}:${esc(i.name)}">${i.char}</button>`).join('');
+            const all = $(`[data-all="${x.id}"]`);
+            all.hidden = shown.length >= found.length;
+            all.textContent = `Show all ${found.length}`;
+            const d = $(`#layer [data-section="${x.id}"]`);
+            d.hidden = !!query && !found.length;
+            d.open = query ? found.length > 0 : openSymbolSections.has(x.id);
+            any = any || found.length > 0;
+        }
+        $('#symNone').hidden = any;
     };
-    draw(false);
-    $('#icoQ').addEventListener('input', () => draw(false));
-    $('#icoAll').onclick = () => draw(true);
-    $('#icoGrid').onclick = e => {
-        const b = e.target.closest('[data-ico]');
-        if (b) { closeLayer(true); insertAt(input, `{{mdi:${b.dataset.ico}}}`, false); }
-    };
+    draw();
+    $('#symQ').addEventListener('input', () => { showAll.clear(); draw(); });
+    $$('[data-all]').forEach(b => b.onclick = () => { showAll.add(b.dataset.all); draw(); });
 }
 
 // The codes of {{datetime:<format>}}, with examples made by the server
@@ -1771,6 +1894,7 @@ function varsHelpHTML() {
             <li><code>{{asn}}</code>, <code>{{asn:&lt;digits&gt;}}</code> - the next archive serial number for Paperless-ngx, like <code>[ASN]</code>.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
+            <li><code>{{fastener:&lt;name&gt;}}</code> and <code>{{electronic:&lt;name&gt;}}</code> - a fastener or an electronic component, e.g. <code>{{fastener:head-torx}}</code> or <code>{{electronic:resistor-iec-standard}}</code>. The Symbol button shows them.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
             <li><code>{{random[:&lt;len&gt;][:shift]}}</code> - a random string of &lt;len&gt; characters (default 64, at most 10000). <code>shift</code> shifts it around to fill gaps.</li>
         </ul>`;
@@ -1903,10 +2027,11 @@ function libItems(cat) {
     let items;
     const demos = S.demoList.filter(d => d.language === S.lang);
     if (cat === 'saved') items = S.saved.map(savedItem);
+    else if (cat.startsWith('tag:')) items = S.saved.filter(s => hasTag(s, cat.slice(4))).map(savedItem);
     else if (cat === 'printed') items = S.history.slice(0, 40).map(histItem);
     else if (cat === 'all') items = demos.map(demoItem);
     else items = demos.filter(d => d.cat === cat).map(demoItem);
-    if (S.fitsOnly && !['printed', 'saved'].includes(cat)) {
+    if (S.fitsOnly && !['printed', 'saved'].includes(cat) && !cat.startsWith('tag:')) {
         // Labels made for other tapes come last
         items = items.filter(i => fitsTape(i.size)).concat(items.filter(i => !fitsTape(i.size)));
     }
@@ -1914,7 +2039,8 @@ function libItems(cat) {
 }
 
 function renderLabels(arg) {
-    if (arg) S.libCat = arg;
+    if (arg) { try { S.libCat = decodeURIComponent(arg); } catch (e) { S.libCat = arg; } }
+    if (S.libCat.startsWith('tag:') && !S.saved.some(s => hasTag(s, S.libCat.slice(4)))) S.libCat = 'saved';
     S.libCatChosen = !!arg;
     const cats = S.demos || [];
     const count = id => S.demoList.filter(d => d.language === S.lang && d.cat === id && (!S.fitsOnly || fitsTape(d.label_size_id))).length;
@@ -1922,6 +2048,7 @@ function renderLabels(arg) {
         <nav class="lib-nav" aria-label="Label groups">
             <div class="h">Yours</div>
             ${navBtn('saved', 'server', 'Saved labels', S.saved.length)}
+            ${allTags().map(t => navBtn('tag:' + t, 'tag', t, S.saved.filter(s => hasTag(s, t)).length)).join('')}
             ${navBtn('printed', 'clock-rotate-left', 'Printed', S.history.length)}
             <div class="h">Ready-made</div>
             ${navBtn('all', 'swatchbook', 'All', S.demoList.filter(d => d.language === S.lang && (!S.fitsOnly || fitsTape(d.label_size_id))).length)}
@@ -1941,7 +2068,7 @@ function renderLabels(arg) {
         </section>
         <aside class="detail" id="libDetail"></aside>
     </div>`;
-    $$('.lib-nav button').forEach(b => b.onclick = () => { S.libCatChosen = true; history.replaceState(null, '', '#templates/' + b.dataset.cat); S.libCat = b.dataset.cat; $$('.lib-nav button').forEach(x => x.classList.toggle('on', x === b)); renderLibGrid(); });
+    $$('.lib-nav button').forEach(b => b.onclick = () => { S.libCatChosen = true; history.replaceState(null, '', '#templates/' + encodeURIComponent(b.dataset.cat)); S.libCat = b.dataset.cat; $$('.lib-nav button').forEach(x => x.classList.toggle('on', x === b)); renderLibGrid(); });
     {
         const ta = $('#wzText');
         const grow = () => { ta.rows = Math.min(6, Math.max(1, ta.value.split('\n').length)); };
@@ -1993,7 +2120,7 @@ function textMatches() {
     const scored = [];
     const pool = [].concat(S.saved.map(savedItem), S.demoList.filter(d => d.language === S.lang).map(d => Object.assign(demoItem(d), { _cat: d.catName })));
     for (const it of pool) {
-        const hay = (it.title + ' ' + (it._cat || '') + ' ' + (it.design ? blanksOf(it.design).join(' ') : '')).toLowerCase();
+        const hay = (it.title + ' ' + (it._cat || '') + ' ' + (it.tags || []).join(' ') + ' ' + (it.design ? blanksOf(it.design).join(' ') : '')).toLowerCase();
         let score = 0;
         for (const w of words) if (hay.includes(w) || hay.includes(w.slice(0, Math.max(4, w.length - 2)))) score++;
         if (score) scored.push([score + (fitsTape(it.size) ? .5 : 0) + (it.kind === 'saved' ? .3 : 0), it]);
@@ -2011,7 +2138,7 @@ function renderLibGrid() {
     const items = matches.length ? matches : libItems(S.libCat);
     const cat = (S.demos || []).find(c => c.id === S.libCat);
     $('#libTitle').textContent = matches.length ? `Templates for "${toDisplay(wizardLines()[0])}"` :
-        ({ saved: 'Saved labels', printed: 'Printed', all: 'All ready-made templates' }[S.libCat] || (cat ? cat.name : 'Templates'));
+        ({ saved: 'Saved labels', printed: 'Printed', all: 'All ready-made templates' }[S.libCat] || (cat ? cat.name : S.libCat.startsWith('tag:') ? S.libCat.slice(4) : 'Templates'));
     if (!items.length) {
         grid.innerHTML = `<p class="empty">${S.libCat === 'printed' ? 'Nothing printed yet.' : 'No labels here.'}</p>`;
         return;
@@ -2019,7 +2146,7 @@ function renderLibGrid() {
     grid.innerHTML = items.slice(0, 240).map((it, i) => {
         const other = placed(it.size);
         const blanks = it.design ? blanksOf(it.design) : [];
-        const sub = it.kind === 'saved' && blanks.length ? 'Fill in: ' + blanks.join(', ') : other ? 'Made for ' + sizeName(it.size) : it.kind === 'saved' ? 'Saved label' : (it.sub || '');
+        const sub = it.kind === 'saved' && blanks.length ? 'Fill in: ' + blanks.join(', ') : other ? 'Made for ' + sizeName(it.size) : it.kind === 'saved' ? (it.tags && it.tags.length ? it.tags.join(', ') : 'Saved label') : (it.sub || '');
         return `<button class="thumb${S.libSel && S.libSel.kind === it.kind && S.libSel.id === it.id ? ' sel' : ''}" type="button" data-i="${i}">
             <div class="bed">${typedGrid && it.kind !== 'printed' ? lazyTypedTag(it) : thumbSrc(it)}</div><div class="t">${esc(it.title)}</div><div class="s">${esc(sub)}</div></button>`;
     }).join('');
@@ -2060,7 +2187,8 @@ async function showDetail(item) {
             <button class="btn" type="button" id="libEdit"><i class="fa-solid fa-pen-ruler"></i>Change the design</button>
             <div class="more-wrap"><button class="btn" type="button" id="libMore" aria-expanded="false"><i class="fa-solid fa-ellipsis"></i>More</button>
                 <div class="more-menu" id="libMenu" hidden>
-                    ${item.kind === 'saved' ? `<button type="button" id="libLinks"><i class="fa-solid fa-link"></i>Use from anywhere</button>
+                    ${item.kind === 'saved' ? `<button type="button" id="libTags"><i class="fa-solid fa-tags"></i>Tags</button>
+                        <button type="button" id="libLinks"><i class="fa-solid fa-link"></i>Use from anywhere</button>
                         <button type="button" id="libDelete" class="danger"><i class="fa-regular fa-trash-can"></i>Remove from the saved labels</button>`
                         : `<button type="button" id="libKeep"><i class="fa-regular fa-bookmark"></i>Save to your labels</button>`}
                 </div></div>
@@ -2101,18 +2229,22 @@ async function showDetail(item) {
     $('#libEdit').onclick = () => openEditor({ title: item.title, design: work.design, origin: item.kind === 'saved' ? { kind: 'saved', id: item.id } : null });
     if ($('#libKeep')) $('#libKeep').onclick = () => {
         $('#libMenu').hidden = true;
-        saveDialog(item.title, async (title, replacing) => {
-            const name = await saveLabel(title, work.design, replacing);
+        saveDialog(item.title, async (title, replacing, tags) => {
+            const name = await saveLabel(title, work.design, replacing, tags);
+            renderLabels();
             toast(`Saved "${title}" to your labels ${savedAs(work.design)}`, { label: 'Open', run: () => { location.hash = 'fill/' + encodeURIComponent(name); } });
         }, work.design);
     };
+    if ($('#libTags')) $('#libTags').onclick = () => { $('#libMenu').hidden = true; tagsDialog(item); };
     if ($('#libLinks')) $('#libLinks').onclick = () => { $('#libMenu').hidden = true; linksDialog({ id: item.id, title: item.title, design: work.design }); };
     if ($('#libDelete')) $('#libDelete').onclick = async () => {
         const kept = clone(item.design);
+        // As listed now, the Tags dialog may have changed them since
+        const tags = (S.saved.find(x => x.name === item.id) || item).tags;
         try { await deleteLabel(item.id); } catch (e) { toast(e.message); return; }
         S.libSel = null;
         renderLabels();
-        toast(`Removed "${item.title}"`, { label: 'Undo', run: async () => { await saveLabel(item.title, kept, item.id); renderLabels(); } });
+        toast(`Removed "${item.title}"`, { label: 'Undo', run: async () => { await saveLabel(item.title, kept, item.id, tags); renderLabels(); } });
     };
 }
 
@@ -3113,9 +3245,9 @@ function bindEditor() {
     $('#edPrint').onclick = () => printJob({ title: E.title, design: madeDesign(E), values: valuesNow(E.values, E.blankDefs, editItem(E)), copies: copiesIn(document, '#edCopies'), source: E.origin });
     $('#edSave').onclick = () => {
         const over = E.origin && E.origin.kind === 'saved' ? E.origin.id : null;
-        const save = async (title, replacing) => {
+        const save = async (title, replacing, tags) => {
             const made = madeDesign(E);
-            const name = await saveLabel(title, made, over || replacing);
+            const name = await saveLabel(title, made, over || replacing, tags);
             E.title = title;
             E.origin = { kind: 'saved', id: name };
             // Saved for this tape, it is made for it now
@@ -3199,6 +3331,8 @@ function readImages(files) {
     });
     files = Array.from(files).filter(isImageFile);
     if (!files.length) return;
+    // The spinner shows at once, reading the files takes a moment
+    markBusy($('#edStage'));
     Promise.all(files.map(read)).then(([first, ...more]) => {
         const d = S.edit.design;
         d.image = first;
@@ -3206,7 +3340,10 @@ function readImages(files) {
         if (!withImage(d)) d.print_type = 'image';
         S.edit.fileShown = 0;
         renderEditor();
-    }).catch(() => toast('The file could not be read'));
+    }).catch(() => {
+        toast('The file could not be read');
+        redrawEditor();
+    });
 }
 
 // The file shown in the preview stays shown when another one is removed
@@ -3276,8 +3413,10 @@ function printerPanelHTML() {
                 ${p.battery_low ? '<span class="sm warn">The battery is low, charge the printer.</span>' : ''}</span>
             ${on ? '<i class="fa-solid fa-check"></i>' : ''}</button>`;
     }).join('') || '<p class="empty">No printer answered.</p>';
+    // What the search for printers could not do, e.g. look on USB without libusb
+    const hints = S.printerHints.map(h => `<p class="small hint">${esc(h)}</p>`).join('');
     return `<div class="row"><h2 class="grow">Printer</h2><button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="plist">${list}</div>
+        <div class="plist">${list}${hints}</div>
         <button class="btn sm" type="button" id="ppRefresh" style="align-self:flex-start"><i class="fa-solid fa-magnifying-glass"></i>Look for printers</button>
         ${settingsCard()}
         <a class="link" href="#wizard/printed"><i class="fa-solid fa-clock-rotate-left"></i> Printed labels</a>`;
@@ -3403,7 +3542,7 @@ function openSearch() {
             groups.push(['Commands', COMMANDS.filter(c => c.name.toLowerCase().includes(t)).map(c => ({ cmd: c }))]);
         } else {
             const m = s => !text || s.toLowerCase().includes(text);
-            groups.push(['Saved labels', S.saved.filter(x => m(x.title)).slice(0, text ? 5 : 6).map(x => ({ item: savedItem(x) }))]);
+            groups.push(['Saved labels', S.saved.filter(x => m(x.title + ' ' + x.tags.join(' '))).slice(0, text ? 5 : 6).map(x => ({ item: savedItem(x) }))]);
             const seen = new Set();
             groups.push(['Printed before', S.history.filter(h => { const n = entryName(h); if (seen.has(n) || !m(n + ' ' + h.title)) return false; seen.add(n); return true; }).slice(0, text ? 3 : 2).map(h => ({ item: histItem(h) }))]);
             if (text) {
@@ -3443,7 +3582,7 @@ function openSearch() {
         if (it.kind === 'saved') { location.hash = 'fill/' + encodeURIComponent(it.id); return; }
         S.libSel = it;
         if (it.kind === 'demo') { const d = S.demoList.find(x => x.id === it.id); if (d) S.libCat = d.cat; }
-        if (location.hash === '#templates/' + S.libCat) renderLabels(); else location.hash = 'templates/' + S.libCat;
+        if (location.hash === '#templates/' + encodeURIComponent(S.libCat)) renderLabels(); else location.hash = 'templates/' + encodeURIComponent(S.libCat);
     };
     q.addEventListener('input', () => { sel = 0; draw(); });
     q.addEventListener('keydown', e => {
