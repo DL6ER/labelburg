@@ -1100,6 +1100,13 @@ def test_a_time_counted_from_now_shows_the_time(designer):
     fmt = designer.evaluate('() => dateFormat()')
     assert designer.evaluate("() => fromDisplay('Use by [today+2h]')") == f'Use by {{{{datetime+2h:{fmt} %H:%M}}}}'
     assert designer.evaluate("() => fromDisplay('[today + 30 minutes]')") == f'{{{{datetime+30min:{fmt} %H:%M}}}}'
+    # [now] is the date with the time, also counted from now
+    assert designer.evaluate("() => fromDisplay('Made [now], use by [now+2h]')") == \
+        f'Made {{{{datetime:{fmt} %H:%M}}}}, use by {{{{datetime+2h:{fmt} %H:%M}}}}'
     # Months stay months, shown as typed
     assert designer.evaluate("() => fromDisplay('[today+6m]')") == f'{{{{datetime+6m:{fmt}}}}}'
-    assert designer.evaluate("() => toDisplay('{{datetime+30min:%H:%M}} {{datetime+2h:%H}}')") == '[today+30min] [today+2h]'
+    # A date with its time is shown as [now], one without as [today]
+    assert designer.evaluate("() => toDisplay('{{datetime+30min:%H:%M}} {{datetime:%d.%m.}} {{datetime+1d:%d.%m. %I %p}}')") == \
+        '[now+30min] [today] [now+1d]'
+    # A blank cannot be named so
+    assert designer.evaluate("() => isVariable('now') && isVariable('Now + 2 hours')") is True
