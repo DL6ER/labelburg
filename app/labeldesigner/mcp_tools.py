@@ -3,6 +3,7 @@ the saved labels and to print. The tools call the API of the app, so that
 they share its checks and its messages. It needs the mcp package, see
 requirements-mcp.txt and docs/mcp.md."""
 import base64
+import hmac
 import json
 import logging
 import os
@@ -613,10 +614,23 @@ class Endpoint:
             return self.wsgi_app(environ, start_response)
         if environ['PATH_INFO'] == PREVIEW:
             return self._preview(environ, start_response)
+        if not self._authorized(environ):
+            return Response('A valid bearer token is required', 401, {'WWW-Authenticate': 'Bearer'})(environ, start_response)
         with self._lock:
             if self._mcp is None:
                 self._mcp = self._start()
         return self._mcp(environ, start_response)
+
+    def _authorized(self, environ) -> bool:
+        """Whether a request may use the tools: always without MCP_TOKEN,
+        else with it as its bearer token. The previews need none, their
+        address holds what they show and the chat of an assistant loads
+        them as images."""
+        token = self.app.config.get('MCP_TOKEN')
+        if not token:
+            return True
+        given = environ.get('HTTP_AUTHORIZATION', '')
+        return hmac.compare_digest(given.encode('utf-8', 'surrogateescape'), f'Bearer {token}'.encode('utf-8'))
 
     def _preview(self, environ, start_response):
         from urllib.parse import parse_qs

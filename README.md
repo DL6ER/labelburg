@@ -100,6 +100,7 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `PRINT_MAX_COUNT` | Most labels per print request | `100` |
 | `MCP_ENABLED` | `false` to turn off the [MCP endpoint](docs/mcp.md) for AI assistants | `true` |
 | `MCP_MAX_COUNT` | Most labels per call of an [AI assistant](docs/mcp.md) | `10` |
+| `MCP_TOKEN` | A token the [MCP endpoint](docs/mcp.md#token) then asks for as `Authorization: Bearer <token>` | none |
 | `MAX_CONTENT_LENGTH` | Largest request in bytes, e.g. for uploaded images | 32 MB |
 | `FONT_FOLDER` | Folder with more fonts, see [Fonts](#fonts) | none |
 | `SYSTEM_FONTS` | `false` to offer only the fonts of `FONT_FOLDER`, not those installed on the system | `true` |

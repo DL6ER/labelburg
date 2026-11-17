@@ -736,3 +736,22 @@ def test_label_for_the_paper_of_the_other_model(client, tmp_path):
     assert printed(tmp_path) == 4
     # Other paper stays refused
     assert tool(client, 'print_label', name='Receipt.json', printer='Till', count=1, label_size='62')['isError']
+
+
+def test_with_a_token_only_requests_that_send_it_use_the_tools(client):
+    assert call(client, 'tools/list')[0] == 200
+    client.application.config['MCP_TOKEN'] = 'secret-token'
+    for headers in ({}, {'Authorization': 'Bearer wrong'}, {'Authorization': 'secret-token'}, {'Authorization': 'Bearer secret-token2'}):
+        response = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, headers={**HEADERS, **headers})
+        assert response.status_code == 401 and response.headers['WWW-Authenticate'] == 'Bearer'
+    status, answer = call(client, 'tools/list', Authorization='Bearer secret-token')
+    assert status == 200 and answer['result']['tools']
+    # The host is still checked first
+    response = client.post('/mcp', json={}, headers={**HEADERS, 'Authorization': 'Bearer secret-token', 'Host': 'evil.example.com'})
+    assert response.status_code == 403
+
+
+def test_the_previews_need_no_token(client):
+    # Their address holds what they show, a chat loads them as images
+    client.application.config['MCP_TOKEN'] = 'secret-token'
+    assert client.get('/mcp/preview.png?r=nonsense').status_code == 400
