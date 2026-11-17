@@ -1093,3 +1093,13 @@ def test_counters_with_a_start_and_step_are_typed_and_shown(designer):
     # One that cannot count shows why
     type_line(designer, 0, 'Box [counter:A1]')
     designer.wait_for_function("() => document.querySelector('#edStage').innerText.includes('A counter starts at a number or at letters, e.g., 001 or A')")
+
+
+def test_a_time_counted_from_now_shows_the_time(designer):
+    # Food used within hours: [today+2h] is the date with the time
+    fmt = designer.evaluate('() => dateFormat()')
+    assert designer.evaluate("() => fromDisplay('Use by [today+2h]')") == f'Use by {{{{datetime+2h:{fmt} %H:%M}}}}'
+    assert designer.evaluate("() => fromDisplay('[today + 30 minutes]')") == f'{{{{datetime+30min:{fmt} %H:%M}}}}'
+    # Months stay months, shown as typed
+    assert designer.evaluate("() => fromDisplay('[today+6m]')") == f'{{{{datetime+6m:{fmt}}}}}'
+    assert designer.evaluate("() => toDisplay('{{datetime+30min:%H:%M}} {{datetime+2h:%H}}')") == '[today+30min] [today+2h]'

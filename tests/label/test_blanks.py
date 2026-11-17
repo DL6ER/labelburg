@@ -128,8 +128,8 @@ def test_dates_of_blanks_start_at_a_day_moved_from_today(tmp_path):
 
 
 @pytest.mark.parametrize('default, message', [
-    ('+5x', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
-    ('-5', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
+    ('+5x', 'A date offset is a sign, a number and d, w, m, y, h or min, e.g., +5d'),
+    ('-5', 'A date offset is a sign, a number and d, w, m, y, h or min, e.g., +5d'),
     (' +101y', 'A date offset is at most a hundred years'),
 ])
 def test_dates_of_blanks_moved_by_another_offset_are_refused(tmp_path, default, message):
