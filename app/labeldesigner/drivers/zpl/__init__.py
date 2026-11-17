@@ -12,7 +12,7 @@ import time
 
 from PIL import Image
 
-from .. import devices
+from .. import devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
@@ -24,6 +24,11 @@ MODELS = ('Zebra/ZPL',)
 DOTS_PER_MM = 8
 # A printhead of 104 mm, as on a GK420t, a 105 mm label loses 1 mm
 HEAD = 832
+# mm/s, 4 in/s, the most a Datamax-O'Neil E-4204B prints and less than the
+# 5 in/s of a GK420t, and the seconds a label takes besides, to take its job
+# and find the gap to the next label
+SPEED = 102
+BESIDES = 1.0
 # Width x length in mm of common labels, metric ones and inch ones, e.g.
 # 105 x 148 mm (A6) and 102 x 152 mm (4 x 6 in) shipping labels. The printer
 # does not tell which are loaded.
@@ -146,7 +151,7 @@ class Zpl(Driver):
         cached = devices.status_cache.get(devices.lock_key(device))
         if _asked_lately(device):
             return dict(cached) if cached else state
-        with devices.device_lock(device, timeout=devices.STATUS_LOCK_TIMEOUT) as acquired:
+        with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
                 state.update(devices.status_cache.get(devices.lock_key(device), {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
@@ -178,6 +183,13 @@ class Zpl(Driver):
             state['media_length'] = measured(answer['length'])
         devices.status_cache[devices.lock_key(device)] = state
         return state
+
+    def print_speed(self, model, fast, red):
+        return SPEED, BESIDES
+
+    def label_lengths(self, job):
+        # Each label of the job tells its rows in ^LL
+        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / DOTS_PER_MM for label in job]
 
     def render(self, queue, entries, keep=None):
         job = []

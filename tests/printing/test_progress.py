@@ -217,12 +217,22 @@ def test_label_length_at_the_resolution_of_the_printer(model, label_size, dots, 
     assert drivers.for_model(model).label_lengths(job) == [pytest.approx(200 if high_res else 100, abs=0.1)]
 
 
+def test_label_length_of_a_zpl_printer():
+    # 150 mm along the paper at 8 dots per mm
+    label = SimpleNamespace(label_type=LabelType.DIE_CUT_LABEL, label_orientation=LabelOrientation.STANDARD,
+                            label_content=LabelContent.IMAGE_BW, generate=lambda: Image.new('1', (800, 1200), 1))
+    queue = SimpleNamespace(model='Zebra/ZPL', label_size='zpl100x150', cut='each')
+    driver = drivers.for_model('Zebra/ZPL')
+    assert driver.label_lengths(driver.render(queue, [{'label': label, 'cut': True}])) == [pytest.approx(150)]
+
+
 @pytest.mark.parametrize('model, device', [
     ('QL-800', DEVICE),
     ('Epson/TM-T20II', 'file:///dev/usb/lp1'),
     ('PUQU/Q00', 'bt://00:11:22:33:44:55'),
     ('Niimbot/D110_M', 'bt://00:11:22:33:44:66'),
     ('VC-500W', 'vc500w://192.0.2.1'),
+    ('Zebra/ZPL', 'tcp://192.0.2.2'),
 ])
 def test_status_of_a_printer_does_not_wait_for_its_job(clock, model, device):
     progress.start(device, [100], (50, 1))
