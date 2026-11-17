@@ -872,18 +872,85 @@ def test_symbols_are_offered(designer):
 def test_icons_are_offered_with_the_symbols(designer):
     type_line(designer, 0, 'Light ')
     designer.click('#edSym')
-    designer.wait_for_selector('#icoGrid .ico')
+    designer.wait_for_selector('[data-grid="mdi"] .ico')
     # The first ones, all of them on request
-    count = "() => document.querySelectorAll('#icoGrid .ico').length"
+    count = "() => document.querySelectorAll('[data-grid=\"mdi\"] .ico').length"
     assert designer.evaluate(count) == 120
-    designer.click('#icoAll')
+    designer.click('[data-all="mdi"]')
     assert designer.evaluate(count) > 7000
-    designer.fill('#icoQ', 'lightbulb')
-    assert designer.get_attribute('#icoGrid .ico', 'title') == 'mdi:lightbulb'
-    designer.click('#icoGrid .ico')
+    designer.fill('#symQ', 'lightbulb')
+    assert designer.get_attribute('[data-grid="mdi"] .ico', 'title') == 'mdi:lightbulb'
+    designer.click('[data-grid="mdi"] .ico')
     assert designer.input_value('[data-row="0"] .tx') == 'Light {{mdi:lightbulb}}'
     wait_for_preview(designer)
     assert 'Everything fits.' in fits_note(designer)
+
+
+def test_one_search_finds_in_every_set(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].filter(d => !d.hidden && d.open).map(d => d.dataset.section)"
+    # The sets with something found open, the others and the symbols hidden
+    designer.fill('#symQ', 'nut')
+    assert designer.evaluate(sections) == ['mdi', 'fastener']
+    designer.fill('#symQ', 'diode')
+    assert designer.evaluate(sections) == ['electronic']
+    designer.fill('#symQ', 'resistor')
+    assert designer.evaluate(sections) == ['mdi', 'electronic']
+    # Only one set
+    designer.fill('#symQ', 'fastener:nut')
+    assert designer.evaluate(sections) == ['fastener']
+    designer.fill('#symQ', 'no such symbol')
+    assert designer.evaluate(sections) == []
+    assert designer.is_visible('#symNone')
+    # Without a search as opened by hand
+    designer.fill('#symQ', '')
+    assert designer.evaluate(sections) == ['symbols', 'mdi']
+
+
+def test_the_icons_come_first_and_open(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    order = designer.eval_on_selector_all('#layer .sym-set', 'ds => ds.map(d => d.dataset.section)')
+    assert order == ['symbols', 'mdi', 'fastener', 'electronic']
+    assert designer.is_visible('[data-grid="mdi"] .ico')
+
+
+def test_the_hints_name_meaningful_examples(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    examples = designer.eval_on_selector_all('#layer .sym-body code', 'els => els.map(e => e.textContent)')
+    assert sorted(examples) == ['{{electronic:resistor-iec-standard}}', '{{fastener:head-torx}}', '{{mdi:power}}']
+
+
+def test_a_search_leaves_the_sections_as_opened_by_hand(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].filter(d => !d.hidden && d.open).map(d => d.dataset.section)"
+    before = designer.evaluate(sections)
+    designer.fill('#symQ', 'nut')
+    assert sorted(designer.evaluate(sections)) == ['fastener', 'mdi']
+    designer.fill('#symQ', '')
+    assert designer.evaluate(sections) == before
+    # Opened by hand, also the next time
+    designer.click('[data-section="electronic"] summary')
+    designer.keyboard.press('Escape')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    assert set(designer.evaluate(sections)) == {*before, 'electronic'}
+
+
+def test_a_search_shows_no_counts(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    designer.fill('#symQ', 'nut')
+    titles = designer.eval_on_selector_all('#layer .sym-set:not([hidden]) > summary', 'els => els.map(e => e.textContent)')
+    assert titles and not any(ch.isdigit() for title in titles for ch in title)
 
 
 @pytest.mark.parametrize('view', ['edit', 'wizard'])
