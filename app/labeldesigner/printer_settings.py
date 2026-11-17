@@ -12,7 +12,7 @@ changing different settings at the same time keep both."""
 import json
 
 from .drivers import for_model
-from .drivers.devices import lock_key, usb_device_id
+from .drivers.devices import device_id_fields, lock_key, usb_device_id
 from .label_names import check_cut, check_label_size
 
 # In the folder of the labels, hidden: saved labels never start with a dot
@@ -44,10 +44,9 @@ def key(device: str) -> str:
     printer where none is configured, prints on the simulator."""
     if device == '?':
         return 'simulation'
-    fields = dict(field.split(':', 1) for field in usb_device_id(device).split(';') if ':' in field)
-    serial = (fields.get('SN') or fields.get('SERN') or '').strip()
-    model = (fields.get('MDL') or fields.get('MODEL') or '').strip()
-    return f'usb:{model}/{serial}' if serial else lock_key(device)
+    fields = device_id_fields(usb_device_id(device))
+    serial = fields.get('SN') or fields.get('SERN')
+    return f'usb:{fields.get("MDL", "")}/{serial}' if serial else lock_key(device)
 
 
 def parsed(content: str) -> dict:

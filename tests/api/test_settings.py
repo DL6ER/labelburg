@@ -270,3 +270,8 @@ def test_print_requests_that_leave_out_which_end_leaves_first_take_it_as_set(tmp
     client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': 'simulation',
                                                           'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
     assert ends == ['top', 'bottom', 'top', 'bottom', 'top']
+
+
+def test_a_usb_printer_is_kept_by_its_serial_also_with_spaces_in_its_device_id(monkeypatch):
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother; MDL:QL-800; SN:000F1Z123;')
+    assert printer_settings.key('/dev/usb/lp1') == 'usb:QL-800/000F1Z123'
