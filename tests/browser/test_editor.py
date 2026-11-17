@@ -1093,3 +1093,47 @@ def test_counters_with_a_start_and_step_are_typed_and_shown(designer):
     # One that cannot count shows why
     type_line(designer, 0, 'Box [counter:A1]')
     designer.wait_for_function("() => document.querySelector('#edStage').innerText.includes('A counter starts at a number or at letters, e.g., 001 or A')")
+
+
+def select_in_line(page, row, start, end):
+    page.evaluate("""([row, start, end]) => document.querySelector(`[data-row="${row}"] .tx`).setSelectionRange(start, end)""", [row, start, end])
+
+
+def test_a_line_takes_several_lines_with_its_settings(designer):
+    # Enter breaks the line in its field, pasted lines stay in it too
+    type_line(designer, 0, 'Jam')
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('End')
+    designer.keyboard.press('Enter')
+    designer.keyboard.type('Strawberry')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam\nStrawberry']
+    assert designer.get_attribute('[data-row="0"] .tx', 'rows') == '2'
+    # Shift+Enter starts a line with settings of its own
+    designer.keyboard.press('Shift+Enter')
+    designer.keyboard.type('2026')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam\nStrawberry', '2026']
+
+
+def test_a_style_set_on_selected_lines_makes_them_a_line_of_their_own(designer):
+    type_line(designer, 0, 'Jam\nStrawberry\nKitchen\n2026')
+    # The selection takes the whole lines it touches: from "rawb" to "Kit"
+    select_in_line(designer, 0, 7, 17)
+    designer.click('[data-row="0"] [data-act="bold"]')
+    wait_for_preview(designer)
+    lines = designer.evaluate("() => S.edit.design.text.map(l => [l.text, wantsBold(l)])")
+    # The first line of a new label is bold, the selected lines no longer
+    assert lines == [['Jam', True], ['Strawberry\nKitchen', False], ['2026', True]]
+    # The size of the selected first line only
+    select_in_line(designer, 0, 0, 1)
+    designer.fill('[data-row="0"] input.mini', '30')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.size)")[0] == '30'
+    # Without a selection, or with all of it, the style is of the whole line
+    designer.click('[data-row="2"] [data-act="align"]')
+    select_in_line(designer, 1, 0, len('Strawberry\nKitchen'))
+    designer.click('[data-row="1"] [data-act="invert"]')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam', 'Strawberry\nKitchen', '2026']
+    assert designer.evaluate("() => S.edit.design.text[1].inverted") is True
