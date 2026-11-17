@@ -331,7 +331,7 @@ class Tools:
                     blank['default'] = defaults[name]
                 blanks.append(blank)
             labels.append({'name': entry['name'], 'title': entry.get('title') or entry['name'],
-                           'label_size': entry.get('label_size_id'), 'tags': data.get('tags') or [], 'blanks': blanks,
+                           'label_size': entry.get('label_size_id'), 'tags': entry['tags'], 'blanks': blanks,
                            'text': [line.get('text', '') for line in data.get('text', []) if isinstance(line, dict)],
                            'code': (data.get('code_text') or None) if 'qrcode' in str(data.get('print_type')) else None})
         return labels

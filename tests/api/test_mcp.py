@@ -496,3 +496,12 @@ def test_the_mcp_package_is_loaded_with_the_first_call_only():
     import sys
     code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules)'
     assert subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout.split()[-1] == 'False'
+
+
+def test_list_labels_with_the_tags_the_label_designer_shows(client, tmp_path):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'Jar.json').write_text('{"label_size": "62", "tags": "Kitchen, Pantry, kitchen", "text": [{"text": "Jam", "size": "60"}]}')
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(repo)
+    listed = client.get('/labeldesigner/api/repository/list').get_json()['files'][0]['tags']
+    assert tool(client, 'list_labels')['structuredContent']['result'][0]['tags'] == listed == ['Kitchen', 'Pantry']
