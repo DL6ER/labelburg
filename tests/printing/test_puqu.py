@@ -187,8 +187,10 @@ def test_printer_is_asked_once_it_is_quiet(client, fake):
     assert kinds == ['label', 'label', 'query', 'label', 'label', 'query']
 
 
-def test_printer_that_keeps_printing_is_not_asked(client, fake):
+def test_printer_that_keeps_printing_is_not_asked(client, fake, monkeypatch):
     printer = fake(endless=reply(protocol.PRINTING))
+    # A test thread held up between two reads must not look like a quiet printer
+    monkeypatch.setattr(protocol, 'QUIET', 1)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
     assert response.get_json() == {'success': False, 'message': 'The printer did not tell that it printed the label'}

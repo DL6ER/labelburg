@@ -1,6 +1,8 @@
 # Checks that the icon fonts in app/static are the versions in tools/fonts, and adds the files of a new
 # version to Dependabot's pull requests with a GitHub App's token, as a push with GITHUB_TOKEN starts no
 # tests or CodeQL. The App's client ID and key are the Dependabot secrets FONTS_APP_CLIENT_ID and FONTS_APP_KEY.
+# Checks too that the font of the symbols is the one tools/symbols_font.py builds with the tools of
+# requirements-symbols.txt: on a pull request that raises one of them, it is built again by hand.
 name: Icon fonts
 
 on:
@@ -10,6 +12,11 @@ on:
       - tools/update_fonts.py
       - app/static/mdi/**
       - app/static/fontawesome/**
+      - tools/symbols/**
+      - tools/fastener_svgs.py
+      - tools/symbols_font.py
+      - requirements-symbols.txt
+      - app/static/symbols/**
       - .github/workflows/fonts.yml
   pull_request:
     paths:
@@ -17,6 +24,11 @@ on:
       - tools/update_fonts.py
       - app/static/mdi/**
       - app/static/fontawesome/**
+      - tools/symbols/**
+      - tools/fastener_svgs.py
+      - tools/symbols_font.py
+      - requirements-symbols.txt
+      - app/static/symbols/**
       - .github/workflows/fonts.yml
 
 permissions: {}
@@ -31,6 +43,22 @@ jobs:
           python-version: '3.15'
       - name: Check the icon fonts
         run: python tools/update_fonts.py --check
+
+  symbols:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install the font tools
+        run: pip install -r requirements-symbols.txt
+      - name: Build the fasteners and the font of the symbols
+        run: |
+          python tools/fastener_svgs.py
+          python tools/symbols_font.py
+      - name: Check that they are the ones committed
+        run: git diff --exit-code -- tools/symbols app/static/symbols && test -z "$(git status --porcelain -- tools/symbols app/static/symbols)"
 
   update:
     # On Dependabot's pull requests for tools/fonts only, not on the push of this job.
