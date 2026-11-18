@@ -93,6 +93,8 @@ class PrinterQueue:
         # The end of the labels that leaves the printer first, top or bottom,
         # None as the driver prints them
         self.leaves_first = None
+        # mm its labels are moved right and down, as calibrated for the printer
+        self.offset = (0.0, 0.0)
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):

@@ -181,19 +181,48 @@ def test_b1_takes_its_own_rolls():
     assert driver.label_names['niimbot40x30'] == '40 x 30 mm die-cut (Niimbot)'
 
 
+class _Black:
+    """A label all black, w x h dots as the label designer draws it."""
+    label_content = None
+
+    def __init__(self, w, h, start=None):
+        self.size, self.start = (w, h), start
+
+    def generate(self):
+        from PIL import Image
+        img = Image.new('RGB', self.size, 'black')
+        if self.start:
+            # Only its first columns black
+            img.paste((255, 255, 255), (self.start, 0) + self.size)
+        return img
+
+
 def test_b1_rows_span_the_printhead_with_the_label_in_the_middle():
-    from PIL import Image
-
-    class _Label:
-        label_content = None
-
-        def generate(self):
-            return Image.new('RGB', (320, 240), 'black')
-    _, rows = niimbot.label_rows(_Label(), 'niimbot40x30')
+    _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30')
     assert (len(rows), len(rows[0])) == (240, 384)
     # Moved left and down by the shifts of the B1, as long as the label
     assert rows[:2] == [[0] * 384] * 2
     assert rows[2] == rows[-1] == [0] * 30 + [1] * 320 + [0] * 34
+
+
+def test_b1_rows_follow_the_offset_of_the_printer():
+    _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30', (0.5, -0.25))
+    assert len(rows) == 240 and rows[0] == [0] * 34 + [1] * 320 + [0] * 30
+
+
+def test_b1_moved_up_keeps_the_length_of_the_label():
+    _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30', (0, -0.5))
+    assert len(rows) == 240 and rows[-2:] == [[0] * 384] * 2 and rows[0][40] == 1
+
+
+def test_b1_moved_far_is_cut_at_the_printhead():
+    _, rows = niimbot.label_rows(_Black(384, 240), 'niimbot50x30', (5.0, 0))
+    assert rows[2] == [0] * 38 + [1] * 346
+
+
+def test_d110_m_ignores_an_offset():
+    # Its start black, which leaves the printer last
+    assert niimbot.label_rows(_Black(320, 96, start=10), 'niimbot12x40', (1, 1))[1] == niimbot.label_rows(_Black(320, 96, start=10), 'niimbot12x40')[1]
 
 
 def test_b1_rows_beyond_the_printhead_are_left_out():

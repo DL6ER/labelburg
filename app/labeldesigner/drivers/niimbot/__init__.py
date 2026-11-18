@@ -69,9 +69,20 @@ def centered(dots: list[int], head: int, shift: int = 0) -> list[int]:
     return (placed + [0] * head)[:head]
 
 
-def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
+def placed(img: Image.Image, head: int, shift: int, feed: int) -> list[list[int]]:
+    """Rows across the printhead with the image in its middle, moved left by
+    shift and down by feed dots (negative: right, up), as many as the image
+    has; dots beyond the printhead or the page are left out."""
+    rows = [centered([int(img.getpixel((x, y)) == 0) for x in range(img.width)], head, shift)
+            for y in range(img.height)]
+    empty = [[0] * head for _ in range(abs(feed))]
+    return (empty + rows)[:len(rows)] if feed >= 0 else (rows + empty)[abs(feed):]
+
+
+def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0)) -> tuple[Image.Image, list[list[int]]]:
     """A label as the printer prints it: rows across the printhead, as wide
-    as the label, black is printed."""
+    as the label, black is printed. offset: mm the printer's labels are
+    moved right and down, a B1 only."""
     img = label.generate()
     # The label designer draws labels longer than wide lying, e.g. 12 x 40
     # mm as 320 x 96 dots; turned as by the other drivers, their end leaves
@@ -83,11 +94,8 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
     dither = label.label_content != LabelContent.IMAGE_BW
     img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
     if size.models == ('Niimbot/B1',):
-        rows = [centered([int(img.getpixel((x, y)) == 0) for x in range(img.width)], protocol.B1_HEAD, B1_SHIFT)
-                for y in range(img.height)]
-        # As long as the label, its last rows left out
-        rows = [[0] * protocol.B1_HEAD for _ in range(B1_FEED)] + rows[:len(rows) - B1_FEED]
-        return img, rows
+        return img, placed(img, protocol.B1_HEAD, B1_SHIFT - round(offset[0] * DOTS_PER_MM),
+                           B1_FEED + round(offset[1] * DOTS_PER_MM))
     rows = [[int(img.getpixel((x, y)) == 0) for x in range(min(img.width, protocol.HEAD))] for y in range(img.height)]
     return img, rows
 
@@ -175,7 +183,7 @@ class Niimbot(Driver):
     def render(self, queue, entries, keep=None):
         job = []
         for i, entry in enumerate(entries):
-            img, rows = label_rows(entry['label'], queue.label_size)
+            img, rows = label_rows(entry['label'], queue.label_size, queue.offset)
             if keep:
                 keep(img, f'niimbot_{i}')
             job.append(rows)
