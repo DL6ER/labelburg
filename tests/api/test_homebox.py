@@ -193,10 +193,32 @@ def _printed(label) -> bytes:
     return printed.getvalue()
 
 
-def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
-    # As in the label designer, a tape set in the printer settings rather
-    # than the one the printer reports
+def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, queued, monkeypatch):
     monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=62))
+    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, label)] = queued
+    assert label_size == '62'
+    assert pixels(_printed(label)) == pixels(image)
+
+
+def test_homebox_makes_a_saved_label_without_a_size_for_the_tape_the_printer_reports(client, queued, monkeypatch):
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=62))
+    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
+    label = {'name': 'Shelf', 'print_type': 'text', 'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
+    assert client.post(SAVE_URL, json=label).status_code == 200
+    image = client.get(URL + '/Shelf', query_string=HOMEBOX_QUERY).data
+    assert client.post(URL + '/Shelf', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, label)] = queued
+    assert label_size == '62'
+    assert pixels(_printed(label)) == pixels(image)
+
+
+def test_homebox_prints_on_the_tape_set_by_hand_where_the_printer_reports_none(client, queued, monkeypatch):
+    # As in the label designer, a tape set in the printer settings where the
+    # printer does not report its tape
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status())
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306)
