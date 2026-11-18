@@ -277,3 +277,10 @@ def test_calibration_tried_with_save_false_is_not_kept(b1, save):
     r = b1.post(URL, json={**B1, 'across': 0.5, 'save': save})
     assert r.get_json()['calibration']['across'] == 0.5
     assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
+
+
+@pytest.mark.parametrize('kind', ['narrow', 'wide'])
+def test_example_picture_is_served_for_each_kind(b1, kind):
+    r = b1.get(f'{URL}/example.png', query_string={**B1, 'kind': kind})
+    assert r.status_code == 200 and r.headers['Content-type'] == 'image/png'
+    assert Image.open(io.BytesIO(r.data)).size[0] > 0
