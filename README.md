@@ -18,6 +18,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
 | Epson | TM-T20II (USB) | 80 and 58 mm receipt paper, cut |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
+| Niimbot | B1 (Bluetooth) | 40 and 50 mm wide die-cut thermal labels, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
@@ -109,7 +110,7 @@ Other settings, e.g. the default font and margins, go into `instance/application
 | `tcp://<host>` | A network printer, an IPv6 address in brackets |
 | `vc500w://<host>` | A VC-500W on the network |
 | `usbip://<host>` | A USB printer another device shares, see [USB/IP](docs/usbip.md) |
-| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger or Niimbot D110_M on Bluetooth, channel 2 on a PUQU and 1 on a Niimbot if left out. A Niimbot has to be paired with the computer. In a container only with `network_mode: host`. |
+| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M or B1 on Bluetooth, channel 2 on a PUQU and 1 on a Niimbot if left out. A Niimbot has to be paired with the computer. In a container only with `network_mode: host`. |
 | `simulation` | The simulator, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them |
 
 The installation above gives the container all of USB and the network, so that it finds printers by itself, also Bluetooth ones. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.

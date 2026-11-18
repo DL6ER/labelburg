@@ -1,6 +1,6 @@
-"""The Niimbot D110_M, a thermal printer for small die-cut labels on Bluetooth
-(protocol.py). It has no cutter, the labels are torn off. Not the D110, which
-niimbluelib prints with other commands."""
+"""The Niimbot D110_M and B1, thermal printers for die-cut labels on
+Bluetooth (protocol.py). They have no cutter, the labels are torn off. Not
+the D110, which niimbluelib prints with other commands."""
 
 import logging
 import re
@@ -9,23 +9,31 @@ import time
 from PIL import Image
 
 from .. import devices, progress
-from ..base import Driver, network_status
+from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('Niimbot/D110_M',)
+MODELS = ('Niimbot/D110_M', 'Niimbot/B1')
 DOTS_PER_MM = 8
 # mm/s as sellers give it, and the seconds a label takes besides, to set up
 # its job and to tell that it printed it
 SPEED = 30
 BESIDES = 2.0
+# The dots across the printhead and the print sequence of each model
+HEADS = {'Niimbot/D110_M': protocol.HEAD, 'Niimbot/B1': protocol.B1_HEAD}
+SEQUENCES = {'Niimbot/D110_M': protocol.V4, 'Niimbot/B1': protocol.B1}
+# The models by the model ID they tell, which the print sequence and the
+# printhead have to fit
+MODEL_IDS = {2320: 'Niimbot/D110_M', 4096: 'Niimbot/B1'}
 
 # Width x length in mm of the rolls sold for the D11 and D110 printers,
 # e.g. T12*40 for 12 x 40 mm. Only 12 x 40 mm was printed on.
 SIZES = ((12, 22), (12, 40), (14, 22), (14, 40), (14, 60), (15, 30), (15, 50))
+# Those sold for the B1, which it prints on 48 mm of
+B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80))
 # Width x length of the rolls by the barcode in their RFID tag, the label
 # designer then picks them. Niimbot tells it only online, at
 # print.niimbot.com, the label designer stays offline.
@@ -36,12 +44,14 @@ ROLLS = {'01222281': (12, 40)}  # T12*40-155WHITE
 _asked: dict[str, float] = {}
 
 
-def _label(width: int, length: int) -> Label:
+def _label(width: int, length: int, model: str) -> Label:
     dots = (width * DOTS_PER_MM, length * DOTS_PER_MM)
-    return Label(f'niimbot{width}x{length}', (width, length), FormFactor.DIE_CUT, dots, dots, 0, models=MODELS)
+    printable = (min(dots[0], HEADS[model]), dots[1])
+    return Label(f'niimbot{width}x{length}', (width, length), FormFactor.DIE_CUT, dots, printable, 0, models=(model,))
 
 
-LABELS = tuple(_label(width, length) for width, length in SIZES)
+LABELS = (tuple(_label(width, length, 'Niimbot/D110_M') for width, length in SIZES)
+          + tuple(_label(width, length, 'Niimbot/B1') for width, length in B1_SIZES))
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)' for label in LABELS}
 
 
@@ -52,11 +62,18 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
     # The label designer draws labels longer than wide lying, e.g. 12 x 40
     # mm as 320 x 96 dots; turned as by the other drivers, their end leaves
     # the printer first
-    across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
+    size = next(size for size in LABELS if size.identifier == label_size)
+    across = size.dots_printable[0]
     if img.width != across:
         img = img.rotate(90, expand=True)
     dither = label.label_content != LabelContent.IMAGE_BW
     img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
+    if size.models == ('Niimbot/B1',):
+        # Rows across the whole printhead, the label in the middle of it
+        left = (protocol.B1_HEAD - img.width) // 2
+        rows = [[0] * left + [int(img.getpixel((x, y)) == 0) for x in range(img.width)] + [0] * (protocol.B1_HEAD - left - img.width)
+                for y in range(img.height)]
+        return img, rows
     rows = [[int(img.getpixel((x, y)) == 0) for x in range(min(img.width, protocol.HEAD))] for y in range(img.height)]
     return img, rows
 
@@ -71,7 +88,7 @@ class Niimbot(Driver):
     errors = (OSError, protocol.NiimbotError)
 
     def fits(self, label, model):
-        return label in LABELS
+        return label in LABELS and model in label.models
 
     def dpi(self, high_res):
         return protocol.DPI
@@ -153,6 +170,9 @@ class Niimbot(Driver):
         device, model = queue.device_specifier, queue.model
         try:
             with protocol.connect(device) as c:
+                told = MODEL_IDS.get(protocol.model_id(c), model)
+                if told != model:
+                    return f'This printer is a {shown(told)}, choose that model for it'
                 # What the status keeps is updated, e.g. another roll
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
@@ -163,7 +183,7 @@ class Niimbot(Driver):
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
                 progress.counting(device)
                 for i, rows in enumerate(job):
-                    protocol.print_label(c, rows, label_type)
+                    protocol.print_label(c, rows, label_type, SEQUENCES[model])
                     progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:

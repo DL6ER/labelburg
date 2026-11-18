@@ -1,8 +1,9 @@
-"""The protocol of the Niimbot D110_M (firmware 4.x) over classic Bluetooth (RFCOMM), the
-print sequence of https://github.com/eigger/hass-niimbot
-(custom_components/niimbot/niimprint/printer.py). Packets are
-55 55 <command> <length> <data> <checksum> aa aa, the checksum the XOR of
-command, length and data."""
+"""The protocol of the Niimbot D110_M (firmware 4.x) and B1 over classic Bluetooth (RFCOMM),
+the print sequence of the D110_M of https://github.com/eigger/hass-niimbot
+(custom_components/niimbot/niimprint/printer.py), that of the B1 of
+niimbluelib's B1PrintTask (https://github.com/MultiMote/niimbluelib, MIT).
+Packets are 55 55 <command> <length> <data> <checksum> aa aa, the checksum
+the XOR of command, length and data."""
 
 import socket
 import struct
@@ -10,9 +11,12 @@ import time
 
 from .. import devices
 
-# 8 dots per mm, the printhead is 15 mm wide
+# 8 dots per mm, the printhead of the D110_M is 15 mm wide, that of the B1 48 mm
 DPI = 203
 HEAD = 120
+B1_HEAD = 384
+# The print sequences, see print_label()
+V4, B1 = 'v4', 'b1'
 CHANNEL = 1
 # Connecting may take a few seconds, an answer comes within ANSWER_WAIT
 CONNECT_WAIT = 10
@@ -78,11 +82,11 @@ def parse(received: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
         received = received[i + n + 7:]
 
 
-def row_packets(rows: list[list[int]]) -> list[bytes]:
+def row_packets(rows: list[list[int]], head: int = HEAD) -> list[bytes]:
     """Rows of dots, 1 printed, as packets: equal rows that follow each
     other once with their count, bitmap rows (85) with the dots in each
-    third of the printhead, empty rows (84) without them."""
-    out, y, third = [], 0, HEAD // 8 // 3
+    third of the printhead of head dots, empty rows (84) without them."""
+    out, y, third = [], 0, head // 8 // 3
     while y < len(rows):
         n = 1
         while y + n < len(rows) and rows[y + n] == rows[y] and n < 255:
@@ -155,11 +159,24 @@ def connect(device: str) -> Connection:
 
 def heartbeat(c: Connection) -> dict:
     """Lid and battery (0 to 4) in the 10 bytes a D110_M answers, e.g.
-    10 1f 00 69 00 69 32 46 01 04; the raw data if the length is another."""
+    10 1f 00 69 00 69 32 46 01 04, the battery in byte 10 of the 13 a B1
+    answers; the raw data if the length is another."""
     data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
+    if len(data) == 13:
+        return {'battery': data[10]}
     if len(data) != 10:
         return {'raw': data.hex()}
     return {'lid': data[8], 'battery': data[9]}
+
+
+def model_id(c: Connection) -> int | None:
+    """The model ID the printer tells, e.g. 4096 for a B1, None if it does
+    not tell."""
+    try:
+        data = c.ask(0x40, b'\x08', 0x48)
+    except NoAnswer:
+        return None
+    return struct.unpack('>H', data[:2])[0] if len(data) >= 2 else None
 
 
 def errors(beat: dict) -> list[str]:
@@ -185,23 +202,31 @@ def roll(c: Connection) -> dict | None:
     return {'barcode': barcode, 'serial': serial, 'total': total, 'used': used, 'type': kind}
 
 
-def print_label(c: Connection, rows: list[list[int]], label_type: int):
+def print_label(c: Connection, rows: list[list[int]], label_type: int, sequence: str = V4):
     """Print one label, rows of dots across the printhead, as the script
     this came from prints one: a job of one page, then the printer is asked
-    every PAGE_POLL seconds how many pages it printed."""
+    every PAGE_POLL seconds how many pages it printed. The B1 starts the
+    page and is told its size and number in a shorter form."""
     height, width = len(rows), len(rows[0])
     c.ok(0x21, bytes([DENSITY]), 0x31)
     c.ok(0x23, bytes([label_type]), 0x33)
     try:
-        c.ok(0x01, struct.pack('>H7B', 1, 0, 0, 0, 0, 0, 0, 0), 0x02)
+        if sequence == B1:
+            c.ok(0x01, struct.pack('>H5B', 1, 0, 0, 0, 0, 0), 0x02)
+        else:
+            c.ok(0x01, struct.pack('>H7B', 1, 0, 0, 0, 0, 0, 0, 0), 0x02)
     except NiimbotError as e:
         # A D110_M answered so to a roll with its RFID tag peeled off
         if e.args[1:] == (0x14,):
             raise NoTag(e.args[0]) from e
         raise
-    c.send(packet(0xdc, b'\x01'))
-    c.ok(0x13, struct.pack('>HHHHB', height, width, 1, 0, 0), 0x14)
-    for data in row_packets(rows):
+    if sequence == B1:
+        c.ok(0x03, b'\x01', 0x04)
+        c.ok(0x13, struct.pack('>HHH', height, width, 1), 0x14)
+    else:
+        c.send(packet(0xdc, b'\x01'))
+        c.ok(0x13, struct.pack('>HHHHB', height, width, 1, 0, 0), 0x14)
+    for data in row_packets(rows, B1_HEAD if sequence == B1 else HEAD):
         c.send(data)
     c.ok(0xe3, b'\x01', 0xe4)
     deadline = time.monotonic() + PRINT_WAIT

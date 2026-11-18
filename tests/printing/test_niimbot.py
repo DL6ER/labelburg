@@ -1,5 +1,5 @@
-"""The Niimbot D110_M: its protocol against a fake printer in place of the
-RFCOMM socket, and printing and status through the label designer."""
+"""The Niimbot D110_M and B1: their protocol against a fake printer in place
+of the RFCOMM socket, and printing and status through the label designer."""
 import json
 import struct
 
@@ -16,12 +16,18 @@ TAG = bytes(8) + b'\x0801222281' + b'\x10PZ1G910304007921' + struct.pack('>HHB',
 # The replies of a D110_M as the script this driver came from got them
 REPLIES = {0x21: (0x31, b'\x01'), 0x23: (0x33, b'\x01'), 0x01: (0x02, b'\x01'), 0x13: (0x14, b'\x01'),
            0xe3: (0xe4, b'\x01'), 0xa3: (0xb3, struct.pack('>H', 1)), 0xf3: (0xf4, b'\x01'),
-           0x1a: (0x1b, TAG), 0xdc: (0xdd, bytes.fromhex('101f0069006932460104'))}
+           0x1a: (0x1b, TAG), 0xdc: (0xdd, bytes.fromhex('101f0069006932460104')), 0x40: (0x48, struct.pack('>H', 2320))}
+# The replies of a B1 where they differ, after the packets niimbluelib logged
+# of one: its model ID, a heartbeat of 13 bytes with the battery in byte 10,
+# a page started and the RFID tag of its roll
+B1_TAG = bytes.fromhex('881d7e4fd9970000') + b'\x0810262260' + b'\x10PZ1G221322004205' + struct.pack('>HHB', 276, 153, 1)
+B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), 0xdc: (0xdd, bytes(10) + bytes([4, 0, 1])),
+              0x03: (0x04, b'\x01'), 0x1a: (0x1b, B1_TAG)}
 
 
 class FakePrinter:
     def __init__(self):
-        self.commands, self.pending = [], b''
+        self.commands, self.packets, self.pending = [], [], b''
 
     def close(self):
         pass
@@ -32,6 +38,7 @@ class FakePrinter:
     def sendall(self, data):
         command = data[2]
         self.commands.append(command)
+        self.packets.append(data)
         # The heartbeat while printing is not waited for
         if command in REPLIES and not (command == 0xdc and 0x01 in self.commands):
             self.pending += protocol.packet(*REPLIES[command])
@@ -71,6 +78,19 @@ def client(tmp_path):
     return client
 
 
+@pytest.fixture
+def b1(client, monkeypatch):
+    """The client with a B1 as its printer, which answers as one."""
+    client.application.config['PRINTER_MODEL'] = 'Niimbot/B1'
+    for command, reply in B1_REPLIES.items():
+        monkeypatch.setitem(REPLIES, command, reply)
+    return client
+
+
+def data_of(packet: bytes) -> bytes:
+    return packet[4:4 + packet[3]]
+
+
 def test_packets_as_the_script_sent_them():
     assert protocol.packet(0x21, b'\x03') == bytes.fromhex('555521010323aaaa')
     assert protocol.parse(protocol.packet(0x31, b'\x01') + b'\x55')[0] == [(0x31, b'\x01')]
@@ -85,7 +105,79 @@ def test_label_is_printed_in_the_order_of_the_script(client, fake):
     assert response.get_json() == {'success': True}
     rows = [c for c in fake.commands if c in (0x84, 0x85)]
     sent = [c for c in fake.commands if c not in (0x84, 0x85)]
-    assert rows and sent == [0xdc, 0x1a, 0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
+    assert rows and sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
+
+
+def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake):
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    rows = [c for c in fake.commands if c in (0x84, 0x85)]
+    sent = [c for c in fake.commands if c not in (0x84, 0x85)]
+    assert rows and sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
+    packets = {packet[2]: data_of(packet) for packet in fake.packets}
+    # One page of 30 mm, rows across the whole printhead
+    assert packets[0x01] == struct.pack('>H5B', 1, 0, 0, 0, 0, 0)
+    assert packets[0x13] == struct.pack('>HHH', 240, 384, 1)
+    # The label type of the roll
+    assert packets[0x23] == b'\x01'
+
+
+def test_b1_takes_its_own_rolls():
+    driver = niimbot.DRIVER
+    sizes = {label.identifier: label for label in driver.labels}
+    assert driver.fits(sizes['niimbot50x30'], 'Niimbot/B1') and not driver.fits(sizes['niimbot50x30'], 'Niimbot/D110_M')
+    assert driver.fits(sizes['niimbot12x40'], 'Niimbot/D110_M') and not driver.fits(sizes['niimbot12x40'], 'Niimbot/B1')
+    # 50 mm wide, 48 mm of it printed
+    assert (sizes['niimbot50x30'].dots_total, sizes['niimbot50x30'].dots_printable) == ((400, 240), (384, 240))
+    assert driver.label_names['niimbot40x30'] == '40 x 30 mm die-cut (Niimbot)'
+
+
+def test_b1_rows_span_the_printhead_with_the_label_in_the_middle():
+    from PIL import Image
+
+    class _Label:
+        label_content = None
+
+        def generate(self):
+            return Image.new('RGB', (320, 240), 'black')
+    _, rows = niimbot.label_rows(_Label(), 'niimbot40x30')
+    assert (len(rows), len(rows[0])) == (240, 384)
+    assert rows[0] == [0] * 32 + [1] * 320 + [0] * 32
+
+
+def test_rows_tell_the_dots_in_each_third_of_a_wide_printhead():
+    row = [1] * 128 + [0] * 128 + [1] * 64 + [0] * 64
+    packet = protocol.row_packets([row], 384)[0]
+    assert packet[2] == 0x85
+    # Row 0, the dots in each 16 bytes, once, then the 48 bytes
+    assert data_of(packet)[:6] == struct.pack('>H3BB', 0, 128, 0, 64, 1)
+    assert len(data_of(packet)) == 6 + 48
+
+
+def test_printer_of_another_model_is_refused(b1, fake, monkeypatch):
+    # Its print sequence and printhead would not fit
+    monkeypatch.setitem(REPLIES, 0x40, (0x48, struct.pack('>H', 2320)))
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['message'] == 'This printer is a Niimbot D110_M, choose that model for it'
+    assert 0x01 not in fake.commands
+
+
+def test_printer_that_does_not_tell_its_model_prints(b1, fake, monkeypatch):
+    monkeypatch.delitem(REPLIES, 0x40)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+
+
+def test_b1_tells_its_battery(b1, fake, monkeypatch):
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['model'], printer_['errors'], printer_['battery_low']) == ('Niimbot/B1', [], False)
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes(10) + bytes([1, 0, 1])))
+    printer_ = b1.get('/labeldesigner/api/printer_status?look=1').get_json()['printers'][0]
+    assert printer_['battery_low'] is True
 
 
 def test_labels_are_counted_while_printing(client, fake):
