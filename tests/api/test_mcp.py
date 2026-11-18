@@ -505,3 +505,11 @@ def test_list_labels_with_the_tags_the_label_designer_shows(client, tmp_path):
     client.application.config['LABEL_REPOSITORY_DIR'] = str(repo)
     listed = client.get('/labeldesigner/api/repository/list').get_json()['files'][0]['tags']
     assert tool(client, 'list_labels')['structuredContent']['result'][0]['tags'] == listed == ['Kitchen', 'Pantry']
+
+
+def test_without_a_label_size_the_one_kept_for_a_printer_that_tells_none(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    assert client.post('/labeldesigner/api/settings', data={'printer': 'simulation', 'label_size': '62x29'}).status_code == 200
+    result = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])
+    assert not result.get('isError') and printed(tmp_path) == 1
+    assert Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data']))).size == (696, 271)

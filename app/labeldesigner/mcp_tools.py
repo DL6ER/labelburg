@@ -272,7 +272,9 @@ class Tools:
     def _loaded(found: dict, saved: str | None = None) -> str:
         """The label size loaded in the printer found, saved where it is
         one of those it may have loaded, else the user is to be asked."""
-        loaded = loaded_label_sizes(found)
+        # A printer that tells none has the one set in its printer settings
+        kept = (found.get('settings') or {}).get('label_size')
+        loaded = loaded_label_sizes(found) or ([kept] if kept else [])
         black = [size for size in loaded if not size.endswith('red')]
         # A QL printer that cannot tell a black and red roll: black
         if len(black) == 1 and all(size in (black[0], black[0] + 'red') for size in loaded):
