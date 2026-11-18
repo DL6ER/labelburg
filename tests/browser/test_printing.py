@@ -3,10 +3,12 @@ copies."""
 
 import base64
 import json
+import time
 from urllib.parse import parse_qs
 
 import pytest
 
+from app.labeldesigner import printer_settings
 from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 
 
@@ -899,6 +901,25 @@ def test_a_status_asked_for_before_a_change_keeps_it(designer):
     designer.evaluate('() => window.polled')
     assert designer.inner_text('.pp [data-q].on') == 'Fast'
     assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('fast_printing')") == '1'
+
+
+def test_a_refused_change_is_taken_back_on_the_printers_a_status_brought(designer):
+    # The status replaces the printers while the change is on its way, the
+    # one refused is taken back at once, not with the next status
+    held = []
+    designer.route('**/api/settings', lambda route: held.append(route))
+    designer.click('#printerChip')
+    designer.click('[data-q="fast"]')
+    deadline = time.monotonic() + 30
+    while not held:
+        assert time.monotonic() < deadline, 'the change was not sent'
+        designer.wait_for_timeout(50)
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.inner_text('.pp [data-q].on') == 'Fast'
+    held[0].fulfill(status=400, json={'success': False, 'message': printer_settings.TOO_MANY_PRINTERS})
+    designer.wait_for_selector(f'#toast:has-text("{printer_settings.TOO_MANY_PRINTERS}")', timeout=5000)
+    assert designer.inner_text('.pp [data-q].on') == 'Quality'
+    assert designer.evaluate('() => kept().quality') is None
 
 
 def test_labels_of_a_printer_that_prints_the_bottom_first_leave_it_as_set(designer):

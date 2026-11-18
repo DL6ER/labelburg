@@ -37,14 +37,15 @@ SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 
 
-def key(device: str) -> str:
+def key(device: str, device_id: str | None = None) -> str:
     """The printer a setting belongs to: on USB by its serial number where
     its device ID tells one, as /dev/usb/lp<N> changes when printers are
     plugged in another order, else by its device. ?, a request without a
-    printer where none is configured, prints on the simulator."""
+    printer where none is configured, prints on the simulator. device_id
+    is the one read already, if it was."""
     if device == '?':
         return 'simulation'
-    fields = device_id_fields(usb_device_id(device))
+    fields = device_id_fields(usb_device_id(device) if device_id is None else device_id)
     serial = fields.get('SN') or fields.get('SERN')
     return f'usb:{fields.get("MDL", "")}/{serial}' if serial else lock_key(device)
 
@@ -62,10 +63,13 @@ def parsed(content: str) -> dict:
 
 def _key(data: dict, device: str) -> str:
     """key(device), of a USB printer switched off, which tells no device ID,
-    the one last seen on its device."""
-    printer, seen = key(device), data.get('seen')
-    off = isinstance(seen, dict) and not usb_device_id(device)
-    return seen.get(printer, printer) if off else printer
+    the one last seen on its device. Its device ID is read once, over
+    USB/IP each read is a connection."""
+    device_id = usb_device_id(device)
+    printer, seen = key(device, device_id), data.get('seen')
+    last = seen.get(printer) if isinstance(seen, dict) and not device_id else None
+    # The file may be edited by hand, anything but text names no printer
+    return last if isinstance(last, str) else printer
 
 
 def of_printer(data: dict, device: str) -> dict:

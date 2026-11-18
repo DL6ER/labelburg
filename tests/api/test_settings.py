@@ -2,7 +2,10 @@
 
 import json
 
+import pytest
+
 from app.labeldesigner import printer_settings
+from app.labeldesigner.drivers.devices import lock_key
 
 from tests.helpers import make_client
 
@@ -64,6 +67,16 @@ def test_a_broken_file_is_no_settings(tmp_path):
     assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
 
 
+def test_a_file_that_is_no_utf_8_is_no_settings(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_bytes(b'\xff\xfe\x00broken')
+    assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+    assert client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text}).status_code == 200
+    client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
+    assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
+
+
 def test_a_usb_printer_is_kept_by_its_serial(monkeypatch):
     monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother;MDL:QL-800;SN:000F1Z123;')
     assert printer_settings.key('/dev/usb/lp1') == 'usb:QL-800/000F1Z123'
@@ -101,6 +114,28 @@ def test_a_usb_printer_switched_off_keeps_its_settings(tmp_path, monkeypatch):
     client.post(URL, data={**lp0, 'label_size': '29'})
     device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
     assert client.get(URL, query_string=lp0).get_json() == {'label_size': '29'}
+
+
+@pytest.mark.parametrize('device_id', ['MFG:Brother;MDL:QL-800;SN:000F1Z123;', ''], ids=['on', 'switched off'])
+def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, device_id):
+    # Over USB/IP each read is a connection
+    data = {'printers': {'usb:QL-800/000F1Z123': {'label_size': '62'}},
+            'seen': {lock_key('file:///dev/usb/lp0'): 'usb:QL-800/000F1Z123'}}
+    read = []
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: read.append(device) or device_id)
+    assert printer_settings.of_printer(data, 'file:///dev/usb/lp0') == {'label_size': '62'}
+    assert read == ['file:///dev/usb/lp0']
+
+
+def test_a_printer_last_seen_that_is_no_printer_key_is_left_out(monkeypatch):
+    # The file may be edited by hand, a USB/IP printer switched off tells
+    # no device ID
+    device = 'usbip://192.0.2.1/1-1'
+    data = {'printers': {}, 'quality': 'fast', 'seen': {lock_key(device): ['not', 'a', 'printer']}}
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    assert printer_settings.of_printer(data, device) == {'quality': 'fast'}
+    printer_settings.changed(data, device, {'cut': 'none'})
+    assert printer_settings.of_printer(data, device) == {'quality': 'fast', 'cut': 'none'}
 
 
 def test_a_settings_file_that_cannot_be_read_is_kept(tmp_path, monkeypatch):

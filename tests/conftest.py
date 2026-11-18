@@ -32,6 +32,7 @@ def shared_printers(monkeypatch):
     # Printers shared over USB/IP stay imported, each test begins without any
     printers = {}
     monkeypatch.setattr(usbip, '_printers', printers)
+    monkeypatch.setattr(usbip, '_unreachable', {})
     yield
     for shared in printers.values():
         shared.close()

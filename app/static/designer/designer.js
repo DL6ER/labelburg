@@ -1254,6 +1254,10 @@ async function saveLabel(title, design, overwrite = null, tags = null) {
     if (!r.ok || !data.success) throw new Error(data.message || 'The label could not be saved');
     forget(data.name);
     await loadSaved();
+    // The wizard shows the label as saved, also when it was opened meanwhile
+    const shown = S.libSel && S.libSel.kind === 'saved' && S.libSel.id === data.name && S.saved.find(x => x.name === data.name);
+    if (shown) S.libSel = Object.assign(savedItem(shown), { values: S.libSel.values, starts: S.libSel.starts });
+    if ($('#libGrid')) { renderLibGrid(); if (shown) showDetail(S.libSel); }
     return data.name;
 }
 // All tags of the saved labels, each once, as first written
@@ -3533,7 +3537,7 @@ function bindPrinterPanel() {
     const saveSettings = changes => {
         // No printer is listed where its status did not come
         if (!S.printer) return toast('The label designer could not be reached');
-        const printers = [...new Set([S.printer, ...S.printers])], before = printers.map(p => p.settings);
+        const printers = [...new Set([S.printer, ...S.printers])], before = new Map(printers.map(p => [p.path, p.settings]));
         const shown = () => {
             detectTape(); renderPrinterChip(); tapeChanged = true;
             const open = $('.pp');
@@ -3554,7 +3558,8 @@ function bindPrinterPanel() {
         post('/settings', fd).catch(() => { throw new Error('The label designer could not be reached'); }).then(async r => {
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The settings could not be saved');
         }).catch(e => {
-            printers.forEach((p, i) => { p.settings = before[i]; });
+            // On the printers shown now, a status may have replaced them
+            [S.printer, ...S.printers].forEach(p => { if (p && before.has(p.path)) p.settings = before.get(p.path); });
             toast(e.message);
             shown();
         }).finally(() => { settingsPending--; settingsAnswered++; });

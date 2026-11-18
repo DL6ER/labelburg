@@ -47,6 +47,9 @@ PROTOCOLS = (2, 1, 3)
 
 CONNECT_TIMEOUT = 5
 CONTROL_TIMEOUT = 5
+# A printer that could not be reached is asked for its device ID again after
+# so many seconds, the drivers each ask for it to find the model
+UNREACHABLE_FOR = 5
 # A read asks for this many bytes, a multiple of the packet size of every
 # USB speed. A write sends up to WRITE_SIZE bytes at a time.
 READ_SIZE = 4096
@@ -368,16 +371,21 @@ class SharedPrinter:
 # designer runs: the host resets it when the connection closes (Linux's
 # usbip-host does), and another client could take it meanwhile.
 _printers: dict[str, SharedPrinter] = {}
-_locks: dict[str, threading.Lock] = {}
+_locks: dict[str, threading.RLock] = {}
 _locks_lock = threading.Lock()
+# Until when a printer is not asked for its device ID, by key()
+_unreachable: dict[str, float] = {}
+
+
+def _lock(name: str) -> threading.RLock:
+    with _locks_lock:
+        return _locks.setdefault(name, threading.RLock())
 
 
 def connect(address: str) -> SharedPrinter:
     """The printer at address, imported anew if it is not yet or no longer."""
     name = key(address)
-    with _locks_lock:
-        lock = _locks.setdefault(name, threading.Lock())
-    with lock:
+    with _lock(name):
         printer = _printers.get(name)
         if printer is None or printer.broken:
             if printer is not None:
@@ -395,11 +403,18 @@ def release(printer: SharedPrinter):
 
 def device_id(address: str) -> str:
     """The IEEE 1284 device ID of the printer, empty if it cannot be reached."""
-    try:
-        return connect(address).device_id
-    except (OSError, ValueError) as e:
-        logger.debug('No device ID of %s: %s', address, e)
-        return ''
+    name = key(address)
+    # Held while it is tried, so that others wait for the answer instead of trying too
+    with _lock(name):
+        printer = _printers.get(name)
+        if (printer is None or printer.broken) and time.monotonic() < _unreachable.get(name, 0):
+            return ''
+        try:
+            return connect(address).device_id
+        except (OSError, ValueError) as e:
+            logger.debug('No device ID of %s: %s', address, e)
+            _unreachable[name] = time.monotonic() + UNREACHABLE_FOR
+            return ''
 
 
 class Socket:
