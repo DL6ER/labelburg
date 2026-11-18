@@ -106,7 +106,8 @@ def test_saved_label_keeps_its_title_and_changes(designer, server):
         designer.wait_for_selector('#edStage')
         type_line(designer, 0, 'Tea')
         designer.click('#edSave')
-        designer.wait_for_function("() => document.getElementById('toast').innerText.startsWith('Saved')")
+        # The toast of the first save keeps its text when it hides
+        designer.wait_for_selector('#toast:has-text("Saved \\"Küche, Regal 2\\" as")')
         designer.click('[data-tab="wizard"]')
         wait_for_preview(designer, '#libStage')
         assert designer.input_value('#libFields [data-line="0"]') == 'Tea'
