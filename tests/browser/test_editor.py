@@ -862,6 +862,25 @@ def test_counter_keeps_its_start_value(designer):
     assert designer.evaluate('() => S.edit.design.text[0].text') == 'Crate {{counter:100}}'
 
 
+@pytest.mark.parametrize('typed, template', [
+    ('ASN[ASN]', 'ASN{{asn}}'),
+    ('ASN[asn:5]', 'ASN{{asn:5}}'),
+    ('ASN[ ASN : 5 ]', 'ASN{{asn:5}}'),
+])
+def test_archive_serial_number_is_typed_and_shown_as_asn(designer, typed, template):
+    type_line(designer, 0, typed)
+    assert designer.evaluate('() => S.edit.design.text[0].text') == template
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == 'ASN[ASN' + (':5' if ':5' in template else '') + ']'
+    # Not a blank to fill in
+    assert designer.evaluate('() => blanksOf(S.edit.design)') == []
+
+
+def test_archive_serial_number_is_explained_with_the_variables(designer):
+    designer.click('#tplInfoBtn')
+    assert '{{asn}}' in designer.inner_text('#tplInfo') and 'Paperless-ngx' in designer.inner_text('#tplInfo')
+
+
 def test_symbols_are_offered(designer):
     designer.click('[data-row="0"] .tx')
     designer.click('#edSym')
