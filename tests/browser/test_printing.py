@@ -3,10 +3,12 @@ copies."""
 
 import base64
 import json
+import time
 from urllib.parse import parse_qs
 
 import pytest
 
+from app.labeldesigner import printer_settings
 from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 
 
@@ -36,6 +38,8 @@ def test_printer_failure_is_shown(designer, monkeypatch):
     assert printed(designer) == ['failed']
     designer.wait_for_selector('#layer h2:has-text("Not printed")')
     assert 'The printer reports: Replace media error' in designer.inner_text('#layer')
+    # "Printing 1 label..." is gone
+    assert designer.is_hidden('#toast')
 
 
 def test_copies_buttons(designer, monkeypatch, tmp_path):
@@ -119,12 +123,25 @@ def use_printer(page, printer):
     page.evaluate("p => { S.printer = p; detectTape(); }", with_tape(printer))
 
 
+def test_tape_the_printer_reports_is_not_set_by_hand(designer):
+    use_printer(designer, {'path': 'simulation', 'model': 'QL-800', 'media_width': 29, 'media_length': 90, 'red_roll': False})
+    designer.evaluate('() => renderEditor()')
+    assert designer.inner_text('.tape-note').strip() == 'In the printer'
+    assert designer.locator('#edTapeChange').count() == 0
+    designer.evaluate('() => openPrinterPanel()')
+    assert designer.locator('#setTape').count() == 0
+    assert designer.inner_text('#ppTape') == designer.evaluate("() => sizeName('29x90')")
+    assert designer.inner_text('#ppTapeNote') == 'Read from the printer.'
+
+
 def test_tape_follows_the_printer(designer):
     # DK and TZe tape of 12 mm have the same size, the model tells them apart
     use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': 12, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['pt12', False]
-    # A tape set by hand belongs to its printer
+    # A tape set by hand counts only where the printer reports none
     designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: 'pt24' }); detectTape(); }")
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt12', False]
+    use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': None, 'media_length': 0, 'settings': {'label_size': 'pt24'}})
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt24', True]
     use_printer(designer, {'path': 'b', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['62', False]
@@ -278,10 +295,12 @@ def test_dense_printing_is_named_without_dpi(designer):
 
 
 def test_ptouch_tape_is_shown_at_180_dpi(designer):
-    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': 12, 'media_length': 0})
-    designer.evaluate("() => { S.edit.design.label_size = S.tape; renderEditor(); }")
+    # Offered to set by hand where the printer does not report its tape
+    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': None, 'media_length': 0})
     offered = offered_tapes(designer)
     assert 'pt6' in offered and 'pt9' in offered and '62' not in offered
+    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': 12, 'media_length': 0})
+    designer.evaluate("() => { S.edit.design.label_size = S.tape; renderEditor(); }")
     # 35 dots at 180 dpi
     assert designer.input_value('[data-margin="left"]') == '4.9'
     type_line(designer, 0, 'Hello')
@@ -461,15 +480,15 @@ def test_loaded_label_that_is_not_offered(designer):
 
 
 def test_tape_set_by_hand_is_known(designer):
-    # A roll the designer does not offer, or one reported without its color,
-    # says nothing about a tape set by hand
+    # A roll the designer does not offer says nothing about a tape set by
+    # hand, nor does a printer that reports none about its color
     use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 40, 'media_length': 0})
     assert designer.evaluate('() => S.tapeUnknown') == '40 mm'
     designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); detectTape(); }")
     assert designer.evaluate('() => [S.tapeUnknown, S.tapeManual]') == ['', True]
     use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate("() => fitsTape('62red')")
-    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); detectTape(); }")
+    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': None, 'media_length': 0, 'settings': {'label_size': '62'}})
     assert not designer.evaluate("() => fitsTape('62red')")
 
 
@@ -566,6 +585,12 @@ def test_printer_tells_its_battery_in_percent(designer):
 def test_printer_still_being_asked_is_not_shown_as_failing(designer):
     # A printer on Bluetooth takes a few seconds to answer, it was red meanwhile
     assert designer.evaluate("() => printerState({ status_type: 'Asking the printer', errors: [] })") == {'cls': 'off', 'text': 'Asking the printer…'}
+
+
+def test_printer_busy_with_another_program_is_not_shown_as_ready(designer):
+    # Its model is not known before it answered
+    assert designer.evaluate("() => printerState({ status_type: 'Printing', errors: [], model: 'Unknown' })") == {'cls': '', 'text': 'Printing'}
+    assert designer.evaluate("() => [printerLabel({ model: 'Unknown' }), thePrinter({ model: 'Unknown' })]") == ['Printer', 'the printer']
 
 
 def test_labels_of_a_q00_leave_it_turned(designer):
@@ -785,7 +810,7 @@ def test_open_printer_panel_follows_the_status(designer):
     designer.evaluate("() => refreshPrinters()")
     assert 'The cover of the printer is open' in designer.inner_text('.pp .plist')
     assert designer.locator('.pp .plist .dot.bad').count() == 1
-    assert designer.evaluate("() => $('#setTape').selectedOptions[0].textContent") == 'Automatic: 29 x 90 mm'
+    assert designer.inner_text('#ppTape') == '29 x 90 mm'
 
 
 def test_editor_follows_the_tape_the_printer_reports(designer):
@@ -802,9 +827,9 @@ def test_editor_follows_the_tape_the_printer_reports(designer):
     assert designer.inner_text('.tape-line .grow') == '29 x 90 mm'
     assert designer.inner_text('#edMade').startswith('Made for 62 mm endless')
     # The same roll leaves the editor as it is
-    designer.focus('#edTapeChange')
+    designer.evaluate("() => { window.row = $('[data-row=\"0\"] .tx'); window.row.focus(); }")
     designer.evaluate("() => refreshPrinters()")
-    assert designer.evaluate("() => document.activeElement.id") == 'edTapeChange'
+    assert designer.evaluate("() => document.activeElement === window.row")
     # Its own roll again, the label is as made
     printer.update(media_width=62, media_length=0)
     designer.evaluate("() => refreshPrinters()")
@@ -885,6 +910,25 @@ def test_a_status_asked_for_before_a_change_keeps_it(designer):
     designer.evaluate('() => window.polled')
     assert designer.inner_text('.pp [data-q].on') == 'Fast'
     assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('fast_printing')") == '1'
+
+
+def test_a_refused_change_is_taken_back_on_the_printers_a_status_brought(designer):
+    # The status replaces the printers while the change is on its way, the
+    # one refused is taken back at once, not with the next status
+    held = []
+    designer.route('**/api/settings', lambda route: held.append(route))
+    designer.click('#printerChip')
+    designer.click('[data-q="fast"]')
+    deadline = time.monotonic() + 30
+    while not held:
+        assert time.monotonic() < deadline, 'the change was not sent'
+        designer.wait_for_timeout(50)
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.inner_text('.pp [data-q].on') == 'Fast'
+    held[0].fulfill(status=400, json={'success': False, 'message': printer_settings.TOO_MANY_PRINTERS})
+    designer.wait_for_selector(f'#toast:has-text("{printer_settings.TOO_MANY_PRINTERS}")', timeout=5000)
+    assert designer.inner_text('.pp [data-q].on') == 'Quality'
+    assert designer.evaluate('() => kept().quality') is None
 
 
 def test_labels_of_a_printer_that_prints_the_bottom_first_leave_it_as_set(designer):

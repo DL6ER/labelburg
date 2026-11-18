@@ -3,7 +3,7 @@ import os
 import pytest
 
 from app.labeldesigner import printer, printer_settings
-from app.labeldesigner.drivers import devices, usbip
+from app.labeldesigner.drivers import backends, devices, usbip
 
 
 @pytest.fixture(autouse=True)
@@ -18,8 +18,9 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(printer, 'ARP_TABLE', os.devnull)
     # Nor are the device IDs of its USB printers read
     monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'no-usb-device-id-{name}'))
-    # Nor its printers on PyUSB
-    monkeypatch.setattr(devices, 'found_usb_printers', lambda: [])
+    # Nor its printers on PyUSB, nor those it shares over USB/IP
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([], []))
+    monkeypatch.setattr(backends, 'USBIP_HOST', str(tmp_path / 'no-usbip-host'))
     monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', False)
     # Nor the printer settings of a server run from here, e.g. with
     # docker-compose.yml, which keeps them in labels/
@@ -31,6 +32,7 @@ def shared_printers(monkeypatch):
     # Printers shared over USB/IP stay imported, each test begins without any
     printers = {}
     monkeypatch.setattr(usbip, '_printers', printers)
+    monkeypatch.setattr(usbip, '_unreachable', {})
     yield
     for shared in printers.values():
         shared.close()

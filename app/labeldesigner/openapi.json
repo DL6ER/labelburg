@@ -9,7 +9,7 @@
     "/labeldesigner/api/preview": {
       "post": {
         "summary": "Generate the label image without printing",
-        "description": "The label as it is printed: the label size and the quality the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`) of its printer.",
+        "description": "The label as it is printed: the label size and the quality the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
         "operationId": "preview",
         "parameters": [
           {
@@ -547,8 +547,19 @@
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
-        "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the label size set by hand, the cutting, which end leaves first and the quality.",
+        "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the label size set by hand, the cutting, which end leaves first and the quality. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
         "operationId": "print",
+        "parameters": [
+          {
+            "name": "return_format",
+            "in": "query",
+            "description": "`png` adds the image of the first label printed, as the printer got it, as base64 in `image`.",
+            "schema": {
+              "type": "string",
+              "enum": ["png"]
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -567,7 +578,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. Default: `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -632,7 +643,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. Default: `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -747,7 +758,7 @@
     "/labeldesigner/api/settings": {
       "get": {
         "summary": "Settings of a printer",
-        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them. A setting not made is left out.",
+        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them, a label size only where the printer reported no tape in its last status. A setting not made is left out.",
         "operationId": "getSettings",
         "parameters": [
           {
@@ -1360,6 +1371,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-PDF-Selected-Pages": {
+                "description": "Number of the pages of a saved PDF `pdf_pages` selects, each printed as a label of its own.",
+                "schema": {
+                  "type": "integer"
+                }
               }
             },
             "content": {
@@ -1486,6 +1503,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-PDF-Selected-Pages": {
+                "description": "Number of the pages of a saved PDF `pdf_pages` selects, each printed as a label of its own.",
+                "schema": {
+                  "type": "integer"
+                }
               }
             },
             "content": {
@@ -1539,9 +1562,18 @@
     "/labeldesigner/api/repository/print": {
       "post": {
         "summary": "Print a saved label",
-        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own.",
+        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
         "operationId": "repositoryPrint",
         "parameters": [
+          {
+            "name": "return_format",
+            "in": "query",
+            "description": "`png` adds the image of the first label printed, as the printer got it, as base64 in `image`.",
+            "schema": {
+              "type": "string",
+              "enum": ["png"]
+            }
+          },
           {
             "name": "name",
             "in": "query",
@@ -1939,7 +1971,7 @@
     "/labeldesigner/api/demos/print": {
       "post": {
         "summary": "Print a demo label",
-        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own.",
+        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
         "operationId": "demoPrint",
         "parameters": [
           {
@@ -2091,7 +2123,7 @@
     "/labeldesigner/api/webhook/print": {
       "post": {
         "summary": "Print images, for other services",
-        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL. The label size, the quality and which end leaves first the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`).",
+        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL. The label size, the quality and which end leaves first the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`). A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
         "operationId": "webhookPrint",
         "security": [
           {
@@ -2224,7 +2256,7 @@
     "/labeldesigner/api/homebox": {
       "get": {
         "summary": "Label for Homebox",
-        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the demo label \"Homebox\" placed on the tape in the printer, or on the one set in its printer settings: its QR code of `URL` next to `TitleText`, `DescriptionText` and `AdditionalInformation`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the demo label \"Homebox\" placed on the tape in the printer, or on the one set in its printer settings where the printer reports none: its QR code of `URL` next to `TitleText`, `DescriptionText` and `AdditionalInformation`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
         "operationId": "homeboxLabel",
         "parameters": [
           {
@@ -2543,6 +2575,10 @@
           "message": {
             "type": "string",
             "description": "Why it failed."
+          },
+          "image": {
+            "type": "string",
+            "description": "The image of the first label printed as base64 PNG, with `return_format=png`."
           }
         }
       },
@@ -2624,7 +2660,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
@@ -3213,7 +3249,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\"."
+                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\", or left alone, e.g. a printer the computer shares over USB/IP."
               }
             }
           }
@@ -3228,7 +3264,7 @@
           },
           "label_size": {
             "type": "string",
-            "description": "Default: `LABEL_DEFAULT_SIZE`."
+            "description": "Default: the tape in the last status of the printer, else the label size set in the printer settings, else `LABEL_DEFAULT_SIZE`."
           },
           "orientation": {
             "type": "string",

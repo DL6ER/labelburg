@@ -9,7 +9,8 @@ import time
 
 import pytest
 
-from app.labeldesigner.drivers import backends, devices, usbip
+from app.labeldesigner import routes
+from app.labeldesigner.drivers import BROTHER, backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
 from app.labeldesigner.drivers.vc500w import DRIVER as VC500W
@@ -160,6 +161,19 @@ def test_printer_not_configured_by_the_host_is_configured():
         host.close()
 
 
+def test_printer_linux_has_not_configured_is_found():
+    # Linux lists a shared device without interfaces until a client
+    # configures it
+    keyboard, printer_ = SharedDevice('1-1', interfaces=((3, 1),)), SharedDevice('3-2', configuration=0)
+    host = FakeHost(keyboard, printer_)
+    try:
+        FakeQL(printer_)
+        assert usb.query_status(host.address())['errors'] == []
+        assert (keyboard.imports, printer_.imports) == (0, 1)
+    finally:
+        host.close()
+
+
 def test_device_id_names_the_model():
     vc, ql = SharedDevice('1-1', device_id=VC500W_ID), SharedDevice('1-2')
     host = FakeHost(vc, ql)
@@ -168,6 +182,7 @@ def test_device_id_names_the_model():
         assert VC500W.model_of(host.address('1-1')) == 'VC-500W'
         assert devices.usb_device_id(host.address('1-2')) == QL1100_ID
         assert VC500W.model_of(host.address('1-2')) is None
+        assert (BROTHER.model_of(host.address('1-1')), BROTHER.model_of(host.address('1-2'))) == (None, 'QL-1100')
     finally:
         host.close()
 
@@ -176,6 +191,40 @@ def test_printer_that_cannot_be_reached_has_no_device_id():
     with socket.create_server(('127.0.0.1', 0)) as closed:
         port = closed.getsockname()[1]
     assert devices.usb_device_id(f'usbip://127.0.0.1:{port}') == ''
+
+
+def test_printer_that_cannot_be_reached_is_tried_once_for_its_model(tmp_path, monkeypatch):
+    attempts = []
+
+    def unreachable(host, port, timeout):
+        attempts.append(host)
+        raise OSError(errno.EHOSTUNREACH, 'No route to host')
+    monkeypatch.setattr(usbip, '_connect', unreachable)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config.update(PRINTER_PRINTER='usbip://192.0.2.1', PRINTER_MODEL='QL-800')
+    data = {'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}]), 'label_size': '62'}
+    assert client.post('/labeldesigner/api/preview', data=data).status_code == 200
+    assert len(attempts) == 1
+    # Printing tries it once more
+    usbip._unreachable.clear()
+    attempts.clear()
+    assert client.post('/labeldesigner/api/print', data=data).status_code == 503
+    assert len(attempts) == 2
+    # The model is asked again after a while
+    usbip._unreachable[usbip.key('usbip://192.0.2.1')] -= usbip.UNREACHABLE_FOR
+    attempts.clear()
+    assert usbip.device_id('usbip://192.0.2.1') == '' and len(attempts) == 1
+
+
+def test_printer_imported_meanwhile_is_asked_for_its_model():
+    host = FakeHost(SharedDevice('1-2'))
+    try:
+        usbip._unreachable[usbip.key(host.address('1-2'))] = time.monotonic() + 60
+        assert usbip.device_id(host.address('1-2')) == ''
+        usbip.connect(host.address('1-2'))
+        assert usbip.device_id(host.address('1-2')) == QL1100_ID
+    finally:
+        host.close()
 
 
 def test_printer_switched_off_and_on_again(host):
@@ -296,6 +345,20 @@ def test_shared_printer_in_the_label_designer(host, tmp_path):
     response = client.post('/labeldesigner/api/print', data={'label_size': '62', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}
     assert ql.received.endswith(b'\x1a') and len(ql.received) > 1000
+
+
+def test_shared_brother_printer_is_the_model_its_device_id_names(host, tmp_path):
+    # Not the model PRINTER_MODEL names, also for requests that name none
+    ql = FakeQL(host.devices[0])
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
+    with client.application.test_request_context():
+        assert routes._printer(None, None) == (host.address(), 'QL-1100')
+        assert routes._printer(None, 'QL-800') == (host.address(), 'QL-800')
+    # Only the QL-1100 series takes it
+    response = client.post('/labeldesigner/api/print', data={'label_size': '103', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    assert ql.received.endswith(b'\x1a')
 
 
 def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):

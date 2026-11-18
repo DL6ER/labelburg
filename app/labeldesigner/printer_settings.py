@@ -51,15 +51,16 @@ OFFSET_LIMIT = 'The labels cannot be moved further than 5 mm.'
 _ROLL = re.compile(r'[A-Za-z0-9]{1,32}')
 
 
-def key(device: str) -> str:
+def key(device: str, device_id: str | None = None) -> str:
     """The printer a setting belongs to: on USB by its serial number where
     its device ID tells one, as /dev/usb/lp<N> changes when printers are
     plugged in another order, by the serial number its status told, e.g. a
     Niimbot B1 on USB and on Bluetooth, else by its device. ?, a request
-    without a printer where none is configured, prints on the simulator."""
+    without a printer where none is configured, prints on the simulator.
+    device_id is the one read already, if it was."""
     if device == '?':
         return 'simulation'
-    fields = device_id_fields(usb_device_id(device))
+    fields = device_id_fields(usb_device_id(device) if device_id is None else device_id)
     serial = fields.get('SN') or fields.get('SERN')
     if serial:
         return f'usb:{fields.get("MDL", "")}/{serial}'
@@ -83,15 +84,18 @@ def parsed(content: str) -> dict:
 def _key(data: dict, device: str) -> str:
     """key(device), of a USB printer switched off, which tells no device ID,
     or of one whose serial number is not told yet, the one last seen on its
-    device. Settings kept before the serial number was told stay its own."""
-    printer, seen = key(device), data.get('seen')
+    device. Settings kept before the serial number was told stay its own.
+    Its device ID is read once, over USB/IP each read is a connection."""
+    device_id = usb_device_id(device)
+    printer, seen = key(device, device_id), data.get('seen')
     if printer.startswith('serial:') and printer not in data['printers'] and lock_key(device) in data['printers']:
         return lock_key(device)
     last = seen.get(printer) if isinstance(seen, dict) else None
+    # The file may be edited by hand, anything but text names no printer
     if not isinstance(last, str):
         return printer
     # A B1 on USB tells a device ID without its serial number
-    return last if not usb_device_id(device) or (printer == lock_key(device) and last.startswith('serial:')) else printer
+    return last if not device_id or (printer == lock_key(device) and last.startswith('serial:')) else printer
 
 
 def of_printer(data: dict, device: str) -> dict:

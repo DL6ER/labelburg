@@ -52,16 +52,21 @@ def _offered() -> dict[str, list]:
     return {label.identifier: label_printers(label) for label in LABELS}
 
 
+def labels_taken(model) -> list[Label]:
+    """The label sizes a printer of model takes. A printer of no known model,
+    e.g. one that did not tell it, takes every label size offered."""
+    offered = _offered()
+    known = any(model in models for models in offered.values())
+    return [label for label in LABELS if (model in offered[label.identifier] if known else offered[label.identifier])]
+
+
 def printer_label_size(printer: dict, default: str) -> tuple[str, bool]:
     """The label size a printer of /api/printer_status prints on, and whether
     it is assumed: the tape the printer reports, else default, else the first
     label size its model takes. Printers of no known model take every label
     size offered. DK and TZe tape of the same size are told apart by the
     model, and only the QL-800 series tells a black and red roll."""
-    model = printer.get('model')
-    offered = _offered()
-    known = any(model in models for models in offered.values())
-    takes = [label for label in LABELS if (model in offered[label.identifier] if known else offered[label.identifier])]
+    takes = labels_taken(printer.get('model'))
     if printer.get('media_width'):
         tape = (printer['media_width'], printer.get('media_length') or 0)
         red = printer.get('red_roll') is True or 'red' in str(printer.get('media_type') or '').lower()

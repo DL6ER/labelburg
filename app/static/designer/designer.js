@@ -68,6 +68,11 @@ function toast(text, action, ms = 0) {
     toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
 }
 
+function hideToast() {
+    clearTimeout(toastTimer);
+    $('#toast').hidden = true;
+}
+
 // In the editor over the label preview, above the cutting shown below the
 // label and the large preview button
 function placeToast(el) {
@@ -103,7 +108,8 @@ const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
 // Models other than Brother ones are named with their maker, e.g. PUQU/Q00
-const modelOnly = model => (model || '').split('/').pop();
+// A printer that has not told its model yet is named "Printer"
+const modelOnly = model => model === 'Unknown' ? '' : (model || '').split('/').pop();
 const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 
 function sizeName(id) {
@@ -259,20 +265,24 @@ function formatDate(iso, fmt = dateFormat()) {
 }
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
-// moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
+// moved, e.g., [today+5d]), [now] for a date with its time (also moved,
+// e.g., [now+2h]), [counter] (also with a start and step, e.g.,
 // [counter:001:5]), [ASN] (also with digits, e.g., [ASN:5]) and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+(?:min|[hdwmy]))?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
-    if (m[2]) return `[today${m[3] || ''}]`;
+    if (m[2]) return `[${/%[HIMp]/.test(m[0]) ? 'now' : 'today'}${m[3] || ''}]`;
     if (m[0].startsWith('{{counter')) return `[counter${m[4] || ''}]`;
     if (m[0].startsWith('{{asn')) return `[ASN${m[5] || ''}]`;
     return '[id]';
 }
 // [today], or a day moved from it as typed, e.g., [today+5d] or [today + 2
-// weeks]: the offset as the server takes it, e.g., +5d or +2w
-const TODAY_RE = /^today(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?))?$/i;
-const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
+// weeks], or [now], the date and time, e.g., [now+2h] or [now+30min]: the
+// offset as the server takes it, e.g., +5d, +2w, +2h or +30min
+const TODAY_RE = /^(?:today|now)(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?|h|hours?|min|minutes?))?$/i;
+const offsetOf = m => m[1] ? m[1] + m[2] + (/^min/i.test(m[3]) ? 'min' : m[3][0].toLowerCase()) : '';
+// [now], or a date moved by hours or minutes, shows its time too
+const withTime = m => /^now/i.test(m[0]) || (!!m[3] && /^(h|min)/i.test(m[3]));
 // [counter], or one with a start and a step as typed, e.g., [counter:001:5]
 // or [Counter : A]
 const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
@@ -323,7 +333,12 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         if (own) return own.template;
         const n = name.trim();
         const day = n.match(TODAY_RE);
-        if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
+        if (day) {
+            let format = formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat();
+            // The format of another date, with the time only where this one has it
+            if (/%[HIMp]/.test(format) !== withTime(day)) format = withTime(day) ? format + ' %H:%M' : dateFormat();
+            return `{{datetime${offsetOf(day)}:${format}}}`;
+        }
         const counter = n.match(COUNTER_RE);
         if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
         const asn = n.match(ASN_RE);
@@ -847,6 +862,8 @@ function fitsTape(sizeId) {
 // another one as setSize() places it, not scaled. Where the printer does not
 // say which tape it has, labels keep their own.
 const tapeKnown = () => !S.tapeAssumed && !!SIZES[S.tape];
+// The tape the printer reports, which is not set by hand
+const tapeReported = () => tapeKnown() && !S.tapeManual;
 // A label of the size of the tape only takes its name, e.g. that of black
 // and red tape. One for black and red keeps it where the printer cannot
 // tell whether its roll has red.
@@ -946,19 +963,21 @@ function printerTakes(s) {
 
 function detectTape() {
     const p = S.printer;
+    // The server tells the label size of the tape the printer reports, or
+    // the one it assumes without
+    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
     // What the printer reported says nothing about a tape set by hand
     S.tapeUnknown = '';
     S.tapeRedUnknown = false;
-    if (SIZES[manualTape()]) {
+    // A tape set by hand counts only where the printer reports none, the
+    // printer refuses a job for another roll
+    if (!found && SIZES[manualTape()]) {
         S.tape = manualTape();
         S.tapeAssumed = false;
         S.tapeManual = true;
         return;
     }
     S.tapeManual = false;
-    // The server tells the label size of the tape the printer reports, or
-    // the one it assumes without
-    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
     // Only the QL-800 series tells whether a roll is black and red
     S.tapeRedUnknown = !!found && !found.red && p.red_roll == null;
     if (p && p.media_width && !found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
@@ -996,6 +1015,8 @@ function printerState(p) {
     // Still being asked, e.g. a printer on Bluetooth that takes a few seconds
     if (p.status_type === 'Asking the printer') return { cls: 'off', text: 'Asking the printer…' };
     if (p.job) return { cls: '', text: jobText(p.job) };
+    // Busy without a job of this server, e.g. with one of another program
+    if (p.status_type === 'Printing') return { cls: '', text: 'Printing' };
     if (/simulat/i.test(p.status_type || p.phase_type || '')) return { cls: '', text: 'Ready (simulated)' };
     return { cls: '', text: 'Ready' };
 }
@@ -1005,7 +1026,7 @@ function renderPrinterChip() {
     const st = printerState(S.printer);
     // Phones show the model only, a printer named in PRINTERS its name
     const vendor = S.printer && !S.printer.name && capsOf(S.printer.model).vendor;
-    chip.innerHTML = `<span class="dot ${st.cls}"></span><b>${vendor ? `<span class="vendor">${esc(vendor)} </span>` : ''}${esc(S.printer ? (S.printer.name || modelOnly(S.printer.model)) : 'No printer')}</b>${tapeKnown() ? `<span class="tape">${esc(sizeName(S.tape))}</span>` : ''}`;
+    chip.innerHTML = `<span class="dot ${st.cls}"></span><b>${vendor ? `<span class="vendor">${esc(vendor)} </span>` : ''}${esc(S.printer ? (S.printer.name || modelOnly(S.printer.model) || 'Printer') : 'No printer')}</b>${tapeKnown() ? `<span class="tape">${esc(sizeName(S.tape))}</span>` : ''}`;
     // A long name is cut short in the chip
     chip.title = S.printer && S.printer.name ? `${S.printer.name}: ${st.text}` : st.text;
     // The printer on the stages shows the same, they are drawn again only
@@ -1065,6 +1086,8 @@ async function printJob(job) {
 }
 
 function announce(entry) {
+    // "Printing..." is over
+    hideToast();
     const n = entry.copies;
     const what = `${n} ${n === 1 ? 'label' : 'labels'}`;
     if (entry.state === 'printed') {
@@ -1228,6 +1251,10 @@ async function saveLabel(title, design, overwrite = null, tags = null) {
     if (!r.ok || !data.success) throw new Error(data.message || 'The label could not be saved');
     forget(data.name);
     await loadSaved();
+    // The wizard shows the label as saved, also when it was opened meanwhile
+    const shown = S.libSel && S.libSel.kind === 'saved' && S.libSel.id === data.name && S.saved.find(x => x.name === data.name);
+    if (shown) S.libSel = Object.assign(savedItem(shown), { values: S.libSel.values, starts: S.libSel.starts });
+    if ($('#libGrid')) { renderLibGrid(); if (shown) showDetail(S.libSel); }
     return data.name;
 }
 // All tags of the saved labels, each once, as first written
@@ -1912,7 +1939,8 @@ function varsHelpHTML() {
         <ul>
             <li><code>[Name]</code> - a blank: whoever prints the label fills it in, in the editor or in the wizard. A name ending in "on" or containing "date" (like <code>[Frozen on]</code>) asks for a date, <code>[Box]</code>, <code>[Number]</code>, <code>[Portions]</code> and <code>[Count]</code> ask for a number, every other name for text.</li>
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
-            <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
+            <li><code>[now]</code> - the date and the time, e.g., when food was prepared, and counted from now like a date, e.g., <code>[now+2h]</code>.</li>
+            <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now, or h for hours or min for minutes with the time, e.g., <code>[now+30min]</code>.</li>
             <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
             <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx: each label gets the next free one, also when labels are printed again before their documents are scanned. <code>[ASN:5]</code> writes it with 5 digits, e.g., 00042.</li>
             <li><code>[id]</code> - a short random ID.</li>
@@ -2293,7 +2321,7 @@ function renderFields(box, item, work, refresh, onEnter) {
     if (blanks.length) {
         html = blanks.map((name, i) => fieldHTML(item, name, work.values[name], i)).join('');
     } else {
-        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><input class="field" id="ln${i}" data-line="${i}" value="${esc(toDisplay(l.text))}"></div>`).join('');
+        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><textarea class="field" id="ln${i}" data-line="${i}" rows="${lineRows(toDisplay(l.text))}">\n${esc(toDisplay(l.text))}</textarea></div>`).join('');
         if (['qrcode_text', 'qrcode', 'image_qrcode_text'].includes(work.design.print_type)) {
             html += `<div><label class="label-s" for="lnCode">Code content</label>${codeField('lnCode', work.design.code_text, work.design.print_type !== 'qrcode' ? ' placeholder="Empty: the text of the label"' : '')}</div>`;
         }
@@ -2301,11 +2329,16 @@ function renderFields(box, item, work, refresh, onEnter) {
     }
     box.innerHTML = html;
     $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { work.values[inp.dataset.blank] = inp.value; refresh(); }));
-    $$('[data-line]', box).forEach(inp => inp.addEventListener('input', () => {
-        const l = work.design.text[+inp.dataset.line];
-        l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
-        refresh();
-    }));
+    $$('[data-line]', box).forEach(inp => {
+        inp.addEventListener('input', () => {
+            const l = work.design.text[+inp.dataset.line];
+            l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
+            inp.rows = lineRows(inp.value);
+            refresh();
+        });
+        // Enter breaks the line, Ctrl+Enter prints as in the field of the code
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onEnter(); } });
+    });
     if ($('#lnCode', box)) {
         $('#lnCode', box).addEventListener('input', e => { e.target.rows = codeRows(e.target.value); work.design.code_text = fromDisplay(e.target.value, work.design.code_text, e.target.selectionStart); refresh(); });
         // Enter starts a new line of the code
@@ -2673,9 +2706,10 @@ function tapeLine(d) {
     const note = S.tapeUnknown ? `<span class="tape-note warn">${who} reports ${esc(S.tapeUnknown)} tape, which is not offered here.</span>`
         : !tapeKnown() ? `<span class="tape-note warn">${who} does not say which tape it has.</span>`
         : `<span class="tape-note ok"><i class="fa-solid fa-check"></i> ${S.tapeManual ? 'Set in the printer settings' : 'In the printer'}${tapeLeft(S.printer) ? ', ' + esc(tapeLeft(S.printer)) : ''}</span>`;
-    return `${note}<div class="field tape-line"><span class="grow">${esc(sizeName(d.label_size))}</span><button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button></div>`;
+    const change = tapeReported() ? '' : `<button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button>`;
+    return `${note}<div class="field tape-line"><span class="grow">${esc(sizeName(d.label_size))}</span>${change}</div>`;
 }
-const bindTapeLine = () => { $('#edTapeChange').onclick = () => openPrinterPanel(); };
+const bindTapeLine = () => { const b = $('#edTapeChange'); if (b) b.onclick = () => openPrinterPanel(); };
 
 // The length of an endless label as cut, next to the tape, where the server
 // offers one for the tape. Die-cut labels have their own, it shows as the hint.
@@ -2842,6 +2876,28 @@ const hexOf = c => c === 'red' ? '#ff0000' : /^#[0-9a-f]{6}$/i.test(c || '') ? c
 const colorOf = hex => hex === '#000000' ? 'black' : hex === '#ff0000' ? 'red' : hex;
 const colorField = (id, color, title) => `<input type="color" class="color-in" id="${id}" value="${hexOf(color)}" title="${title}" aria-label="${title}">`;
 const SPACINGS = [100, 150, 200, 250, 300];
+// The field of a line grows with its line breaks, each is a line on the label
+const lineRows = text => Math.min(8, Math.max(1, String(text).split('\n').length));
+
+// A style set while lines of line i are selected in its field applies to
+// those lines only: they become a line of their own, the lines before and
+// after them stay as they were. A style is one of whole lines on the label,
+// so a selection takes the whole lines it touches. The line to style.
+function selectedLines(d, i, tx) {
+    if (!tx || tx.selectionStart === tx.selectionEnd) return i;
+    const shown = tx.value;
+    let end = tx.selectionEnd;
+    if (end > tx.selectionStart && shown[end - 1] === '\n') end--;
+    const first = shown.slice(0, tx.selectionStart).split('\n').length - 1;
+    const last = shown.slice(0, end).split('\n').length - 1;
+    // The templates have no line breaks: the lines of the text are those shown
+    const lines = String(d.text[i].text).split('\n');
+    if (lines.length !== shown.split('\n').length || (first === 0 && last === lines.length - 1)) return i;
+    const parts = [lines.slice(0, first), lines.slice(first, last + 1), lines.slice(last + 1)]
+        .map(part => part.length ? Object.assign({}, d.text[i], { text: part.join('\n') }) : null);
+    d.text.splice(i, 1, ...parts.filter(Boolean));
+    return i + (parts[0] ? 1 : 0);
+}
 
 // Two rows per line: the text on top, all settings of the line below it
 function lineRow(l, i, main, families, red, color) {
@@ -2850,7 +2906,7 @@ function lineRow(l, i, main, families, red, color) {
     const noBold = wantsBold(l) && !hasBold(fam);
     const spacing = +(l.line_spacing || 100);
     return `<div class="lrow${wantsBold(l) && !noBold ? ' bold' : ''}${i === S.editSel ? ' sel' : ''}${l.color === 'red' ? ' red' : ''}" data-row="${i}">
-        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<input class="tx"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} value="${esc(toDisplay(l.text))}" placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">
+        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<textarea class="tx" rows="${lineRows(toDisplay(l.text))}"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">\n${esc(toDisplay(l.text))}</textarea>
             <button class="mini quiet" type="button" data-act="del" title="Remove the line"><i class="fa-solid fa-xmark"></i></button></span>
         <div class="st">
             <select class="mini lf${fam !== main ? ' on' : ''}" title="Font of line ${i + 1}" aria-label="Font of line ${i + 1}">${missingFont(fam)}${families.map(f => `<option${f === fam ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select>
@@ -3155,9 +3211,10 @@ function bindEditor() {
     if ($('#edAdd')) $('#edAdd').onclick = () => {
         const last = d.text[d.text.length - 1];
         d.text.push(L('', last ? Math.max(20, Math.round(last.size * .6)) : 50, false, last ? last.align : 'center', { font: fontOf(familyOf(last && last.font), false) }));
-        S.editSel = d.text.length - 1;
+        // Drawn anew the line that had the focus gets it back first
+        const added = S.editSel = d.text.length - 1;
         renderEditor();
-        const inp = $(`[data-row="${S.editSel}"] .tx`);
+        const inp = $(`[data-row="${added}"] .tx`);
         if (inp) inp.focus();
     };
     $$('[data-tok]').forEach(b => b.onclick = () => {
@@ -3172,24 +3229,40 @@ function bindEditor() {
         const i = +row.dataset.row, l = d.text[i];
         const tx = $('.tx', row);
         tx.addEventListener('focus', () => { S.editSel = i; $$('[data-row]').forEach(r => r.classList.toggle('sel', r === row)); });
-        tx.addEventListener('input', () => { l.text = fromDisplay(tx.value, l.text, tx.selectionStart); redrawEditor(); });
+        tx.addEventListener('input', () => { l.text = fromDisplay(tx.value, l.text, tx.selectionStart); tx.rows = lineRows(tx.value); redrawEditor(); });
         tx.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); $('#edAdd').click(); }
+            // Enter breaks the line in the field, Shift+Enter starts a line
+            // with settings of its own
+            if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); $('#edAdd').click(); }
             if (e.key === 'Backspace' && !tx.value && d.text.length > 1) { e.preventDefault(); d.text.splice(i, 1); S.editSel = Math.max(0, i - 1); renderEditor(); const p = $(`[data-row="${S.editSel}"] .tx`); if (p) p.focus(); }
         });
-        $('input.mini', row).addEventListener('input', e => { const v = Math.round(+e.target.value); if (v > 0) { l.size = String(v); redrawEditor(); } });
-        $('select.lf', row).onchange = e => { l.bold = wantsBold(l); l.font = fontOf(e.target.value, l.bold); S.editSel = i; renderEditor(); };
-        $('select.lsp', row).onchange = e => { l.line_spacing = e.target.value; S.editSel = i; renderEditor(); };
-        if ($('input.lcol', row)) $('input.lcol', row).onchange = e => { l.color = colorOf(e.target.value); S.editSel = i; renderEditor(); };
+        // The line a style applies to: the selected lines of the field as a
+        // line of their own, else the whole line
+        const styled = () => { const j = selectedLines(d, i, tx); S.editSel = j; return d.text[j]; };
+        $('input.mini', row).addEventListener('input', e => {
+            const v = Math.round(+e.target.value);
+            if (!(v > 0)) return;
+            const count = d.text.length, m = styled();
+            m.size = String(v);
+            if (d.text.length === count) return redrawEditor();
+            // Split, the size typed next goes on in the field of the new line
+            renderEditor();
+            const size = $(`[data-row="${S.editSel}"] input.mini`);
+            // Set anew, the value puts the caret after the digits typed so far
+            if (size) { size.focus(); size.value = ''; size.value = m.size; }
+        });
+        $('select.lf', row).onchange = e => { const m = styled(); m.bold = wantsBold(m); m.font = fontOf(e.target.value, m.bold); renderEditor(); };
+        $('select.lsp', row).onchange = e => { styled().line_spacing = e.target.value; renderEditor(); };
+        if ($('input.lcol', row)) $('input.lcol', row).onchange = e => { styled().color = colorOf(e.target.value); renderEditor(); };
         $$('button[data-act]', row).forEach(b => b.onclick = () => {
             const act = b.dataset.act;
-            if (act === 'todo') l.checkbox = !l.checkbox;
-            if (act === 'red') l.color = l.color === 'red' ? 'black' : 'red';
-            if (act === 'bold') { l.bold = !wantsBold(l); if (FONTS[familyOf(l.font)]) l.font = fontOf(familyOf(l.font), l.bold); }
-            if (act === 'align') l.align = { left: 'center', center: 'right', right: 'left' }[l.align] || 'left';
-            if (act === 'invert') l.inverted = !l.inverted;
-            if (act === 'del') d.text.splice(i, 1);
-            S.editSel = i;
+            if (act === 'del') { d.text.splice(i, 1); S.editSel = i; renderEditor(); return; }
+            const m = styled();
+            if (act === 'todo') m.checkbox = !m.checkbox;
+            if (act === 'red') m.color = m.color === 'red' ? 'black' : 'red';
+            if (act === 'bold') { m.bold = !wantsBold(m); if (FONTS[familyOf(m.font)]) m.font = fontOf(familyOf(m.font), m.bold); }
+            if (act === 'align') m.align = { left: 'center', center: 'right', right: 'left' }[m.align] || 'left';
+            if (act === 'invert') m.inverted = !m.inverted;
             renderEditor();
         });
     });
@@ -3462,7 +3535,7 @@ function bindPrinterPanel() {
     const saveSettings = changes => {
         // No printer is listed where its status did not come
         if (!S.printer) return toast('The label designer could not be reached');
-        const printers = [...new Set([S.printer, ...S.printers])], before = printers.map(p => p.settings);
+        const printers = [...new Set([S.printer, ...S.printers])], before = new Map(printers.map(p => [p.path, p.settings]));
         const shown = () => {
             detectTape(); renderPrinterChip(); tapeChanged = true;
             const open = $('.pp');
@@ -3483,7 +3556,8 @@ function bindPrinterPanel() {
         post('/settings', fd).catch(() => { throw new Error('The label designer could not be reached'); }).then(async r => {
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The settings could not be saved');
         }).catch(e => {
-            printers.forEach((p, i) => { p.settings = before[i]; });
+            // On the printers shown now, a status may have replaced them
+            [S.printer, ...S.printers].forEach(p => { if (p && before.has(p.path)) p.settings = before.get(p.path); });
             toast(e.message);
             shown();
         }).finally(() => { settingsPending--; settingsAnswered++; });
@@ -3497,7 +3571,8 @@ function bindPrinterPanel() {
         redraw();
     });
     $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
-    $('#setTape', box).onchange = e => saveSettings({ label_size: e.target.value });
+    const setTape = $('#setTape', box);
+    if (setTape) setTape.onchange = e => saveSettings({ label_size: e.target.value });
     // Of this browser only
     const keepHere = () => { store(own('designer_settings'), S.settings); tapeChanged = true; redraw(); };
     $('#setDate', box).onchange = e => { S.settings.dateFmt = e.target.value; keepHere(); };
@@ -3680,11 +3755,13 @@ function settingsCard() {
     const assumed = `Labels keep their own size, new ones are ${esc(sizeName(S.tape))}.`;
     const note = S.tapeManual ? 'Set by hand.' : S.tapeUnknown ? `The printer reports ${S.tapeUnknown} tape, which is not offered here. ${assumed}`
         : S.tapeAssumed ? `The printer does not report its tape. ${assumed}` : 'Read from the printer.';
-    return `<div class="settings">
-        <div><label class="label-s" for="setTape">Tape in the printer</label>
-            <select class="field" id="setTape"><option value="">Automatic${S.tapeManual || S.tapeAssumed ? '' : ': ' + esc(sizeName(S.tape))}</option>
+    const tapeField = tapeReported() ? `<span class="label-s">Tape in the printer</span><div id="ppTape">${esc(sizeName(S.tape))}</div>`
+        : `<label class="label-s" for="setTape">Tape in the printer</label>
+            <select class="field" id="setTape"><option value="">Automatic</option>
             ${sizeOptions(manualTape(), x => esc(sizeName(x.id)))}
-            </select><span class="muted small">${note}</span></div>
+            </select>`;
+    return `<div class="settings">
+        <div>${tapeField}<span class="muted small" id="ppTapeNote">${note}</span></div>
         <div><div class="row" style="gap:.35rem;margin-bottom:.3rem"><span class="label-s" style="margin:0">Quality</span>
             <button type="button" class="info-btn" id="qInfoBtn" aria-expanded="${!!S.qualityInfo}" aria-controls="qInfo" title="About the quality settings"><i class="fa-solid fa-circle-info"></i><span class="sr-only">About the quality settings</span></button></div>
             <div class="seg">

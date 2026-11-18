@@ -25,7 +25,7 @@ class SharedDevice:
     endpoints 0x02 and 0x81, is the other end of the socket 'printer'.
     'requests' are the control requests it got, 'resets' how often a client
     let it go, after which Linux resets it. configuration 0: not configured
-    yet."""
+    yet, listed without interfaces as Linux does."""
 
     def __init__(self, busid='1-1', product=0x20A7, device_id=QL1100_ID, interfaces=((7, 2),), configuration=1,
                  device_class=0):
@@ -43,7 +43,11 @@ class SharedDevice:
     def record(self):
         return usbip.DEVICE.pack(f'/sys/devices/usb1/{self.busid}'.encode(), self.busid.encode(), 1, 2, 2,
                                  0x04F9, self.product, 0x0100, self.device_class, 0, 0, self.configuration, 1,
-                                 len(self.interfaces))
+                                 len(self.listed()))
+
+    def listed(self):
+        """The interfaces the host lists, none before the device is configured."""
+        return self.interfaces if self.configuration else ()
 
     def unplug(self):
         """Switch the printer off: its transfers fail, the host lets the
@@ -95,7 +99,7 @@ class FakeHost:
                     free = [device for device in self.devices if device.present and not device.used]
                     connection.sendall(usbip.OP.pack(usbip.VERSION, usbip.OP_REP_DEVLIST, 0) + struct.pack('>I', len(free))
                                        + b''.join(device.record() + b''.join(usbip.INTERFACE.pack(cls, 1, protocol)
-                                                                             for cls, protocol in device.interfaces)
+                                                                             for cls, protocol in device.listed())
                                                   for device in free))
                     return
                 busid = _receive(connection, 32).rstrip(b'\0').decode()
