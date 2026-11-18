@@ -22,7 +22,7 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, resolution_problem
+from .drivers import DEVICE_PATTERNS, progress, resolution_problem
 from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
@@ -1328,6 +1328,10 @@ def get_printer_status():
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        # A job of this server, added to what the printer tells of it
+        job = progress.state(printer['path']) if printer.get('path') else None
+        if job:
+            printer['job'] = dict(printer.get('job') or {}, **job)
     return status
 
 

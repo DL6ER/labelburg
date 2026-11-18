@@ -41,7 +41,7 @@ def render(queue, entries, keep=None) -> Raster:
         img = label.generate()
         if keep:
             keep(img, f'{i:03d}')
-        raster.page_lengths.append(max(img.size) / (180 if ptouch else 300) * 25.4)
+        raster.page_lengths.append(max(img.size) / raster.spec.dpi * 25.4)
         if job:
             job['images'].append(img)
             job['cuts'].append(entry['cut'])

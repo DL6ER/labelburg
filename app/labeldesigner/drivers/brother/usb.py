@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 
-from .. import devices
+from .. import devices, progress
 from ..backends import open_printer
 from .status import HEADER, LENGTH, parse_status
 
@@ -34,6 +34,7 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
     info = {'did_print': False, 'ready_for_next_job': False, 'printer_state': None,
             'pages': len(page_lengths), 'confirmed': 0}
     printer = get_printer(device_specifier)
+    progress.counting(device_specifier)
     try:
         _drain(printer)
         received = _write_reading(printer, data)
@@ -66,6 +67,7 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
                 if state['status_type'] == 'Phase change':
                     # "Printing" before each page, "waiting to receive" after it
                     info['ready_for_next_job'] = state['phase_type'] == 'Waiting to receive'
+            progress.printed(device_specifier, info['confirmed'])
             info['did_print'] = info['confirmed'] >= info['pages']
             if info['did_print'] and info['ready_for_next_job']:
                 return info
@@ -194,7 +196,7 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
     """Query the printer status without waiting for a running print job. While
     a job holds the device, the last known status is returned instead."""
     key = devices.lock_key(device_specifier)
-    with devices.device_lock(device_specifier, timeout=devices.STATUS_LOCK_TIMEOUT) as acquired:
+    with devices.device_lock(device_specifier, timeout=progress.status_wait(device_specifier)) as acquired:
         if acquired:
             printer = get_printer(device_specifier)
             try:

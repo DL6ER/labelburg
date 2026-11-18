@@ -62,9 +62,24 @@ function toast(text, action, ms = 0) {
     const el = $('#toast');
     el.innerHTML = esc(text) + (action ? ` <button class="btn sm quiet" style="color:inherit;text-decoration:underline" type="button">${esc(action.label)}</button>` : '');
     el.hidden = false;
+    placeToast(el);
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; action.run(); };
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
+}
+
+// In the editor over the label preview, above the cutting shown below the
+// label and the large preview button
+function placeToast(el) {
+    Object.assign(el.style, { left: '', bottom: '', maxWidth: '' });
+    const stage = $('#edStage');
+    if (!stage || !stage.offsetParent) return;
+    const box = stage.getBoundingClientRect();
+    if (box.width < innerWidth - 1) Object.assign(el.style, { left: `${box.left + box.width / 2}px`, maxWidth: `${box.width - 32}px` });
+    const t = el.getBoundingClientRect();
+    const covered = [...stage.querySelectorAll('.cuts, .zoom')].map(c => c.getBoundingClientRect())
+        .filter(r => r.width && t.left < r.right && r.left < t.right && t.top < r.bottom && r.top < t.bottom);
+    if (covered.length) el.style.bottom = `${innerHeight - Math.min(...covered.map(r => r.top)) + 8}px`;
 }
 
 function fmtTime(ts) {
@@ -83,7 +98,7 @@ const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].m
 // ZINK tape of the VC-500W, which prints in any color
 const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 // What the server's driver of a printer model offers, see Driver.capabilities()
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, job_stages: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false };
 const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
@@ -958,10 +973,21 @@ function detectTape() {
     S.tapeAssumed = !found;
 }
 
-// What a VC-500W does: the stage of the label it prints, the label of how
-// many, how far along it is
+// What a printer does with a job: the stage of the label (VC-500W), the
+// label of how many, how long the job still takes
 function jobText(job) {
-    return job.stage + (job.percent !== undefined ? ` ${job.percent} %` : '') + (job.labels > 1 ? `, label ${job.label} of ${job.labels}` : '');
+    const parts = [];
+    if (job.stage) parts.push(job.stage + (job.percent !== undefined ? ` ${job.percent} %` : ''));
+    if (job.label !== undefined && job.labels > 1) parts.push(`label ${job.label} of ${job.labels}`);
+    if (job.seconds_left !== undefined) parts.push(timeLeft(job.seconds_left));
+    const text = parts.join(', ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function timeLeft(seconds) {
+    if (seconds < 10) return 'a few seconds left';
+    if (seconds < 60) return `about ${Math.round(seconds / 5) * 5} s left`;
+    return `about ${Math.round(seconds / 60)} min left`;
 }
 
 // The tape left in the cassette of a VC-500W
@@ -1010,13 +1036,14 @@ async function printJob(job) {
     saveHistory();
     updateCounts();
     toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`);
-    // A VC-500W takes about 40 s for a label, what it does is shown meanwhile
-    const followed = S.printer && printerCaps().job_stages ? S.printer.path : '';
+    // How far the job is and how long it still takes are shown meanwhile
+    const followed = S.printer && S.printer.path !== 'simulation' ? S.printer.path : '';
     const follow = followed && setInterval(async () => {
         try {
             const data = await (await fetch(API + '/printer_status')).json();
             const p = (Array.isArray(data.printers) ? data.printers : [data]).find(x => x.path === followed);
-            if (p && p.job && entry.state === 'printing') toast(jobText(p.job), null, 10000);
+            const text = p && p.job ? jobText(p.job) : '';
+            if (text && entry.state === 'printing') toast(text, null, 10000);
         } catch (e) { }
     }, 1500);
     try {

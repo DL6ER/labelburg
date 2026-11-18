@@ -8,7 +8,7 @@ import time
 
 from PIL import Image
 
-from .. import devices
+from .. import devices, progress
 from ..base import Driver, network_status
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 MODELS = ('Niimbot/D110_M',)
 DOTS_PER_MM = 8
+# mm/s as sellers give it, and the seconds a label takes besides, to set up
+# its job and to tell that it printed it
+SPEED = 30
+BESIDES = 2.0
 
 # Width x length in mm of the rolls sold for the D11 and D110 printers,
 # e.g. T12*40 for 12 x 40 mm. Only 12 x 40 mm was printed on.
@@ -98,7 +102,7 @@ class Niimbot(Driver):
         return state
 
     def _status(self, device, model):
-        with devices.device_lock(device, timeout=devices.STATUS_LOCK_TIMEOUT) as acquired:
+        with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
                 state = network_status(device, model)
                 state.update(devices.status_cache.get(devices.lock_key(device), {}))
@@ -128,6 +132,12 @@ class Niimbot(Driver):
         _asked[device] = time.monotonic()
         return state
 
+    def print_speed(self, model, fast, red):
+        return SPEED, BESIDES
+
+    def label_lengths(self, job):
+        return [len(rows) / DOTS_PER_MM for rows in job]
+
     def render(self, queue, entries, keep=None):
         job = []
         for i, entry in enumerate(entries):
@@ -151,8 +161,10 @@ class Niimbot(Driver):
                     devices.note_answer(device)
                     return state['errors'][0]
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
-                for rows in job:
+                progress.counting(device)
+                for i, rows in enumerate(job):
                     protocol.print_label(c, rows, label_type)
+                    progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:
             logger.warning('Printing on %s failed: %s', device, e)

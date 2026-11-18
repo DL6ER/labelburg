@@ -689,7 +689,7 @@ def test_printer_of_another_driver_gets_what_it_offers(designer):
     # The label designer knows printers only by what their driver tells
     designer.evaluate("""() => {
         C.models['Other-1'] = { qualities: ['fast', 'quality'], high_res: false, half_cut: false, chain: false,
-                                feed_waste: false, job_stages: false, colors: 'black', never_cut: 'It keeps them.' };
+                                feed_waste: false, colors: 'black', never_cut: 'It keeps them.' };
         SIZES['o48'] = Object.assign({}, SIZES['62'], { id: 'o48', models: ['Other-1'], dpi: [203, 203] });
         S.printer = Object.assign({}, S.printer, { model: 'Other-1' }); S.printer.settings = Object.assign({}, S.printer.settings, { quality: 'high' }); S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'last' });
         openPrinterPanel(); }""")
@@ -914,6 +914,66 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
     button = designer.locator('.pp #setLfTest')
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
+
+
+def print_held(page, job, large=False):
+    """Print on a QL-800 that tells the job, the answer held back, with large
+    the preview shown large. The held request is returned."""
+    printer = {'errors': [], 'model': 'QL-800', 'path': 'file:///dev/usb/lp0', 'media_width': 62, 'media_length': 0, 'job': job}
+    body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
+    page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    page.reload()
+    wait_for_preview(page)
+    type_line(page, 0, 'Spices')
+    if large:
+        page.click('#edStage .zoom')
+        wait_for_preview(page)
+    pending = []
+    page.route('**/api/print', lambda route: pending.append(route))
+    page.click('#edPrint')
+    return pending
+
+
+def test_time_left_is_shown_while_printing(designer):
+    # On every printer, not only the VC-500W that tells its stages
+    pending = print_held(designer, {'labels': 3, 'label': 2, 'seconds_left': 40})
+    designer.wait_for_function("() => document.querySelector('#toast').textContent === 'Label 2 of 3, about 40 s left'")
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+    assert printed(designer) == ['printed']
+
+
+def overlap(a, b) -> bool:
+    return a['x'] < b['x'] + b['width'] and b['x'] < a['x'] + a['width'] and a['y'] < b['y'] + b['height'] and b['y'] < a['y'] + a['height']
+
+
+@pytest.mark.parametrize('width, height, large', [(1326, 924, False), (1326, 924, True), (1600, 900, False), (390, 844, False)])
+def test_messages_leave_the_preview_controls_visible(designer, width, height, large):
+    # Neither the cutting below the label nor the large preview button
+    designer.set_viewport_size({'width': width, 'height': height})
+    pending = print_held(designer, {'labels': 30, 'label': 12, 'stage': 'Waiting for the printer to cool down', 'seconds_left': 400}, large)
+    designer.wait_for_function("() => document.querySelector('#toast').textContent.startsWith('Waiting')")
+    toast = designer.locator('#toast').bounding_box()
+    for selector in ('#edStage .cuts', '#edStage .zoom'):
+        if designer.locator(selector).is_visible():
+            assert not overlap(toast, designer.locator(selector).bounding_box()), selector
+    if width > 900:
+        # Over the preview, not over the settings beside it
+        stage = designer.locator('#edStage').bounding_box()
+        assert stage['x'] <= toast['x'] and toast['x'] + toast['width'] <= stage['x'] + stage['width']
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+
+
+@pytest.mark.parametrize('job, text', [
+    ({'labels': 3, 'label': 2, 'seconds_left': 42}, 'Label 2 of 3, about 40 s left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 130}, 'About 2 min left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 70}, 'About 1 min left'),
+    # A printer that does not tell its labels printed
+    ({'labels': 20, 'seconds_left': 3}, 'A few seconds left'),
+    ({'labels': 2}, ''),
+    ({'stage': 'Preheating', 'label': 1, 'labels': 2, 'seconds_left': 75}, 'Preheating, label 1 of 2, about 1 min left'),
+])
+def test_time_left_in_words(designer, job, text):
+    assert designer.evaluate('job => jobText(job)', job) == text
 
 
 def test_printer_list_tells_a_missing_libusb(designer):
