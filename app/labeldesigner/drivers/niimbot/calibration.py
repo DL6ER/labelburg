@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from . import protocol
 
 MM = 8
+KIND_MESSAGE = 'kind must be narrow or wide'
 # Kept clear of the rounded ends of a label
 CORNER = 2
 # The printhead has to reach this far past each edge of a narrow roll
@@ -95,7 +96,7 @@ def example(kind: str) -> bytes:
     label designer: on a 40 x 30 mm roll with the reading points marked, or
     on a 50 x 30 mm roll with its uneven white strips."""
     if kind not in ('narrow', 'wide'):
-        raise ValueError('kind must be narrow or wide')
+        raise ValueError(KIND_MESSAGE)
     width_mm, length_mm, shift, zoom, pad = (40 if kind == 'narrow' else 50), 30, MM, 3, 5 * MM
     page = narrow(width_mm, length_mm) if kind == 'narrow' else wide(width_mm, length_mm)
     width, height = width_mm * MM, length_mm * MM

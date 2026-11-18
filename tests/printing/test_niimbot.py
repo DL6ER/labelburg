@@ -8,7 +8,7 @@ import pytest
 
 from app.labeldesigner import printer_settings
 from app.labeldesigner.drivers import devices, niimbot, progress
-from app.labeldesigner.drivers.niimbot import protocol
+from app.labeldesigner.drivers.niimbot import calibration, protocol
 from tests.helpers import make_client
 
 DEVICE = 'bt://00:F4:BA:17:12:06'
@@ -508,3 +508,36 @@ def test_bluetooth_connections_are_set_up_one_at_a_time(monkeypatch):
     for thread in threads:
         thread.join()
     assert max(most) == 1 and len(most) == 2
+
+
+def _calibration_page(img):
+    return img.point(lambda v: 0 if v < 128 else 255)
+
+
+@pytest.mark.parametrize('label_size, page', [('niimbot40x30', lambda: calibration.narrow(40, 30)),
+                                              ('niimbot50x30', lambda: calibration.wide(50, 30))])
+def test_calibration_label_is_placed_as_the_printer_is_calibrated(label_size, page):
+    from types import SimpleNamespace
+    job = niimbot.DRIVER.calibration_job(SimpleNamespace(label_size=label_size, offset=(-0.5, 0.25)))
+    assert job == [niimbot.placed(_calibration_page(page()), 384, 2 + 4, 2 + 2)]
+
+
+def test_b1_prints_its_calibration_label(b1, fake, tmp_path):
+    b1.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    r = b1.post('/labeldesigner/api/calibration/print', data={'printer': DEVICE, 'model': 'Niimbot/B1', 'label_size': 'niimbot40x30'})
+    assert r.get_json() == {'success': True}
+    packets = {packet[2]: data_of(packet) for packet in fake.packets}
+    assert packets[0x13] == struct.pack('>HHH', 240, 384, 1)
+
+
+def test_d110_m_prints_no_calibration_label(client, fake):
+    r = client.post('/labeldesigner/api/calibration/print', data={'printer': DEVICE, 'label_size': 'niimbot12x40'})
+    assert r.status_code == 400 and r.get_json()['message'] == printer_settings.NO_CALIBRATION
+    assert fake.commands == []
+
+
+@pytest.mark.parametrize('kind, status', [('narrow', 200), ('wide', 200), ('other', 400)])
+def test_example_of_the_calibration_label(b1, kind, status):
+    r = b1.get('/labeldesigner/api/calibration/example.png', query_string={'kind': kind})
+    assert r.status_code == status
+    assert (r.mimetype == 'image/png') is (status == 200)

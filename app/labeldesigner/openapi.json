@@ -381,6 +381,143 @@
         }
       }
     },
+    "/labeldesigner/api/calibration/print": {
+      "post": {
+        "summary": "Print a calibration label",
+        "description": "Prints the calibration label for the roll in a printer that offers calibration, moved as the printer is calibrated: on a narrow roll a triangle at each edge to read the numbers at, on a wider one a frame to compare the white strips beside.",
+        "operationId": "printCalibration",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Printed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown printer or label size, or a printer that offers no calibration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The printer could not print it, the message tells why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/calibration/example.png": {
+      "get": {
+        "summary": "Example of a calibration label",
+        "description": "A calibration label of the kind printed 1 mm too far right, which shows where to read it.",
+        "operationId": "calibrationExample",
+        "parameters": [
+          {
+            "name": "printer",
+            "in": "query",
+            "required": false,
+            "description": "The device or name of the printer, the configured one if left out.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["narrow", "wide"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown kind, or a printer that offers no calibration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",

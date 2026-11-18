@@ -120,6 +120,16 @@ class Driver:
         one."""
         return ''
 
+    def calibration_job(self, queue):
+        """The job that prints the calibration label for the label size of
+        the queue, moved as its offset says, as send() takes it."""
+        raise NotImplementedError
+
+    def calibration_example(self, kind: str) -> bytes:
+        """A PNG of a calibration label of the kind printed off-center, which
+        shows where to read it. ValueError for an unknown kind."""
+        raise NotImplementedError
+
     def resolution_problem(self, model: str, high_res: bool) -> str:
         """Why the model cannot print at the resolution, or an empty string."""
         return ''

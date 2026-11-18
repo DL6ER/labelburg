@@ -155,6 +155,27 @@ class PrinterQueue:
                 progress.finish(self.device_specifier, printed)
 
 
+    def print_calibration(self) -> str:
+        """Print the calibration label of the printer, see
+        Driver.calibration_job()."""
+        if is_simulation(self.device_specifier):
+            return ''
+        with devices.device_lock(self.device_specifier) as acquired:
+            if not acquired:
+                logger.warning('Printer %s is busy with another job', self.device_specifier)
+                return "Printer is busy with another print job, please try again"
+            job = self.driver.calibration_job(self)
+            progress.start(self.device_specifier, self.driver.label_lengths(job),
+                           self.driver.print_speed(self.model, False, False), (False, False, False))
+            printed = False
+            try:
+                message = self.driver.send(self, job)
+                printed = not message
+                return message
+            finally:
+                progress.finish(self.device_specifier, printed)
+
+
 def _discovered_label_printers() -> list[tuple[str, str]]:
     """Label printers that announce themselves on the network, as (address,
     model), e.g. tcp://<address>[:<port>] or vc500w://<address>. Kept for

@@ -108,6 +108,7 @@ class Niimbot(Driver):
     # bt://<MAC>[/<RFCOMM channel>]
     device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),)
     errors = (OSError, protocol.NiimbotError)
+    refusals = (calibration.KIND_MESSAGE,)
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
@@ -128,6 +129,18 @@ class Niimbot(Driver):
         if model != 'Niimbot/B1' or size is None:
             return ''
         return 'narrow' if calibration.is_narrow(size.tape_size[0]) else 'wide'
+
+    def calibration_job(self, queue):
+        size = next(label for label in LABELS if label.identifier == queue.label_size)
+        width, length = size.tape_size
+        page = calibration.narrow(width, length) if calibration.is_narrow(width) else calibration.wide(width, length)
+        # Its title is drawn smooth, printed where at least half black
+        page = page.point(lambda v: 0 if v < 128 else 255)
+        return [placed(page, protocol.B1_HEAD, B1_SHIFT - round(queue.offset[0] * DOTS_PER_MM),
+                       B1_FEED + round(queue.offset[1] * DOTS_PER_MM))]
+
+    def calibration_example(self, kind):
+        return calibration.example(kind)
 
     def status(self, device, model, unconfirmed=False):
         # One that did not answer is not looked for at every status query

@@ -1405,10 +1405,7 @@ def calibration_route():
     across and along, or notes the roll it holds for."""
     values = {**request.values.to_dict(), **_json_body()}
     try:
-        device, model = _printer(values.pop('printer', None), values.pop('model', None))
-        driver = drivers.for_model(model)
-        if not driver.capabilities(model)['calibration']:
-            raise ValueError(printer_settings.NO_CALIBRATION)
+        device, model, driver = _calibrating(values)
         if request.method == 'GET':
             kept = _kept_settings()
             label_size = values.get('label_size') or printer_settings.of_printer(kept, device).get('label_size', '')
@@ -1440,6 +1437,47 @@ def calibration_route():
         _log_refused_request('Calibrating', e)
         return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
     return jsonify({'success': True, 'calibration': printer_settings.calibration_of(data, device), 'shift': shift})
+
+
+def _calibrating(values: dict) -> tuple[str, str, object]:
+    """The device, model and driver of the printer a request names, which
+    has to offer calibration."""
+    device, model = _printer(values.pop('printer', None), values.pop('model', None))
+    driver = drivers.for_model(model)
+    if not driver.capabilities(model)['calibration']:
+        raise ValueError(printer_settings.NO_CALIBRATION)
+    return device, model, driver
+
+
+@bp.route('/api/calibration/print', methods=['POST'])
+def print_calibration():
+    """Print the calibration label for the roll in the printer."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model, _ = _calibrating(values)
+        label_size = values.get('label_size') or printer_settings.of_printer(_kept_settings(), device).get('label_size', '')
+        message = _queue(model, device, label_size).print_calibration()
+    except ValueError as e:
+        _log_refused_request('Printing the calibration label', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+    if message:
+        return make_response(jsonify({'success': False, 'message': message}), PRINTER_FAILED)
+    return jsonify({'success': True})
+
+
+@bp.route('/api/calibration/example.png', methods=['GET'])
+def calibration_example():
+    """A calibration label printed off-center, which shows where to read it."""
+    values = request.args.to_dict()
+    try:
+        _, _, driver = _calibrating(values)
+        image = driver.calibration_example(values.get('kind', ''))
+    except ValueError as e:
+        _log_refused_request('The example of a calibration label', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+    response = make_response(image)
+    response.headers.set('Content-type', 'image/png')
+    return response
 
 
 @bp.route('/api/print', methods=['POST'])
