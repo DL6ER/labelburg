@@ -6,6 +6,7 @@ import struct
 
 import pytest
 
+from app.labeldesigner import printer_settings
 from app.labeldesigner.drivers import devices, niimbot, progress
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client
@@ -25,7 +26,7 @@ B1_TAG = bytes.fromhex('881d7e4fd9970000') + b'\x0810262260' + b'\x10PZ1G2213220
 B1_CLOSED = bytes.fromhex('1ff7006100610000' '4f00040001')
 B1_OPEN = bytes.fromhex('2017005400540000' '4f01040100')
 B1_NO_ROLL = bytes.fromhex('2017008500850000' '4f00040100')
-B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), 0xdc: (0xdd, B1_CLOSED),
+B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), (0x40, 0x0b): (0x4b, b'TEST000001'), 0xdc: (0xdd, B1_CLOSED),
               0x03: (0x04, b'\x01'), 0x1a: (0x1b, B1_TAG)}
 
 
@@ -43,9 +44,11 @@ class FakePrinter:
         command = data[2]
         self.commands.append(command)
         self.packets.append(data)
+        # Some commands answer by their first byte, e.g. 0x40 by what it asks
+        key = (command, data[4]) if (command, data[4]) in REPLIES else command
         # The heartbeat while printing is not waited for
-        if command in REPLIES and not (command == 0xdc and 0x01 in self.commands):
-            self.pending += protocol.packet(*REPLIES[command])
+        if key in REPLIES and not (command == 0xdc and 0x01 in self.commands):
+            self.pending += protocol.packet(*REPLIES[key])
 
     def recv(self, size):
         data, self.pending = self.pending, b''
@@ -118,7 +121,8 @@ def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake):
     assert response.get_json() == {'success': True}
     rows = [c for c in fake.commands if c in (0x84, 0x85)]
     sent = [c for c in fake.commands if c not in (0x84, 0x85)]
-    assert rows and sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
+    # Its serial number asked after its roll
+    assert rows and sent == [0x40, 0xdc, 0x1a, 0x40, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
     packets = {packet[2]: data_of(packet) for packet in fake.packets}
     # One page of 30 mm, rows across the whole printhead
     assert packets[0x01] == struct.pack('>H5B', 1, 0, 0, 0, 0, 0)
@@ -151,12 +155,15 @@ def test_b1_on_usb_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
         return opened[-1]
     monkeypatch.setattr(protocol.backends, 'open_printer', open_printer)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
+    # Not asked over the network for a device ID
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: '')
     b1.application.config['PRINTER_PRINTER'] = 'usbip://192.0.2.7/1-4.1.3'
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}
     sent = [c for c in printer.commands if c not in (0x84, 0x85)]
-    assert sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
+    assert sent == [0x40, 0xdc, 0x1a, 0x40, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
     assert opened and all(p.disposed for p in opened)
 
 
@@ -374,6 +381,17 @@ def test_no_roll_is_not_an_open_lid(client, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, b'\x00'))
     errors = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors']
     assert errors == ['No Niimbot roll with its RFID tag is in the printer']
+
+
+def test_b1_tells_its_serial_number_and_its_roll(b1, fake):
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['serial'], printer_['roll']) == ('TEST000001', 'PZ1G221322004205')
+
+
+def test_d110_m_is_not_asked_for_its_serial_number(client, fake):
+    printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert printer_['serial'] is None and printer_['roll'] == 'PZ1G910304007921'
+    assert not any(packet[2] == 0x40 and packet[4] == 0x0b for packet in fake.packets)
 
 
 def test_b1_with_its_lid_open(b1, fake, monkeypatch):

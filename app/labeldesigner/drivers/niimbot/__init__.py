@@ -157,9 +157,10 @@ class Niimbot(Driver):
             with protocol.connect(device) as c:
                 beat = protocol.heartbeat(c)
                 roll = protocol.roll(c)
-        return self._keep(device, model, beat, roll)
+                serial = protocol.printer_serial(c) if model == 'Niimbot/B1' else None
+        return self._keep(device, model, beat, roll, serial)
 
-    def _keep(self, device, model, beat, roll):
+    def _keep(self, device, model, beat, roll, serial=None):
         """The state of the printer by its heartbeat and roll, kept for the
         status queries until it is asked again."""
         state = network_status(device, model)
@@ -174,6 +175,10 @@ class Niimbot(Driver):
         state['battery_low'] = battery in (0, 1)
         if isinstance(battery, int):
             state['battery'] = min(battery, 4) * 25
+        # The settings of a B1 follow it by its serial number, the label
+        # designer tells when another roll is in it
+        state['serial'] = serial
+        state['roll'] = roll.get('serial') if roll else None
         # The label designer then picks the labels of the roll
         if roll and roll['barcode'] in ROLLS:
             state['media_width'], state['media_length'] = ROLLS[roll['barcode']]
@@ -208,7 +213,8 @@ class Niimbot(Driver):
                 # What the status keeps is updated, e.g. another roll
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
-                state = self._keep(device, model, beat, loaded)
+                serial = protocol.printer_serial(c) if model == 'Niimbot/B1' else None
+                state = self._keep(device, model, beat, loaded, serial)
                 if state['errors']:
                     devices.note_answer(device)
                     return state['errors'][0]

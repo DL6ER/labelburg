@@ -2984,6 +2984,14 @@
             "type": "integer",
             "description": "Niimbot: the charge of the battery in percent, in steps of 25, as the printer tells it in 4 steps."
           },
+          "serial": {
+            "type": ["string", "null"],
+            "description": "Niimbot B1: the serial number of the printer, its settings and calibration follow it on any connection."
+          },
+          "roll": {
+            "type": ["string", "null"],
+            "description": "Niimbot: the serial number of the roll in the printer, from its RFID tag, null without one."
+          },
           "job": {
             "type": "object",
             "description": "The job the printer prints for this server, also what a VC-500W does while it prints a label, which takes about 40 s.",

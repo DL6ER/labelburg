@@ -212,6 +212,16 @@ def model_id(c: Connection) -> int | None:
     return struct.unpack('>H', data[:2])[0] if len(data) >= 2 else None
 
 
+def printer_serial(c: Connection) -> str | None:
+    """The serial number the printer tells, None if it tells none."""
+    try:
+        data = c.ask(0x40, b'\x0b', 0x4b)
+    except NoAnswer:
+        return None
+    text = data.decode('ascii', 'replace').strip('\x00 ')
+    return text if text.isalnum() else None
+
+
 def errors(beat: dict) -> list[str]:
     """What keeps the printer from printing, by its heartbeat."""
     return ['The cover of the printer is open'] if beat.get('open') else []

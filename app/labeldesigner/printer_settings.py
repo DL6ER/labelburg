@@ -12,7 +12,7 @@ changing different settings at the same time keep both."""
 import json
 import re
 
-from .drivers import for_model
+from .drivers import devices, for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
 from .label_names import check_cut, check_label_size
 
@@ -53,13 +53,19 @@ _ROLL = re.compile(r'[A-Za-z0-9]{1,32}')
 def key(device: str) -> str:
     """The printer a setting belongs to: on USB by its serial number where
     its device ID tells one, as /dev/usb/lp<N> changes when printers are
-    plugged in another order, else by its device. ?, a request without a
-    printer where none is configured, prints on the simulator."""
+    plugged in another order, by the serial number its status told, e.g. a
+    Niimbot B1 on USB and on Bluetooth, else by its device. ?, a request
+    without a printer where none is configured, prints on the simulator."""
     if device == '?':
         return 'simulation'
     fields = device_id_fields(usb_device_id(device))
     serial = fields.get('SN') or fields.get('SERN')
-    return f'usb:{fields.get("MDL", "")}/{serial}' if serial else lock_key(device)
+    if serial:
+        return f'usb:{fields.get("MDL", "")}/{serial}'
+    told = devices.status_cache.get(lock_key(device), {})
+    if told.get('serial') and told.get('model'):
+        return f'serial:{told["model"]}/{told["serial"]}'
+    return lock_key(device)
 
 
 def parsed(content: str) -> dict:
@@ -75,8 +81,11 @@ def parsed(content: str) -> dict:
 
 def _key(data: dict, device: str) -> str:
     """key(device), of a USB printer switched off, which tells no device ID,
-    the one last seen on its device."""
+    or of one whose serial number is not told yet, the one last seen on its
+    device. Settings kept before the serial number was told stay its own."""
     printer, seen = key(device), data.get('seen')
+    if printer.startswith('serial:') and printer not in data['printers'] and lock_key(device) in data['printers']:
+        return lock_key(device)
     off = isinstance(seen, dict) and not usb_device_id(device)
     return seen.get(printer, printer) if off else printer
 
@@ -114,8 +123,11 @@ def checked(changes: dict, model: str) -> dict:
 
 def _keeping(data: dict, device: str) -> str:
     """The printer a change of device is kept for, noted as seen there."""
+    printer = key(device)
+    if printer.startswith('serial:') and printer not in data['printers'] and lock_key(device) in data['printers']:
+        data['printers'][printer] = data['printers'].pop(lock_key(device))
     printer = _key(data, device)
-    if printer.startswith('usb:'):
+    if printer.startswith(('usb:', 'serial:')):
         seen = data['seen'] if isinstance(data.get('seen'), dict) else {}
         data['seen'] = {**seen, lock_key(device): printer}
     return printer

@@ -141,3 +141,41 @@ def test_printers_without_calibration_are_refused(tmp_path):
 @pytest.mark.parametrize('label_size, kind', [('niimbot40x30', 'narrow'), ('niimbot50x30', 'wide')])
 def test_the_calibration_label_follows_the_roll(b1, label_size, kind):
     assert b1.get(URL, query_string={**B1, 'label_size': label_size}).get_json()['kind'] == kind
+
+
+USBIP, BT = 'usbip://192.0.2.7/1-1', 'bt://00:00:5E:00:53:01'
+
+
+def _told(monkeypatch, *devices_, serial='TEST000001'):
+    """The status of the devices told the printer's serial number."""
+    from app.labeldesigner.drivers import devices
+    # Not asked over the network for a device ID
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(devices, 'status_cache', {devices.lock_key(d): {'serial': serial, 'model': 'Niimbot/B1'} for d in devices_})
+
+
+def test_calibration_follows_a_b1_by_its_serial_number(monkeypatch):
+    _told(monkeypatch, USBIP, BT)
+    data = printer_settings.calibrated({'printers': {}}, USBIP, 0.5, 0, None)
+    assert printer_settings.calibration_of(data, BT)['across'] == 0.5
+    # Another B1 on the same address has its own
+    _told(monkeypatch, USBIP, serial='TEST000002')
+    assert printer_settings.calibration_of(data, USBIP)['across'] == 0.0
+
+
+def test_calibration_is_found_before_the_serial_number_is_asked(monkeypatch):
+    _told(monkeypatch, USBIP)
+    data = printer_settings.calibrated({'printers': {}}, USBIP, 0.5, 0, None)
+    # The server started again, the printer not asked yet
+    _told(monkeypatch)
+    assert printer_settings.calibration_of(data, USBIP)['across'] == 0.5
+
+
+def test_settings_from_before_the_serial_number_was_known_are_kept(monkeypatch):
+    _told(monkeypatch)
+    data = printer_settings.calibrated({'printers': {}}, USBIP, 0.5, 0, None)
+    _told(monkeypatch, USBIP)
+    assert printer_settings.calibration_of(data, USBIP)['across'] == 0.5
+    # Kept by the serial number from the next change on
+    data = printer_settings.calibrated(data, USBIP, 0.25, 0, None)
+    assert list(data['printers']) == ['serial:Niimbot/B1/TEST000001']
