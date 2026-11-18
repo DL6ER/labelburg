@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from app import create_app
 
@@ -10,7 +11,9 @@ def _api_routes(app) -> dict:
     routes = {}
     for rule in app.url_map.iter_rules():
         if rule.rule.startswith('/labeldesigner/api/'):
-            routes[rule.rule] = sorted(m.lower() for m in rule.methods - {'HEAD', 'OPTIONS'})
+            # A variable of the path as OpenAPI writes it, <name> as {name}
+            path = re.sub(r'<(?:\w+:)?(\w+)>', r'{\1}', rule.rule)
+            routes[path] = sorted(m.lower() for m in rule.methods - {'HEAD', 'OPTIONS'})
     return routes
 
 

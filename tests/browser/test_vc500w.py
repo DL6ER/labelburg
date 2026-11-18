@@ -7,7 +7,7 @@ import json
 import pytest
 from PIL import Image, ImageDraw
 
-from tests.browser.helpers import fits_note, png, preview_size, printed, set_tape, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 from tests.browser.test_printing import fake_printer
 
 VC = {'errors': [], 'model': 'VC-500W', 'path': 'file:///dev/usb/lp0', 'media_width': 25, 'media_length': 0,
@@ -16,7 +16,7 @@ VC = {'errors': [], 'model': 'VC-500W', 'path': 'file:///dev/usb/lp0', 'media_wi
 
 def fake_vc500w(page, **status):
     """Answer the status queries with a VC-500W and load the page again."""
-    printer = {**VC, **status}
+    printer = with_tape({**VC, **status})
     body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
     page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
     page.reload()
@@ -97,7 +97,7 @@ def test_images_print_in_color(designer):
 
 def test_fast_or_quality_without_600_dpi(designer):
     fake_vc500w(designer)
-    designer.evaluate("() => { S.settings.quality = 'high'; }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { quality: 'high' }); }")
     designer.click('#printerChip')
     designer.wait_for_selector('[data-q]')
     assert designer.eval_on_selector_all('[data-q]', 'buttons => buttons.map(b => b.textContent)') == ['Fast', 'Quality']
@@ -114,7 +114,7 @@ def test_half_cuts_but_no_chain_printing(designer):
     # Labels not cut get a half cut unless switched off, chain printing does
     # not exist on this printer
     fake_vc500w(designer)
-    designer.evaluate("() => { S.settings.cut = 'last'; }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'last' }); }")
     designer.click('#printerChip')
     designer.wait_for_selector('.pp [data-c]')
     assert designer.locator('.pp [data-c="half_cut"][data-v="1"].on:enabled').count() == 1
@@ -130,7 +130,7 @@ def test_never_cut_is_not_offered(designer):
     # The printer would keep the labels until the next print, which follows
     # them without a cut. Set before for all printers, it cuts after the last.
     fake_vc500w(designer)
-    designer.evaluate("() => { S.settings.cut = 'none'; }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'none' }); }")
     designer.click('#printerChip')
     designer.wait_for_selector('.pp [data-c]')
     never = designer.locator('.pp [data-c="cut"][data-v="none"]')

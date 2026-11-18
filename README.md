@@ -31,10 +31,10 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, and today's date or a date some days ahead, e.g., "best before".
 - **Icons:** 7400 icons, e.g., a light bulb, and symbols of screws, nuts, washers and electronic parts for workshop bins, next to the text, found by name.
 - **Labels:** save your labels, group them by tags and print them again, pass them on as files, or start from one of about 680 ready-made labels in English and German, e.g., addresses, safety signs, hazard labels, name badges, price tags and pictures for kids.
-- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one.
+- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes.
 - **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
-- **Several printers:** use several printers at once, each with a name of your choice, or try everything without a printer.
-- **Other programs:** e.g., [Grocy](docs/grocy.md) can print its labels through Labelburg.
+- **Several printers:** use several printers at once, each with a name of your choice and the same settings in every browser, or try everything without a printer.
+- **Other programs:** e.g., [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md) can print their labels through Labelburg, and labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents.
 
 ## Screenshots
 
@@ -82,11 +82,12 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 |---|---|---|
 | `PRINTER_PRINTER` | The printer, see [Printer addresses](#printer-addresses) | `?` |
 | `PRINTER_MODEL` | Model of a printer that does not report it, e.g. a network printer. Models of other makers than Brother are named with their maker, e.g. `PUQU/Q00` or `Epson/TM-T20II`, Brother ones with or without it (`Brother/QL-800`). | `QL-800` |
-| `PRINTERS` | Several printers of different models instead of `PRINTER_PRINTER` and `PRINTER_MODEL`, as `<model>=<printer>`, comma-separated, e.g., `QL-700=usb://0x04f9:0x2042,QL-1100=file:///dev/usb/lp1,PUQU/Q00=bt://<MAC>`, the models as for `PRINTER_MODEL`. A name in front, e.g., `Kitchen:QL-700=usb://0x04f9:0x2042`, is shown in the label designer, and requests may choose the printer by it (`printer=Kitchen`). There is no detection, each printer keeps its model and its own label settings in the browser, requests that name no printer go to the first one. The simulator is offered only when listed, e.g., `QL-700=simulation`. | none |
+| `PRINTERS` | Several printers of different models instead of `PRINTER_PRINTER` and `PRINTER_MODEL`, as `<model>=<printer>`, comma-separated, e.g., `QL-700=usb://0x04f9:0x2042,QL-1100=file:///dev/usb/lp1,PUQU/Q00=bt://<MAC>`, the models as for `PRINTER_MODEL`. A name in front, e.g., `Kitchen:QL-700=usb://0x04f9:0x2042`, is shown in the label designer, and requests may choose the printer by it (`printer=Kitchen`). There is no detection, each printer keeps its model and its own printer settings, requests that name no printer go to the first one. The simulator is offered only when listed, e.g., `QL-700=simulation`. | none |
 | `LABEL_DEFAULT_SIZE` | Label size the label designer starts with when the printer does not report its roll, e.g., the simulator. The name tells the kind: `62` or `102` is endless tape, `62x29` or `103x164` die-cut labels, `d24` round ones. | `62` |
 | `LABEL_DEFAULT_ORIENTATION` | `standard` or `rotated` | `standard` |
 | `LABEL_TEMPLATE_ENV_VARS` | Environment variables labels may insert with `{{env:<var>}}`, comma-separated. All others stay empty, so that nobody can read secrets of the server through a label. | none |
 | `WEBHOOK_PASSWORD` | Turns on the webhook, see [API](#api) | off |
+| `PAPERLESS_URL`, `PAPERLESS_TOKEN` | Address and API token of Paperless-ngx, whose next archive serial number `[ASN]` continues from, see [Paperless-ngx](docs/paperless.md) | none |
 | `TRUSTED_HOSTS` | Host names you open the label designer with, comma-separated, e.g. `labels.local,192.168.0.10`. Requests for other names are refused, which protects against DNS rebinding. | all |
 | `PROXY_COUNT` | Number of reverse proxies in front of the server, e.g. to serve the label designer below a path, see [Reverse proxy](docs/reverse-proxy.md). Only then the `X-Forwarded-*` headers they set are used, others could fake them. | `0` |
 | `PRINT_MAX_COUNT` | Most labels per print request | `100` |
@@ -144,7 +145,7 @@ The label designer offers all `.ttf` and `.otf` fonts it finds in the system fon
 
 ### Label designer
 
-Besides blanks, counters and dates, labels can insert UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. The Variables button in the label designer explains them all.
+Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. The Variables button in the label designer explains them all.
 
 Images can be PNG, JPG, WEBP, AVIF, GIF, TIFF, BMP and many more formats. A PDF gives one label per page if you like.
 
@@ -188,6 +189,7 @@ curl -X POST http://localhost:8013/labeldesigner/api/webhook/print \
 ```
 
 - A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses).
+- The printer settings of the label designer (the label size set by hand, cutting, which end of the labels leaves first and quality) are kept on the server in `.printers.json` in the folder of the labels, the same for every browser; `/labeldesigner/api/settings` reads and changes them, `printer_status` tells them with each printer, and print requests and previews of the API take what they leave out from them.
 - Requests that print, save or delete labels must be `POST` requests and are refused when a browser sends them from another website, so that a malicious page cannot use your printer. Scripts and `curl` are not affected.
 - Text lines may have up to 10000 characters (100000 per label) after the templates are filled in, barcodes up to 1000. Labels and images may have up to 64 million pixels, enough for a 62 mm wide label of about 2 m at 600 dpi. Of PDFs the first page is printed, or the pages `pdf_pages` selects (e.g., `1-3, 5` or `all`), each as a label of its own. Several `image` fields in a print request are printed one after the other. Blanks are filled in from `blanks`, e.g., `{"Room": "Garage"}`, also in saved labels printed by name, or else with their default. A saved label printed by name also takes fields of the request named like its blanks, which is how [Grocy](docs/grocy.md) prints its labels.
 

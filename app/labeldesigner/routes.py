@@ -14,7 +14,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import bp, codes, demos, refusals
+from . import bp, codes, demos, paperless, printer_settings, refusals
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound
@@ -22,14 +22,14 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, resolution_problem
+from .drivers import DEVICE_PATTERNS, progress, resolution_problem
 from .drivers.devices import flock_within, look_again
 from .printer import PrinterQueue, configured_printers, get_ptr_status
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
-from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
-from flask import Request, current_app, json, jsonify, redirect, render_template, request, make_response, url_for
+from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits, printer_label_size
+from flask import current_app, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
 from app.utils import (
@@ -478,7 +478,7 @@ def repo_list():
     repo = _get_repo_dir()
     files = []
     for name in sorted(os.listdir(repo)):
-        if not name.lower().endswith('.json'):
+        if name.startswith('.') or not name.lower().endswith('.json'):
             continue
         path = os.path.join(repo, name)
         # Read label metadata, a single broken file must not break the list
@@ -913,10 +913,17 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
 
 def _queue_labels(printer, labels, data, files, high_res, fast):
     """Adds the labels to the queue, the printer cuts them as printer.cut says."""
+    # Taken before printing: labels of a job that fails may have come out
+    asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(labels)) if paperless.uses_asn(data) else None
     # The copies share the text measured, alike where nothing changes
     layouts = {}
     for i, image in enumerate(labels):
-        printer.add_label_to_queue(create_label_from_request(data, files, i, image, layouts=layouts), high_res=high_res, fast=fast)
+        printer.add_label_to_queue(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn), high_res=high_res, fast=fast)
+
+
+def _next_asn(data: dict) -> int | None:
+    """The archive serial number a preview shows, None without {{asn}}."""
+    return paperless.next_asn(current_app.config, _get_repo_dir()) if paperless.uses_asn(data) else None
 
 
 def _given(value, default):
@@ -1037,7 +1044,8 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
         data['printer'] = printer
     try:
         data['blanks'] = _requested_blanks(data)
-        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks)
+        label = create_label_from_request(data, {}, image=load_label_image(data, {}, image_dir, image_bytes), mark_blanks=mark_blanks,
+                                          asn=_next_asn(data))
         im = label.generate()
     except Exception as e:
         _log_refused_request('Preview', e)
@@ -1077,6 +1085,17 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
     try:
         data['blanks'] = _requested_blanks(data)
         device, model = _printer(requested_printer, _requested('model'))
+        # What the label leaves out as set in the printer settings, the
+        # quality and which end leaves first unless the request names them:
+        # the label designer saves high_res 0 with each label
+        requested = {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')}
+        # A quality the request names leaves out the label's own, e.g. one
+        # saved by the previous label designer
+        if any(requested[key] not in (None, '') for key in ('high_res', 'fast_printing')):
+            data = {key: value for key, value in data.items() if key not in ('high_res', 'fast_printing')}
+        kept = printer_settings.for_printing(_kept_settings(), device, model, {
+            **{key: value for key, value in data.items() if key not in requested}, **requested})
+        data = {**data, **{key: value for key, value in kept.items() if value is not None}}
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
 
@@ -1089,8 +1108,8 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         # Saved with the label, the request overrides it
         collate = _requested('collate')
         collate = _whole_or(collate if collate is not None else data.get('collate'), 1) != 0
-        # Of the request only, it is set for each printer
-        printer.leaves_first = _leaves_first(_requested('leaves_first'))
+        # Of the request, else as set for the printer, never of the label
+        printer.leaves_first = _leaves_first(_requested('leaves_first') or kept.get('leaves_first'))
         # The label and its image have to be generated with the resolution
         # it is printed with
         data['high_res'] = high_res
@@ -1200,12 +1219,18 @@ def get_barcodes():
 def preview_from_image():
     try:
         values = request.values.to_dict(flat=True)
+        # Made as printed: the label size and the quality the request leaves
+        # out as set for its printer, the label designer sends both
+        if any(values.get(key) in (None, '') for key in ('label_size', 'high_res')):
+            device, model = _printer(values.get('printer'), values.get('model'))
+            values = printer_settings.for_printing(_kept_settings(), device, model, values)
         files = request.files.to_dict(flat=True)
         # Of a PDF the first selected page
         images, page_count = load_label_images(values, files, first_only=True)
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0)
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0,
+                                          asn=_next_asn(values))
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im):
@@ -1297,11 +1322,65 @@ def get_printer_status():
     if request.args.get('look') == '1':
         look_again()
     status = get_ptr_status(current_app.config)
+    kept = _kept_settings()
     # The VC-500W prints in color, the label designer then offers colors
     for printer in [status] + status.get('printers', []):
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
+        printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        # Labels are shown and printed on the tape in the printer
+        printer['label_size'], printer['label_size_assumed'] = printer_label_size(printer, current_app.config['LABEL_DEFAULT_SIZE'])
+        # A job of this server, added to what the printer tells of it
+        job = progress.state(printer['path']) if printer.get('path') else None
+        if job:
+            printer['job'] = dict(printer.get('job') or {}, **job)
     return status
+
+
+def _kept_settings(changing: bool = False) -> dict:
+    """The settings of the printers kept on the server, see printer_settings.
+    A file that cannot be read raises OSError when changing: it is kept with
+    the settings of the other printers."""
+    try:
+        with open(os.path.join(_get_repo_dir(), printer_settings.FILE), encoding='utf-8') as fh:
+            return printer_settings.parsed(fh.read())
+    except FileNotFoundError:
+        return {'printers': {}}
+    except OSError as e:
+        if changing:
+            raise
+        current_app.logger.warning('Cannot read the settings of the printers: %s', e)
+        return {'printers': {}}
+
+
+@bp.route('/api/settings', methods=['GET', 'POST'])
+def printer_settings_route():
+    """The settings of a printer, the common ones with its own. POST changes
+    only the ones named, an empty value removes one, and answers all."""
+    # JSON numbers and true or false as for printing, e.g. 62 or 0, other
+    # values as text, refused like a wrong one
+    values = {name: str(int(value)) if isinstance(value, (bool, int)) else
+              value if value is None or isinstance(value, str) else str(value)
+              for name, value in {**request.values.to_dict(), **_json_body()}.items()}
+    try:
+        device, model = _printer(values.pop('printer', None), values.pop('model', None))
+        if request.method == 'GET':
+            return jsonify(printer_settings.of_printer(_kept_settings(), device))
+        changes = printer_settings.checked(values, model)
+        repo = _get_repo_dir()
+        with _saving(repo):
+            data = printer_settings.changed(_kept_settings(changing=True), device, changes)
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except LabelsBusy:
+        return _busy()
+    except OSError as e:
+        current_app.logger.warning('Cannot save the settings of the printers: %s', e)
+        return make_response(jsonify({'success': False, 'message': refusals.SETTINGS_NOT_SAVED}), 500)
+    except ValueError as e:
+        _log_refused_request('Saving the settings', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+    return jsonify({'success': True, 'settings': printer_settings.of_printer(data, device)})
 
 
 @bp.route('/api/print', methods=['POST'])
@@ -1312,14 +1391,17 @@ def print_label():
     """
     return_dict = {'success': False}
     try:
-        printer = create_printer_from_request(request)
-        print_count = _check_print_count(_whole_or(request.values.get('print_count'), 1))
-        printer.cut, printer.half_cut, printer.chain = _cutting(request.values.get)
+        device, model = _printer(request.values.get('printer'), request.values.get('model'))
+        # What the request leaves out as set in the printer settings
+        values = printer_settings.for_printing(_kept_settings(), device, model, request.values.to_dict(flat=True))
+        printer = PrinterQueue(model=model, device_specifier=device, label_size=values.get('label_size', DEFAULT_LABEL_SIZE))
+        print_count = _check_print_count(_whole_or(values.get('print_count'), 1))
+        printer.cut, printer.half_cut, printer.chain = _cutting(values.get)
         check_cut(printer.cut, printer.model)
-        high_res = _whole_or(request.values.get('high_res'), 0) != 0
-        fast = _whole_or(request.values.get('fast_printing'), 0) != 0
-        collate = _whole_or(request.values.get('collate'), 1) != 0
-        printer.leaves_first = _leaves_first(request.values.get('leaves_first'))
+        high_res = _whole_or(values.get('high_res'), 0) != 0
+        fast = _whole_or(values.get('fast_printing'), 0) != 0
+        collate = _whole_or(values.get('collate'), 1) != 0
+        printer.leaves_first = _leaves_first(values.get('leaves_first'))
     except HTTPException:
         raise
     except Exception as e:
@@ -1329,7 +1411,6 @@ def print_label():
 
     status = ""
     try:
-        values = request.values.to_dict(flat=True)
         # Every uploaded image, not only the first
         files = request.files
         # Decode the image once, all labels of the job share it. Of a PDF
@@ -1386,17 +1467,6 @@ def _printer(requested_device, requested_model) -> tuple[str, str]:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
-
-
-def create_printer_from_request(request: Request):
-    label_size = request.values.get('label_size', DEFAULT_LABEL_SIZE)
-    # Allow overriding the device specifier via the request (frontend selection)
-    device, model = _printer(request.values.get('printer'), request.values.get('model'))
-    return PrinterQueue(
-        model=model,
-        device_specifier=device,
-        label_size=label_size
-    )
 
 
 # Default for create_label_from_request(): load the image from the request
@@ -1459,7 +1529,8 @@ def _image_contrast(d: dict) -> bool:
     return _palette(d.get('label_size', DEFAULT_LABEL_SIZE)) == 'color' and _whole_or(d.get('image_contrast'), 0) != 0
 
 
-def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None):
+def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
+                              asn: int | None = None):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = next((label for label in LABELS if label.identifier == label_size), None)
     if size is None:
@@ -1616,6 +1687,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         border_color=border_color,
         timestamp=context['timestamp'],
         counter=counter,
+        asn=asn,
         code_text=context['code_text'],
         template_env_vars=_template_env_vars(),
         warnings=warnings,
@@ -1970,6 +2042,28 @@ def _convert_image(img: Image.Image, image_mode: str, bw_threshold: int = 70, co
         return convert_image_to_bw(img, bw_threshold)
 
 
+def _image_label(img: Image.Image, label_size: str, label_orientation: LabelOrientation, image_mode: str,
+                 bw_threshold: int = 70, contrast: bool = False, high_res: bool = False) -> SimpleLabel:
+    """A label of img alone, converted to image_mode and scaled to the
+    label size. On die-cut labels the image is turned like with auto-fit in
+    the label designer."""
+    kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+    width, height = _get_label_dimensions(label_size, high_res)
+    if height > width:
+        width, height = height, width
+    if label_orientation == LabelOrientation.ROTATED:
+        height, width = width, height
+    img = _convert_image(img, image_mode, bw_threshold, contrast)
+    if _label_type(kind) == LabelType.DIE_CUT_LABEL:
+        width, height, label_orientation = _fitting_orientation(img, width, height, label_orientation)
+    orientation = 'rotated' if label_orientation == LabelOrientation.ROTATED else 'standard'
+    content = {'grayscale': LabelContent.IMAGE_GRAYSCALE, 'red_and_black': LabelContent.IMAGE_RED_BLACK,
+               'colored': LabelContent.IMAGE_COLORED}.get(image_mode, LabelContent.IMAGE_BW)
+    return SimpleLabel(width=width, height=height, label_content=content, label_orientation=label_orientation,
+                       label_type=_label_type(kind), image=_scale_image_to_label(img, label_size, orientation, high_res),
+                       image_fit=True, text=[])
+
+
 def _scale_image_to_label(img: Image.Image, label_size: str, orientation: str,
                           high_res: bool = False) -> Image.Image:
     width, height = _get_label_dimensions(label_size, high_res)
@@ -2030,14 +2124,14 @@ def webhook_print():
 
     Multipart form-data:
         - images: one or more image files (field name "images")
-        - label_size: label size identifier (default: from config)
+        - label_size: label size identifier (default: as set in the printer settings, else from config)
         - orientation: "standard" or "rotated" (default: from config)
         - image_mode: "grayscale", "black_and_white" (also "bw"), "red_and_black", "colored" (default: from config)
         - bw_threshold: black/white threshold 0-255 (default: from config)
-        - high_res: 0 or 1 for 600 DPI (default: 0)
-        - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: 0)
+        - high_res: 0 or 1 for 600 DPI (default: as the quality set in the printer settings, else 0)
+        - fast_printing: 0 or 1, 1 prints faster and a little less sharp (default: as the quality set in the printer settings, else 0)
         - image_contrast: 0 or 1, 1 prints the images with stronger contrast on the tapes of the VC-500W (default: 0)
-        - leaves_first: "top" or "bottom", the end of the labels that leaves the printer first (default: as the driver prints them)
+        - leaves_first: "top" or "bottom", the end of the labels that leaves the printer first (default: as set in the printer settings, else as the driver prints them)
         - printer: printer device specifier (default: from config)
         - model: printer model (default: from config)
 
@@ -2076,14 +2170,17 @@ def webhook_print():
         def _param(key, default):
             return _given(_requested(key), default)
 
-        label_size = _param('label_size', current_app.config['LABEL_DEFAULT_SIZE'])
+        device, model = _printer(_param('printer', None), _param('model', None))
+        # The label size, the quality and which end leaves first the request leaves out as set in the printer settings
+        given = printer_settings.for_printing(_kept_settings(), device, model,
+                                              {key: _requested(key) for key in ('label_size', 'high_res', 'fast_printing', 'leaves_first')})
+        label_size = _given(given['label_size'], current_app.config['LABEL_DEFAULT_SIZE'])
         orientation = _param('orientation', current_app.config['LABEL_DEFAULT_ORIENTATION'])
         image_mode = _param('image_mode', current_app.config['IMAGE_DEFAULT_MODE'])
         bw_threshold = int(_param('bw_threshold', current_app.config['IMAGE_DEFAULT_BW_THRESHOLD']))
-        high_res = _whole_or(_requested('high_res'), 0) != 0
-        fast = _whole_or(_requested('fast_printing'), 0) != 0
+        high_res = _whole_or(given['high_res'], 0) != 0
+        fast = _whole_or(given['fast_printing'], 0) != 0
         contrast = _image_contrast({'label_size': label_size, 'image_contrast': _requested('image_contrast')})
-        device, model = _printer(_param('printer', None), _param('model', None))
 
         # Validate label_size
         kind = next((label.form_factor for label in LABELS if label.identifier == label_size), None)
@@ -2094,7 +2191,7 @@ def webhook_print():
         except ValueError:
             return make_response(jsonify({'success': False, 'message': IMAGE_MODE_REFUSED}), 400)
         try:
-            leaves_first = _leaves_first(_requested('leaves_first'))
+            leaves_first = _leaves_first(given['leaves_first'])
         except ValueError as e:
             return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
         # Images stay in color on the tapes of the VC-500W, printed at its resolution
@@ -2107,24 +2204,7 @@ def webhook_print():
         if problem:
             return make_response(jsonify({'success': False, 'message': problem}), 400)
 
-        # Determine label content type from image_mode
-        if image_mode == 'grayscale':
-            label_content = LabelContent.IMAGE_GRAYSCALE
-        elif image_mode == 'red_and_black':
-            label_content = LabelContent.IMAGE_RED_BLACK
-        elif image_mode == 'colored':
-            label_content = LabelContent.IMAGE_COLORED
-        else:
-            label_content = LabelContent.IMAGE_BW
-
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
-        label_type = _label_type(kind)
-
-        width, height = _get_label_dimensions(label_size, high_res)
-        if height > width:
-            width, height = height, width
-        if label_orientation == LabelOrientation.ROTATED:
-            height, width = width, height
 
     except Exception as e:
         current_app.logger.exception(e)
@@ -2138,22 +2218,15 @@ def webhook_print():
     if len(uploaded_files or json_images) > max_count:
         return make_response(jsonify({'success': False, 'message': f'Too many images, at most {max_count} per request'}), 400)
 
-    def prepare(img: Image.Image) -> tuple:
-        # Convert and scale right away, so only label sized images are kept.
-        # Images on die-cut labels are turned like with auto-fit in the label
-        # designer.
-        img = _convert_image(img, image_mode, bw_threshold, contrast)
-        image_width, image_height, image_orientation = width, height, label_orientation
-        if label_type == LabelType.DIE_CUT_LABEL:
-            image_width, image_height, image_orientation = _fitting_orientation(img, width, height, label_orientation)
-        image_orientation_name = 'rotated' if image_orientation == LabelOrientation.ROTATED else 'standard'
-        return _scale_image_to_label(img, label_size, image_orientation_name, high_res), image_width, image_height, image_orientation
+    def prepare(img: Image.Image) -> SimpleLabel:
+        # Converted and scaled right away, so only label sized images are kept
+        return _image_label(img, label_size, label_orientation, image_mode, bw_threshold, contrast, high_res)
 
-    pil_images = []
+    labels = []
     dpi = label_dpi(label_size, high_res)
     try:
         for f in uploaded_files:
-            pil_images.append(prepare(open_image(f, f.filename, dpi)))
+            labels.append(prepare(open_image(f, f.filename, dpi)))
 
         if not uploaded_files:
             for entry in json_images:
@@ -2164,30 +2237,20 @@ def webhook_print():
                     img_bytes = base64.b64decode(entry['data'])
                 else:
                     continue
-                pil_images.append(prepare(open_image(BytesIO(img_bytes), '', dpi)))
+                labels.append(prepare(open_image(BytesIO(img_bytes), '', dpi)))
 
     except Exception as e:
         current_app.logger.exception(e)
         return make_response(jsonify({'success': False, 'message': 'Failed to read images'}), 400)
 
-    if not pil_images:
+    if not labels:
         return make_response(jsonify({'success': False, 'message': 'No images provided'}), 400)
 
     # Process and queue each image
     try:
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
         printer.leaves_first = leaves_first
-        for img, image_width, image_height, image_orientation in pil_images:
-            label = SimpleLabel(
-                width=image_width,
-                height=image_height,
-                label_content=label_content,
-                label_orientation=image_orientation,
-                label_type=label_type,
-                image=img,
-                image_fit=True,
-                text=[],
-            )
+        for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
         status = printer.process_queue()
     except Exception as e:
@@ -2196,9 +2259,119 @@ def webhook_print():
 
     result = {
         'success': len(status) == 0,
-        'count': len(pil_images)
+        'count': len(labels)
     }
     if status:
         result['message'] = status
         return make_response(jsonify(result), PRINTER_FAILED)
     return jsonify(result)
+
+
+# --- Homebox ------------------------------------------------------------------
+# Homebox gets its labels from an external label service with GET and runs a
+# print command for them, which sends the image back with POST. Homebox
+# replaces the query of the service address, so a saved label is named in
+# its path.
+HOMEBOX_DEMO = 'storage/013-homebox-62.json'
+HOMEBOX_NO_IMAGE = 'Send the label as an image, e.g. the file Homebox made'
+
+
+def _homebox_printer() -> tuple[str, str, str]:
+    """The printer labels for Homebox are made for, the first one as in the
+    label designer: its device, model and the label size of its tape, as in
+    the label designer one set by hand before the one the printer reports."""
+    status = get_ptr_status(current_app.config)
+    printers = status.get('printers') or [status]
+    chosen = next((p for p in printers if p.get('path') == status.get('selected')), printers[0])
+    label_size = printer_settings.of_printer(_kept_settings(), chosen.get('path') or '').get('label_size')
+    if not any(label.identifier == label_size for label in LABELS):
+        label_size, _ = printer_label_size(chosen, current_app.config['LABEL_DEFAULT_SIZE'])
+    return chosen.get('path'), chosen.get('model'), label_size
+
+
+def _as_set_for_printer(data: dict, device: str, model: str) -> dict:
+    """A label as printed on the printer: in the quality and leaving first
+    as set in its printer settings rather than as saved with the label, cut
+    as set there where the label leaves it out."""
+    own = {key: value for key, value in data.items() if key not in ('high_res', 'fast_printing', 'leaves_first')}
+    kept = printer_settings.for_printing(_kept_settings(), device, model, own)
+    return {**{key: value for key, value in data.items() if key != 'leaves_first'}, **kept}
+
+
+def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes | None]:
+    """The saved label name, else the demo label "Homebox" on label_size:
+    wide, i.e. along endless tape and across die-cut labels. With the folder
+    of its image and the image read with it."""
+    if name is None:
+        data = demos.load(HOMEBOX_DEMO)
+        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+        endless = _label_type(kind) == LabelType.ENDLESS_LABEL
+        data.update(label_size=label_size, orientation='rotated' if endless else 'standard', text=json.dumps(data['text']))
+        return data, demos.IMAGE_DIR, None
+    data, image_bytes = _load_repo_json(name if name.endswith('.json') else f'{name}.json')
+    return data, _get_repo_dir(), image_bytes
+
+
+def _along_endless_tape(img: Image.Image, label_size: str, high_res: bool) -> LabelOrientation:
+    """How an image is printed on endless tape: as made where a side is as
+    wide as the tape, e.g. a label made here, else its longer side along
+    the tape."""
+    across = _get_label_dimensions(label_size, high_res)[0]
+    if img.width == across:
+        return LabelOrientation.STANDARD
+    if img.height == across or img.width > img.height:
+        return LabelOrientation.ROTATED
+    return LabelOrientation.STANDARD
+
+
+@bp.route('/api/homebox', methods=['GET', 'POST'])
+@bp.route('/api/homebox/<name>', methods=['GET', 'POST'])
+def homebox(name: str | None = None):
+    """GET: the label for Homebox as PNG, the saved label name or the demo
+    label "Homebox" on the tape in the printer, its blanks filled with the
+    fields Homebox sends, e.g. TitleText and URL. POST: print the image of
+    the body on the same label."""
+    try:
+        device, model, label_size = _homebox_printer()
+        data, image_dir, image_bytes = _homebox_label(name, label_size)
+        # Made as printed, at the resolution of the quality set
+        data = _as_set_for_printer(data, device, model)
+    except FileNotFoundError:
+        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+    except LabelsBusy:
+        return _busy()
+    except Exception as e:
+        current_app.logger.exception(e)
+        return make_response(jsonify({'success': False, 'message': 'Failed to load file'}), 500)
+    if request.method == 'GET':
+        return _preview_response(data, image_dir, image_bytes)
+
+    label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
+    high_res = _high_res(data)
+    try:
+        img = open_image(BytesIO(request.get_data()), '', label_dpi(label_size, high_res))
+    except Exception as e:
+        _log_refused_request('Homebox label', e)
+        return make_response(jsonify({'success': False, 'message': HOMEBOX_NO_IMAGE}), 400)
+    try:
+        device, model = _printer(device, model)
+        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
+        check_cut(printer.cut, printer.model)
+        printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))
+        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
+        if _label_type(kind) == LabelType.ENDLESS_LABEL:
+            orientation = _along_endless_tape(img, label_size, high_res)
+        else:
+            orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
+        # Printed as it is shown, dithered like the labels made here
+        image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
+        printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
+                                   high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
+        status = printer.process_queue()
+    except Exception as e:
+        _log_refused_request('Print job', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+    if status:
+        return make_response(jsonify({'success': False, 'message': status}), PRINTER_FAILED)
+    return {'success': True}
