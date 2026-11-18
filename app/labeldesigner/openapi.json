@@ -194,6 +194,17 @@
         "summary": "Print a label",
         "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the label size set by hand, the cutting, which end leaves first and the quality.",
         "operationId": "print",
+        "parameters": [
+          {
+            "name": "return_format",
+            "in": "query",
+            "description": "`png` adds the image of the first label printed, as the printer got it, as base64 in `image`.",
+            "schema": {
+              "type": "string",
+              "enum": ["png"]
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1005,6 +1016,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-PDF-Selected-Pages": {
+                "description": "Number of the pages of a saved PDF `pdf_pages` selects, each printed as a label of its own.",
+                "schema": {
+                  "type": "integer"
+                }
               }
             },
             "content": {
@@ -1131,6 +1148,12 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "X-PDF-Selected-Pages": {
+                "description": "Number of the pages of a saved PDF `pdf_pages` selects, each printed as a label of its own.",
+                "schema": {
+                  "type": "integer"
+                }
               }
             },
             "content": {
@@ -1187,6 +1210,15 @@
         "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own.",
         "operationId": "repositoryPrint",
         "parameters": [
+          {
+            "name": "return_format",
+            "in": "query",
+            "description": "`png` adds the image of the first label printed, as the printer got it, as base64 in `image`.",
+            "schema": {
+              "type": "string",
+              "enum": ["png"]
+            }
+          },
           {
             "name": "name",
             "in": "query",
@@ -2188,6 +2220,10 @@
           "message": {
             "type": "string",
             "description": "Why it failed."
+          },
+          "image": {
+            "type": "string",
+            "description": "The image of the first label printed as base64 PNG, with `return_format=png`."
           }
         }
       },
@@ -2251,7 +2287,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
