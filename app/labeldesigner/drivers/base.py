@@ -108,10 +108,17 @@ class Driver:
         not leave labels uncut, if it does not, whether labels leave it top
         first, the label designer then shows the printer below them, the
         blank paper in mm before each label that is cut, which was between
-        printhead and cutter, and the maker of the model."""
+        printhead and cutter, the maker of the model and whether its print
+        position is calibrated with a calibration label."""
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
-                'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor}
+                'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False}
+
+    def calibration_kind(self, model: str, label_size: str) -> str:
+        """The calibration label of the model for the label size: narrow,
+        where the printhead reaches past both edges, or wide, empty without
+        one."""
+        return ''
 
     def resolution_problem(self, model: str, high_res: bool) -> str:
         """Why the model cannot print at the resolution, or an empty string."""

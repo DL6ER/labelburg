@@ -46,6 +46,7 @@ CALIBRATION_MESSAGE = ('across and along are millimeters in steps of 0.25 from -
                        '0.25 from -3 to 3, roll is the serial number of a roll')
 READINGS_DISAGREE = ('Left and right do not fit together. Look at the label again; if they still do not fit, '
                      'put the roll in again and print a new calibration label.')
+NO_CALIBRATION = 'This printer offers no calibration'
 _ROLL = re.compile(r'[A-Za-z0-9]{1,32}')
 
 

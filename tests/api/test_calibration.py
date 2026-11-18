@@ -83,3 +83,61 @@ def test_broken_settings_print_without_calibration(tmp_path, offsets):
     _keep(tmp_path, 'not json')
     assert _print(client, 'print').get_json()['success'] is True
     assert offsets == [(0.0, 0.0)]
+
+
+URL = '/labeldesigner/api/calibration'
+B1 = {'printer': 'bt://00:00:5E:00:53:01', 'model': 'Niimbot/B1'}
+
+
+@pytest.fixture
+def b1(tmp_path):
+    return make_client(tmp_path, empty_repo=True, model='Niimbot/B1')
+
+
+def test_readings_move_the_print(b1):
+    r = b1.post(URL, data={**B1, 'left': '-1', 'right': '1', 'roll': 'PZ1TEST00001'})
+    assert r.get_json() == {'success': True, 'shift': 1.0,
+                            'calibration': {'across': -1.0, 'along': 0.0, 'roll': 'PZ1TEST00001'}}
+    assert b1.get(URL, query_string={**B1, 'label_size': 'niimbot40x30'}).get_json() == {
+        'across': -1.0, 'along': 0.0, 'roll': 'PZ1TEST00001', 'kind': 'narrow'}
+    # Read again on a label printed with it, half a step is rounded
+    r = b1.post(URL, json={**B1, 'left': 0, 'right': -0.25})
+    assert r.get_json()['calibration']['across'] == -1.0
+
+
+def test_moving_up_or_down_keeps_the_sideways_offset(b1):
+    b1.post(URL, data={**B1, 'left': '-1', 'right': '1'})
+    r = b1.post(URL, data={**B1, 'along': '0.25'})
+    assert r.get_json()['calibration'] == {'across': -1.0, 'along': 0.25, 'roll': None}
+    assert r.get_json()['shift'] is None
+
+
+def test_not_now_keeps_the_offsets_for_another_roll(b1):
+    b1.post(URL, data={**B1, 'across': '0.5', 'along': '-0.25', 'roll': 'PZ1TEST00001'})
+    r = b1.post(URL, data={**B1, 'roll': 'PZ1TEST00002'})
+    assert r.get_json()['calibration'] == {'across': 0.5, 'along': -0.25, 'roll': 'PZ1TEST00002'}
+
+
+@pytest.mark.parametrize('values, message', [({'left': '-1.5', 'right': '-1'}, 'READINGS_DISAGREE'),
+                                             ({'across': 'far'}, 'CALIBRATION_MESSAGE'),
+                                             ({'left': '1'}, 'CALIBRATION_MESSAGE'),
+                                             ({}, 'CALIBRATION_MESSAGE')])
+def test_refused_calibrations_keep_the_one_before(b1, values, message):
+    b1.post(URL, data={**B1, 'across': '0.5'})
+    r = b1.post(URL, data={**B1, **values})
+    assert r.status_code == 400 and r.get_json()['message'] == getattr(printer_settings, message)
+    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.5
+
+
+def test_printers_without_calibration_are_refused(tmp_path):
+    from app.labeldesigner.drivers import niimbot
+    client = make_client(tmp_path, empty_repo=True, model='Niimbot/D110_M')
+    r = client.post(URL, data={'printer': 'bt://00:00:5E:00:53:01', 'model': 'Niimbot/D110_M', 'across': '0.5'})
+    assert r.status_code == 400 and r.get_json()['message'] == printer_settings.NO_CALIBRATION
+    assert niimbot.DRIVER.capabilities('Niimbot/B1')['calibration'] is True
+    assert niimbot.DRIVER.capabilities('Niimbot/D110_M')['calibration'] is False
+
+
+@pytest.mark.parametrize('label_size, kind', [('niimbot40x30', 'narrow'), ('niimbot50x30', 'wide')])
+def test_the_calibration_label_follows_the_roll(b1, label_size, kind):
+    assert b1.get(URL, query_string={**B1, 'label_size': label_size}).get_json()['kind'] == kind

@@ -1391,6 +1391,57 @@ def printer_settings_route():
     return jsonify({'success': True, 'settings': printer_settings.of_printer(data, device)})
 
 
+def _millimeters(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(printer_settings.CALIBRATION_MESSAGE) from None
+
+
+@bp.route('/api/calibration', methods=['GET', 'POST'])
+def calibration_route():
+    """The calibration of the print position of a printer. POST sets it from
+    the numbers read left and right on a calibration label, or moves it to
+    across and along, or notes the roll it holds for."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model = _printer(values.pop('printer', None), values.pop('model', None))
+        driver = drivers.for_model(model)
+        if not driver.capabilities(model)['calibration']:
+            raise ValueError(printer_settings.NO_CALIBRATION)
+        if request.method == 'GET':
+            kept = _kept_settings()
+            label_size = values.get('label_size') or printer_settings.of_printer(kept, device).get('label_size', '')
+            return jsonify({**printer_settings.calibration_of(kept, device), 'kind': driver.calibration_kind(model, label_size)})
+        given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along')
+                 if values.get(name) not in (None, '')}
+        roll, shift = values.get('roll') or None, None
+        repo = _get_repo_dir()
+        with _saving(repo):
+            data = _kept_settings(changing=True)
+            kept = printer_settings.calibration_of(data, device)
+            across, along = given.get('across', kept['across']), given.get('along', kept['along'])
+            if 'left' in given or 'right' in given:
+                if 'left' not in given or 'right' not in given:
+                    raise ValueError(printer_settings.CALIBRATION_MESSAGE)
+                shift = printer_settings.from_readings(given['left'], given['right'])
+                across = round((kept['across'] - shift) * 4) / 4
+            elif not given and not roll:
+                raise ValueError(printer_settings.CALIBRATION_MESSAGE)
+            data = printer_settings.calibrated(data, device, across, along, roll or kept['roll'])
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except LabelsBusy:
+        return _busy()
+    except OSError as e:
+        current_app.logger.warning('Cannot save the calibration of the printer: %s', e)
+        return make_response(jsonify({'success': False, 'message': refusals.SETTINGS_NOT_SAVED}), 500)
+    except ValueError as e:
+        _log_refused_request('Calibrating', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+    return jsonify({'success': True, 'calibration': printer_settings.calibration_of(data, device), 'shift': shift})
+
+
 @bp.route('/api/print', methods=['POST'])
 def print_label():
     """

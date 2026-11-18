@@ -12,7 +12,7 @@ from .. import devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
-from . import protocol
+from . import calibration, protocol
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,14 @@ class Niimbot(Driver):
 
     def capabilities(self, model):
         # The labels are torn off, their top leaves it first
-        return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True)
+        return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
+                    calibration=model == 'Niimbot/B1')
+
+    def calibration_kind(self, model, label_size):
+        size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
+        if model != 'Niimbot/B1' or size is None:
+            return ''
+        return 'narrow' if calibration.is_narrow(size.tape_size[0]) else 'wide'
 
     def status(self, device, model, unconfirmed=False):
         # One that did not answer is not looked for at every status query

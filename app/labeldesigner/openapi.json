@@ -189,6 +189,198 @@
         }
       }
     },
+    "/labeldesigner/api/calibration": {
+      "get": {
+        "summary": "Calibration of a printer",
+        "description": "How far the labels of a printer that offers it (the Niimbot B1) are moved, kept on the server for every print on it, and which calibration label fits the label size.",
+        "operationId": "getCalibration",
+        "parameters": [
+          {
+            "name": "printer",
+            "in": "query",
+            "required": false,
+            "description": "The device or name of the printer, the configured one if left out.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "label_size",
+            "in": "query",
+            "required": false,
+            "description": "The label size of the roll, as set for the printer if left out.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The calibration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Calibration"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["narrow", "wide", ""],
+                          "description": "narrow: the calibration label is read at triangles on both edges; wide: the roll is wider than the printhead, its white strips are compared."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown printer, or one that offers no calibration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Calibrate a printer",
+        "description": "Sets the calibration from the numbers read on a calibration label, or moves the labels to across and along, or notes the roll the calibration holds for. It stays with the printer until the next calibration.",
+        "operationId": "setCalibration",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "left": {
+                    "type": "number",
+                    "description": "The number read where the black starts at the left edge of the calibration label, in steps of 0.25 from -3 to 3. Taken with right."
+                  },
+                  "right": {
+                    "type": "number",
+                    "description": "The number read where the black starts at the right edge, taken with left. The two read about the same with opposite signs, else they are refused."
+                  },
+                  "across": {
+                    "type": "number",
+                    "description": "Moved right, in place of left and right."
+                  },
+                  "along": {
+                    "type": "number",
+                    "description": "Moved down."
+                  },
+                  "roll": {
+                    "type": "string",
+                    "description": "The serial number of the roll in the printer; alone it keeps the offsets for that roll."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "left": {
+                    "type": "number",
+                    "description": "The number read where the black starts at the left edge of the calibration label, in steps of 0.25 from -3 to 3. Taken with right."
+                  },
+                  "right": {
+                    "type": "number",
+                    "description": "The number read where the black starts at the right edge, taken with left. The two read about the same with opposite signs, else they are refused."
+                  },
+                  "across": {
+                    "type": "number",
+                    "description": "Moved right, in place of left and right."
+                  },
+                  "along": {
+                    "type": "number",
+                    "description": "Moved down."
+                  },
+                  "roll": {
+                    "type": "string",
+                    "description": "The serial number of the roll in the printer; alone it keeps the offsets for that roll."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "calibration": {
+                      "$ref": "#/components/schemas/Calibration"
+                    },
+                    "shift": {
+                      "type": ["number", "null"],
+                      "description": "How far the calibration label sat right, in mm, when read numbers were given."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused, e.g. numbers that do not fit together.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Another label or setting is being saved, try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
@@ -2188,6 +2380,24 @@
           "message": {
             "type": "string",
             "description": "Why it failed."
+          }
+        }
+      },
+      "Calibration": {
+        "type": "object",
+        "description": "How the labels of a printer are moved to sit straight on its roll, in millimeters: right and down positive.",
+        "properties": {
+          "across": {
+            "type": "number",
+            "description": "Moved right, in steps of 0.25 from -5 to 5."
+          },
+          "along": {
+            "type": "number",
+            "description": "Moved down, toward the end that leaves the printer last, in steps of 0.25 from -5 to 5."
+          },
+          "roll": {
+            "type": ["string", "null"],
+            "description": "The serial number of the roll it was made on, from its RFID tag."
           }
         }
       },

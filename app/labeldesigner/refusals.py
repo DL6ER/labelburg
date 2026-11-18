@@ -20,7 +20,7 @@ from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
-from .printer_settings import CALIBRATION_MESSAGE, READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_PRINTERS
+from .printer_settings import CALIBRATION_MESSAGE, NO_CALIBRATION, READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_PRINTERS
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
 
@@ -65,6 +65,7 @@ MESSAGES = (
     TOO_MANY_PRINTERS,
     CALIBRATION_MESSAGE,
     READINGS_DISAGREE,
+    NO_CALIBRATION,
     'image_position must be above, below, left or right',
     'label_length must be a length in millimeters or empty',
     *label_length_problems(),
