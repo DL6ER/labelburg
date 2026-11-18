@@ -3515,7 +3515,7 @@ function bindPrinterPanel() {
     if ($('#calOpen', box)) {
         $('#calOpen', box).onclick = () => openCalibration();
         if ($('#calNotNow', box)) $('#calNotNow', box).onclick = () => postCalibration({}).then(r => { if (r) redraw(); });
-        if ($('#calPrintNew', box)) $('#calPrintNew', box).onclick = () => { printCalibration(); openCalibration(); };
+        if ($('#calPrintNew', box)) $('#calPrintNew', box).onclick = () => openCalibration(true);
     }
 }
 
@@ -3571,7 +3571,8 @@ async function printCalibration(shown = toast, working = {}) {
     return false;
 }
 
-async function openCalibration() {
+// With print, it prints the calibration label as it opens
+async function openCalibration(print = false) {
     const q = new URLSearchParams({ printer: printerKey(), model: S.printer.model, label_size: S.tape });
     let kept;
     try {
@@ -3582,8 +3583,9 @@ async function openCalibration() {
         return toast('The label designer could not be reached');
     }
     const narrow = kept.kind !== 'wide', step = narrow ? 0.5 : 0.25;
-    // Changed here, kept for the printer only once saved
-    let working = { across: kept.across, along: kept.along };
+    // Changed here, kept for the printer only once saved. Read numbers count
+    // from the correction the last calibration label was printed with.
+    let working = { across: kept.across, along: kept.along }, printed = { ...working };
     const readings = ['<option value=""></option>', ...Array.from({ length: 25 }, (_, i) => -3 + i / 4)
         .map(v => `<option value="${v}">${v > 0 ? '+' : ''}${v}</option>`)].join('');
     const move = (dir, label) => `<button class="btn sm" type="button" data-move="${dir}"><i class="fa-solid fa-arrow-${dir}"></i>${label}</button>`;
@@ -3593,17 +3595,17 @@ async function openCalibration() {
             : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it'}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
         <button class="btn-print sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
         ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
-        <div class="row" style="gap:1rem"><label>Left <select class="field" id="calLeft">${readings}</select></label>
+        <div class="row cal-row"><label>Left <select class="field" id="calLeft">${readings}</select></label>
             <label>Right <select class="field" id="calRight">${readings}</select></label>
             <button class="btn sm" type="button" id="calApply">Apply</button></div>`
         : '<p>Compare the white strips left and right of the frame.</p>'}
         <p id="calResult" class="small" aria-live="polite"></p>
-        <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('left', `${step} mm`)}${move('right', `${step} mm`)}</div>
+        <div class="row cal-row">${move('left', `${step} mm`)}${move('right', `${step} mm`)}</div>
         <p class="muted small">Compare the white strip above the top line with the one below the bottom line.</p>
-        <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('up', '0.25 mm')}${move('down', '0.25 mm')}</div>
-        <div class="row" style="gap:.5rem;align-items:center;flex-wrap:wrap"><span id="calNow" class="small"></span>
+        <div class="row cal-row">${move('up', '0.25 mm')}${move('down', '0.25 mm')}</div>
+        <div class="row cal-row"><span id="calNow" class="small"></span>
             <button class="btn sm quiet" type="button" id="calReset">No fine correction</button></div>
-        <div class="row" style="gap:.5rem;flex-wrap:wrap">
+        <div class="row cal-row">
             <button class="btn-print sm bad" type="button" id="calCancel" data-close><i class="fa-solid fa-xmark"></i>Cancel</button>
             <button class="btn-print sm ok" type="button" id="calSave"><i class="fa-solid fa-floppy-disk"></i>Save</button></div>`);
     const box = $('#layer'), result = $('#calResult', box);
@@ -3615,9 +3617,13 @@ async function openCalibration() {
         $('#calNow', box).textContent = parts.length ? `Labels are moved ${parts.join(' and ')}.` : 'Labels are not moved.';
     };
     now();
-    // Worked out by the server, not kept yet
+    // Worked out by the server, not kept yet. One at a time, each counts
+    // from the one before.
+    const steps = () => $$('[data-move], #calReset, #calApply, #calSave', box);
     const tryOut = async extra => {
+        steps().forEach(b => { b.disabled = true; });
         const j = await postCalibration({ across: working.across, along: working.along, ...extra }, text => say(text, true), true);
+        steps().forEach(b => { b.disabled = false; });
         if (!j) return null;
         working = { across: j.calibration.across, along: j.calibration.along };
         now();
@@ -3628,14 +3634,19 @@ async function openCalibration() {
     printButton.onclick = async () => {
         printButton.disabled = true;
         say('Printing the calibration label.');
-        if (await printCalibration(text => say(text, true), working)) say('');
+        const at = { ...working };
+        if (await printCalibration(text => say(text, true), at)) {
+            printed = at;
+            say('');
+        }
         printButton.disabled = false;
     };
+    if (print) printButton.onclick();
     if (narrow) $('#calApply', box).onclick = async () => {
         const left = $('#calLeft', box), right = $('#calRight', box);
         if (!left.value || !right.value) return say('Choose the number on each side.', true);
-        const before = working.across;
-        if (!await tryOut({ left: left.value, right: right.value })) return;
+        const before = printed.across;
+        if (!await tryOut({ left: left.value, right: right.value, across: before })) return;
         // Read on a label printed before, applied again it would move the labels again
         left.value = right.value = '';
         const moved = working.across - before, n = mm(moved);

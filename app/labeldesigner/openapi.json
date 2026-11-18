@@ -299,7 +299,7 @@
                   "save": {
                     "type": "string",
                     "enum": ["0", "1"],
-                    "description": "0 only answers the calibration this gives, without keeping it. Default 1."
+                    "description": "0 or false only answers the calibration this gives, without keeping it. Default 1."
                   }
                 }
               }
@@ -338,7 +338,7 @@
                   "save": {
                     "type": "string",
                     "enum": ["0", "1"],
-                    "description": "0 only answers the calibration this gives, without keeping it. Default 1."
+                    "description": "0 or false only answers the calibration this gives, without keeping it. Default 1."
                   }
                 }
               }
@@ -347,7 +347,7 @@
         },
         "responses": {
           "200": {
-            "description": "Saved.",
+            "description": "Saved, or with save=0 only worked out.",
             "content": {
               "application/json": {
                 "schema": {

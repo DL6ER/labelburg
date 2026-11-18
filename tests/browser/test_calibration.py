@@ -178,6 +178,8 @@ def test_save_keeps_the_working_correction(designer, calibration):
 def test_example_tells_what_it_shows(designer, calibration):
     _dialog(designer)
     assert 'where the black starts' in designer.get_attribute('.cal-example', 'alt')
+    # Shown smaller than drawn, smoothed rather than with dots left out
+    assert designer.eval_on_selector('.cal-example', 'e => getComputedStyle(e).imageRendering') != 'pixelated'
 
 
 def test_printing_waits_for_the_printer(designer, calibration):
@@ -209,3 +211,59 @@ def test_cancel_and_save_end_the_dialog_side_by_side(designer, calibration):
     assert designer.evaluate("""() => {
         const c = document.querySelector('#calCancel'), s = document.querySelector('#calSave');
         return c.parentElement === s.parentElement && c.nextElementSibling === s && !s.parentElement.nextElementSibling; }""")
+
+
+def test_buttons_side_by_side_on_the_screen(designer, calibration):
+    _dialog(designer)
+    sheet = designer.locator('#layer .sheet').bounding_box()
+    for first, second in (('#calCancel', '#calSave'), ('[data-move="left"]', '[data-move="right"]'), ('[data-move="up"]', '[data-move="down"]')):
+        a, b = designer.locator(first).bounding_box(), designer.locator(second).bounding_box()
+        # One row, the first on the left, neither as wide as the dialog
+        assert abs(a['y'] - b['y']) < 2 and a['x'] + a['width'] <= b['x']
+        assert a['width'] < sheet['width'] / 2 and b['width'] < sheet['width'] / 2
+
+
+def test_readings_count_from_the_correction_the_label_was_printed_with(designer, calibration):
+    sent, _ = calibration
+    _dialog(designer)
+    # Moved after the label was printed
+    designer.click('[data-move="right"]')
+    _until(designer, lambda: len(sent) == 1)
+    designer.wait_for_function('() => !document.querySelector("#calApply").disabled')
+    designer.select_option('#calLeft', '-1')
+    designer.select_option('#calRight', '1')
+    designer.click('#calApply')
+    _until(designer, lambda: len(sent) == 2)
+    assert sent[1][1]['across'] == '0'
+    # Told from the label as printed
+    designer.wait_for_function('() => document.querySelector("#calResult").textContent')
+    assert designer.inner_text('#calResult') == 'The printer prints 1 mm too far right. Labels are moved 1 mm to the left once you save.'
+
+
+def test_steps_wait_for_the_one_before(designer, calibration):
+    sent, _ = calibration
+    pending = []
+    designer.route('**/api/calibration', lambda route: pending.append(route) if route.request.method == 'POST' else route.fallback())
+    _dialog(designer)
+    designer.click('[data-move="left"]')
+    _until(designer, lambda: len(pending) == 1)
+    assert designer.eval_on_selector_all('[data-move], #calReset, #calApply, #calSave', 'all => all.every(b => b.disabled)')
+    pending[0].fulfill(content_type='application/json', body=json.dumps(
+        {'success': True, 'shift': None, 'calibration': {'across': -0.5, 'along': 0.0, 'roll': 'PZ1TEST00001'}}))
+    designer.wait_for_function('() => !document.querySelector("[data-move=left]").disabled')
+    assert designer.inner_text('#calNow') == 'Labels are moved 0.5 mm to the left.'
+
+
+def test_new_roll_prints_from_the_dialog_once(designer, calibration):
+    sent, _ = calibration
+    pending = []
+    designer.route('**/api/calibration/print', lambda route: pending.append(route))
+    _panel(designer)
+    designer.click('#calPrintNew')
+    designer.wait_for_selector('[data-cal-print]')
+    _until(designer, lambda: len(pending) == 1)
+    assert designer.eval_on_selector('[data-cal-print]', 'b => b.disabled')
+    assert designer.inner_text('#calResult') == 'Printing the calibration label.'
+    pending[0].fulfill(content_type='application/json', body='{"success": true}')
+    designer.wait_for_function('() => !document.querySelector("[data-cal-print]").disabled')
+    assert len(pending) == 1

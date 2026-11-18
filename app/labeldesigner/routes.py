@@ -1434,7 +1434,7 @@ def calibration_route():
             elif not given and not roll:
                 raise ValueError(printer_settings.CALIBRATION_MESSAGE)
             return across, along, roll or kept['roll']
-        if str(values.get('save', '1')) == '0':
+        if str(values.get('save', '1')).lower() in ('0', 'false'):
             across, along, roll = worked_out(printer_settings.calibration_of(_kept_settings(), device))
             printer_settings.checked_offsets(across, along, roll)
             return jsonify({'success': True, 'calibration': {'across': across, 'along': along, 'roll': roll}, 'shift': shift})

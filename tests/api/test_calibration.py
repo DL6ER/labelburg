@@ -270,3 +270,10 @@ def test_calibration_label_prints_with_offsets_not_saved_yet(b1, monkeypatch):
     assert offsets == [(0.25, 0.0), (-0.5, 0.25)]
     r = b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30', 'across': '6'})
     assert r.status_code == 400 and r.get_json()['message'] == printer_settings.OFFSET_LIMIT
+
+
+@pytest.mark.parametrize('save', [False, 'false', 0])
+def test_calibration_tried_with_save_false_is_not_kept(b1, save):
+    r = b1.post(URL, json={**B1, 'across': 0.5, 'save': save})
+    assert r.get_json()['calibration']['across'] == 0.5
+    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0

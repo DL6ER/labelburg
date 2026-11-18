@@ -108,10 +108,19 @@ class Niimbot(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
-    # bt://<MAC>[/<RFCOMM channel>]
-    device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),)
+    # bt://<MAC>[/<RFCOMM channel>], a B1 also on USB: usblp on Linux, else
+    # through PyUSB, e.g. usb://0x3513:0x0002
+    device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),
+                       re.compile(r'(file://)?/dev/usb/lp\w+'),
+                       re.compile(r'usb://0x3513:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.NiimbotError)
     refusals = (calibration.KIND_MESSAGE,)
+
+    def model_of(self, device):
+        # By the device ID on USB: MFG:NIIMBOT;CMD:ESC;MDL: B1;
+        fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
+        model = f"Niimbot/{fields.get('MDL', '').strip()}"
+        return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
@@ -204,7 +213,8 @@ class Niimbot(Driver):
         # designer tells when another roll is in it
         state['serial'] = serial
         serial_of_roll = roll.get('serial') if roll else None
-        state['roll'] = serial_of_roll if serial_of_roll and serial_of_roll.isalnum() and len(serial_of_roll) <= 32 else None
+        state['roll'] = (serial_of_roll if serial_of_roll and serial_of_roll.isascii() and serial_of_roll.isalnum()
+                         and len(serial_of_roll) <= 32 else None)
         # The label designer then picks the labels of the roll
         if roll and roll['barcode'] in ROLLS:
             state['media_width'], state['media_length'] = ROLLS[roll['barcode']]

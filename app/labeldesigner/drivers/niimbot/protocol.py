@@ -5,6 +5,8 @@ niimbluelib's B1PrintTask (https://github.com/MultiMote/niimbluelib, MIT).
 Packets are 55 55 <command> <length> <data> <checksum> aa aa, the checksum
 the XOR of command, length and data."""
 
+import os
+import select
 import socket
 import struct
 import time
@@ -125,10 +127,17 @@ class UsbSocket:
 
     def recv(self, size: int) -> bytes:
         deadline = time.monotonic() + self.timeout
-        while not (data := self.printer.read(size)):
+        while not (data := self._read(size, deadline)):
             if time.monotonic() >= deadline:
                 raise socket.timeout('no answer')
         return data
+
+    def _read(self, size: int, deadline: float) -> bytes:
+        # usblp blocks a read until the printer answers: read once it has
+        if isinstance(self.printer, backends.KernelPrinter):
+            ready, _, _ = select.select([self.printer.dev], [], [], max(0.0, deadline - time.monotonic()))
+            return os.read(self.printer.dev, size) if ready else b''
+        return self.printer.read(size)
 
     def close(self):
         self.printer.dispose()
@@ -207,7 +216,7 @@ def model_id(c: Connection) -> int | None:
     not tell."""
     try:
         data = c.ask(0x40, b'\x08', 0x48)
-    except NoAnswer:
+    except NiimbotError:
         return None
     return struct.unpack('>H', data[:2])[0] if len(data) >= 2 else None
 

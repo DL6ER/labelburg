@@ -553,7 +553,11 @@ textarea.field.choices { field-sizing: content; min-height: 3.6em; max-height: 1
 .prow > i { color: var(--select); }
 .settings { display: flex; flex-direction: column; gap: 1rem; }
 .cal { display: flex; flex-direction: column; gap: .5rem; }
-.cal-example { max-width: 100%; height: auto; image-rendering: pixelated; border-radius: .4rem; }
+.cal-example { max-width: 100%; height: auto; border-radius: .4rem; }
+/* Buttons of the calibration share their row, unlike the full-width ones of other sheets */
+.sheet .cal-row { gap: .5rem; flex-wrap: nowrap; }
+.sheet .cal-row > .btn, .sheet .cal-row > .btn-print { width: auto; flex: 1 1 0; padding: .55rem .8rem; }
+.sheet .cal-row > .btn.quiet { flex: none; }
 .settings h3 { font-size: 1.05rem; }
 
 @media (prefers-reduced-motion: reduce) {

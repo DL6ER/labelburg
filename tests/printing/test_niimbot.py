@@ -2,6 +2,7 @@
 of the RFCOMM socket or the USB printer, and printing and status through the
 label designer."""
 import json
+import os
 import struct
 
 import pytest
@@ -572,3 +573,60 @@ def test_wide_frame_stays_on_the_paper_when_moved_1_mm(across, column):
     from types import SimpleNamespace
     [rows] = niimbot.DRIVER.calibration_job(SimpleNamespace(label_size='niimbot50x30', offset=(across, 0)))
     assert any(rows[120][x] for x in column)
+
+
+B1_DEVICE_ID = 'MFG:NIIMBOT;CMD:ESC;MDL: B1;'
+
+
+@pytest.mark.parametrize('device', ['file:///dev/usb/lp0', '/dev/usb/lp1', 'usb://0x3513:0x0002'])
+def test_b1_plugged_in_is_known_by_its_device_id(monkeypatch, device):
+    from app.labeldesigner import drivers
+    monkeypatch.setattr(devices, 'usb_device_id', lambda d: B1_DEVICE_ID)
+    assert drivers.resolve(device, 'Unknown') == (niimbot.DRIVER, 'Niimbot/B1')
+    # Listed when found, a request may name it
+    assert any(pattern.fullmatch(device) for pattern in niimbot.DRIVER.device_patterns)
+    monkeypatch.setattr(devices, 'usb_device_id', lambda d: 'MFG:Brother;CMD:PT-CBP;MDL:QL-800;')
+    assert niimbot.DRIVER.model_of(device) is None
+
+
+def test_printer_refusing_its_model_id_still_prints(b1, fake, monkeypatch):
+    monkeypatch.setitem(REPLIES, (0x40, 0x08), (protocol.ERROR, b'\x01'))
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+
+
+def test_roll_serial_number_of_other_letters_is_left_out(b1, fake, monkeypatch):
+    # 16 bytes as the tag tells them, 15 letters with one outside A-Z
+    tag = B1_TAG.replace(b'PZ1G221322004205', 'PZ1\u00c4TEST0000001'.encode())
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+    assert b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['roll'] is None
+
+
+def test_usb_read_waits_no_longer_than_its_time(monkeypatch):
+    # usblp blocks a read until the printer answers, one that never does
+    # must not hold the printer
+    import threading
+    from app.labeldesigner.drivers import backends
+    read_end, write_end = os.pipe()
+    printer = backends.KernelPrinter.__new__(backends.KernelPrinter)
+    printer.dev = read_end
+    monkeypatch.setattr(protocol.backends, 'open_printer', lambda device: printer)
+    usb = protocol.UsbSocket('/dev/usb/lp0')
+    usb.settimeout(0.1)
+    outcome = []
+
+    def read():
+        try:
+            outcome.append(usb.recv(64))
+        except OSError as e:
+            outcome.append(e)
+    thread = threading.Thread(target=read, daemon=True)
+    thread.start()
+    thread.join(2)
+    try:
+        assert not thread.is_alive() and isinstance(outcome[0], TimeoutError)
+    finally:
+        os.close(write_end)
+        thread.join(2)
+        os.close(read_end)
