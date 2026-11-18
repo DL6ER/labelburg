@@ -1137,3 +1137,29 @@ def test_a_style_set_on_selected_lines_makes_them_a_line_of_their_own(designer):
     wait_for_preview(designer)
     assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam', 'Strawberry\nKitchen', '2026']
     assert designer.evaluate("() => S.edit.design.text[1].inverted") is True
+
+
+def test_a_line_that_starts_with_a_line_break_keeps_it_when_drawn_anew(designer):
+    type_line(designer, 0, 'Jam')
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('Home')
+    designer.keyboard.press('Enter')
+    wait_for_preview(designer)
+    designer.click('[data-row="0"] [data-act="align"]')
+    wait_for_preview(designer)
+    assert designer.input_value('[data-row="0"] .tx') == '\nJam'
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('Control+End')
+    designer.keyboard.type('s')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text[0].text") == '\nJams'
+
+
+def test_a_size_typed_digit_by_digit_for_selected_lines(designer):
+    type_line(designer, 0, 'Jam\nStrawberry')
+    designer.evaluate("""() => document.querySelector('[data-row="0"] .tx').setSelectionRange(4, 6)""")
+    designer.click('[data-row="0"] input.mini')
+    designer.keyboard.press('Control+A')
+    designer.keyboard.type('30')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => [l.text, l.size])")[1] == ['Strawberry', '30']

@@ -2209,7 +2209,7 @@ function renderFields(box, item, work, refresh, onEnter) {
     if (blanks.length) {
         html = blanks.map((name, i) => fieldHTML(item, name, work.values[name], i)).join('');
     } else {
-        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><input class="field" id="ln${i}" data-line="${i}" value="${esc(toDisplay(l.text))}"></div>`).join('');
+        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><textarea class="field" id="ln${i}" data-line="${i}" rows="${lineRows(toDisplay(l.text))}">\n${esc(toDisplay(l.text))}</textarea></div>`).join('');
         if (['qrcode_text', 'qrcode', 'image_qrcode_text'].includes(work.design.print_type)) {
             html += `<div><label class="label-s" for="lnCode">Code content</label>${codeField('lnCode', work.design.code_text, work.design.print_type !== 'qrcode' ? ' placeholder="Empty: the text of the label"' : '')}</div>`;
         }
@@ -2217,11 +2217,16 @@ function renderFields(box, item, work, refresh, onEnter) {
     }
     box.innerHTML = html;
     $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { work.values[inp.dataset.blank] = inp.value; refresh(); }));
-    $$('[data-line]', box).forEach(inp => inp.addEventListener('input', () => {
-        const l = work.design.text[+inp.dataset.line];
-        l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
-        refresh();
-    }));
+    $$('[data-line]', box).forEach(inp => {
+        inp.addEventListener('input', () => {
+            const l = work.design.text[+inp.dataset.line];
+            l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
+            inp.rows = lineRows(inp.value);
+            refresh();
+        });
+        // Enter breaks the line, Ctrl+Enter prints as in the field of the code
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onEnter(); } });
+    });
     if ($('#lnCode', box)) {
         $('#lnCode', box).addEventListener('input', e => { e.target.rows = codeRows(e.target.value); work.design.code_text = fromDisplay(e.target.value, work.design.code_text, e.target.selectionStart); refresh(); });
         // Enter starts a new line of the code
@@ -2788,7 +2793,7 @@ function lineRow(l, i, main, families, red, color) {
     const noBold = wantsBold(l) && !hasBold(fam);
     const spacing = +(l.line_spacing || 100);
     return `<div class="lrow${wantsBold(l) && !noBold ? ' bold' : ''}${i === S.editSel ? ' sel' : ''}${l.color === 'red' ? ' red' : ''}" data-row="${i}">
-        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<textarea class="tx" rows="${lineRows(toDisplay(l.text))}"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">${esc(toDisplay(l.text))}</textarea>
+        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<textarea class="tx" rows="${lineRows(toDisplay(l.text))}"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">\n${esc(toDisplay(l.text))}</textarea>
             <button class="mini quiet" type="button" data-act="del" title="Remove the line"><i class="fa-solid fa-xmark"></i></button></span>
         <div class="st">
             <select class="mini lf${fam !== main ? ' on' : ''}" title="Font of line ${i + 1}" aria-label="Font of line ${i + 1}">${missingFont(fam)}${families.map(f => `<option${f === fam ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select>
@@ -3130,7 +3135,8 @@ function bindEditor() {
             // Split, the size typed next goes on in the field of the new line
             renderEditor();
             const size = $(`[data-row="${S.editSel}"] input.mini`);
-            if (size) size.focus();
+            // Set anew, the value puts the caret after the digits typed so far
+            if (size) { size.focus(); size.value = ''; size.value = m.size; }
         });
         $('select.lf', row).onchange = e => { const m = styled(); m.bold = wantsBold(m); m.font = fontOf(e.target.value, m.bold); renderEditor(); };
         $('select.lsp', row).onchange = e => { styled().line_spacing = e.target.value; renderEditor(); };
