@@ -2770,6 +2770,10 @@
             "type": "boolean",
             "description": "Niimbot: the battery of the printer needs charging, it is at 1 of 4 or less."
           },
+          "battery": {
+            "type": "integer",
+            "description": "Niimbot: the charge of the battery in percent, in steps of 25, as the printer tells it in 4 steps."
+          },
           "job": {
             "type": "object",
             "description": "The job the printer prints for this server, also what a VC-500W does while it prints a label, which takes about 40 s.",

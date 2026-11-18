@@ -1,5 +1,6 @@
 """The Niimbot D110_M and B1: their protocol against a fake printer in place
-of the RFCOMM socket, and printing and status through the label designer."""
+of the RFCOMM socket or the USB printer, and printing and status through the
+label designer."""
 import json
 import struct
 
@@ -18,10 +19,13 @@ REPLIES = {0x21: (0x31, b'\x01'), 0x23: (0x33, b'\x01'), 0x01: (0x02, b'\x01'), 
            0xe3: (0xe4, b'\x01'), 0xa3: (0xb3, struct.pack('>H', 1)), 0xf3: (0xf4, b'\x01'),
            0x1a: (0x1b, TAG), 0xdc: (0xdd, bytes.fromhex('101f0069006932460104')), 0x40: (0x48, struct.pack('>H', 2320))}
 # The replies of a B1 where they differ, after the packets niimbluelib logged
-# of one: its model ID, a heartbeat of 13 bytes with the battery in byte 10,
-# a page started and the RFID tag of its roll
+# of one: its model ID, a page started and the RFID tag of its roll. Its
+# heartbeats of 13 bytes with the lid closed, open and without a roll.
 B1_TAG = bytes.fromhex('881d7e4fd9970000') + b'\x0810262260' + b'\x10PZ1G221322004205' + struct.pack('>HHB', 276, 153, 1)
-B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), 0xdc: (0xdd, bytes(10) + bytes([4, 0, 1])),
+B1_CLOSED = bytes.fromhex('1ff7006100610000' '4f00040001')
+B1_OPEN = bytes.fromhex('2017005400540000' '4f01040100')
+B1_NO_ROLL = bytes.fromhex('2017008500850000' '4f00040100')
+B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), 0xdc: (0xdd, B1_CLOSED),
               0x03: (0x04, b'\x01'), 0x1a: (0x1b, B1_TAG)}
 
 
@@ -123,6 +127,50 @@ def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake):
     assert packets[0x23] == b'\x01'
 
 
+class UsbPrinter:
+    """The fake printer behind the printer backend of USB and USB/IP."""
+
+    def __init__(self, printer):
+        self.printer, self.disposed = printer, False
+
+    def write(self, data):
+        self.printer.sendall(data)
+
+    def read(self, length=32):
+        return self.printer.recv(length)
+
+    def dispose(self):
+        self.disposed = True
+
+
+def test_b1_on_usb_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
+    printer, opened = FakePrinter(), []
+
+    def open_printer(device):
+        opened.append(UsbPrinter(printer))
+        return opened[-1]
+    monkeypatch.setattr(protocol.backends, 'open_printer', open_printer)
+    monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
+    b1.application.config['PRINTER_PRINTER'] = 'usbip://192.0.2.7/1-4.1.3'
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    sent = [c for c in printer.commands if c not in (0x84, 0x85)]
+    assert sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
+    assert opened and all(p.disposed for p in opened)
+
+
+def test_b1_on_usb_that_does_not_answer(monkeypatch):
+    printer = UsbPrinter(FakePrinter())
+    printer.read = lambda length=32: b''
+    monkeypatch.setattr(protocol.backends, 'open_printer', lambda device: printer)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    with protocol.connect('usb://0x3513:0x0002') as c:
+        with pytest.raises(protocol.NoAnswer):
+            protocol.heartbeat(c)
+    assert printer.disposed
+
+
 def test_b1_takes_its_own_rolls():
     driver = niimbot.DRIVER
     sizes = {label.identifier: label for label in driver.labels}
@@ -143,7 +191,16 @@ def test_b1_rows_span_the_printhead_with_the_label_in_the_middle():
             return Image.new('RGB', (320, 240), 'black')
     _, rows = niimbot.label_rows(_Label(), 'niimbot40x30')
     assert (len(rows), len(rows[0])) == (240, 384)
-    assert rows[0] == [0] * 32 + [1] * 320 + [0] * 32
+    # Moved left and down by the shifts of the B1, as long as the label
+    assert rows[:2] == [[0] * 384] * 2
+    assert rows[2] == rows[-1] == [0] * 30 + [1] * 320 + [0] * 34
+
+
+def test_b1_rows_beyond_the_printhead_are_left_out():
+    # 50 mm across are printed on the middle 48 mm, moved left by the shift
+    assert niimbot.centered([1] * 8 + [0] * 384 + [1] * 8, 384) == [0] * 384
+    assert niimbot.centered([1] * 10 + [0] * 380 + [1] * 10, 384, 2) == [0] * 380 + [1] * 4
+    assert niimbot.centered([1] * 400, 384) == [1] * 384
 
 
 def test_rows_tell_the_dots_in_each_third_of_a_wide_printhead():
@@ -175,7 +232,7 @@ def test_printer_that_does_not_tell_its_model_prints(b1, fake, monkeypatch):
 def test_b1_tells_its_battery(b1, fake, monkeypatch):
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert (printer_['model'], printer_['errors'], printer_['battery_low']) == ('Niimbot/B1', [], False)
-    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes(10) + bytes([1, 0, 1])))
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, B1_CLOSED[:10] + bytes([1]) + B1_CLOSED[11:]))
     printer_ = b1.get('/labeldesigner/api/printer_status?look=1').get_json()['printers'][0]
     assert printer_['battery_low'] is True
 
@@ -231,6 +288,11 @@ def test_status_tells_the_size_of_a_known_roll(client, fake, monkeypatch):
     assert (printer_['media_width'], printer_['media_length']) == (12, 40)
 
 
+def test_b1_status_tells_the_size_of_its_roll(b1, fake):
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['media_width'], printer_['media_length']) == (50, 30)
+
+
 def test_printer_is_asked_only_when_looking_for_printers(client, fake):
     # It beeps at each connection, the designer asks for the status every 20 s
     client.get('/labeldesigner/api/printer_status')
@@ -247,11 +309,11 @@ def beat(lid=1, battery=3):
     return (0xdd, bytes.fromhex('101f0069006932460000')[:8] + bytes([lid, battery]))
 
 
-@pytest.mark.parametrize('battery, low', [(0, True), (1, True), (2, False), (4, False)])
-def test_status_tells_only_whether_the_battery_needs_charging(client, fake, monkeypatch, battery, low):
+@pytest.mark.parametrize('battery, low, percent', [(0, True, 0), (1, True, 25), (2, False, 50), (4, False, 100)])
+def test_status_tells_the_battery_in_percent(client, fake, monkeypatch, battery, low, percent):
     monkeypatch.setitem(REPLIES, 0xdc, beat(battery=battery))
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert printer_['battery_low'] is low and 'battery' not in printer_
+    assert (printer_['battery_low'], printer_['battery']) == (low, percent)
 
 
 def test_open_lid_is_an_error(client, fake, monkeypatch):
@@ -282,6 +344,23 @@ def test_no_roll_is_not_an_open_lid(client, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes.fromhex('10200097009732460104')))
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, b'\x00'))
     errors = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors']
+    assert errors == ['No Niimbot roll with its RFID tag is in the printer']
+
+
+def test_b1_with_its_lid_open(b1, fake, monkeypatch):
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, B1_OPEN))
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, b'\x00'))
+    assert b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The cover of the printer is open']
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['message'] == 'The cover of the printer is open'
+    assert 0x21 not in fake.commands
+
+
+def test_b1_without_a_roll(b1, fake, monkeypatch):
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, B1_NO_ROLL))
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, b'\x00'))
+    errors = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors']
     assert errors == ['No Niimbot roll with its RFID tag is in the printer']
 
 

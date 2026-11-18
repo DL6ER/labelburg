@@ -1,6 +1,6 @@
 """The Niimbot D110_M and B1, thermal printers for die-cut labels on
-Bluetooth (protocol.py). They have no cutter, the labels are torn off. Not
-the D110, which niimbluelib prints with other commands."""
+Bluetooth, the B1 also on USB (protocol.py). They have no cutter, the labels
+are torn off. Not the D110, which niimbluelib prints with other commands."""
 
 import logging
 import re
@@ -28,6 +28,11 @@ SEQUENCES = {'Niimbot/D110_M': protocol.V4, 'Niimbot/B1': protocol.B1}
 # The models by the model ID they tell, which the print sequence and the
 # printhead have to fit
 MODEL_IDS = {2320: 'Niimbot/D110_M', 4096: 'Niimbot/B1'}
+# A B1 prints 0.25 mm right of the middle of a tightly seated roll and starts
+# 0.1 to 0.5 mm before the top edge of a label, by roll: its rows are moved
+# left by 0.25 mm and down by 0.25 mm
+B1_SHIFT = 2
+B1_FEED = 2
 
 # Width x length in mm of the rolls sold for the D11 and D110 printers,
 # e.g. T12*40 for 12 x 40 mm. Only 12 x 40 mm was printed on.
@@ -37,7 +42,8 @@ B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80)
 # Width x length of the rolls by the barcode in their RFID tag, the label
 # designer then picks them. Niimbot tells it only online, at
 # print.niimbot.com, the label designer stays offline.
-ROLLS = {'01222281': (12, 40)}  # T12*40-155WHITE
+ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
+         '10262260': (50, 30)}  # T50*30-230WHITE
 # It beeps at each connection: it is asked only when the label designer looks
 # for printers and when printing, the other status queries are answered from
 # the last state. When each was last asked:
@@ -55,6 +61,14 @@ LABELS = (tuple(_label(width, length, 'Niimbot/D110_M') for width, length in SIZ
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)' for label in LABELS}
 
 
+def centered(dots: list[int], head: int, shift: int = 0) -> list[int]:
+    """A row across the whole printhead with the dots in its middle, moved
+    left by shift; dots beyond the printhead are left out."""
+    left = (head - len(dots)) // 2 - shift
+    placed = [0] * left + dots if left >= 0 else dots[-left:]
+    return (placed + [0] * head)[:head]
+
+
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
     """A label as the printer prints it: rows across the printhead, as wide
     as the label, black is printed."""
@@ -69,10 +83,10 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
     dither = label.label_content != LabelContent.IMAGE_BW
     img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
     if size.models == ('Niimbot/B1',):
-        # Rows across the whole printhead, the label in the middle of it
-        left = (protocol.B1_HEAD - img.width) // 2
-        rows = [[0] * left + [int(img.getpixel((x, y)) == 0) for x in range(img.width)] + [0] * (protocol.B1_HEAD - left - img.width)
+        rows = [centered([int(img.getpixel((x, y)) == 0) for x in range(img.width)], protocol.B1_HEAD, B1_SHIFT)
                 for y in range(img.height)]
+        # As long as the label, its last rows left out
+        rows = [[0] * protocol.B1_HEAD for _ in range(B1_FEED)] + rows[:len(rows) - B1_FEED]
         return img, rows
     rows = [[int(img.getpixel((x, y)) == 0) for x in range(min(img.width, protocol.HEAD))] for y in range(img.height)]
     return img, rows
@@ -140,8 +154,11 @@ class Niimbot(Driver):
         if roll is None and not state['errors']:
             state['errors'] = ['No Niimbot roll with its RFID tag is in the printer']
         state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
-        # Told only when it needs charging, at 1 of 4 or less
-        state['battery_low'] = beat.get('battery') in (0, 1)
+        # It tells 0 to 4, shown as a percentage, low at 1 of 4 or less
+        battery = beat.get('battery')
+        state['battery_low'] = battery in (0, 1)
+        if isinstance(battery, int):
+            state['battery'] = min(battery, 4) * 25
         # The label designer then picks the labels of the roll
         if roll and roll['barcode'] in ROLLS:
             state['media_width'], state['media_length'] = ROLLS[roll['barcode']]

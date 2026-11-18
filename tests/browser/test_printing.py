@@ -554,6 +554,15 @@ def test_printer_with_a_low_battery_asks_to_charge_it(designer):
         designer.evaluate('() => closeLayer(true)')
 
 
+def test_printer_tells_its_battery_in_percent(designer):
+    for battery, shown in ((75, 'Battery 75%'), (None, None)):
+        value = 'null' if battery is None else battery
+        designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ status_type: 'Reply to status request', battery: {value} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
+        text = designer.inner_text('.plist')
+        assert (shown in text) if shown else 'Battery' not in text
+        designer.evaluate('() => closeLayer(true)')
+
+
 def test_printer_still_being_asked_is_not_shown_as_failing(designer):
     # A printer on Bluetooth takes a few seconds to answer, it was red meanwhile
     assert designer.evaluate("() => printerState({ status_type: 'Asking the printer', errors: [] })") == {'cls': 'off', 'text': 'Asking the printer…'}

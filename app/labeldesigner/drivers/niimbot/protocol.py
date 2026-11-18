@@ -1,5 +1,5 @@
 """The protocol of the Niimbot D110_M (firmware 4.x) and B1 over classic Bluetooth (RFCOMM),
-the print sequence of the D110_M of https://github.com/eigger/hass-niimbot
+and of the B1 over its USB printer interface, the print sequence of the D110_M of https://github.com/eigger/hass-niimbot
 (custom_components/niimbot/niimprint/printer.py), that of the B1 of
 niimbluelib's B1PrintTask (https://github.com/MultiMote/niimbluelib, MIT).
 Packets are 55 55 <command> <length> <data> <checksum> aa aa, the checksum
@@ -9,7 +9,7 @@ import socket
 import struct
 import time
 
-from .. import devices
+from .. import backends, devices
 
 # 8 dots per mm, the printhead of the D110_M is 15 mm wide, that of the B1 48 mm
 DPI = 203
@@ -36,6 +36,11 @@ ERROR = 0xdb
 # 32 46 01 04), 0 with the lid open (10 22 00 54 00 54 32 46 00 04). It tells
 # no paper: the bytes that change without a roll change with an open lid too.
 LID_OPEN = 0
+# Bytes 9 to 12 of the 13 a B1 answers: lid (1 open), battery, paper (1 none)
+# and whether it read the RFID tag of the roll, e.g. 1f f7 00 61 00 61 00 00
+# 4f 00 04 00 01 closed with a roll, 20 17 00 54 00 54 00 00 4f 01 04 01 00
+# open, 20 17 00 85 00 85 00 00 4f 00 04 01 00 closed without a roll.
+B1_LID_OPEN = 1
 
 
 class NiimbotError(Exception):
@@ -104,8 +109,37 @@ def row_packets(rows: list[list[int]], head: int = HEAD) -> list[bytes]:
     return out
 
 
+class UsbSocket:
+    """A printer on USB or shared over USB/IP, read and written like a
+    socket. The B1 takes the same packets there as on Bluetooth."""
+
+    def __init__(self, device: str):
+        self.printer = backends.open_printer(device)
+        self.timeout = CONNECT_WAIT
+
+    def settimeout(self, timeout: float):
+        self.timeout = timeout
+
+    def sendall(self, data: bytes):
+        self.printer.write(data)
+
+    def recv(self, size: int) -> bytes:
+        deadline = time.monotonic() + self.timeout
+        while not (data := self.printer.read(size)):
+            if time.monotonic() >= deadline:
+                raise socket.timeout('no answer')
+        return data
+
+    def close(self):
+        self.printer.dispose()
+
+
 class Connection:
     def __init__(self, device: str):
+        self.received = b''
+        if not device.startswith('bt://'):
+            self.s = UsbSocket(device)
+            return
         self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
         self.s.settimeout(CONNECT_WAIT)
         try:
@@ -114,7 +148,6 @@ class Connection:
         except OSError:
             self.s.close()
             raise
-        self.received = b''
 
     def __enter__(self):
         return self
@@ -158,15 +191,15 @@ def connect(device: str) -> Connection:
 
 
 def heartbeat(c: Connection) -> dict:
-    """Lid and battery (0 to 4) in the 10 bytes a D110_M answers, e.g.
-    10 1f 00 69 00 69 32 46 01 04, the battery in byte 10 of the 13 a B1
+    """Whether the lid is open and the battery (0 to 4), from the 10 bytes
+    a D110_M answers, e.g. 10 1f 00 69 00 69 32 46 01 04, or the 13 a B1
     answers; the raw data if the length is another."""
     data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
     if len(data) == 13:
-        return {'battery': data[10]}
+        return {'open': data[9] == B1_LID_OPEN, 'battery': data[10]}
     if len(data) != 10:
         return {'raw': data.hex()}
-    return {'lid': data[8], 'battery': data[9]}
+    return {'open': data[8] == LID_OPEN, 'battery': data[9]}
 
 
 def model_id(c: Connection) -> int | None:
@@ -181,7 +214,7 @@ def model_id(c: Connection) -> int | None:
 
 def errors(beat: dict) -> list[str]:
     """What keeps the printer from printing, by its heartbeat."""
-    return ['The cover of the printer is open'] if beat.get('lid') == LID_OPEN else []
+    return ['The cover of the printer is open'] if beat.get('open') else []
 
 
 def roll(c: Connection) -> dict | None:
