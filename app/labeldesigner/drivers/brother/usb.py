@@ -53,6 +53,8 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
             for state in states:
                 info['printer_state'] = state
                 if state['errors']:
+                    # The status the printer holds, see query_status()
+                    devices.status_cache[devices.lock_key(device_specifier)] = state
                     return info
                 if state['status_type'] == 'Printing completed':
                     info['confirmed'] += 1
@@ -192,6 +194,15 @@ def _release(printer):
     printer.dispose = lambda: None
 
 
+def _held_error(key: str) -> dict | None:
+    """The error a printer stopped a job with, which it holds: a QL-1100
+    answers no status request until the error is cleared at the printer."""
+    known = devices.status_cache.get(key, {})
+    if known.get('status_type') != 'Error occurred' or not known.get('errors'):
+        return None
+    return dict(known, errors=[f"{', '.join(known['errors'])}, clear it at the printer"])
+
+
 def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
     """Query the printer status without waiting for a running print job. While
     a job holds the device, the last known status is returned instead."""
@@ -201,6 +212,11 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
             printer = get_printer(device_specifier)
             try:
                 state = get_status(printer)
+            except TimeoutError:
+                held = _held_error(key)
+                if held is None:
+                    raise
+                return held
             finally:
                 # Release the device before giving up the lock
                 _release(printer)
