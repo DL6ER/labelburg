@@ -190,13 +190,19 @@ def calibration_of(data: dict, device: str) -> dict:
             'roll': kept['roll'] if _roll(kept.get('roll')) else None}
 
 
-def calibrated(data: dict, device: str, across: float, along: float, roll: str | None) -> dict:
-    """data with the calibration of a printer kept, ValueError for values off
-    the steps."""
+def checked_offsets(across: float, along: float, roll: str | None = None):
+    """ValueError for offsets off the steps or further than 5 mm, or a roll
+    told otherwise than in letters and digits."""
     if not (_in_steps(across, float('inf')) and _in_steps(along, float('inf'))) or (roll is not None and not _roll(roll)):
         raise ValueError(CALIBRATION_MESSAGE)
     if abs(across) > MAX_OFFSET or abs(along) > MAX_OFFSET:
         raise ValueError(OFFSET_LIMIT)
+
+
+def calibrated(data: dict, device: str, across: float, along: float, roll: str | None) -> dict:
+    """data with the calibration of a printer kept, ValueError for values off
+    the steps."""
+    checked_offsets(across, along, roll)
     printer = _keeping(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}

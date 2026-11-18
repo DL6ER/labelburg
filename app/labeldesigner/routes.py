@@ -1405,8 +1405,10 @@ def _millimeters(value) -> float:
 @bp.route('/api/calibration', methods=['GET', 'POST'])
 def calibration_route():
     """The calibration of the print position of a printer. POST sets it from
-    the numbers read left and right on a calibration label, or moves it to
-    across and along, or notes the roll it holds for."""
+    the numbers read left and right on a calibration label printed with
+    across and along (as kept if left out), or moves it to across and along,
+    or notes the roll it holds for. With save=0 it only answers what that
+    gives, e.g. for the label designer before the user saves."""
     values = {**request.values.to_dict(), **_json_body()}
     try:
         device, model, driver = _calibrating(values)
@@ -1420,19 +1422,26 @@ def calibration_route():
         given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along')
                  if values.get(name) not in (None, '')}
         roll, shift = values.get('roll') or None, None
-        repo = _get_repo_dir()
-        with _saving(repo):
-            data = _kept_settings(changing=True)
-            kept = printer_settings.calibration_of(data, device)
+
+        def worked_out(kept: dict) -> tuple[float, float, str | None]:
+            nonlocal shift
             across, along = given.get('across', kept['across']), given.get('along', kept['along'])
             if 'left' in given or 'right' in given:
                 if 'left' not in given or 'right' not in given:
                     raise ValueError(printer_settings.CALIBRATION_MESSAGE)
                 shift = printer_settings.from_readings(given['left'], given['right'])
-                across = round((kept['across'] - shift) * 4) / 4
+                across = round((across - shift) * 4) / 4
             elif not given and not roll:
                 raise ValueError(printer_settings.CALIBRATION_MESSAGE)
-            data = printer_settings.calibrated(data, device, across, along, roll or kept['roll'])
+            return across, along, roll or kept['roll']
+        if str(values.get('save', '1')) == '0':
+            across, along, roll = worked_out(printer_settings.calibration_of(_kept_settings(), device))
+            printer_settings.checked_offsets(across, along, roll)
+            return jsonify({'success': True, 'calibration': {'across': across, 'along': along, 'roll': roll}, 'shift': shift})
+        repo = _get_repo_dir()
+        with _saving(repo):
+            data = _kept_settings(changing=True)
+            data = printer_settings.calibrated(data, device, *worked_out(printer_settings.calibration_of(data, device)))
             _write_atomically(os.path.join(repo, printer_settings.FILE),
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
     except LabelsBusy:
@@ -1458,12 +1467,18 @@ def _calibrating(values: dict) -> tuple[str, str, object]:
 
 @bp.route('/api/calibration/print', methods=['POST'])
 def print_calibration():
-    """Print the calibration label for the roll in the printer."""
+    """Print the calibration label for the roll in the printer, moved as
+    kept for it or by across and along not saved yet."""
     values = {**request.values.to_dict(), **_json_body()}
     try:
         device, model, _ = _calibrating(values)
         label_size = values.get('label_size') or printer_settings.of_printer(_kept_settings(), device).get('label_size', '')
-        message = _queue(model, device, label_size).print_calibration()
+        queue = _queue(model, device, label_size)
+        offsets = {name: _millimeters(values[name]) for name in ('across', 'along') if values.get(name) not in (None, '')}
+        if offsets:
+            queue.offset = (offsets.get('across', queue.offset[0]), offsets.get('along', queue.offset[1]))
+            printer_settings.checked_offsets(*queue.offset)
+        message = queue.print_calibration()
     except Exception as e:
         _log_refused_request('Printing the calibration label', e)
         return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)

@@ -295,6 +295,11 @@
                   "roll": {
                     "type": "string",
                     "description": "The serial number of the roll in the printer; alone it keeps the offsets for that roll."
+                  },
+                  "save": {
+                    "type": "string",
+                    "enum": ["0", "1"],
+                    "description": "0 only answers the calibration this gives, without keeping it. Default 1."
                   }
                 }
               }
@@ -329,6 +334,11 @@
                   "roll": {
                     "type": "string",
                     "description": "The serial number of the roll in the printer; alone it keeps the offsets for that roll."
+                  },
+                  "save": {
+                    "type": "string",
+                    "enum": ["0", "1"],
+                    "description": "0 only answers the calibration this gives, without keeping it. Default 1."
                   }
                 }
               }
@@ -402,6 +412,14 @@
                   "label_size": {
                     "type": "string",
                     "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  },
+                  "across": {
+                    "type": "number",
+                    "description": "Moved right, in place of the kept calibration, e.g. one not saved yet."
+                  },
+                  "along": {
+                    "type": "number",
+                    "description": "Moved down, in place of the kept calibration."
                   }
                 }
               }
@@ -420,6 +438,14 @@
                   "label_size": {
                     "type": "string",
                     "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  },
+                  "across": {
+                    "type": "number",
+                    "description": "Moved right, in place of the kept calibration, e.g. one not saved yet."
+                  },
+                  "along": {
+                    "type": "number",
+                    "description": "Moved down, in place of the kept calibration."
                   }
                 }
               }

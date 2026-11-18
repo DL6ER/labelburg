@@ -3530,36 +3530,37 @@ function calibrationCard() {
     return `<div class="cal">${fresh ? `<p class="small hint">A new roll is in the printer. Print a calibration label so the labels sit straight on it.</p>
             <div class="row" style="gap:.5rem"><button class="btn sm" type="button" id="calPrintNew"><i class="fa-solid fa-print"></i>Print calibration label</button>
             <button class="btn sm quiet" type="button" id="calNotNow">Not now</button></div>` : ''}
-        <button class="btn sm" type="button" id="calOpen" style="align-self:flex-start"><i class="fa-solid fa-ruler-horizontal"></i>Line up the labels</button></div>`;
+        <button class="btn sm" type="button" id="calOpen" style="align-self:flex-start"><i class="fa-solid fa-ruler-horizontal"></i>Calibrate printer</button></div>`;
 }
 
-function calibrationForm(extra) {
+function calibrationForm(extra, roll = true) {
     const fd = new FormData();
     fd.set('printer', printerKey());
     if (C.models[S.printer.model]) fd.set('model', S.printer.model);
     // The roll it holds for, the hint then stays away
-    if (S.printer.roll) fd.set('roll', S.printer.roll);
+    if (roll && S.printer.roll) fd.set('roll', S.printer.roll);
     Object.entries(extra).forEach(([k, v]) => fd.set(k, String(v)));
     return fd;
 }
 
-// The answer of the server, null with the reason shown
-async function postCalibration(extra, shown = toast) {
+// The answer of the server, null with the reason shown. Kept for the printer
+// unless only tried, which tells what it would be.
+async function postCalibration(extra, shown = toast, trying = false) {
     try {
-        const r = await post('/calibration', calibrationForm(extra));
+        const r = await post('/calibration', calibrationForm(trying ? { ...extra, save: 0 } : extra, !trying));
         const j = await r.json().catch(() => ({}));
         if (!r.ok) return shown(j.message || 'The calibration could not be saved'), null;
-        S.printer.calibration = j.calibration;
+        if (!trying) S.printer.calibration = j.calibration;
         return j;
     } catch {
         return shown('The label designer could not be reached'), null;
     }
 }
 
-// Whether it printed, else the reason shown
-async function printCalibration(shown = toast) {
-    const fd = calibrationForm({ label_size: S.tape });
-    fd.delete('roll');
+// Whether it printed, else the reason shown. Moved as kept for the printer,
+// or as in the open dialog, not saved yet.
+async function printCalibration(shown = toast, working = {}) {
+    const fd = calibrationForm({ label_size: S.tape, ...working }, false);
     try {
         const r = await post('/calibration/print', fd);
         if (r.ok) return true;
@@ -3581,58 +3582,76 @@ async function openCalibration() {
         return toast('The label designer could not be reached');
     }
     const narrow = kept.kind !== 'wide', step = narrow ? 0.5 : 0.25;
+    // Changed here, kept for the printer only once saved
+    let working = { across: kept.across, along: kept.along };
     const readings = ['<option value=""></option>', ...Array.from({ length: 25 }, (_, i) => -3 + i / 4)
         .map(v => `<option value="${v}">${v > 0 ? '+' : ''}${v}</option>`)].join('');
     const move = (dir, label) => `<button class="btn sm" type="button" data-move="${dir}"><i class="fa-solid fa-arrow-${dir}"></i>${label}</button>`;
-    sheet(`<h2>Line up the labels</h2>
+    sheet(`<h2>Calibrate printer</h2>
         <p>Print a calibration label, then look at it as the picture shows.</p>
-        <button class="btn sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
         <img class="cal-example" alt="${narrow ? 'A calibration label printed 1 mm too far right: read where the black starts at each edge of the label'
             : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it'}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
+        <button class="btn-print sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
         ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
         <div class="row" style="gap:1rem"><label>Left <select class="field" id="calLeft">${readings}</select></label>
-            <label>Right <select class="field" id="calRight">${readings}</select></label></div>
-        <button class="btn-print" type="button" id="calSave">Save</button>`
+            <label>Right <select class="field" id="calRight">${readings}</select></label>
+            <button class="btn sm" type="button" id="calApply">Apply</button></div>`
         : '<p>Compare the white strips left and right of the frame.</p>'}
         <p id="calResult" class="small" aria-live="polite"></p>
         <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('left', `${step} mm`)}${move('right', `${step} mm`)}</div>
         <p class="muted small">Compare the white strip above the top line with the one below the bottom line.</p>
         <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('up', '0.25 mm')}${move('down', '0.25 mm')}</div>
-        <div class="row" style="gap:.5rem;flex-wrap:wrap"><button class="btn sm" type="button" data-cal-print><i class="fa-solid fa-print"></i>Print a check label</button>
+        <div class="row" style="gap:.5rem;align-items:center;flex-wrap:wrap"><span id="calNow" class="small"></span>
             <button class="btn sm quiet" type="button" id="calReset">No fine correction</button></div>
-        <button class="btn quiet" type="button" data-close>Done</button>`);
+        <div class="row" style="gap:.5rem;flex-wrap:wrap">
+            <button class="btn-print sm bad" type="button" id="calCancel" data-close><i class="fa-solid fa-xmark"></i>Cancel</button>
+            <button class="btn-print sm ok" type="button" id="calSave"><i class="fa-solid fa-floppy-disk"></i>Save</button></div>`);
     const box = $('#layer'), result = $('#calResult', box);
     const say = (text, warn = false) => { result.textContent = text; result.classList.toggle('warn', warn); };
-    const save = async extra => {
-        const before = kept.across, j = await postCalibration(extra, text => say(text, true));
+    const mm = v => +Math.abs(v).toFixed(2);
+    const now = () => {
+        const parts = [working.across ? `${mm(working.across)} mm to the ${working.across < 0 ? 'left' : 'right'}` : '',
+            working.along ? `${mm(working.along)} mm ${working.along < 0 ? 'up' : 'down'}` : ''].filter(Boolean);
+        $('#calNow', box).textContent = parts.length ? `Labels are moved ${parts.join(' and ')}.` : 'Labels are not moved.';
+    };
+    now();
+    // Worked out by the server, not kept yet
+    const tryOut = async extra => {
+        const j = await postCalibration({ across: working.across, along: working.along, ...extra }, text => say(text, true), true);
         if (!j) return null;
-        kept = Object.assign(kept, j.calibration);
-        if (j.shift === null || j.shift === undefined) return say('Saved.'), j;
-        const moved = kept.across - before, n = +Math.abs(moved).toFixed(2);
-        say(moved ? `The printer prints ${n} mm too far ${moved < 0 ? 'right' : 'left'}. Labels are moved ${n} mm to the ${moved < 0 ? 'left' : 'right'} from now on.`
-            : 'The labels sit straight.');
+        working = { across: j.calibration.across, along: j.calibration.along };
+        now();
         return j;
     };
     // Once at a time, a second click would print a second label
-    const printers = $$('[data-cal-print]', box);
-    printers.forEach(b => b.onclick = async () => {
-        printers.forEach(x => { x.disabled = true; });
+    const printButton = $('[data-cal-print]', box);
+    printButton.onclick = async () => {
+        printButton.disabled = true;
         say('Printing the calibration label.');
-        if (await printCalibration(text => say(text, true))) say('');
-        printers.forEach(x => { x.disabled = false; });
-    });
-    if (narrow) $('#calSave', box).onclick = async () => {
+        if (await printCalibration(text => say(text, true), working)) say('');
+        printButton.disabled = false;
+    };
+    if (narrow) $('#calApply', box).onclick = async () => {
         const left = $('#calLeft', box), right = $('#calRight', box);
         if (!left.value || !right.value) return say('Choose the number on each side.', true);
-        // Read on a label printed before, saved again it would move the labels again
-        if (await save({ left: left.value, right: right.value })) left.value = right.value = '';
+        const before = working.across;
+        if (!await tryOut({ left: left.value, right: right.value })) return;
+        // Read on a label printed before, applied again it would move the labels again
+        left.value = right.value = '';
+        const moved = working.across - before, n = mm(moved);
+        say(moved ? `The printer prints ${n} mm too far ${moved < 0 ? 'right' : 'left'}. Labels are moved ${n} mm to the ${moved < 0 ? 'left' : 'right'} once you save.`
+            : 'The labels sit straight.');
     };
     $$('[data-move]', box).forEach(b => b.onclick = () => {
         const d = b.dataset.move, along = d === 'up' || d === 'down';
         const by = along ? (d === 'down' ? 0.25 : -0.25) : (d === 'right' ? step : -step);
-        save(along ? { across: kept.across, along: kept.along + by } : { across: kept.across + by, along: kept.along });
+        say('');
+        tryOut(along ? { along: working.along + by } : { across: working.across + by });
     });
-    $('#calReset', box).onclick = () => save({ across: 0, along: 0 });
+    $('#calReset', box).onclick = () => { say(''); tryOut({ across: 0, along: 0 }); };
+    $('#calSave', box).onclick = async () => {
+        if (await postCalibration({ across: working.across, along: working.along }, text => say(text, true))) closeLayer();
+    };
 }
 
 const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];

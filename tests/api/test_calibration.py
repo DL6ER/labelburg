@@ -246,3 +246,27 @@ def test_a_failing_calibration_print_answers_plainly(b1, monkeypatch):
     monkeypatch.setattr(printer.PrinterQueue, 'print_calibration', broken)
     r = b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30'})
     assert r.status_code == 400 and r.get_json()['message'] == refusals.PRINT_FAILED
+
+
+def test_calibration_is_tried_without_saving(b1):
+    r = b1.post(URL, data={**B1, 'across': '0.5', 'along': '-0.25', 'save': '0'})
+    assert r.get_json()['calibration'] == {'across': 0.5, 'along': -0.25, 'roll': None}
+    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
+
+
+def test_readings_count_from_the_offset_the_label_was_printed_with(b1):
+    # Printed moved 0.5 mm right, it still sat 1 mm right
+    r = b1.post(URL, data={**B1, 'left': '-1', 'right': '1', 'across': '0.5', 'along': '0.25', 'save': '0'})
+    assert r.get_json()['calibration'] == {'across': -0.5, 'along': 0.25, 'roll': None}
+    assert r.get_json()['shift'] == 1.0
+
+
+def test_calibration_label_prints_with_offsets_not_saved_yet(b1, monkeypatch):
+    offsets = []
+    monkeypatch.setattr(printer.PrinterQueue, 'print_calibration', lambda self: offsets.append(self.offset) or '')
+    b1.post(URL, data={**B1, 'across': '0.25'})
+    b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30'})
+    b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30', 'across': '-0.5', 'along': '0.25'})
+    assert offsets == [(0.25, 0.0), (-0.5, 0.25)]
+    r = b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30', 'across': '6'})
+    assert r.status_code == 400 and r.get_json()['message'] == printer_settings.OFFSET_LIMIT
