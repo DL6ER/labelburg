@@ -154,7 +154,7 @@ services:
       - PRINTER_PRINTER=usbip://192.168.1.50
 ```
 
-With other printers, use `PRINTERS` instead, e.g., `QL-810W=usbip://192.168.1.50,QL-700=file:///dev/usb/lp0`. For an Epson receipt printer, set `vid: 0x04B8` on the board and name the model, e.g., `PRINTERS=Epson/TM-T20II=usbip://192.168.1.50`.
+With other printers, use `PRINTERS` instead, e.g., `QL-810W=usbip://192.168.1.50,QL-700=file:///dev/usb/lp0`. For an Epson receipt printer, set `vid: 0x04B8` on the board and name the model, e.g., `PRINTERS=Epson/ESC-POS=usbip://192.168.1.50`.
 
 ### Other firmware, not tried
 
