@@ -132,7 +132,7 @@ class Escpos(Driver):
         return SPEED, BESIDES
 
     def label_lengths(self, job):
-        return [len(rows) / protocol.DPI * 25.4 for _, rows, _ in job]
+        return [len(rows) / dpi * 25.4 for _, rows, _, dpi in job]
 
     def render(self, queue, entries, keep=None):
         job = []
@@ -140,7 +140,8 @@ class Escpos(Driver):
             img, rows, width = label_rows(entry['label'], queue.label_size)
             if keep:
                 keep(img, f'escpos_{i}')
-            job.append((entry['cut'], rows, width))
+            # The dpi of the paper, for the length of the label
+            job.append((entry['cut'], rows, width, DPI[next(label.models[0] for label in LABELS if label.identifier == queue.label_size)]))
         return job
 
     def send(self, queue, job) -> str:

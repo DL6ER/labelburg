@@ -45,10 +45,10 @@ def raster(rows: list[bytes], width: int) -> bytes:
     return out
 
 
-def job(labels: list[tuple[bool, list[bytes], int]]) -> bytes:
-    """(cut after it, rows, bytes per row) of each label as one job."""
+def job(labels: list[tuple]) -> bytes:
+    """(cut after it, rows, bytes per row, ...) of each label as one job."""
     out = INIT
-    for cut, rows, width in labels:
+    for cut, rows, width, *_ in labels:
         out += raster(rows, width) + (CUT if cut else b'')
     return out
 
