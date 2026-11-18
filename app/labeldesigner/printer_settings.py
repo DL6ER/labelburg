@@ -10,6 +10,7 @@ They are kept in one file in the folder of the labels, the folder a Docker
 setup keeps. A change names only the settings it changes, two browsers
 changing different settings at the same time keep both."""
 import json
+import re
 
 from .drivers import for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
@@ -35,6 +36,17 @@ SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut
                     'leaves_first (top or bottom) of a printer and quality (quality, high or fast), '
                     'an empty value removes one')
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
+# The calibration of the print position: mm the labels of a printer are moved
+# right and down, and the roll it was made on. Kept apart from the settings
+# above, which a print request may name.
+CALIBRATION = 'calibration'
+MAX_OFFSET = 5
+MAX_READING = 3
+CALIBRATION_MESSAGE = ('across and along are millimeters in steps of 0.25 from -5 to 5, left and right in steps of '
+                       '0.25 from -3 to 3, roll is the serial number of a roll')
+READINGS_DISAGREE = ('Left and right do not fit together. Look at the label again; if they still do not fit, '
+                     'put the roll in again and print a new calibration label.')
+_ROLL = re.compile(r'[A-Za-z0-9]{1,32}')
 
 
 def key(device: str) -> str:
@@ -99,12 +111,18 @@ def checked(changes: dict, model: str) -> dict:
     return changes
 
 
-def changed(data: dict, device: str, changes: dict) -> dict:
-    """data with the checked changes made, an empty value removes one."""
+def _keeping(data: dict, device: str) -> str:
+    """The printer a change of device is kept for, noted as seen there."""
     printer = _key(data, device)
     if printer.startswith('usb:'):
         seen = data['seen'] if isinstance(data.get('seen'), dict) else {}
         data['seen'] = {**seen, lock_key(device): printer}
+    return printer
+
+
+def changed(data: dict, device: str, changes: dict) -> dict:
+    """data with the checked changes made, an empty value removes one."""
+    printer = _keeping(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}
     for name, value in changes.items():
@@ -135,3 +153,47 @@ def for_printing(data: dict, device: str, model: str, values: dict) -> dict:
         taken['high_res'] = '1' if kept['quality'] == 'high' and caps['high_res'] else '0'
         taken['fast_printing'] = '1' if kept['quality'] == 'fast' and 'fast' in caps['qualities'] else '0'
     return {**values, **taken}
+
+
+def _in_steps(value, limit: float) -> bool:
+    return (isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) <= limit
+            and float(value * 4).is_integer())
+
+
+def _roll(value) -> bool:
+    return isinstance(value, str) and bool(_ROLL.fullmatch(value))
+
+
+def calibration_of(data: dict, device: str) -> dict:
+    """The calibration of a printer, none where nothing valid is kept."""
+    own = data['printers'].get(_key(data, device))
+    kept = own.get(CALIBRATION) if isinstance(own, dict) else None
+    kept = kept if isinstance(kept, dict) else {}
+    return {**{name: float(kept[name]) if _in_steps(kept.get(name), MAX_OFFSET) else 0.0 for name in ('across', 'along')},
+            'roll': kept['roll'] if _roll(kept.get('roll')) else None}
+
+
+def calibrated(data: dict, device: str, across: float, along: float, roll: str | None) -> dict:
+    """data with the calibration of a printer kept, ValueError for values off
+    the steps."""
+    if not (_in_steps(across, MAX_OFFSET) and _in_steps(along, MAX_OFFSET)) or (roll is not None and not _roll(roll)):
+        raise ValueError(CALIBRATION_MESSAGE)
+    printer = _keeping(data, device)
+    own = data['printers'].get(printer)
+    own = dict(own) if isinstance(own, dict) else {}
+    own[CALIBRATION] = {'across': float(across), 'along': float(along), 'roll': roll}
+    data['printers'][printer] = own
+    if len(data['printers']) > MAX_PRINTERS:
+        raise ValueError(TOO_MANY_PRINTERS)
+    return data
+
+
+def from_readings(left: float, right: float) -> float:
+    """How far the print sits right, in mm, by the numbers read where the
+    black of the calibration label starts at the left and the right edge."""
+    if not (_in_steps(left, MAX_READING) and _in_steps(right, MAX_READING)):
+        raise ValueError(CALIBRATION_MESSAGE)
+    # Moved sideways only, the two read the same number with opposite signs
+    if abs(left + right) > 0.5:
+        raise ValueError(READINGS_DISAGREE)
+    return (right - left) / 2

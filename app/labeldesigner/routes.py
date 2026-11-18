@@ -1097,7 +1097,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
             **{key: value for key, value in data.items() if key not in requested}, **requested})
         data = {**data, **{key: value for key, value in kept.items() if value is not None}}
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer = _queue(model, device, label_size)
 
         # Determine printing options (print_count, cutting, high_res)
         print_count = _check_print_count(_whole(_option('print_count', data, 1)))
@@ -1337,6 +1337,14 @@ def get_printer_status():
     return status
 
 
+def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
+    """A print queue for the printer, its labels moved as it is calibrated."""
+    queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+    calibration = printer_settings.calibration_of(_kept_settings(), device)
+    queue.offset = (calibration['across'], calibration['along'])
+    return queue
+
+
 def _kept_settings(changing: bool = False) -> dict:
     """The settings of the printers kept on the server, see printer_settings.
     A file that cannot be read raises OSError when changing: it is kept with
@@ -1394,7 +1402,7 @@ def print_label():
         device, model = _printer(request.values.get('printer'), request.values.get('model'))
         # What the request leaves out as set in the printer settings
         values = printer_settings.for_printing(_kept_settings(), device, model, request.values.to_dict(flat=True))
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=values.get('label_size', DEFAULT_LABEL_SIZE))
+        printer = _queue(model, device, values.get('label_size', DEFAULT_LABEL_SIZE))
         print_count = _check_print_count(_whole_or(values.get('print_count'), 1))
         printer.cut, printer.half_cut, printer.chain = _cutting(values.get)
         check_cut(printer.cut, printer.model)
@@ -2248,7 +2256,7 @@ def webhook_print():
 
     # Process and queue each image
     try:
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
@@ -2355,7 +2363,7 @@ def homebox(name: str | None = None):
         return make_response(jsonify({'success': False, 'message': HOMEBOX_NO_IMAGE}), 400)
     try:
         device, model = _printer(device, model)
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
+        printer = _queue(model, device, label_size)
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
         printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))
