@@ -67,8 +67,9 @@ def _key(data: dict, device: str) -> str:
     USB/IP each read is a connection."""
     device_id = usb_device_id(device)
     printer, seen = key(device, device_id), data.get('seen')
-    off = isinstance(seen, dict) and not device_id
-    return seen.get(printer, printer) if off else printer
+    last = seen.get(printer) if isinstance(seen, dict) and not device_id else None
+    # The file may be edited by hand, anything but text names no printer
+    return last if isinstance(last, str) else printer
 
 
 def of_printer(data: dict, device: str) -> dict:

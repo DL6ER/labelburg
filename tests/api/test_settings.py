@@ -127,6 +127,17 @@ def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, devi
     assert read == ['file:///dev/usb/lp0']
 
 
+def test_a_printer_last_seen_that_is_no_printer_key_is_left_out(monkeypatch):
+    # The file may be edited by hand, a USB/IP printer switched off tells
+    # no device ID
+    device = 'usbip://192.0.2.1/1-1'
+    data = {'printers': {}, 'quality': 'fast', 'seen': {lock_key(device): ['not', 'a', 'printer']}}
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    assert printer_settings.of_printer(data, device) == {'quality': 'fast'}
+    printer_settings.changed(data, device, {'cut': 'none'})
+    assert printer_settings.of_printer(data, device) == {'quality': 'fast', 'cut': 'none'}
+
+
 def test_a_settings_file_that_cannot_be_read_is_kept(tmp_path, monkeypatch):
     # E.g. one written by another user: the settings of the other printers
     # in it stay
