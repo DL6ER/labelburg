@@ -64,6 +64,16 @@ def test_a_broken_file_is_no_settings(tmp_path):
     assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
 
 
+def test_a_file_that_is_no_utf_8_is_no_settings(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_bytes(b'\xff\xfe\x00broken')
+    assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
+    text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
+    assert client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text}).status_code == 200
+    client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
+    assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
+
+
 def test_a_usb_printer_is_kept_by_its_serial(monkeypatch):
     monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother;MDL:QL-800;SN:000F1Z123;')
     assert printer_settings.key('/dev/usb/lp1') == 'usb:QL-800/000F1Z123'
