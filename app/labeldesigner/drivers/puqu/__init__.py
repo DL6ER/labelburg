@@ -7,7 +7,7 @@ import re
 
 from PIL import Image
 
-from .. import devices
+from .. import devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
@@ -23,6 +23,11 @@ MODELS = ('PUQU/Q00',)
 SIZES = {(50, 30): 0, (50, 80): 0, (40, 30): 1, (40, 50): 1}
 OFFSETS = {f'puqu{w}x{h}': offset for (w, h), offset in SIZES.items()}
 DOTS_PER_MM = 8
+# No figures of the maker: mm/s and the seconds a label takes besides,
+# mostly waiting for the printer to tell that it printed it, a guess the
+# jobs correct
+SPEED = 20
+BESIDES = 3.0
 
 
 def _label(width: int, length: int, offset: int) -> Label:
@@ -93,7 +98,7 @@ class Puqu(Driver):
     def _status(self, device, model):
         state = network_status(device, model)
         state.update({'media_type': 'Die-cut labels', 'phase_type': 'Waiting to receive'})
-        with devices.device_lock(device, timeout=devices.STATUS_LOCK_TIMEOUT) as acquired:
+        with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
                 state.update(devices.status_cache.get(devices.lock_key(device), {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
@@ -103,6 +108,12 @@ class Puqu(Driver):
         state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
         devices.status_cache[devices.lock_key(device)] = state
         return state
+
+    def print_speed(self, model, fast, red):
+        return SPEED, BESIDES
+
+    def label_lengths(self, job):
+        return [len(rows) / DOTS_PER_MM for rows in job]
 
     def render(self, queue, entries, keep=None):
         job = []
@@ -116,7 +127,7 @@ class Puqu(Driver):
     def send(self, queue, job) -> str:
         device = queue.device_specifier
         try:
-            error = protocol.print_labels(device, job, [len(rows) / DOTS_PER_MM for rows in job])
+            error = protocol.print_labels(device, job, self.label_lengths(job))
             devices.note_answer(device)
         except protocol.PuquError as e:
             logger.warning('Printing on %s failed: %s', device, e)

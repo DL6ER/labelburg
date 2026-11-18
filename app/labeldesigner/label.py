@@ -150,6 +150,16 @@ def datetime_codes() -> dict:
             'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
 
 
+# {{asn}}, an archive serial number of Paperless-ngx (paperless.py), or
+# {{asn:5}} with as many digits, e.g., 00042
+ASN_TEMPLATE = re.compile(r'\{\{asn(?::(\d{1,2}))?\}\}')
+
+
+def asn_text(start: int, index: int, digits: str | None) -> str:
+    """The ASN of the label index (0 is the first) of a job starting at start."""
+    return str(start + index).zfill(int(digits or 0))
+
+
 # The start of a counter is at most this long, its step at most this large
 MAX_COUNTER_START_LENGTH = 12
 MAX_COUNTER_STEP = 1000000
@@ -283,6 +293,7 @@ class SimpleLabel:
         border_color: Tuple[int, int, int] = (0, 0, 0),
         timestamp: int = 0,
         counter: int = 0,
+        asn: int | None = None,
         red_support: bool = False,
         code_text: str = '',
         template_env_vars: frozenset = frozenset(),
@@ -355,6 +366,8 @@ class SimpleLabel:
         self._border_distance = border_distance
         self._border_color = border_color
         self._counter = counter
+        # The archive serial number of the first label of the job, see paperless.py
+        self._asn = asn
         self._timestamp = timestamp
         self._red_support = red_support
         self._code_text = code_text
@@ -549,6 +562,10 @@ class SimpleLabel:
             return counter_value(start, check_counter(start, step), self._counter)
         substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
 
+        # Replace {{asn[:<digits>]}} with the archive serial number of the copy
+        if self._asn is not None:
+            substitute(ASN_TEMPLATE, lambda match: asn_text(self._asn, self._counter, match.group(1)))
+
         # Replace {{datetime:<format>}} with current datetime formatted as
         # <format>, {{datetime+5d:<format>}} with the one 5 days later (see
         # shift_date)
@@ -568,10 +585,12 @@ class SimpleLabel:
             pieces[:] = [piece.replace("{{short-uuid}}", str(ui)[:8]) for piece in pieces]
 
         # Replace {{mdi:<name>}} with the Material Design Icon of the name,
-        # e.g. {{mdi:lightbulb}}. Unknown names stay as they
-        # are, so that a typo shows on the label.
+        # e.g. {{mdi:lightbulb}}, {{fastener:<name>}} and
+        # {{electronic:<name>}} with the symbol, e.g. {{fastener:head-torx}}.
+        # Unknown names stay as they are, so that a typo shows on the label.
         if with_icons:
-            substitute(r"\{\{mdi:([a-z0-9-]+)\}\}", lambda match: icons.icon(match.group(1)) or match.group(0))
+            substitute(r"\{\{(mdi|fastener|electronic):([a-z0-9-]+)\}\}",
+                       lambda match: icons.icon(match.group(2), match.group(1)) or match.group(0))
 
         # Replace {{env:<var>}} with the value of the environment variable
         # var. Only explicitly allowed variables are inserted, others could
@@ -1272,15 +1291,14 @@ class SimpleLabel:
 
     def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, **kwargs):
         """The bounding box of a line of text at xy, also drawn in fill if
-        given. Icons ({{mdi:<name>}}) are drawn with the icon font, on the
-        same baseline as the text around them."""
+        given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
+        on the same baseline as the text around them."""
         if not any(icons.is_icon(char) for char in text):
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
-        icon_font = self._get_font(icons.FONT_PATH, font.size, measuring=measuring)
-        runs = [(''.join(chars), icon_font if is_icon else font)
-                for is_icon, chars in itertools.groupby(text, icons.is_icon)]
+        runs = [(''.join(chars), self._get_font(path, font.size, measuring=measuring) if path else font)
+                for path, chars in itertools.groupby(text, icons.font_of)]
         width = sum(run_font.getlength(run) for run, run_font in runs)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]

@@ -22,7 +22,7 @@ from app import create_app
 from app.labeldesigner import drivers, printer
 from app.labeldesigner.label import LabelOrientation
 from app.labeldesigner.label_names import LABELS
-from app.labeldesigner.drivers import devices
+from app.labeldesigner.drivers import devices, progress
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.vc500w import image as vc_image
@@ -113,7 +113,8 @@ class FakeVC500W:
         if usbip:
             self.host = FakeHost(SharedDevice(product=0x2112, device_id=VC500W_ID, interfaces=((7, 4), (7, 2))))
             self.target, self.port = self.host.address(), vc500w.PORT
-            threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True).start()
+            self._thread = threading.Thread(target=self._handle, args=(self.host.devices[0].printer,), daemon=True)
+            self._thread.start()
         elif usb:
             self._master, self._slave = os.openpty()
             tty.setraw(self._slave)
@@ -191,7 +192,13 @@ class FakeVC500W:
     def close(self):
         if hasattr(self, 'host'):
             self.host.close()
-            self.host.devices[0].unplug()
+            # Its thread stops reading and closes the printer's end itself
+            try:
+                self.host.devices[0].printer.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                # Closed before
+                pass
+            self._thread.join(5)
         elif hasattr(self, 'server'):
             self.server.close()
         elif self._slave >= 0:
@@ -647,7 +654,10 @@ def test_stage_of_a_running_job(client, fake):
     path = client.application.config['PRINTER_PRINTER']
     key = devices.lock_key(path)
     devices.status_cache[key] = network.network_printer(path, 'VC-500W')
-    vc_status.jobs[key] = {'stage': 'Preheating', 'label': 2, 'labels': 3}
+    progress.start(path, [50] * 3, (0, 0))
+    progress.counting(path)
+    progress.printed(path, 1)
+    progress.stage(path, 'Preheating')
     vc500w._answers[vc_status.target(path)] = collections.deque([True, False])
     try:
         with devices.device_lock(path):
@@ -656,11 +666,29 @@ def test_stage_of_a_running_job(client, fake):
             status = client.get('/labeldesigner/api/printer_status').get_json()
             assert time.monotonic() - started < devices.STATUS_LOCK_TIMEOUT / 2
     finally:
-        vc_status.jobs.clear()
+        progress.finish(path, False)
     assert status['printers'][0]['job'] == {'stage': 'Preheating', 'label': 2, 'labels': 3}
     assert status['printers'][0]['status_type'] == devices.BUSY_STATUS_TYPE
     # How well it is reached, also while the job holds it
     assert status['printers'][0].get('weak_connection') is (True if path.startswith('vc500w://') else None)
+
+
+def test_labels_and_their_stages_while_printing(client, fake, monkeypatch):
+    path = client.application.config['PRINTER_PRINTER']
+    seen = []
+    real = vc500w.print_image
+
+    def print_image(*args, **kwargs):
+        seen.append(progress.state(path))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(vc500w, 'print_image', print_image)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert response.get_json() == {'success': True}
+    assert [(state['label'], state['labels'], state['stage']) for state in seen] == [(1, 2, 'Processing'), (2, 2, 'Processing')]
+    # About 40 s each
+    assert seen[0]['seconds_left'] > 60
+    assert progress.state(path) is None
 
 
 def test_stage_while_another_app_prints(client, fake):
@@ -930,13 +958,16 @@ def test_refused_label_through_the_label_designer(client, fake):
     assert response.get_json()['message'] == 'The printer refused the label (label 1 of 2), the log of the server names the reason'
 
 
-def test_printer_gone_through_the_label_designer(client, fake):
+def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
     if fake.target == '127.0.0.1':
         with socket.socket() as unused:
             unused.bind(('127.0.0.1', 0))
             client.application.config['PRINTER_PRINTER'] = f'vc500w://127.0.0.1:{unused.getsockname()[1]}'
-    else:
+    elif fake.target.startswith('usbip://'):
         fake.close()
+    else:
+        # Not the closed terminal: a test running alongside may get it next
+        client.application.config['PRINTER_PRINTER'] = f'file://{tmp_path}/lp0'
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
     assert response.status_code == 503

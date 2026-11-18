@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from app.labeldesigner.drivers import devices, puqu
+from app.labeldesigner.drivers import devices, progress, puqu
 from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
 from tests.helpers import make_client
@@ -162,6 +162,19 @@ def test_labels_are_printed_one_after_the_other(client, fake):
     assert printer.connected == [DEVICE]
 
 
+def test_labels_are_counted_while_printing(client, fake):
+    # Noted at the start of each label
+    printer, seen = fake(), []
+    send = printer.sendall
+    printer.sendall = lambda data: (data[:4] == bytes([0x3a, 48, 240, 0]) and seen.append(progress.state(DEVICE))) or send(data)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert response.get_json() == {'success': True}
+    assert [(state['label'], state['labels']) for state in seen] == [(1, 2), (2, 2)]
+    assert all(state['seconds_left'] >= 0 for state in seen)
+    assert progress.state(DEVICE) is None
+
+
 def test_printer_is_asked_once_it_is_quiet(client, fake):
     # A state query while it prints is taken for an empty label, a Q00 fed
     # one for each. A Reekon P1L told that it prints every 0.2 s, then nothing.
@@ -174,8 +187,10 @@ def test_printer_is_asked_once_it_is_quiet(client, fake):
     assert kinds == ['label', 'label', 'query', 'label', 'label', 'query']
 
 
-def test_printer_that_keeps_printing_is_not_asked(client, fake):
+def test_printer_that_keeps_printing_is_not_asked(client, fake, monkeypatch):
     printer = fake(endless=reply(protocol.PRINTING))
+    # A test thread held up between two reads must not look like a quiet printer
+    monkeypatch.setattr(protocol, 'QUIET', 1)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
     assert response.get_json() == {'success': False, 'message': 'The printer did not tell that it printed the label'}

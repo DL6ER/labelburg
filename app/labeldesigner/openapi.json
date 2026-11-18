@@ -9,6 +9,7 @@
     "/labeldesigner/api/preview": {
       "post": {
         "summary": "Generate the label image without printing",
+        "description": "The label as it is printed: the label size and the quality the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`) of its printer.",
         "operationId": "preview",
         "parameters": [
           {
@@ -191,6 +192,7 @@
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
+        "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the label size set by hand, the cutting, which end leaves first and the quality.",
         "operationId": "print",
         "requestBody": {
           "required": true,
@@ -230,7 +232,7 @@
                           "top",
                           "bottom"
                         ],
-                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -295,7 +297,7 @@
                           "top",
                           "bottom"
                         ],
-                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -380,6 +382,113 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PrinterStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/settings": {
+      "get": {
+        "summary": "Settings of a printer",
+        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them. A setting not made is left out.",
+        "operationId": "getSettings",
+        "parameters": [
+          {
+            "name": "printer",
+            "in": "query",
+            "required": false,
+            "description": "The device or name of the printer, the configured one if left out.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown printer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Change settings of a printer",
+        "description": "Changes only the settings named, so that two browsers changing different settings keep both. An empty value removes a setting. Each is checked as for printing, e.g. a label size the printer cannot take is refused.",
+        "operationId": "setSettings",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsChange"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved, with all settings of the printer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "$ref": "#/components/schemas/PrinterSettings"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A setting is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Another label or setting is being saved, try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -580,6 +689,96 @@
           },
           "500": {
             "description": "The request was refused, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Another label was being saved or deleted for longer than 10 seconds, e.g. on a slow network share. Try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/repository/tags": {
+      "post": {
+        "summary": "Change the tags of a saved label",
+        "description": "The rest of the saved label stays as it is.",
+        "operationId": "repositoryTags",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "tags"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "File name of the saved label."
+                  },
+                  "tags": {
+                    "description": "The tags, as for saving a label. An empty list removes them.",
+                    "oneOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed, with the tags as they are kept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No label is saved under the name.",
             "content": {
               "application/json": {
                 "schema": {
@@ -985,7 +1184,7 @@
     "/labeldesigner/api/repository/print": {
       "post": {
         "summary": "Print a saved label",
-        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md).",
+        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own.",
         "operationId": "repositoryPrint",
         "parameters": [
           {
@@ -1042,7 +1241,7 @@
                           "top",
                           "bottom"
                         ],
-                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
                       },
                       "printer": {
                         "type": "string",
@@ -1385,7 +1584,7 @@
     "/labeldesigner/api/demos/print": {
       "post": {
         "summary": "Print a demo label",
-        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three.",
+        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own.",
         "operationId": "demoPrint",
         "parameters": [
           {
@@ -1442,7 +1641,7 @@
                           "top",
                           "bottom"
                         ],
-                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
                       },
                       "printer": {
                         "type": "string",
@@ -1537,7 +1736,7 @@
     "/labeldesigner/api/webhook/print": {
       "post": {
         "summary": "Print images, for other services",
-        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL.",
+        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL. The label size, the quality and which end leaves first the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`).",
         "operationId": "webhookPrint",
         "security": [
           {
@@ -1992,6 +2191,56 @@
           }
         }
       },
+      "PrinterSettings": {
+        "type": "object",
+        "properties": {
+          "label_size": {
+            "type": "string",
+            "description": "The label size set by hand, used where the printer does not report its media."
+          },
+          "cut": {
+            "type": "string",
+            "enum": ["each", "last", "none"]
+          },
+          "half_cut": {
+            "type": "string",
+            "enum": ["0", "1"]
+          },
+          "chain": {
+            "type": "string",
+            "enum": ["0", "1"]
+          },
+          "leaves_first": {
+            "type": "string",
+            "enum": ["top", "bottom"],
+            "description": "The end of the labels that leaves the printer first, else as the driver prints them."
+          },
+          "quality": {
+            "type": "string",
+            "enum": ["quality", "high", "fast"],
+            "description": "The same for all printers."
+          }
+        }
+      },
+      "SettingsChange": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "printer": {
+                "type": "string",
+                "description": "The device or name of the printer, the configured one if left out."
+              },
+              "model": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/PrinterSettings"
+          }
+        ]
+      },
       "Message": {
         "type": "object",
         "properties": {
@@ -2002,7 +2251,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}` and `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
@@ -2358,6 +2607,26 @@
                 "examples": [
                   "image/png"
                 ]
+              },
+              "tags": {
+                "description": "Tags the label designer groups saved labels by, a list or texts with commas between them, at most 20 of at most 40 characters each. They are trimmed and split at commas, and each is kept once whatever its case. A label saved again without `tags` keeps those it had, an empty list removes them.",
+                "oneOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "examples": [
+                  [
+                    "Kitchen",
+                    "Freezer"
+                  ]
+                ]
               }
             }
           },
@@ -2385,6 +2654,13 @@
           "mtime": {
             "type": "integer",
             "description": "Time saved, Unix time."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags of the label, empty for none."
           },
           "size": {
             "type": "integer",
@@ -2475,6 +2751,9 @@
             "type": "boolean",
             "description": "`label_size` is assumed, the printer reports no tape it takes."
           },
+          "settings": {
+            "$ref": "#/components/schemas/PrinterSettings"
+          },
           "tape_length_mm": {
             "type": ["integer", "null"],
             "description": "VC-500W: length of the tape in the cassette when new, in millimeters."
@@ -2493,7 +2772,7 @@
           },
           "job": {
             "type": "object",
-            "description": "VC-500W: what it does while it prints a label, which takes about 40 s.",
+            "description": "The job the printer prints for this server, also what a VC-500W does while it prints a label, which takes about 40 s.",
             "properties": {
               "stage": {
                 "type": "string",
@@ -2505,11 +2784,15 @@
               },
               "label": {
                 "type": "integer",
-                "description": "The label printed, counted from 1, for a job of this server."
+                "description": "The label printed, counted from 1, on printers that tell each label printed."
               },
               "labels": {
                 "type": "integer",
                 "description": "The labels of the job."
+              },
+              "seconds_left": {
+                "type": "integer",
+                "description": "About how long the job still takes: estimated from the print speed of the model, corrected by how long earlier jobs of the printer took and by the labels it printed."
               }
             }
           }
@@ -2535,6 +2818,13 @@
                   "null"
                 ],
                 "description": "Printer used when a request names none."
+              },
+              "hints": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\"."
               }
             }
           }
@@ -2574,7 +2864,7 @@
               "top",
               "bottom"
             ],
-            "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the label designer, never saved with a label. Default: as the driver prints them."
+            "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
           },
           "bw_threshold": {
             "type": "integer",

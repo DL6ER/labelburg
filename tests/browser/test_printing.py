@@ -124,7 +124,7 @@ def test_tape_follows_the_printer(designer):
     use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': 12, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['pt12', False]
     # A tape set by hand belongs to its printer
-    designer.evaluate("() => { S.settings.tapes = { a: 'pt24' }; detectTape(); }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: 'pt24' }); detectTape(); }")
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt24', True]
     use_printer(designer, {'path': 'b', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['62', False]
@@ -248,7 +248,8 @@ def test_no_600_dpi_on_the_ql1100(designer):
     wait_for_preview(designer)
     assert preview_size(designer)[0] == 2 * width
     # The choice is kept for other printers, this one previews and prints at 300 dpi
-    fake_printer(designer, model='QL-1100', media_width=62)
+    # as the server tells it with each printer
+    fake_printer(designer, model='QL-1100', media_width=62, settings={'quality': 'high'})
     assert preview_size(designer)[0] == width
     assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('high_res')") == '0'
     designer.click('#printerChip')
@@ -464,12 +465,11 @@ def test_tape_set_by_hand_is_known(designer):
     # says nothing about a tape set by hand
     use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 40, 'media_length': 0})
     assert designer.evaluate('() => S.tapeUnknown') == '40 mm'
-    designer.evaluate("() => { S.settings.tapes = { a: '62' }; detectTape(); }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); detectTape(); }")
     assert designer.evaluate('() => [S.tapeUnknown, S.tapeManual]') == ['', True]
-    designer.evaluate("() => { S.settings.tapes = {}; }")
     use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
     assert designer.evaluate("() => fitsTape('62red')")
-    designer.evaluate("() => { S.settings.tapes = { a: '62' }; detectTape(); }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); detectTape(); }")
     assert not designer.evaluate("() => fitsTape('62red')")
 
 
@@ -493,7 +493,7 @@ def test_cutting_per_printer_and_per_label(designer):
         return {k: form[k][0] for k in ('cut', 'half_cut', 'chain')}
 
     designer.route('**/api/print', lambda route: route.fulfill(content_type='application/json', body='{"success": true}'))
-    designer.evaluate("() => { S.settings.cut = 'last'; }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'last' }); }")
     type_line(designer, 0, 'Hello')
     # Printers without a setting of their own keep the one set before for all
     assert sent() == {'cut': 'last', 'half_cut': '1', 'chain': '0'}
@@ -503,7 +503,7 @@ def test_cutting_per_printer_and_per_label(designer):
     # The 62 mm label is printed on it as set by hand: a PT-E550W does not
     # report its tape over the network, and tape it takes would be assumed
     designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'PT-E550W' });
-        S.settings.tapes = Object.assign({}, S.settings.tapes, { [printerKey()]: '62' }); closeLayer(true); openPrinterPanel(); }""")
+        S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); closeLayer(true); openPrinterPanel(); }""")
     # Not cut is chain printing on P-touch printers
     designer.click('[data-c="cut"][data-v="none"]')
     assert designer.locator('[data-c="chain"][data-v="1"].on:disabled').count() == 1
@@ -526,7 +526,7 @@ def test_cutting_per_printer_and_per_label(designer):
 def test_no_half_cut_on_a_ptouch_printer_without_a_half_cutter(designer):
     # The PT-P700 cuts and chain prints, but has no half cutter: half cuts
     # are shown off and disabled with the reason, also when they are on
-    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'PT-P700' }); S.settings.cut = 'last'; openPrinterPanel(); }")
+    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'PT-P700' }); S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'last' }); openPrinterPanel(); }")
     half = designer.locator('.pp [data-c="half_cut"][data-v="0"]')
     assert half.get_attribute('class') == 'on' and half.is_disabled()
     assert designer.get_attribute('.pp div:has(> .seg [data-c="half_cut"])', 'title') == 'This printer has no half cutter'
@@ -591,7 +591,10 @@ def test_labels_can_leave_the_printer_bottom_first(designer):
     # As the driver prints them until set
     assert b'leaves_first' not in request.value.post_data_buffer
     designer.evaluate("() => openPrinterPanel()")
-    designer.click('.pp [data-lf="bottom"]')
+    # Kept on the server with the other settings of the printer
+    with designer.expect_response('**/api/settings') as response:
+        designer.click('.pp [data-lf="bottom"]')
+    assert response.value.json()['settings']['leaves_first'] == 'bottom'
     assert designer.locator('.pp [data-lf="bottom"].on').count() == 1
     # The test label names its ends, printed as set
     with designer.expect_request('**/api/print') as request:
@@ -641,7 +644,7 @@ def test_receipt_shows_the_blank_paper_before_it(designer):
 def test_cutting_is_disabled_on_a_printer_without_a_cutter(designer):
     # The labels of a PUQU Q00 are torn off, cutting after each or the last
     # label was offered all the same
-    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'PUQU/Q00' }); S.settings.cut = 'each'; openPrinterPanel(); }")
+    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'PUQU/Q00' }); S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'each' }); openPrinterPanel(); }")
     cuts = designer.locator('.pp [data-c="cut"]')
     assert cuts.count() == 3 and all(cuts.nth(i).is_disabled() for i in range(3))
     assert designer.locator('.pp [data-c="cut"].on').count() == 0
@@ -653,7 +656,7 @@ def test_cutting_is_disabled_on_a_printer_without_a_cutter(designer):
     assert designer.evaluate("() => [printerCut().cut, cutOf({ cut: 'each', label_size: 'puqu50x30' }).cut]") == ['none', 'none']
     assert 'disabled title="This printer has no cutter"' in designer.evaluate("() => cutField({ cut: '', label_size: 'puqu50x30' })")
     # It prints in one quality, Fast did nothing
-    designer.evaluate("() => { S.settings.quality = 'fast'; closeLayer(true); openPrinterPanel(); }")
+    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { quality: 'fast' }); closeLayer(true); openPrinterPanel(); }")
     fast, quality = designer.locator('.pp [data-q="fast"]'), designer.locator('.pp [data-q="quality"]')
     assert fast.is_disabled() and quality.is_disabled() and 'on' in quality.get_attribute('class').split()
     assert quality.get_attribute('title') == 'This printer prints in one quality only'
@@ -661,7 +664,7 @@ def test_cutting_is_disabled_on_a_printer_without_a_cutter(designer):
 
 def test_ql500_labels_are_cut_by_hand(designer):
     # The QL-500 has a lever instead of a cutter, cutting was offered
-    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'QL-500' }); S.settings.cut = 'each'; openPrinterPanel(); }")
+    designer.evaluate("() => { S.printer = Object.assign({}, S.printer, { model: 'QL-500' }); S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'each' }); openPrinterPanel(); }")
     cuts = designer.locator('.pp [data-c="cut"]')
     assert cuts.count() == 3 and all(cuts.nth(i).is_disabled() for i in range(3))
     assert designer.get_attribute('.pp div:has(> .seg [data-c="cut"])', 'title') == 'This printer has no automatic cutter'
@@ -679,7 +682,6 @@ def test_ql500_labels_are_cut_by_hand(designer):
 
 def test_assumed_tape_is_one_the_printer_takes(designer):
     # A PUQU Q00 does not report its labels, 62 mm endless tape was assumed
-    designer.evaluate("() => { S.settings.tapes = {}; }")
     use_printer(designer, {'path': 'simulation', 'model': 'PUQU/Q00', 'media_width': None, 'media_length': 0})
     assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['puqu50x30', True]
     # New labels start on it, the printer panel names it, not 62 mm endless
@@ -694,9 +696,9 @@ def test_printer_of_another_driver_gets_what_it_offers(designer):
     # The label designer knows printers only by what their driver tells
     designer.evaluate("""() => {
         C.models['Other-1'] = { qualities: ['fast', 'quality'], high_res: false, half_cut: false, chain: false,
-                                feed_waste: false, job_stages: false, colors: 'black', never_cut: 'It keeps them.' };
+                                feed_waste: false, colors: 'black', never_cut: 'It keeps them.' };
         SIZES['o48'] = Object.assign({}, SIZES['62'], { id: 'o48', models: ['Other-1'], dpi: [203, 203] });
-        S.printer = Object.assign({}, S.printer, { model: 'Other-1' }); S.settings.quality = 'high'; S.settings.cut = 'last';
+        S.printer = Object.assign({}, S.printer, { model: 'Other-1' }); S.printer.settings = Object.assign({}, S.printer.settings, { quality: 'high' }); S.printer.settings = Object.assign({}, S.printer.settings, { cut: 'last' });
         openPrinterPanel(); }""")
     assert designer.eval_on_selector_all('.pp [data-q]', 'buttons => buttons.map(b => b.textContent)') == ['Fast', 'Quality']
     assert designer.inner_text('.pp [data-q].on') == 'Quality'
@@ -809,10 +811,77 @@ def test_sheet_after_printing_on_a_phone_names_the_printer_with_its_maker(design
     assert 'Q on the PUQU Q00' in designer.inner_text('body')
 
 
+def test_settings_are_kept_on_the_server_for_every_browser(designer, browser, server):
+    designer.click('#printerChip')
+    with designer.expect_response('**/api/settings'):
+        designer.click('[data-q="fast"]')
+    with designer.expect_response('**/api/settings'):
+        designer.click('[data-c="cut"][data-v="last"]')
+    other = browser.new_context(locale='en-US').new_page()
+    try:
+        other.goto(server + '/labeldesigner/#edit')
+        wait_for_preview(other)
+        assert other.evaluate("() => [kept().quality, printerCut().cut]") == ['fast', 'last']
+        # A change in one browser keeps the change of the other
+        other.click('#printerChip')
+        with other.expect_response('**/api/settings'):
+            other.click('[data-c="cut"][data-v="each"]')
+        designer.evaluate("() => refreshPrinters()")
+        assert designer.evaluate("() => [kept().quality, printerCut().cut]") == ['fast', 'each']
+    finally:
+        other.context.close()
+
+
+def test_the_order_of_copies_and_the_date_format_stay_in_each_browser(designer, browser, server):
+    designer.click('#printerChip')
+    designer.select_option('#setDate', '%d.%m.%Y')
+    designer.click('[data-col="0"]')
+    other = browser.new_context(locale='en-US').new_page()
+    try:
+        other.goto(server + '/labeldesigner/#edit')
+        wait_for_preview(other)
+        other.evaluate('() => refreshPrinters()')
+        assert other.evaluate('() => [dateFormat() === browserDateFormat(), collated()]') == [True, True]
+    finally:
+        other.context.close()
+    # This browser keeps them
+    designer.reload()
+    wait_for_preview(designer)
+    assert designer.evaluate('() => [dateFormat(), collated()]') == ['%d.%m.%Y', False]
+
+
+def test_a_change_the_server_does_not_get_is_taken_back_in_plain_words(designer):
+    designer.click('#printerChip')
+    designer.route('**/api/settings', lambda route: route.abort())
+    designer.click('[data-q="fast"]')
+    designer.wait_for_selector('#toast:has-text("The label designer could not be reached")', timeout=5000)
+    assert designer.inner_text('.pp [data-q].on') == 'Quality'
+    # Nor without a printer, as where its status did not come either
+    designer.evaluate("() => { $('#toast').hidden = true; S.printers = []; S.printer = null; closeLayer(true); openPrinterPanel(); }")
+    designer.click('[data-q="fast"]')
+    designer.wait_for_selector('#toast:has-text("The label designer could not be reached")', timeout=5000)
+
+
+def test_a_status_asked_for_before_a_change_keeps_it(designer):
+    # The status polled every 20 s may have been read on the server before
+    # the change was saved
+    designer.click('#printerChip')
+    before = designer.evaluate("() => fetch(API + '/printer_status').then(r => r.text())")
+    held = []
+    designer.route('**/api/printer_status*', lambda route: held.append(route) if not held else route.continue_())
+    designer.evaluate('() => { window.polled = refreshPrinters(); }')
+    with designer.expect_response('**/api/settings'):
+        designer.click('[data-q="fast"]')
+    held[0].fulfill(content_type='application/json', body=before)
+    designer.evaluate('() => window.polled')
+    assert designer.inner_text('.pp [data-q].on') == 'Fast'
+    assert designer.evaluate("() => formFor(S.edit.design, 1, true).get('fast_printing')") == '1'
+
+
 def test_labels_of_a_printer_that_prints_the_bottom_first_leave_it_as_set(designer):
     # As its driver prints them, bottom first, until set otherwise
     designer.evaluate("""() => { C.models['VC-500W'] = Object.assign({}, C.models['VC-500W'], { leaves_turned: false });
-        S.printer = Object.assign({}, S.printer, { model: 'VC-500W' }); S.tape = 'vc25'; S.settings.leaves = {};
+        S.printer = Object.assign({}, S.printer, { model: 'VC-500W', settings: {} }); S.tape = 'vc25';
         openEditor({ title: 'V', design: Object.assign(baseDesign('vc25'), { text: [L('V', 40)] }) }); }""")
     wait_for_preview(designer)
     assert 'turned' not in designer.get_attribute('#edStage', 'class').split()
@@ -827,7 +896,7 @@ def test_labels_of_a_printer_that_prints_the_bottom_first_leave_it_as_set(design
 
 
 def test_test_label_names_the_ends_of_a_label_that_leaves_sideways(designer):
-    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'QL-800' }); S.tape = '29x90'; S.settings.leaves = {};
+    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'QL-800', settings: {} }); S.tape = '29x90';
         openEditor({ title: 'T', design: endsTest() }); }""")
     wait_for_preview(designer)
     # The printer on its left, its right end leaves first
@@ -839,8 +908,7 @@ def test_test_label_names_the_ends_of_a_label_that_leaves_sideways(designer):
 
 
 def test_receipt_shows_the_blank_paper_at_the_end_that_leaves_first(designer):
-    receipt = """leaves => { S.printer = Object.assign({}, S.printer, { model: 'Epson/TM-T20II' }); S.tape = 'escpos80';
-        S.settings.leaves = { [printerKey()]: leaves };
+    receipt = """leaves => { S.printer = Object.assign({}, S.printer, { model: 'Epson/TM-T20II', settings: { leaves_first: leaves } }); S.tape = 'escpos80';
         openEditor({ title: 'R', design: Object.assign(baseDesign('escpos80'), { text: [L('R', 40)] }) }); }"""
     paper = "() => [...document.querySelectorAll('#edStage .paper > *')].map(e => e.tagName === 'IMG' ? 'label' : e.className)"
     for leaves, order in (('top', ['lead', 'label']), ('bottom', ['label', 'lead'])):
@@ -853,3 +921,77 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
     button = designer.locator('.pp #setLfTest')
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
+
+
+def print_held(page, job, large=False):
+    """Print on a QL-800 that tells the job, the answer held back, with large
+    the preview shown large. The held request is returned."""
+    printer = {'errors': [], 'model': 'QL-800', 'path': 'file:///dev/usb/lp0', 'media_width': 62, 'media_length': 0, 'job': job}
+    body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
+    page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    page.reload()
+    wait_for_preview(page)
+    type_line(page, 0, 'Spices')
+    if large:
+        page.click('#edStage .zoom')
+        wait_for_preview(page)
+    pending = []
+    page.route('**/api/print', lambda route: pending.append(route))
+    page.click('#edPrint')
+    return pending
+
+
+def test_time_left_is_shown_while_printing(designer):
+    # On every printer, not only the VC-500W that tells its stages
+    pending = print_held(designer, {'labels': 3, 'label': 2, 'seconds_left': 40})
+    designer.wait_for_function("() => document.querySelector('#toast').textContent === 'Label 2 of 3, about 40 s left'")
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+    assert printed(designer) == ['printed']
+
+
+def overlap(a, b) -> bool:
+    return a['x'] < b['x'] + b['width'] and b['x'] < a['x'] + a['width'] and a['y'] < b['y'] + b['height'] and b['y'] < a['y'] + a['height']
+
+
+@pytest.mark.parametrize('width, height, large', [(1326, 924, False), (1326, 924, True), (1600, 900, False), (390, 844, False)])
+def test_messages_leave_the_preview_controls_visible(designer, width, height, large):
+    # Neither the cutting below the label nor the large preview button
+    designer.set_viewport_size({'width': width, 'height': height})
+    pending = print_held(designer, {'labels': 30, 'label': 12, 'stage': 'Waiting for the printer to cool down', 'seconds_left': 400}, large)
+    designer.wait_for_function("() => document.querySelector('#toast').textContent.startsWith('Waiting')")
+    toast = designer.locator('#toast').bounding_box()
+    for selector in ('#edStage .cuts', '#edStage .zoom'):
+        if designer.locator(selector).is_visible():
+            assert not overlap(toast, designer.locator(selector).bounding_box()), selector
+    if width > 900:
+        # Over the preview, not over the settings beside it
+        stage = designer.locator('#edStage').bounding_box()
+        assert stage['x'] <= toast['x'] and toast['x'] + toast['width'] <= stage['x'] + stage['width']
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+
+
+@pytest.mark.parametrize('job, text', [
+    ({'labels': 3, 'label': 2, 'seconds_left': 42}, 'Label 2 of 3, about 40 s left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 130}, 'About 2 min left'),
+    ({'labels': 1, 'label': 1, 'seconds_left': 70}, 'About 1 min left'),
+    # A printer that does not tell its labels printed
+    ({'labels': 20, 'seconds_left': 3}, 'A few seconds left'),
+    ({'labels': 2}, ''),
+    ({'stage': 'Preheating', 'label': 1, 'labels': 2, 'seconds_left': 75}, 'Preheating, label 1 of 2, about 1 min left'),
+])
+def test_time_left_in_words(designer, job, text):
+    assert designer.evaluate('job => jobText(job)', job) == text
+
+
+def test_printer_list_tells_a_missing_libusb(designer):
+    hint = 'Printers on usb:// need libusb, please install it'
+    simulator = {'errors': [], 'model': 'QL-800', 'path': 'simulation', 'status_type': 'Simulator'}
+    body = json.dumps({**simulator, 'printers': [simulator], 'selected': 'simulation', 'hints': [hint]})
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
+    designer.reload()
+    wait_for_preview(designer)
+    designer.click('#printerChip')
+    # Below the printers, the simulator is still offered and ready
+    assert designer.eval_on_selector_all('.plist [data-printer]', 'rows => rows.map(r => r.dataset.printer)') == ['simulation']
+    assert hint in designer.inner_text('.plist')
+    assert designer.evaluate('() => printerState(S.printer).text') == 'Ready (simulated)'

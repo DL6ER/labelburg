@@ -6,7 +6,7 @@ import re
 
 from PIL import Image
 
-from .. import devices
+from .. import devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from ...enums import LabelContent
@@ -25,6 +25,10 @@ LABELS = tuple(Label(f'escpos{width}', (width, 0), FormFactor.ENDLESS, (dots, 0)
 # next one: on a TM-T20II a 15 mm label took 27 mm of paper, two of them
 # not cut between them 42 mm
 LEAD_MM = 12
+# mm/s after Epson's data sheet of the TM-T20II, and the seconds a label
+# takes besides, to feed and cut it
+SPEED = 200
+BESIDES = 0.5
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper (Epson)' for label in LABELS}
@@ -61,6 +65,12 @@ class Escpos(Driver):
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.EscposError)
 
+    def model_of(self, device):
+        # By the device ID on USB: MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
+        fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
+        model = f"Epson/{fields.get('MDL', '')}"
+        return model if 'ESC/POS' in fields.get('CMD', '').split(',') and model in MODELS else None
+
     def fits(self, label, model):
         return label in LABELS
 
@@ -81,7 +91,7 @@ class Escpos(Driver):
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
-        with devices.device_lock(device, timeout=devices.STATUS_LOCK_TIMEOUT) as acquired:
+        with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
                 state.update(devices.status_cache.get(devices.lock_key(device), {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
@@ -91,6 +101,12 @@ class Escpos(Driver):
         state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
         devices.status_cache[devices.lock_key(device)] = state
         return state
+
+    def print_speed(self, model, fast, red):
+        return SPEED, BESIDES
+
+    def label_lengths(self, job):
+        return [len(rows) / protocol.DPI * 25.4 for _, rows, _ in job]
 
     def render(self, queue, entries, keep=None):
         job = []

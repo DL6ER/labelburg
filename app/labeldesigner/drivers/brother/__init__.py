@@ -10,7 +10,8 @@ from .. import devices
 from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
-from .models import HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, length_problem, longest_label, resolution_problem
+from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
+                     RED_SPEED, length_problem, longest_label, resolution_problem)
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,15 @@ class BrotherRaster(Driver):
 
     def network_device(self, address):
         return f'tcp://{address}'
+
+    def print_speed(self, model, fast, red):
+        spec = MODELS[model]
+        slower = 1 if fast else QUALITY_SLOWER
+        speed = RED_SPEED if red and spec.two_color else spec.speed
+        return speed / slower, (PTOUCH_BESIDES if model.startswith('PT-') else QL_BESIDES) * slower
+
+    def label_lengths(self, job):
+        return job.page_lengths
 
     def render(self, queue, entries, keep=None):
         return raster.render(queue, entries, keep)
