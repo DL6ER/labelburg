@@ -193,6 +193,40 @@ def test_printer_that_cannot_be_reached_has_no_device_id():
     assert devices.usb_device_id(f'usbip://127.0.0.1:{port}') == ''
 
 
+def test_printer_that_cannot_be_reached_is_tried_once_for_its_model(tmp_path, monkeypatch):
+    attempts = []
+
+    def unreachable(host, port, timeout):
+        attempts.append(host)
+        raise OSError(errno.EHOSTUNREACH, 'No route to host')
+    monkeypatch.setattr(usbip, '_connect', unreachable)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config.update(PRINTER_PRINTER='usbip://192.0.2.1', PRINTER_MODEL='QL-800')
+    data = {'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}]), 'label_size': '62'}
+    assert client.post('/labeldesigner/api/preview', data=data).status_code == 200
+    assert len(attempts) == 1
+    # Printing tries it once more
+    usbip._unreachable.clear()
+    attempts.clear()
+    assert client.post('/labeldesigner/api/print', data=data).status_code == 503
+    assert len(attempts) == 2
+    # The model is asked again after a while
+    usbip._unreachable[usbip.key('usbip://192.0.2.1')] -= usbip.UNREACHABLE_FOR
+    attempts.clear()
+    assert usbip.device_id('usbip://192.0.2.1') == '' and len(attempts) == 1
+
+
+def test_printer_imported_meanwhile_is_asked_for_its_model():
+    host = FakeHost(SharedDevice('1-2'))
+    try:
+        usbip._unreachable[usbip.key(host.address('1-2'))] = time.monotonic() + 60
+        assert usbip.device_id(host.address('1-2')) == ''
+        usbip.connect(host.address('1-2'))
+        assert usbip.device_id(host.address('1-2')) == QL1100_ID
+    finally:
+        host.close()
+
+
 def test_printer_switched_off_and_on_again(host):
     device = host.devices[0]
     FakeQL(device)
