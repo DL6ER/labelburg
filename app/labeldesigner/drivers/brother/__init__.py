@@ -135,10 +135,7 @@ class BrotherRaster(Driver):
             return message
         except Exception as e:
             logger.exception("Exception during sending to printer: %s", e)
-            reason = devices.unanswered_reason(e)
-            if reason:
-                return f"Could not send the label to the printer: {reason}"
-            return "Could not send the label to the printer, the log of the server names the reason"
+            return devices.not_sent(e)
 
 
 DRIVER = BrotherRaster()

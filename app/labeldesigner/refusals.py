@@ -18,8 +18,9 @@ from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
 from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
 from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong
 from .label_names import cut_problems, label_length_problems, label_size_problems
-from .drivers import DRIVERS, MODELS, resolution_problem
+from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
+from .printer import BUSY as PRINTER_BUSY
 from .printer_settings import SETTINGS_MESSAGE, TOO_MANY_PRINTERS
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
@@ -83,6 +84,8 @@ MESSAGES = (
     'The label has no image',
     IMAGE_MODE_REFUSED,
     UNKNOWN_MODEL,
+    *devices.not_sent_messages(),
+    PRINTER_BUSY,
     'print_count must be greater than 0',
     *check_digit_problems(),
     *code_problems(),

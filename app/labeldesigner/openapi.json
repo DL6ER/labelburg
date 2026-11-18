@@ -223,7 +223,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. Default: `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -288,7 +288,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. Default: `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -2860,7 +2860,7 @@
                 "items": {
                   "type": "string"
                 },
-                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\"."
+                "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\", or left alone, e.g. a printer the computer shares over USB/IP."
               }
             }
           }

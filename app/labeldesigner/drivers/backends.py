@@ -16,6 +16,9 @@ from . import usbip
 
 logger = logging.getLogger(__name__)
 
+# The devices Linux shares over USB/IP, by their bus IDs
+USBIP_HOST = '/sys/bus/usb/drivers/usbip-host'
+
 
 class NoLibusb(OSError):
     """PyUSB finds no libusb to reach usb:// printers through."""
@@ -203,10 +206,28 @@ def device_id(device_specifier: str) -> str:
         return ''
 
 
-def found_printers() -> list[tuple[str, str]]:
+def _shared_bus_ids() -> set[str]:
+    """The bus IDs of the USB devices Linux shares over USB/IP, e.g. 3-2."""
+    try:
+        return {name for name in os.listdir(USBIP_HOST) if re.fullmatch(r'\d+-[\d.]+', name)}
+    except OSError:
+        return set()
+
+
+def _bus_id(device) -> str:
+    """The bus ID of a device as Linux names it, e.g. 3-2 or 1-4.1."""
+    try:
+        return f"{device.bus}-{'.'.join(str(port) for port in device.port_numbers)}"
+    except (AttributeError, TypeError, NotImplementedError):
+        return ''
+
+
+def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
     """usb://<vendor>:<product>[/<serial>] and the IEEE 1284 device ID of the
     printers PyUSB finds that no driver of the kernel holds: on Linux usblp
-    holds them as /dev/usb/lp<N>, on macOS none does."""
+    holds them as /dev/usb/lp<N>, on macOS none does. Then the bus IDs of
+    those Linux shares over USB/IP, which are left to the computers using
+    them that way."""
     try:
         import usb.core
         import usb.util
@@ -216,9 +237,14 @@ def found_printers() -> list[tuple[str, str]]:
         raise
     except Exception:
         logger.debug('No printers through PyUSB', exc_info=True)
-        return []
-    found = []
+        return [], []
+    found, shared = [], []
+    usbip_host = _shared_bus_ids()
     for printer in printers:
+        # usbip-host holds the device, not its interfaces
+        if usbip_host and (bus_id := _bus_id(printer)) in usbip_host:
+            shared.append(bus_id)
+            continue
         try:
             if printer.is_kernel_driver_active(0):
                 continue
@@ -236,7 +262,7 @@ def found_printers() -> list[tuple[str, str]]:
         if serial and re.fullmatch(r'[A-Za-z0-9_-]+', serial):
             spec += f'/{serial}'
         found.append((spec, _device_id(usb, printer)))
-    return found
+    return found, shared
 
 
 def _libusb():

@@ -130,9 +130,7 @@ class Escpos(Driver):
             return 'The printer does not answer'
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
-            reason = devices.unanswered_reason(e)
-            return (f'Could not send the label to the printer: {reason}' if reason
-                    else 'Could not send the label to the printer, the log of the server names the reason')
+            return devices.not_sent(e)
         return ''
 
 
