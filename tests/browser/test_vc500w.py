@@ -7,7 +7,7 @@ import json
 import pytest
 from PIL import Image, ImageDraw
 
-from tests.browser.helpers import fits_note, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
+from tests.browser.helpers import fits_note, png, preview_size, printed, type_line, wait_for_preview, with_tape
 from tests.browser.test_printing import fake_printer
 
 VC = {'errors': [], 'model': 'VC-500W', 'path': 'file:///dev/usb/lp0', 'media_width': 25, 'media_length': 0,
@@ -34,13 +34,15 @@ def pick(page, selector, color):
 
 
 def test_color_tape_of_the_printer(designer):
-    fake_vc500w(designer)
-    assert designer.evaluate('() => S.tape') == 'vc25'
+    # Offered to set by hand where the printer does not report its tape
+    fake_vc500w(designer, media_width=None)
     designer.click('#printerChip')
     offered = designer.eval_on_selector_all('#setTape option', 'options => options.map(o => o.value).filter(Boolean)')
     assert offered == ['vc9', 'vc12', 'vc19', 'vc25', 'vc50']
     assert designer.eval_on_selector('#setTape optgroup:last-child', 'g => g.label') == 'Color tape'
     designer.keyboard.press('Escape')
+    fake_vc500w(designer)
+    assert designer.evaluate('() => S.tape') == 'vc25'
     use_tape(designer)
     assert designer.inner_text('.tape-note').strip() == 'In the printer, 4.6 m of 5.0 m left'
     # 35 dots of the margin at 320 dpi
@@ -80,7 +82,10 @@ def test_colors_on_tape_without_them(designer):
     assert 'red parts print black' in fits_note(designer)
     assert designer.evaluate("() => JSON.parse(formFor(S.edit.design).get('text'))[0].color") == 'black'
     # On black and red tape the server prints it in one of them
-    set_tape(designer, '62red')
+    red = with_tape({'errors': [], 'model': 'QL-800', 'path': 'simulation', 'media_width': 62, 'media_length': 0, 'red_roll': True})
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={**red, 'printers': [red], 'selected': 'simulation'}))
+    designer.evaluate('() => refreshPrinters()')
+    wait_for_preview(designer)
     assert designer.evaluate('() => S.edit.design.label_size') == '62red'
     assert 'other colors print in one of them' in fits_note(designer)
     assert designer.evaluate("() => JSON.parse(formFor(S.edit.design).get('text'))[0].color") == '#1e90ff'
