@@ -34,7 +34,7 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes.
 - **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
 - **Several printers:** use several printers at once, each with a name of your choice and the same settings in every browser, or try everything without a printer.
-- **Other programs:** e.g., [Grocy](docs/grocy.md) can print its labels through Labelburg, and labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents.
+- **Other programs:** e.g., [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md) can print their labels through Labelburg, and labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents.
 
 ## Screenshots
 

@@ -7,7 +7,7 @@ import json
 import pytest
 from PIL import Image, ImageDraw
 
-from tests.browser.helpers import fits_note, png, preview_size, printed, set_tape, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 from tests.browser.test_printing import fake_printer
 
 VC = {'errors': [], 'model': 'VC-500W', 'path': 'file:///dev/usb/lp0', 'media_width': 25, 'media_length': 0,
@@ -16,7 +16,7 @@ VC = {'errors': [], 'model': 'VC-500W', 'path': 'file:///dev/usb/lp0', 'media_wi
 
 def fake_vc500w(page, **status):
     """Answer the status queries with a VC-500W and load the page again."""
-    printer = {**VC, **status}
+    printer = with_tape({**VC, **status})
     body = json.dumps({**printer, 'printers': [printer], 'selected': printer['path']})
     page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
     page.reload()

@@ -956,20 +956,13 @@ function detectTape() {
         return;
     }
     S.tapeManual = false;
-    let found = null;
-    if (p && p.media_width) {
-        // The width and length of DK and TZe tape can be the same. The color
-        // of the text on TZe tape is no black and red roll.
-        const red = p.red_roll === true || /red/i.test(p.media_type || '');
-        found = C.label_sizes.find(s => printerTakes(s) && s.tape[0] === p.media_width && s.tape[1] === (p.media_length || 0) && !!s.red === red);
-        // Only the QL-800 series tells whether a roll is black and red
-        S.tapeRedUnknown = !!found && !red && p.red_roll == null;
-        if (!found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
-    }
-    // Assumed is the default size, or the first one the printer takes if it
-    // does not take that, e.g. a PUQU Q00 no 62 mm endless tape
-    const fallback = C.label_sizes.find(s => s.id === C.default_label_size && printerTakes(s)) || C.label_sizes.find(printerTakes);
-    S.tape = found ? found.id : fallback ? fallback.id : C.default_label_size;
+    // The server tells the label size of the tape the printer reports, or
+    // the one it assumes without
+    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
+    // Only the QL-800 series tells whether a roll is black and red
+    S.tapeRedUnknown = !!found && !found.red && p.red_roll == null;
+    if (p && p.media_width && !found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
+    S.tape = p && SIZES[p.label_size] ? p.label_size : C.default_label_size;
     S.tapeAssumed = !found;
 }
 
