@@ -1387,6 +1387,8 @@ def _kept_settings(changing: bool = False) -> dict:
             return printer_settings.parsed(fh.read())
     except FileNotFoundError:
         return {'printers': {}}
+    except UnicodeDecodeError:
+        return printer_settings.parsed('')
     except OSError as e:
         if changing:
             raise
