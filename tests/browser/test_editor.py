@@ -1196,3 +1196,10 @@ def test_a_time_counted_from_now_shows_the_time(designer):
         '[now+30min] [today] [now+1d]'
     # A blank cannot be named so
     assert designer.evaluate("() => isVariable('now') && isVariable('Now + 2 hours')") is True
+
+
+def test_a_time_typed_into_the_wizard_keeps_the_time(designer):
+    fmt = designer.evaluate('() => dateFormat()')
+    # A label of no blanks: the typed date takes the format of the one it had
+    assert designer.evaluate("() => fromDisplay('Made [now]', 'Made {{datetime:%d.%m.%Y}}', null, true)") == 'Made {{datetime:%d.%m.%Y %H:%M}}'
+    assert designer.evaluate("() => fromDisplay('Made [today]', 'Made {{datetime:%d.%m. %H:%M}}', null, true)") == f'Made {{{{datetime:{fmt}}}}}'

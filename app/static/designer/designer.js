@@ -327,7 +327,12 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         if (own) return own.template;
         const n = name.trim();
         const day = n.match(TODAY_RE);
-        if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat() + (withTime(day) ? ' %H:%M' : '')}}}`;
+        if (day) {
+            let format = formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat();
+            // The format of another date, with the time only where this one has it
+            if (/%[HIMp]/.test(format) !== withTime(day)) format = withTime(day) ? format + ' %H:%M' : dateFormat();
+            return `{{datetime${offsetOf(day)}:${format}}}`;
+        }
         const counter = n.match(COUNTER_RE);
         if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
         const asn = n.match(ASN_RE);

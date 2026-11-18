@@ -196,10 +196,11 @@ def check_counter(start: str, step: str) -> int:
     return int(step)
 
 
-# A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months), +1y
-# (years), or a time moved from now, e.g., +2h (hours) or +30min (minutes),
-# at most a hundred years
-DATE_OFFSET = re.compile(r"([+-])(\d{1,6})(min|[hdwmy])", re.ASCII)
+# A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months) or +1y
+# (years), at most a hundred years. A date and time also by hours or minutes,
+# e.g., +2h or +30min: a date blank has no time.
+DATE_OFFSET = re.compile(r"([+-])(\d{1,6})([dwmy])", re.ASCII)
+TIME_OFFSET = re.compile(r"([+-])(\d{1,6})(min|[hdwmy])", re.ASCII)
 MAX_DATE_OFFSET = {'min': 999999, 'h': 876600, 'd': 36525, 'w': 5218, 'm': 1200, 'y': 100}
 
 
@@ -207,9 +208,9 @@ def shift_date(when, offset: str):
     """when, a date or a date and time, moved by offset, e.g., +5d. Months and
     years are calendar months: the day stays, or becomes the last day of a
     shorter month (January 31 + 1m is the last day of February)."""
-    match = DATE_OFFSET.fullmatch(offset)
+    match = (TIME_OFFSET if isinstance(when, datetime.datetime) else DATE_OFFSET).fullmatch(offset)
     if match is None:
-        raise ValueError(f"A date offset is a sign, a number and d, w, m, y, h or min, e.g., +5d, not {offset}")
+        raise ValueError(f"A date offset is a sign, a number and d, w, m or y, e.g., +5d, not {offset}")
     sign, amount, unit = match.groups()
     if int(amount) > MAX_DATE_OFFSET[unit]:
         raise ValueError(f"A date offset is at most a hundred years, not {offset}")
