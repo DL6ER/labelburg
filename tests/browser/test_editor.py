@@ -862,6 +862,25 @@ def test_counter_keeps_its_start_value(designer):
     assert designer.evaluate('() => S.edit.design.text[0].text') == 'Crate {{counter:100}}'
 
 
+@pytest.mark.parametrize('typed, template', [
+    ('ASN[ASN]', 'ASN{{asn}}'),
+    ('ASN[asn:5]', 'ASN{{asn:5}}'),
+    ('ASN[ ASN : 5 ]', 'ASN{{asn:5}}'),
+])
+def test_archive_serial_number_is_typed_and_shown_as_asn(designer, typed, template):
+    type_line(designer, 0, typed)
+    assert designer.evaluate('() => S.edit.design.text[0].text') == template
+    designer.evaluate('() => renderEditor()')
+    assert designer.input_value('[data-row="0"] .tx') == 'ASN[ASN' + (':5' if ':5' in template else '') + ']'
+    # Not a blank to fill in
+    assert designer.evaluate('() => blanksOf(S.edit.design)') == []
+
+
+def test_archive_serial_number_is_explained_with_the_variables(designer):
+    designer.click('#tplInfoBtn')
+    assert '{{asn}}' in designer.inner_text('#tplInfo') and 'Paperless-ngx' in designer.inner_text('#tplInfo')
+
+
 def test_symbols_are_offered(designer):
     designer.click('[data-row="0"] .tx')
     designer.click('#edSym')
@@ -872,18 +891,85 @@ def test_symbols_are_offered(designer):
 def test_icons_are_offered_with_the_symbols(designer):
     type_line(designer, 0, 'Light ')
     designer.click('#edSym')
-    designer.wait_for_selector('#icoGrid .ico')
+    designer.wait_for_selector('[data-grid="mdi"] .ico')
     # The first ones, all of them on request
-    count = "() => document.querySelectorAll('#icoGrid .ico').length"
+    count = "() => document.querySelectorAll('[data-grid=\"mdi\"] .ico').length"
     assert designer.evaluate(count) == 120
-    designer.click('#icoAll')
+    designer.click('[data-all="mdi"]')
     assert designer.evaluate(count) > 7000
-    designer.fill('#icoQ', 'lightbulb')
-    assert designer.get_attribute('#icoGrid .ico', 'title') == 'mdi:lightbulb'
-    designer.click('#icoGrid .ico')
+    designer.fill('#symQ', 'lightbulb')
+    assert designer.get_attribute('[data-grid="mdi"] .ico', 'title') == 'mdi:lightbulb'
+    designer.click('[data-grid="mdi"] .ico')
     assert designer.input_value('[data-row="0"] .tx') == 'Light {{mdi:lightbulb}}'
     wait_for_preview(designer)
     assert 'Everything fits.' in fits_note(designer)
+
+
+def test_one_search_finds_in_every_set(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].filter(d => !d.hidden && d.open).map(d => d.dataset.section)"
+    # The sets with something found open, the others and the symbols hidden
+    designer.fill('#symQ', 'nut')
+    assert designer.evaluate(sections) == ['mdi', 'fastener']
+    designer.fill('#symQ', 'diode')
+    assert designer.evaluate(sections) == ['electronic']
+    designer.fill('#symQ', 'resistor')
+    assert designer.evaluate(sections) == ['mdi', 'electronic']
+    # Only one set
+    designer.fill('#symQ', 'fastener:nut')
+    assert designer.evaluate(sections) == ['fastener']
+    designer.fill('#symQ', 'no such symbol')
+    assert designer.evaluate(sections) == []
+    assert designer.is_visible('#symNone')
+    # Without a search as opened by hand
+    designer.fill('#symQ', '')
+    assert designer.evaluate(sections) == ['symbols', 'mdi']
+
+
+def test_the_icons_come_first_and_open(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    order = designer.eval_on_selector_all('#layer .sym-set', 'ds => ds.map(d => d.dataset.section)')
+    assert order == ['symbols', 'mdi', 'fastener', 'electronic']
+    assert designer.is_visible('[data-grid="mdi"] .ico')
+
+
+def test_the_hints_name_meaningful_examples(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    examples = designer.eval_on_selector_all('#layer .sym-body code', 'els => els.map(e => e.textContent)')
+    assert sorted(examples) == ['{{electronic:resistor-iec-standard}}', '{{fastener:head-torx}}', '{{mdi:power}}']
+
+
+def test_a_search_leaves_the_sections_as_opened_by_hand(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    sections = "() => [...document.querySelectorAll('#layer .sym-set')].filter(d => !d.hidden && d.open).map(d => d.dataset.section)"
+    before = designer.evaluate(sections)
+    designer.fill('#symQ', 'nut')
+    assert sorted(designer.evaluate(sections)) == ['fastener', 'mdi']
+    designer.fill('#symQ', '')
+    assert designer.evaluate(sections) == before
+    # Opened by hand, also the next time
+    designer.click('[data-section="electronic"] summary')
+    designer.keyboard.press('Escape')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    assert set(designer.evaluate(sections)) == {*before, 'electronic'}
+
+
+def test_a_search_shows_no_counts(designer):
+    designer.click('[data-row="0"] .tx')
+    designer.click('#edSym')
+    designer.wait_for_selector('#symQ')
+    designer.fill('#symQ', 'nut')
+    titles = designer.eval_on_selector_all('#layer .sym-set:not([hidden]) > summary', 'els => els.map(e => e.textContent)')
+    assert titles and not any(ch.isdigit() for title in titles for ch in title)
 
 
 @pytest.mark.parametrize('view', ['edit', 'wizard'])
@@ -1093,3 +1179,97 @@ def test_counters_with_a_start_and_step_are_typed_and_shown(designer):
     # One that cannot count shows why
     type_line(designer, 0, 'Box [counter:A1]')
     designer.wait_for_function("() => document.querySelector('#edStage').innerText.includes('A counter starts at a number or at letters, e.g., 001 or A')")
+
+
+def select_in_line(page, row, start, end):
+    page.evaluate("""([row, start, end]) => document.querySelector(`[data-row="${row}"] .tx`).setSelectionRange(start, end)""", [row, start, end])
+
+
+def test_a_line_takes_several_lines_with_its_settings(designer):
+    # Enter breaks the line in its field, pasted lines stay in it too
+    type_line(designer, 0, 'Jam')
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('End')
+    designer.keyboard.press('Enter')
+    designer.keyboard.type('Strawberry')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam\nStrawberry']
+    assert designer.get_attribute('[data-row="0"] .tx', 'rows') == '2'
+    # Shift+Enter starts a line with settings of its own
+    designer.keyboard.press('Shift+Enter')
+    designer.keyboard.type('2026')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam\nStrawberry', '2026']
+
+
+def test_a_style_set_on_selected_lines_makes_them_a_line_of_their_own(designer):
+    type_line(designer, 0, 'Jam\nStrawberry\nKitchen\n2026')
+    # The selection takes the whole lines it touches: from "rawb" to "Kit"
+    select_in_line(designer, 0, 7, 17)
+    designer.click('[data-row="0"] [data-act="bold"]')
+    wait_for_preview(designer)
+    lines = designer.evaluate("() => S.edit.design.text.map(l => [l.text, wantsBold(l)])")
+    # The first line of a new label is bold, the selected lines no longer
+    assert lines == [['Jam', True], ['Strawberry\nKitchen', False], ['2026', True]]
+    # The size of the selected first line only
+    select_in_line(designer, 0, 0, 1)
+    designer.fill('[data-row="0"] input.mini', '30')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.size)")[0] == '30'
+    # Without a selection, or with all of it, the style is of the whole line
+    designer.click('[data-row="2"] [data-act="align"]')
+    select_in_line(designer, 1, 0, len('Strawberry\nKitchen'))
+    designer.click('[data-row="1"] [data-act="invert"]')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => l.text)") == ['Jam', 'Strawberry\nKitchen', '2026']
+    assert designer.evaluate("() => S.edit.design.text[1].inverted") is True
+
+
+def test_a_line_that_starts_with_a_line_break_keeps_it_when_drawn_anew(designer):
+    type_line(designer, 0, 'Jam')
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('Home')
+    designer.keyboard.press('Enter')
+    wait_for_preview(designer)
+    designer.click('[data-row="0"] [data-act="align"]')
+    wait_for_preview(designer)
+    assert designer.input_value('[data-row="0"] .tx') == '\nJam'
+    designer.focus('[data-row="0"] .tx')
+    designer.keyboard.press('Control+End')
+    designer.keyboard.type('s')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text[0].text") == '\nJams'
+
+
+def test_a_size_typed_digit_by_digit_for_selected_lines(designer):
+    type_line(designer, 0, 'Jam\nStrawberry')
+    designer.evaluate("""() => document.querySelector('[data-row="0"] .tx').setSelectionRange(4, 6)""")
+    designer.click('[data-row="0"] input.mini')
+    designer.keyboard.press('Control+A')
+    designer.keyboard.type('30')
+    wait_for_preview(designer)
+    assert designer.evaluate("() => S.edit.design.text.map(l => [l.text, l.size])")[1] == ['Strawberry', '30']
+
+
+def test_a_time_counted_from_now_shows_the_time(designer):
+    # Food used within hours: [today+2h] is the date with the time
+    fmt = designer.evaluate('() => dateFormat()')
+    assert designer.evaluate("() => fromDisplay('Use by [today+2h]')") == f'Use by {{{{datetime+2h:{fmt} %H:%M}}}}'
+    assert designer.evaluate("() => fromDisplay('[today + 30 minutes]')") == f'{{{{datetime+30min:{fmt} %H:%M}}}}'
+    # [now] is the date with the time, also counted from now
+    assert designer.evaluate("() => fromDisplay('Made [now], use by [now+2h]')") == \
+        f'Made {{{{datetime:{fmt} %H:%M}}}}, use by {{{{datetime+2h:{fmt} %H:%M}}}}'
+    # Months stay months, shown as typed
+    assert designer.evaluate("() => fromDisplay('[today+6m]')") == f'{{{{datetime+6m:{fmt}}}}}'
+    # A date with its time is shown as [now], one without as [today]
+    assert designer.evaluate("() => toDisplay('{{datetime+30min:%H:%M}} {{datetime:%d.%m.}} {{datetime+1d:%d.%m. %I %p}}')") == \
+        '[now+30min] [today] [now+1d]'
+    # A blank cannot be named so
+    assert designer.evaluate("() => isVariable('now') && isVariable('Now + 2 hours')") is True
+
+
+def test_a_time_typed_into_the_wizard_keeps_the_time(designer):
+    fmt = designer.evaluate('() => dateFormat()')
+    # A label of no blanks: the typed date takes the format of the one it had
+    assert designer.evaluate("() => fromDisplay('Made [now]', 'Made {{datetime:%d.%m.%Y}}', null, true)") == 'Made {{datetime:%d.%m.%Y %H:%M}}'
+    assert designer.evaluate("() => fromDisplay('Made [today]', 'Made {{datetime:%d.%m. %H:%M}}', null, true)") == f'Made {{{{datetime:{fmt}}}}}'

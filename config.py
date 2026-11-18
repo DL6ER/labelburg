@@ -65,8 +65,24 @@ class Config(object):
     # WEBHOOK_PASSWORD.
     LABEL_TEMPLATE_ENV_VARS = ''
 
+    # Paperless-ngx, where {{asn}} takes the next archive serial number from,
+    # and an API token of a user there
+    PAPERLESS_URL = ''
+    PAPERLESS_TOKEN = ''
+
     # Maximum number of labels a single print request may produce
     PRINT_MAX_COUNT = 100
+
+    # The MCP endpoint /mcp for AI assistants, where its packages are
+    # installed (requirements-mcp.txt)
+    MCP_ENABLED = True
+
+    # Most labels an AI assistant may print with one call to the MCP endpoint
+    MCP_MAX_COUNT = 10
+
+    # Host names the MCP endpoint answers besides IP addresses, single-label
+    # names and those ending in .local, .lan or .home.arpa
+    MCP_HOSTS = None
 
     # Maximum size of a request (uploaded images, JSON payloads) in bytes
     MAX_CONTENT_LENGTH = 32 * 1024 * 1024

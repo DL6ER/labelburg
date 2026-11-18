@@ -11,6 +11,10 @@ from . import image, printing, protocol, status, tapes
 # without a cut
 NEVER_CUT = 'The VC-500W cannot leave the labels uncut, cut them after the last label'
 NEVER_WHY = 'The VC-500W would keep the labels inside until the next print'
+# mm/s after Brother's data sheet, and the seconds a label takes besides,
+# most of its 40 s to prepare and preheat it, a few less printing fast
+SPEED = 8
+BESIDES = {True: 30.0, False: 34.0}
 
 
 class VC500W(Driver):
@@ -48,8 +52,7 @@ class VC500W(Driver):
         return protocol.DPI
 
     def capabilities(self, model):
-        # A label takes about 40 s, the label designer shows its stages
-        return dict(super().capabilities(model), half_cut=True, job_stages=True, never_cut=NEVER_WHY, leaves_turned=True)
+        return dict(super().capabilities(model), half_cut=True, never_cut=NEVER_WHY, leaves_turned=True)
 
     def status(self, device, model, unconfirmed=False):
         return status.query_status(device)
@@ -58,6 +61,12 @@ class VC500W(Driver):
         if status.announces_vc500w(service['txt']):
             return f"vc500w://{service['address']}", tapes.MODEL
         return None
+
+    def print_speed(self, model, fast, red):
+        return SPEED, BESIDES[fast]
+
+    def label_lengths(self, job):
+        return [label.height / protocol.DPI * 25.4 for _, _, label in job]
 
     def render(self, queue, entries, keep=None):
         job = []

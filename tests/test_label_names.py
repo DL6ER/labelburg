@@ -89,12 +89,12 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     models = config['models']
     assert set(models) == set(drivers.MODELS)
     assert models['QL-800'] == {'qualities': ['fast', 'quality', 'high'], 'high_res': True, 'cutter': True, 'manual_cutter': False,
-                                'half_cut': False, 'chain': False, 'feed_waste': False, 'job_stages': False, 'colors': 'red',
+                                'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': 'red',
                                 'never_cut': '', 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother'}
     assert (models['QL-1100']['high_res'], models['PT-P700']['half_cut'], models['PT-P700']['chain']) == (False, False, True)
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
-                                 'half_cut': True, 'chain': False, 'feed_waste': False, 'job_stages': True, 'colors': 'color',
+                                 'half_cut': True, 'chain': False, 'feed_waste': False, 'colors': 'color',
                                  'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother'}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
@@ -159,3 +159,43 @@ def test_tape_of_another_printer_is_refused_with_its_name(tmp_path, label_size, 
         'printer': 'simulation', 'label_size': label_size, 'model': model, 'print_type': 'text', 'text': text})
     assert response.status_code == 400
     assert response.get_json()['message'] == label_size_problem(label_size, model) != ''
+
+
+def _status(model, width=None, length=0, **status):
+    return {'model': model, 'media_width': width, 'media_length': length, **status}
+
+
+@pytest.mark.parametrize('status, label_size', [
+    (_status('QL-800', 62), '62'),
+    (_status('QL-800', 29, 90), '29x90'),
+    # The QL-800 series tells whether a roll is black and red
+    (_status('QL-800', 62, red_roll=True), '62red'),
+    (_status('QL-800', 62, red_roll=None), '62'),
+    (_status('QL-810W', 62, media_type='Continuous length tape (red)'), '62red'),
+    # DK and TZe tape of the same size, told apart by the printer
+    (_status('QL-800', 12), '12'),
+    (_status('PT-P750W', 12), 'pt12'),
+    (_status('VC-500W', 12), 'vc12'),
+    (_status('Niimbot/D110_M', 12, 40), 'niimbot12x40'),
+    # A printer of no known model, any label size of a printer
+    (_status('Unknown', 29, 90), '29x90'),
+])
+def test_label_size_of_the_tape_a_printer_reports(status, label_size):
+    from app.labeldesigner.label_names import printer_label_size
+    assert printer_label_size(status, '62') == (label_size, False)
+
+
+@pytest.mark.parametrize('status, default, label_size', [
+    # No tape reported, or one the label designer does not know
+    (_status('QL-800'), '62', '62'),
+    (_status('QL-800', 50, 50), '62', '62'),
+    (_status('QL-800'), '29', '29'),
+    # Tape of another printer
+    (_status('QL-800', 36), '62', '62'),
+    # The default is not for this printer: the first label size it takes
+    (_status('PUQU/Q00'), '62', 'puqu50x30'),
+    (_status('VC-500W', 30), '62', 'vc9'),
+])
+def test_label_size_assumed_without_a_tape_reported(status, default, label_size):
+    from app.labeldesigner.label_names import printer_label_size
+    assert printer_label_size(status, default) == (label_size, True)

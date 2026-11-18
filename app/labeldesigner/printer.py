@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from flask import Config
 
 from . import drivers, mdns
-from .drivers import devices
+from .drivers import devices, progress
 from .drivers.backends import NoLibusb
 from .label_names import check_label_size
 
@@ -138,7 +138,20 @@ class PrinterQueue:
             if simulation:
                 _prune_simulated_labels()
                 return ''
-            return self.driver.send(self, job)
+            # Estimated for the mode the printer prints in: fast or for
+            # quality, at 600 dpi, in red
+            fast = all(entry['fast'] for entry in entries)
+            red = 'red' in str(self.label_size)
+            mode = (fast, any(entry['high_res'] for entry in entries), red)
+            lengths = self.driver.label_lengths(job) or [0.0] * len(entries)
+            progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
+            printed = False
+            try:
+                message = self.driver.send(self, job)
+                printed = not message
+                return message
+            finally:
+                progress.finish(self.device_specifier, printed)
 
 
 def _discovered_label_printers() -> list[tuple[str, str]]:

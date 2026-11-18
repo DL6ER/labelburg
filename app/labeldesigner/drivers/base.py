@@ -113,14 +113,13 @@ class Driver:
         shows (fast, quality, high for 600 dpi), whether the model prints at
         600 dpi, whether it has a cutter, else whether its labels are cut
         off by hand with a lever, half cuts between labels and chain prints,
-        whether it feeds tape before the first label, reports the stage of a
-        job it prints, its colors, why it does not leave labels uncut, if it
-        does not, whether labels leave it top first, the label designer then
-        shows the printer below them, the blank paper in mm before each label
-        that is cut, which was between printhead and cutter, and the maker of
-        the model."""
+        whether it feeds tape before the first label, its colors, why it does
+        not leave labels uncut, if it does not, whether labels leave it top
+        first, the label designer then shows the printer below them, the
+        blank paper in mm before each label that is cut, which was between
+        printhead and cutter, and the maker of the model."""
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
-                'half_cut': False, 'chain': False, 'feed_waste': False, 'job_stages': False, 'colors': self.colors(model),
+                'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor}
 
     def resolution_problem(self, model: str, high_res: bool) -> str:
@@ -147,6 +146,18 @@ class Driver:
     def network_device(self, address: str) -> str:
         """The address of a printer found by its MAC address."""
         raise NotImplementedError
+
+    def print_speed(self, model: str, fast: bool, red: bool) -> tuple[float, float]:
+        """About how fast the model prints, printing fast or for quality and
+        in red or not: mm/s, and the seconds each label takes besides, e.g.
+        to feed and cut it. The jobs of a printer correct it, see
+        progress.py. A speed of 0 gives no estimate."""
+        return 0, 0
+
+    def label_lengths(self, job) -> list[float]:
+        """The length of each label of a job of render() along the paper, in
+        mm as the printer prints them, empty if unknown."""
+        return []
 
     def render(self, queue, entries: list, keep=None):
         """The job for the labels of the queue, as send() takes it. entries:

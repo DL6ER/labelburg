@@ -150,6 +150,16 @@ def datetime_codes() -> dict:
             'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
 
 
+# {{asn}}, an archive serial number of Paperless-ngx (paperless.py), or
+# {{asn:5}} with as many digits, e.g., 00042
+ASN_TEMPLATE = re.compile(r'\{\{asn(?::(\d{1,2}))?\}\}')
+
+
+def asn_text(start: int, index: int, digits: str | None) -> str:
+    """The ASN of the label index (0 is the first) of a job starting at start."""
+    return str(start + index).zfill(int(digits or 0))
+
+
 # The start of a counter is at most this long, its step at most this large
 MAX_COUNTER_START_LENGTH = 12
 MAX_COUNTER_STEP = 1000000
@@ -187,22 +197,26 @@ def check_counter(start: str, step: str) -> int:
 
 
 # A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months) or +1y
-# (years), at most a hundred years
+# (years), at most a hundred years. A date and time also by hours or minutes,
+# e.g., +2h or +30min: a date blank has no time.
 DATE_OFFSET = re.compile(r"([+-])(\d{1,6})([dwmy])", re.ASCII)
-MAX_DATE_OFFSET = {'d': 36525, 'w': 5218, 'm': 1200, 'y': 100}
+TIME_OFFSET = re.compile(r"([+-])(\d{1,6})(min|[hdwmy])", re.ASCII)
+MAX_DATE_OFFSET = {'min': 999999, 'h': 876600, 'd': 36525, 'w': 5218, 'm': 1200, 'y': 100}
 
 
 def shift_date(when, offset: str):
     """when, a date or a date and time, moved by offset, e.g., +5d. Months and
     years are calendar months: the day stays, or becomes the last day of a
     shorter month (January 31 + 1m is the last day of February)."""
-    match = DATE_OFFSET.fullmatch(offset)
+    match = (TIME_OFFSET if isinstance(when, datetime.datetime) else DATE_OFFSET).fullmatch(offset)
     if match is None:
         raise ValueError(f"A date offset is a sign, a number and d, w, m or y, e.g., +5d, not {offset}")
     sign, amount, unit = match.groups()
     if int(amount) > MAX_DATE_OFFSET[unit]:
         raise ValueError(f"A date offset is at most a hundred years, not {offset}")
     amount = int(amount) if sign == '+' else -int(amount)
+    if unit in ('h', 'min'):
+        return when + datetime.timedelta(hours=amount) if unit == 'h' else when + datetime.timedelta(minutes=amount)
     if unit in 'dw':
         return when + datetime.timedelta(days=amount * 7 if unit == 'w' else amount)
     year, month = divmod(when.year * 12 + when.month - 1 + (amount * 12 if unit == 'y' else amount), 12)
@@ -283,6 +297,7 @@ class SimpleLabel:
         border_color: Tuple[int, int, int] = (0, 0, 0),
         timestamp: int = 0,
         counter: int = 0,
+        asn: int | None = None,
         red_support: bool = False,
         code_text: str = '',
         template_env_vars: frozenset = frozenset(),
@@ -355,6 +370,8 @@ class SimpleLabel:
         self._border_distance = border_distance
         self._border_color = border_color
         self._counter = counter
+        # The archive serial number of the first label of the job, see paperless.py
+        self._asn = asn
         self._timestamp = timestamp
         self._red_support = red_support
         self._code_text = code_text
@@ -549,13 +566,17 @@ class SimpleLabel:
             return counter_value(start, check_counter(start, step), self._counter)
         substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
 
+        # Replace {{asn[:<digits>]}} with the archive serial number of the copy
+        if self._asn is not None:
+            substitute(ASN_TEMPLATE, lambda match: asn_text(self._asn, self._counter, match.group(1)))
+
         # Replace {{datetime:<format>}} with current datetime formatted as
-        # <format>, {{datetime+5d:<format>}} with the one 5 days later (see
-        # shift_date)
+        # <format>, {{datetime+5d:<format>}} with the one 5 days later,
+        # {{datetime+2h:<format>}} 2 hours later (see shift_date)
         def datetime_replacer(match):
             when = self._now()
             return (shift_date(when, match.group(1)) if match.group(1) else when).strftime(match.group(2))
-        substitute(r"\{\{datetime([+-]\d{1,6}[dwmy])?:([^}]+)\}\}", datetime_replacer)
+        substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
         if any("{{uuid}}" in piece for piece in pieces):
@@ -568,10 +589,12 @@ class SimpleLabel:
             pieces[:] = [piece.replace("{{short-uuid}}", str(ui)[:8]) for piece in pieces]
 
         # Replace {{mdi:<name>}} with the Material Design Icon of the name,
-        # e.g. {{mdi:lightbulb}}. Unknown names stay as they
-        # are, so that a typo shows on the label.
+        # e.g. {{mdi:lightbulb}}, {{fastener:<name>}} and
+        # {{electronic:<name>}} with the symbol, e.g. {{fastener:head-torx}}.
+        # Unknown names stay as they are, so that a typo shows on the label.
         if with_icons:
-            substitute(r"\{\{mdi:([a-z0-9-]+)\}\}", lambda match: icons.icon(match.group(1)) or match.group(0))
+            substitute(r"\{\{(mdi|fastener|electronic):([a-z0-9-]+)\}\}",
+                       lambda match: icons.icon(match.group(2), match.group(1)) or match.group(0))
 
         # Replace {{env:<var>}} with the value of the environment variable
         # var. Only explicitly allowed variables are inserted, others could
@@ -720,6 +743,14 @@ class SimpleLabel:
     turned = False
 
     def generate(self):
+        """The image of the label, kept as generated where keep_generated is
+        set: of the first label of a print job, which the print routes return."""
+        image = self._generate()
+        if getattr(self, 'keep_generated', False):
+            self.generated = image
+        return image
+
+    def _generate(self):
         img = self._generate_label()
         if self._flag_wrap:
             # Both halves from one render, so random texts and counters match
@@ -1272,15 +1303,14 @@ class SimpleLabel:
 
     def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, **kwargs):
         """The bounding box of a line of text at xy, also drawn in fill if
-        given. Icons ({{mdi:<name>}}) are drawn with the icon font, on the
-        same baseline as the text around them."""
+        given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
+        on the same baseline as the text around them."""
         if not any(icons.is_icon(char) for char in text):
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
-        icon_font = self._get_font(icons.FONT_PATH, font.size, measuring=measuring)
-        runs = [(''.join(chars), icon_font if is_icon else font)
-                for is_icon, chars in itertools.groupby(text, icons.is_icon)]
+        runs = [(''.join(chars), self._get_font(path, font.size, measuring=measuring) if path else font)
+                for path, chars in itertools.groupby(text, icons.font_of)]
         width = sum(run_font.getlength(run) for run, run_font in runs)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]

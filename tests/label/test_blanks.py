@@ -130,6 +130,9 @@ def test_dates_of_blanks_start_at_a_day_moved_from_today(tmp_path):
 @pytest.mark.parametrize('default, message', [
     ('+5x', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
     ('-5', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
+    # A date blank has no time
+    ('+2h', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
+    ('+30min', 'A date offset is a sign, a number and d, w, m or y, e.g., +5d'),
     (' +101y', 'A date offset is at most a hundred years'),
 ])
 def test_dates_of_blanks_moved_by_another_offset_are_refused(tmp_path, default, message):
@@ -495,3 +498,15 @@ def test_choice_blanks_counters_and_dates_in_one_line(tmp_path):
         assert label.text[0]['text'] == 'Garage B006 31.01.2024 use by 2024-02-29'
         with pytest.raises(ValueError, match='is none of the choices'):
             create_label_from_request(dict(data, blanks={'Room': 'Cellar'}), {}, 1).process_templates()
+
+
+def test_a_date_blank_given_hours_keeps_them_as_text(tmp_path):
+    client = make_client(tmp_path)
+    timestamp = int(datetime(2024, 1, 31, 23).timestamp())
+    data = {'timestamp': str(timestamp), 'fields': json.dumps({'Use by': {'type': 'date', 'format': '%d.%m.%Y'}}),
+            'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Use by}}'}]),
+            'blanks': json.dumps({'Use by': '+30h'})}
+    with client.application.test_request_context():
+        label = create_label_from_request(data)
+        label.process_templates()
+        assert label.text[0]['text'] == '+30h'

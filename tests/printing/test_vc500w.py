@@ -22,7 +22,7 @@ from app import create_app
 from app.labeldesigner import drivers, printer
 from app.labeldesigner.label import LabelOrientation
 from app.labeldesigner.label_names import LABELS
-from app.labeldesigner.drivers import devices
+from app.labeldesigner.drivers import devices, progress
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.vc500w import image as vc_image
@@ -654,7 +654,10 @@ def test_stage_of_a_running_job(client, fake):
     path = client.application.config['PRINTER_PRINTER']
     key = devices.lock_key(path)
     devices.status_cache[key] = network.network_printer(path, 'VC-500W')
-    vc_status.jobs[key] = {'stage': 'Preheating', 'label': 2, 'labels': 3}
+    progress.start(path, [50] * 3, (0, 0))
+    progress.counting(path)
+    progress.printed(path, 1)
+    progress.stage(path, 'Preheating')
     vc500w._answers[vc_status.target(path)] = collections.deque([True, False])
     try:
         with devices.device_lock(path):
@@ -663,11 +666,29 @@ def test_stage_of_a_running_job(client, fake):
             status = client.get('/labeldesigner/api/printer_status').get_json()
             assert time.monotonic() - started < devices.STATUS_LOCK_TIMEOUT / 2
     finally:
-        vc_status.jobs.clear()
+        progress.finish(path, False)
     assert status['printers'][0]['job'] == {'stage': 'Preheating', 'label': 2, 'labels': 3}
     assert status['printers'][0]['status_type'] == devices.BUSY_STATUS_TYPE
     # How well it is reached, also while the job holds it
     assert status['printers'][0].get('weak_connection') is (True if path.startswith('vc500w://') else None)
+
+
+def test_labels_and_their_stages_while_printing(client, fake, monkeypatch):
+    path = client.application.config['PRINTER_PRINTER']
+    seen = []
+    real = vc500w.print_image
+
+    def print_image(*args, **kwargs):
+        seen.append(progress.state(path))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(vc500w, 'print_image', print_image)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert response.get_json() == {'success': True}
+    assert [(state['label'], state['labels'], state['stage']) for state in seen] == [(1, 2, 'Processing'), (2, 2, 'Processing')]
+    # About 40 s each
+    assert seen[0]['seconds_left'] > 60
+    assert progress.state(path) is None
 
 
 def test_stage_while_another_app_prints(client, fake):
