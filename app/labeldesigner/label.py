@@ -743,6 +743,14 @@ class SimpleLabel:
     turned = False
 
     def generate(self):
+        """The image of the label, kept as generated where keep_generated is
+        set: of the first label of a print job, which the print routes return."""
+        image = self._generate()
+        if getattr(self, 'keep_generated', False):
+            self.generated = image
+        return image
+
+    def _generate(self):
         img = self._generate_label()
         if self._flag_wrap:
             # Both halves from one render, so random texts and counters match
