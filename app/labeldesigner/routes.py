@@ -1423,7 +1423,7 @@ def print_label():
     except HTTPException:
         raise
     except PrinterUnreachable as e:
-        return_dict['message'] = str(e)
+        return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)
         return make_response(jsonify(return_dict), PRINTER_FAILED)
     except Exception as e:
         return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)

@@ -423,7 +423,7 @@ def test_printer_of_unknown_model_is_asked_before_printing(client, monkeypatch):
 
 
 def test_printer_of_unknown_model_that_does_not_answer_is_reported(client, monkeypatch):
-    # It was refused for its unknown model, not for being switched off
+    # Told as not there, not refused for its model
     _device_files(monkeypatch, {'/dev/usb/lp4': errno.ENODEV})
     data = dict(EXAMPLE_FORMDATA, printer='file:///dev/usb/lp4', model='Unknown')
     response = client.post('/labeldesigner/api/print', data=data)
@@ -541,6 +541,13 @@ def test_an_answer_after_the_wait_is_told_next_time(client, monkeypatch):
     # While it is asked again, its last answer is told
     third = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert third['status_type'] == 'Reply to status request'
+
+
+def test_printer_that_cannot_be_asked_is_told_with_a_fixed_message():
+    errors = [TimeoutError(), backends.NoLibusb('No backend available'), RuntimeError('/app/instance/secret.json is gone')]
+    errors += [OSError(number, os.strerror(number)) for numbers, _ in devices._UNANSWERED for number in numbers]
+    for told in [devices.not_sent(error) for error in errors] + [printer.BUSY]:
+        assert refusals.message(routes.PrinterUnreachable(told), refusals.PRINT_FAILED) == told
 
 
 def test_send_errors_are_told_without_their_text(client, monkeypatch, caplog):

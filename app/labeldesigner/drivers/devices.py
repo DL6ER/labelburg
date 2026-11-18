@@ -279,6 +279,9 @@ _UNANSWERED = (
     ((errno.ECONNREFUSED,), 'The printer refuses the connection'),
     ((errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN), 'The printer cannot be reached'),
 )
+NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
+NOT_SENT = 'Could not send the label to the printer'
+NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
 
 
 def unanswered_reason(error: Exception) -> str:
@@ -288,7 +291,7 @@ def unanswered_reason(error: Exception) -> str:
     if isinstance(error, TimeoutError):
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
-        return 'Printers on usb:// need libusb, please install it'
+        return NO_LIBUSB
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -299,8 +302,14 @@ def not_sent(error: Exception) -> str:
     """Why a label could not be sent to the printer, in plain words."""
     reason = unanswered_reason(error)
     if reason:
-        return f'Could not send the label to the printer: {reason}'
-    return 'Could not send the label to the printer, the log of the server names the reason'
+        return f'{NOT_SENT}: {reason}'
+    return NOT_SENT_LOGGED
+
+
+def not_sent_messages() -> tuple[str, ...]:
+    """Every text not_sent() gives, for the fixed messages of refusals.py."""
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB])
+    return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 
 def shared_over_usbip(bus_id: str) -> str:
