@@ -501,6 +501,11 @@ def test_date_and_time_codes_for_the_label_designer(tmp_path):
     ((2024, 11, 15), '{{datetime+6m:%d.%m.%Y}}', '15.05.2025'),
     ((2024, 2, 29), '{{datetime+1y:%Y-%m-%d}}', '2025-02-28'),
     ((2024, 2, 29), '{{datetime-100y:%Y-%m-%d}}', '1924-02-29'),
+    # Hours and minutes, e.g., food used within hours, also past midnight
+    ((2024, 12, 31), '{{datetime+2h:%d.%m. %H:%M}}', '31.12. 14:15'),
+    ((2024, 12, 31), '{{datetime+12h:%Y-%m-%d %H:%M}}', '2025-01-01 00:15'),
+    ((2024, 1, 31), '{{datetime+30min:%H:%M}}', '12:45'),
+    ((2024, 1, 31), '{{datetime-90min:%H:%M}}', '10:45'),
     # Several in a line, and one that is no offset stays as it is
     ((2024, 1, 31), 'Made {{datetime:%d.%m.}}, use by {{datetime+5d:%d.%m.}}', 'Made 31.01., use by 05.02.'),
     ((2024, 1, 31), '{{datetime+5x:%Y}} {{datetime 5d:%Y}}', '{{datetime+5x:%Y}} {{datetime 5d:%Y}}'),

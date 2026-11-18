@@ -197,22 +197,26 @@ def check_counter(start: str, step: str) -> int:
 
 
 # A date moved from today, e.g., +5d (days), -1w (weeks), +6m (months) or +1y
-# (years), at most a hundred years
+# (years), at most a hundred years. A date and time also by hours or minutes,
+# e.g., +2h or +30min: a date blank has no time.
 DATE_OFFSET = re.compile(r"([+-])(\d{1,6})([dwmy])", re.ASCII)
-MAX_DATE_OFFSET = {'d': 36525, 'w': 5218, 'm': 1200, 'y': 100}
+TIME_OFFSET = re.compile(r"([+-])(\d{1,6})(min|[hdwmy])", re.ASCII)
+MAX_DATE_OFFSET = {'min': 999999, 'h': 876600, 'd': 36525, 'w': 5218, 'm': 1200, 'y': 100}
 
 
 def shift_date(when, offset: str):
     """when, a date or a date and time, moved by offset, e.g., +5d. Months and
     years are calendar months: the day stays, or becomes the last day of a
     shorter month (January 31 + 1m is the last day of February)."""
-    match = DATE_OFFSET.fullmatch(offset)
+    match = (TIME_OFFSET if isinstance(when, datetime.datetime) else DATE_OFFSET).fullmatch(offset)
     if match is None:
         raise ValueError(f"A date offset is a sign, a number and d, w, m or y, e.g., +5d, not {offset}")
     sign, amount, unit = match.groups()
     if int(amount) > MAX_DATE_OFFSET[unit]:
         raise ValueError(f"A date offset is at most a hundred years, not {offset}")
     amount = int(amount) if sign == '+' else -int(amount)
+    if unit in ('h', 'min'):
+        return when + datetime.timedelta(hours=amount) if unit == 'h' else when + datetime.timedelta(minutes=amount)
     if unit in 'dw':
         return when + datetime.timedelta(days=amount * 7 if unit == 'w' else amount)
     year, month = divmod(when.year * 12 + when.month - 1 + (amount * 12 if unit == 'y' else amount), 12)
@@ -567,12 +571,12 @@ class SimpleLabel:
             substitute(ASN_TEMPLATE, lambda match: asn_text(self._asn, self._counter, match.group(1)))
 
         # Replace {{datetime:<format>}} with current datetime formatted as
-        # <format>, {{datetime+5d:<format>}} with the one 5 days later (see
-        # shift_date)
+        # <format>, {{datetime+5d:<format>}} with the one 5 days later,
+        # {{datetime+2h:<format>}} 2 hours later (see shift_date)
         def datetime_replacer(match):
             when = self._now()
             return (shift_date(when, match.group(1)) if match.group(1) else when).strftime(match.group(2))
-        substitute(r"\{\{datetime([+-]\d{1,6}[dwmy])?:([^}]+)\}\}", datetime_replacer)
+        substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
         if any("{{uuid}}" in piece for piece in pieces):
@@ -739,6 +743,14 @@ class SimpleLabel:
     turned = False
 
     def generate(self):
+        """The image of the label, kept as generated where keep_generated is
+        set: of the first label of a print job, which the print routes return."""
+        image = self._generate()
+        if getattr(self, 'keep_generated', False):
+            self.generated = image
+        return image
+
+    def _generate(self):
         img = self._generate_label()
         if self._flag_wrap:
             # Both halves from one render, so random texts and counters match
