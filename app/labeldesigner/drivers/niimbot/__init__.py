@@ -182,9 +182,7 @@ class Niimbot(Driver):
             # Asked again at the next status query, which then tells why
             devices.note_answer(device, e)
             _asked.pop(device, None)
-            reason = devices.unanswered_reason(e)
-            return (f'Could not send the label to the printer: {reason}' if reason
-                    else 'Could not send the label to the printer, the log of the server names the reason')
+            return devices.not_sent(e)
         return ''
 
 

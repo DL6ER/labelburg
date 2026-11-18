@@ -221,6 +221,8 @@ sudo systemctl mask --now ipp-usb.service
 
 In the label designer, name the printer by the host name or address of that computer, e.g., `PRINTER_PRINTER=usbip://printer-pi`. If it shares several printers, add the bus ID that `usbip list -l` shows there, e.g., `usbip://printer-pi/1-1.2`.
 
+A label designer on the computer that shares the printer leaves it to USB/IP and says so below its list of printers. To print on it there too, name it with `localhost`, e.g., `usbip://localhost/1-1.2`. In Docker, this needs `network_mode: host`.
+
 ### Through SSH
 
 SSH encrypts the connection and needs a key, so port 3240 can stay closed to the network. `usbipd` listens on every address, so close port 3240 in the firewall of the computer with the printer. The tunnel reaches it from that computer itself.

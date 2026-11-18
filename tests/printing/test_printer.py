@@ -6,7 +6,7 @@ import time
 import pytest
 from PIL import Image
 
-from app.labeldesigner import printer
+from app.labeldesigner import printer, refusals, routes
 from app.labeldesigner.enums import LabelContent, LabelOrientation, LabelType
 from app.labeldesigner.drivers import devices
 from app.labeldesigner.drivers import backends
@@ -336,6 +336,82 @@ def test_detected_printer_busy_before_first_answer_has_unknown_model(client, mon
     lp0 = next(p for p in status['printers'] if p['path'] == DEVICE)
     assert lp0['status_type'] == 'Printing'
     assert lp0['model'] == 'Unknown'
+
+
+def _device_files(monkeypatch, errors):
+    """Device files /dev/usb/lp<N> for detection: lp0 and those of errors,
+    which raise their error number when opened."""
+    def opened(device):
+        number = errors.get(device.removeprefix('file://'))
+        if number:
+            raise OSError(number, os.strerror(number), device)
+        return ExclusiveUsbPrinter(device)
+    monkeypatch.setattr(backends, 'KernelPrinter', opened)
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, 'exists', lambda path: path == '/dev/usb/lp0' or path in errors or real_exists(path))
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, '_cached_printers', [])
+
+
+def test_device_files_without_a_printer_are_not_listed(client, monkeypatch):
+    # A container copies /dev when it starts, the files of printers removed
+    # later stay there
+    _device_files(monkeypatch, {'/dev/usb/lp4': errno.ENODEV, '/dev/usb/lp5': errno.ENXIO,
+                                '/dev/usb/lp6': errno.ENOENT, '/dev/usb/lp7': errno.EACCES})
+    client.application.config['PRINTER_PRINTER'] = '?'
+    status = client.get('/labeldesigner/api/printer_status').get_json()
+    assert [(p['path'], p['errors']) for p in status['printers']] == [
+        (DEVICE, []), ('file:///dev/usb/lp7', ['No permission to use the printer']), ('simulation', [])]
+
+
+def test_printer_that_answered_is_chosen(client, monkeypatch):
+    errors = {'/dev/usb/lp1': errno.EACCES}
+    _device_files(monkeypatch, errors)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', ['/dev/usb/lp1', '/dev/usb/lp0'])
+    client.application.config['PRINTER_PRINTER'] = '?'
+    status = client.get('/labeldesigner/api/printer_status').get_json()
+    assert [p['path'] for p in status['printers']] == ['file:///dev/usb/lp1', DEVICE, 'simulation']
+    assert (status['selected'], status['path'], status['errors']) == (DEVICE, DEVICE, [])
+    # Without one, the first printer: labels never go to the simulator unnoticed
+    errors['/dev/usb/lp0'] = errno.EBUSY
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    status = client.get('/labeldesigner/api/printer_status').get_json()
+    assert (status['selected'], status['errors']) == ('file:///dev/usb/lp1', ['No permission to use the printer'])
+
+
+def test_printer_of_unknown_model_is_asked_before_printing(client, monkeypatch):
+    # The label designer sends Unknown for a printer that has not told its model
+    def ql700(status, phase=0):
+        packet = bytearray(_status_packet(status, phase))
+        packet[3], packet[4] = 0x34, 0x35
+        return bytes(packet)
+
+    def answer(self, data):
+        self.responses += [ql700(0x00)] if data == b'\x1b\x69\x53' else [ql700(0x01), ql700(0x06)]
+    monkeypatch.setattr(ExclusiveUsbPrinter, 'write', answer)
+    queues = []
+    real_queue = routes.PrinterQueue
+    monkeypatch.setattr(routes, 'PrinterQueue', lambda **kwargs: queues.append(real_queue(**kwargs)) or queues[-1])
+    data = dict(EXAMPLE_FORMDATA, printer=DEVICE, model='Unknown')
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert queues[0].model == 'QL-700'
+    # One that tells no model this server knows
+    monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
+    response = client.post('/labeldesigner/api/print', data=data)
+    assert (response.status_code, response.get_json()['message']) == (400, refusals.UNKNOWN_MODEL)
+
+
+def test_printer_of_unknown_model_that_does_not_answer_is_reported(client, monkeypatch):
+    # It was refused for its unknown model, not for being switched off
+    _device_files(monkeypatch, {'/dev/usb/lp4': errno.ENODEV})
+    data = dict(EXAMPLE_FORMDATA, printer='file:///dev/usb/lp4', model='Unknown')
+    response = client.post('/labeldesigner/api/print', data=data)
+    assert (response.status_code, response.get_json()['message']) == \
+        (503, 'Could not send the label to the printer: The printer is switched off or not connected')
+    # Busy with a job of another program
+    with devices.device_lock(DEVICE):
+        response = client.post('/labeldesigner/api/print', data=dict(data, printer=DEVICE))
+    assert (response.status_code, response.get_json()['message']) == (503, printer.BUSY)
 
 
 def test_detected_pt_e550w_prints(client, monkeypatch):

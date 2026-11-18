@@ -36,6 +36,8 @@ def test_printer_failure_is_shown(designer, monkeypatch):
     assert printed(designer) == ['failed']
     designer.wait_for_selector('#layer h2:has-text("Not printed")')
     assert 'The printer reports: Replace media error' in designer.inner_text('#layer')
+    # "Printing 1 label..." is gone
+    assert designer.is_hidden('#toast')
 
 
 def test_copies_buttons(designer, monkeypatch, tmp_path):
@@ -557,6 +559,12 @@ def test_printer_with_a_low_battery_asks_to_charge_it(designer):
 def test_printer_still_being_asked_is_not_shown_as_failing(designer):
     # A printer on Bluetooth takes a few seconds to answer, it was red meanwhile
     assert designer.evaluate("() => printerState({ status_type: 'Asking the printer', errors: [] })") == {'cls': 'off', 'text': 'Asking the printer…'}
+
+
+def test_printer_busy_with_another_program_is_not_shown_as_ready(designer):
+    # Its model is not known before it answered
+    assert designer.evaluate("() => printerState({ status_type: 'Printing', errors: [], model: 'Unknown' })") == {'cls': '', 'text': 'Printing'}
+    assert designer.evaluate("() => [printerLabel({ model: 'Unknown' }), thePrinter({ model: 'Unknown' })]") == ['Printer', 'the printer']
 
 
 def test_labels_of_a_q00_leave_it_turned(designer):

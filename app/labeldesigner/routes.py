@@ -22,9 +22,9 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, progress, resolution_problem
+from .drivers import DEVICE_PATTERNS, devices, progress, resolution_problem
 from .drivers.devices import flock_within, look_again
-from .printer import PrinterQueue, configured_printers, get_ptr_status
+from .printer import BUSY, PrinterQueue, configured_printers, get_ptr_status, is_simulation
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -1391,7 +1391,7 @@ def print_label():
     """
     return_dict = {'success': False}
     try:
-        device, model = _printer(request.values.get('printer'), request.values.get('model'))
+        device, model = _printer(request.values.get('printer'), request.values.get('model'), ask=True)
         # What the request leaves out as set in the printer settings
         values = printer_settings.for_printing(_kept_settings(), device, model, request.values.to_dict(flat=True))
         printer = PrinterQueue(model=model, device_specifier=device, label_size=values.get('label_size', DEFAULT_LABEL_SIZE))
@@ -1404,6 +1404,9 @@ def print_label():
         printer.leaves_first = _leaves_first(values.get('leaves_first'))
     except HTTPException:
         raise
+    except PrinterUnreachable as e:
+        return_dict['message'] = str(e)
+        return make_response(jsonify(return_dict), PRINTER_FAILED)
     except Exception as e:
         return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)
         _log_refused_request('Print job', e)
@@ -1446,10 +1449,32 @@ def _log_refused_request(what: str, error: Exception):
 PRINTER_MODELS = list(MODELS)
 
 
-def _printer(requested_device, requested_model) -> tuple[str, str]:
+class PrinterUnreachable(Exception):
+    """A printer asked for its model that did not tell it, why in plain words."""
+
+
+def _told_model(device: str) -> str:
+    """The model a printer tells when asked, for one the label designer knows
+    no model of, e.g. one that did not answer the status query."""
+    driver, model = drivers.resolve(device, 'Unknown')
+    if model != 'Unknown':
+        return model
+    try:
+        state = driver.status(device, model)
+    except driver.errors as e:
+        current_app.logger.info('Status query of %s failed: %s', device, e)
+        raise PrinterUnreachable(devices.not_sent(e)) from e
+    told = state.get('model', 'Unknown')
+    if told == 'Unknown' and state.get('status_type') == devices.BUSY_STATUS_TYPE:
+        raise PrinterUnreachable(BUSY)
+    return told
+
+
+def _printer(requested_device, requested_model, ask: bool = False) -> tuple[str, str]:
     """Return the device and model selected by a request, or the configured
     ones. With PRINTERS, the model of a listed device is the configured one,
-    and a request may name the printer instead of its device."""
+    and a request may name the printer instead of its device. With ask, a
+    printer requested as model Unknown is asked for its model."""
     printers = configured_printers(current_app.config)
     if printers:
         configured, model = printers[0][1], printers[0][0]
@@ -1463,6 +1488,8 @@ def _printer(requested_device, requested_model) -> tuple[str, str]:
             not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
         raise ValueError(f"Unsupported printer: {device}")
     model = drivers.canonical(requested_model) if requested_model else next((m for m, d, _ in printers if d == device), model)
+    if ask and model == 'Unknown' and not is_simulation(device):
+        model = _told_model(device)
     if model not in PRINTER_MODELS:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")

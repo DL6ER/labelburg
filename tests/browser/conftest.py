@@ -40,7 +40,7 @@ def app(tmp_path_factory):
     app.config['LABEL_REPOSITORY_DIR'] = str(repo)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(printer, 'USB_PRINTER_DEVICES', [])
-        patch.setattr(devices, 'found_usb_printers', lambda: [])
+        patch.setattr(devices, 'found_usb_printers', lambda: ([], []))
         patch.setattr(printer, 'ARP_TABLE', os.devnull)
         patch.setattr(printer, 'NETWORK_DISCOVERY', False)
         yield app
