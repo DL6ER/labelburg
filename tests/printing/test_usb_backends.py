@@ -196,17 +196,17 @@ def test_printers_found_that_usblp_does_not_hold(pyusb):
     # On Linux usblp holds it, it is /dev/usb/lp<N>
     held = Device(0x2042, bound=True)
     pyusb.extend([epson, held, Device(0x0081, vendor=0x0a5f, serial='with space')])
-    assert backends.found_printers() == [
+    assert backends.found_printers() == ([
         ('usb://0x04b8:0x0e15/544338592994570000', 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;'),
-        ('usb://0x0a5f:0x0081', '')]
+        ('usb://0x0a5f:0x0081', '')], [])
     assert backends.device_id('usb://0x04b8:0x0e15') == epson.device_id
     assert devices.device_id_fields(epson.device_id)['MDL'] == 'TM-T20II'
     assert devices.device_id_fields('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:GK420t;')['CMD'] == 'ZPL'
 
 
 @pytest.fixture
-def detect(pyusb, tmp_path, monkeypatch):
-    """The printers PRINTER_PRINTER '?' lists, PyUSB faked."""
+def detected(pyusb, tmp_path, monkeypatch):
+    """What the printer status tells with PRINTER_PRINTER '?', PyUSB faked."""
     monkeypatch.setattr(devices, 'found_usb_printers', FOUND_USB_PRINTERS)
     monkeypatch.setattr(devices, '_usb_device_ids', {})
     monkeypatch.setattr(devices, 'status_cache', {})
@@ -215,7 +215,13 @@ def detect(pyusb, tmp_path, monkeypatch):
     monkeypatch.setattr(printer, '_cached_printers', [])
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = '?'
-    return lambda: client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    return lambda: client.get('/labeldesigner/api/printer_status').get_json()
+
+
+@pytest.fixture
+def detect(detected):
+    """The printers PRINTER_PRINTER '?' lists, PyUSB faked."""
+    return lambda: detected()['printers']
 
 
 @pytest.mark.parametrize('error', [USBError(13, 'Access denied (insufficient permissions)'), USBError(5, 'Input/Output Error')])
@@ -226,7 +232,7 @@ def test_printer_pyusb_cannot_open_is_left_out(pyusb, error):
     held = Device(0x2042, serial=None)
     held.is_kernel_driver_active = unopened
     pyusb.extend([held, Device(0x209c, serial='C2')])
-    assert backends.found_printers() == [('usb://0x04f9:0x209c/C2', '')]
+    assert backends.found_printers() == ([('usb://0x04f9:0x209c/C2', '')], [])
 
 
 def test_brother_office_printer_is_not_listed(detect, pyusb):
@@ -242,6 +248,23 @@ def test_vc500w_on_pyusb_is_not_listed(detect, pyusb):
     assert [p['path'] for p in detect()] == ['simulation']
 
 
+def test_printer_linux_shares_over_usbip_is_left_alone(detected, pyusb, tmp_path, monkeypatch):
+    # usbip-host holds the device, no driver holds its printer interface
+    usbip_host = tmp_path / 'usbip-host'
+    (usbip_host / '3-2').mkdir(parents=True)
+    monkeypatch.setattr(backends, 'USBIP_HOST', str(usbip_host))
+    monkeypatch.setattr(brother_usb, 'query_status', lambda device, model='Unknown': {'path': device, 'model': 'QL-700', 'errors': []})
+    shared, other = Device(0x20a7, serial='000H4G871616'), Device(0x2042, serial='000B2')
+    shared.bus, shared.port_numbers = 3, (2,)
+    other.bus, other.port_numbers = 1, (4, 1)
+    pyusb.extend([shared, other])
+    assert backends.found_printers() == ([('usb://0x04f9:0x2042/000B2', '')], ['3-2'])
+    status = detected()
+    assert [p['path'] for p in status['printers']] == ['usb://0x04f9:0x2042/000B2', 'simulation']
+    assert status['hints'] == ['The printer at USB port 3-2 is shared over USB/IP. To print on it here too, add it as usbip://localhost/3-2']
+    assert shared.calls == [] and shared.endpoints[1].written == []
+
+
 def test_printer_without_winusb_is_left_out(pyusb, monkeypatch):
     # On Windows libusb cannot open a printer that has a driver of its own
     def get_string(device, index):
@@ -250,7 +273,7 @@ def test_printer_without_winusb_is_left_out(pyusb, monkeypatch):
         return device.serial
     monkeypatch.setattr(sys.modules['usb.util'], 'get_string', get_string)
     pyusb.extend([Device(0x2042, serial=None), Device(0x209c, serial='C2')])
-    assert backends.found_printers() == [('usb://0x04f9:0x209c/C2', '')]
+    assert backends.found_printers() == ([('usb://0x04f9:0x209c/C2', '')], [])
 
 
 def test_label_printers_on_pyusb_are_listed(detect, pyusb, monkeypatch):
@@ -273,7 +296,7 @@ def test_device_id_asked_once(pyusb, monkeypatch):
     epson.ctrl_transfer = lambda *args: asked.append(args) or ctrl_transfer(*args)
     pyusb.append(epson)
     # The detection keeps the device ID it read
-    assert devices.found_usb_printers() == ['usb://0x04b8:0x0e15/5443']
+    assert devices.found_usb_printers() == (['usb://0x04b8:0x0e15/5443'], [])
     assert escpos.DRIVER.model_of('usb://0x04b8:0x0e15/5443') == 'Epson/ESC-POS'
     assert len(asked) == 1
     # Configured without serial number: asked once, then kept

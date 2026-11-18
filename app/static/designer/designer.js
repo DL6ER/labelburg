@@ -68,6 +68,11 @@ function toast(text, action, ms = 0) {
     toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
 }
 
+function hideToast() {
+    clearTimeout(toastTimer);
+    $('#toast').hidden = true;
+}
+
 // In the editor over the label preview, above the cutting shown below the
 // label and the large preview button
 function placeToast(el) {
@@ -103,7 +108,8 @@ const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
 // Models other than Brother ones are named with their maker, e.g. PUQU/Q00
-const modelOnly = model => capsOf(model).model_shown || (model || '').split('/').pop();
+// A printer that has not told its model yet is named "Printer"
+const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 
 function sizeName(id) {
@@ -856,6 +862,8 @@ function fitsTape(sizeId) {
 // another one as setSize() places it, not scaled. Where the printer does not
 // say which tape it has, labels keep their own.
 const tapeKnown = () => !S.tapeAssumed && !!SIZES[S.tape];
+// The tape the printer reports, which is not set by hand
+const tapeReported = () => tapeKnown() && !S.tapeManual;
 // A label of the size of the tape only takes its name, e.g. that of black
 // and red tape. One for black and red keeps it where the printer cannot
 // tell whether its roll has red.
@@ -958,19 +966,21 @@ function printerTakes(s) {
 
 function detectTape() {
     const p = S.printer;
+    // The server tells the label size of the tape the printer reports, or
+    // the one it assumes without
+    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
     // What the printer reported says nothing about a tape set by hand
     S.tapeUnknown = '';
     S.tapeRedUnknown = false;
-    if (SIZES[manualTape()]) {
+    // A tape set by hand counts only where the printer reports none, the
+    // printer refuses a job for another roll
+    if (!found && SIZES[manualTape()]) {
         S.tape = manualTape();
         S.tapeAssumed = false;
         S.tapeManual = true;
         return;
     }
     S.tapeManual = false;
-    // The server tells the label size of the tape the printer reports, or
-    // the one it assumes without
-    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
     // Only the QL-800 series tells whether a roll is black and red
     S.tapeRedUnknown = !!found && !found.red && p.red_roll == null;
     if (p && p.media_width && !found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
@@ -1008,6 +1018,8 @@ function printerState(p) {
     // Still being asked, e.g. a printer on Bluetooth that takes a few seconds
     if (p.status_type === 'Asking the printer') return { cls: 'off', text: 'Asking the printer…' };
     if (p.job) return { cls: '', text: jobText(p.job) };
+    // Busy without a job of this server, e.g. with one of another program
+    if (p.status_type === 'Printing') return { cls: '', text: 'Printing' };
     if (/simulat/i.test(p.status_type || p.phase_type || '')) return { cls: '', text: 'Ready (simulated)' };
     return { cls: '', text: 'Ready' };
 }
@@ -1017,7 +1029,7 @@ function renderPrinterChip() {
     const st = printerState(S.printer);
     // Phones show the model only, a printer named in PRINTERS its name
     const vendor = S.printer && !S.printer.name && capsOf(S.printer.model).vendor;
-    chip.innerHTML = `<span class="dot ${st.cls}"></span><b>${vendor ? `<span class="vendor">${esc(vendor)} </span>` : ''}${esc(S.printer ? (S.printer.name || modelOnly(S.printer.model)) : 'No printer')}</b>${tapeKnown() ? `<span class="tape">${esc(sizeName(S.tape))}</span>` : ''}`;
+    chip.innerHTML = `<span class="dot ${st.cls}"></span><b>${vendor ? `<span class="vendor">${esc(vendor)} </span>` : ''}${esc(S.printer ? (S.printer.name || modelOnly(S.printer.model) || 'Printer') : 'No printer')}</b>${tapeKnown() ? `<span class="tape">${esc(sizeName(S.tape))}</span>` : ''}`;
     // A long name is cut short in the chip
     chip.title = S.printer && S.printer.name ? `${S.printer.name}: ${st.text}` : st.text;
     // The printer on the stages shows the same, they are drawn again only
@@ -1077,6 +1089,8 @@ async function printJob(job) {
 }
 
 function announce(entry) {
+    // "Printing..." is over
+    hideToast();
     const n = entry.copies;
     const what = `${n} ${n === 1 ? 'label' : 'labels'}`;
     if (entry.state === 'printed') {
@@ -2691,9 +2705,10 @@ function tapeLine(d) {
     const note = S.tapeUnknown ? `<span class="tape-note warn">${who} reports ${esc(S.tapeUnknown)} tape, which is not offered here.</span>`
         : !tapeKnown() ? `<span class="tape-note warn">${who} does not say which tape it has.</span>`
         : `<span class="tape-note ok"><i class="fa-solid fa-check"></i> ${S.tapeManual ? 'Set in the printer settings' : 'In the printer'}${tapeLeft(S.printer) ? ', ' + esc(tapeLeft(S.printer)) : ''}</span>`;
-    return `${note}<div class="field tape-line"><span class="grow">${esc(sizeName(d.label_size))}</span><button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button></div>`;
+    const change = tapeReported() ? '' : `<button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button>`;
+    return `${note}<div class="field tape-line"><span class="grow">${esc(sizeName(d.label_size))}</span>${change}</div>`;
 }
-const bindTapeLine = () => { $('#edTapeChange').onclick = () => openPrinterPanel(); };
+const bindTapeLine = () => { const b = $('#edTapeChange'); if (b) b.onclick = () => openPrinterPanel(); };
 
 // The length of an endless label as cut, next to the tape, where the server
 // offers one for the tape. Die-cut labels have their own, it shows as the hint.
@@ -3553,7 +3568,8 @@ function bindPrinterPanel() {
         redraw();
     });
     $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
-    $('#setTape', box).onchange = e => saveSettings({ label_size: e.target.value });
+    const setTape = $('#setTape', box);
+    if (setTape) setTape.onchange = e => saveSettings({ label_size: e.target.value });
     // Of this browser only
     const keepHere = () => { store(own('designer_settings'), S.settings); tapeChanged = true; redraw(); };
     $('#setDate', box).onchange = e => { S.settings.dateFmt = e.target.value; keepHere(); };
@@ -3585,11 +3601,13 @@ function settingsCard() {
     const assumed = `Labels keep their own size, new ones are ${esc(sizeName(S.tape))}.`;
     const note = S.tapeManual ? 'Set by hand.' : S.tapeUnknown ? `The printer reports ${S.tapeUnknown} tape, which is not offered here. ${assumed}`
         : S.tapeAssumed ? `The printer does not report its tape. ${assumed}` : 'Read from the printer.';
-    return `<div class="settings">
-        <div><label class="label-s" for="setTape">Tape in the printer</label>
-            <select class="field" id="setTape"><option value="">Automatic${S.tapeManual || S.tapeAssumed ? '' : ': ' + esc(sizeName(S.tape))}</option>
+    const tapeField = tapeReported() ? `<span class="label-s">Tape in the printer</span><div id="ppTape">${esc(sizeName(S.tape))}</div>`
+        : `<label class="label-s" for="setTape">Tape in the printer</label>
+            <select class="field" id="setTape"><option value="">Automatic</option>
             ${sizeOptions(manualTape(), x => esc(sizeName(x.id)))}
-            </select><span class="muted small">${note}</span></div>
+            </select>`;
+    return `<div class="settings">
+        <div>${tapeField}<span class="muted small" id="ppTapeNote">${note}</span></div>
         <div><div class="row" style="gap:.35rem;margin-bottom:.3rem"><span class="label-s" style="margin:0">Quality</span>
             <button type="button" class="info-btn" id="qInfoBtn" aria-expanded="${!!S.qualityInfo}" aria-controls="qInfo" title="About the quality settings"><i class="fa-solid fa-circle-info"></i><span class="sr-only">About the quality settings</span></button></div>
             <div class="seg">

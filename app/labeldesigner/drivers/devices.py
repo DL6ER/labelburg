@@ -165,16 +165,18 @@ def device_id_fields(device_id: str) -> dict:
     return fields
 
 
-def found_usb_printers() -> list[str]:
+def found_usb_printers() -> tuple[list[str], list[str]]:
     """The printers PyUSB finds that no driver of the kernel holds, as
-    usb://..., their device IDs kept."""
+    usb://..., their device IDs kept, and the bus IDs of those Linux shares
+    over USB/IP."""
     from . import backends
     found = []
-    for spec, told in backends.found_printers():
+    printers, shared = backends.found_printers()
+    for spec, told in printers:
         if told:
             _usb_device_ids[_usb_key(spec)] = told
         found.append(spec)
-    return found
+    return found, shared
 
 
 def _private_lock_dir() -> str:
@@ -264,16 +266,22 @@ def device_lock(device_specifier: str, timeout: float | None = None):
         os.close(fd)
 
 
+# Errors of a device file or USB device without a printer behind it
+NOT_THERE = (errno.ENOENT, errno.ENODEV, errno.ENXIO)
+
 # Why a printer did not answer, in the words of those who use it. The error
 # itself is logged where it is caught.
 _UNANSWERED = (
-    ((errno.ENOENT, errno.ENODEV, errno.ENXIO), 'The printer is switched off or not connected'),
+    (NOT_THERE, 'The printer is switched off or not connected'),
     ((errno.EACCES, errno.EPERM), 'No permission to use the printer'),
     ((errno.EBUSY,), 'The printer is in use by another program'),
     ((errno.ETIMEDOUT,), 'The printer does not answer'),
     ((errno.ECONNREFUSED,), 'The printer refuses the connection'),
     ((errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN), 'The printer cannot be reached'),
 )
+NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
+NOT_SENT = 'Could not send the label to the printer'
+NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
 
 
 def unanswered_reason(error: Exception) -> str:
@@ -283,11 +291,30 @@ def unanswered_reason(error: Exception) -> str:
     if isinstance(error, TimeoutError):
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
-        return 'Printers on usb:// need libusb, please install it'
+        return NO_LIBUSB
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
     return ''
+
+
+def not_sent(error: Exception) -> str:
+    """Why a label could not be sent to the printer, in plain words."""
+    reason = unanswered_reason(error)
+    if reason:
+        return f'{NOT_SENT}: {reason}'
+    return NOT_SENT_LOGGED
+
+
+def not_sent_messages() -> tuple[str, ...]:
+    """Every text not_sent() gives, for the fixed messages of refusals.py."""
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB])
+    return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
+
+
+def shared_over_usbip(bus_id: str) -> str:
+    """The hint for a printer Linux shares over USB/IP, which is left alone."""
+    return f'The printer at USB port {bus_id} is shared over USB/IP. To print on it here too, add it as usbip://localhost/{bus_id}'
 
 
 def unanswered(error: Exception) -> str:

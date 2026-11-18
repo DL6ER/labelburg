@@ -193,7 +193,7 @@ def test_found_by_its_device_id(client, monkeypatch):
     # Another Epson is no receipt printer
     assert escpos.DRIVER.model_of('usb://0x04b8:0x0202') is None
     # Found on USB by the label designer, without PRINTERS
-    monkeypatch.setattr(devices, 'found_usb_printers', lambda: list(told))
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: (list(told), []))
     monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
     monkeypatch.setattr(printer, '_last_scan_ts', 0)
     monkeypatch.setattr(printer, '_cached_printers', [])

@@ -20,6 +20,8 @@ from .label_names import check_label_size
 
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
 
+BUSY = 'Printer is busy with another print job, please try again'
+
 # Number of simulated labels kept in SIMULATED_LABELS_DIR, older ones are
 # deleted so that printing to the simulator cannot fill up the disk
 MAX_SIMULATED_LABELS = 100
@@ -132,7 +134,7 @@ class PrinterQueue:
         with lock as acquired:
             if not acquired:
                 logger.warning('Printer %s is busy with another job', self.device_specifier)
-                return "Printer is busy with another print job, please try again"
+                return BUSY
             logger.info('Printing %d labels', len(entries))
             job = self.driver.render(self, entries, _Simulator() if simulation else None)
             if simulation:
@@ -321,12 +323,13 @@ def get_ptr_status(config: Config):
                 specs = [f"file://{dev}" for dev in USB_PRINTER_DEVICES if os.path.exists(dev)]
                 hints = []
                 try:
-                    found_usb = devices.found_usb_printers()
+                    found_usb, shared = devices.found_usb_printers()
                 except NoLibusb as e:
                     # Told once below the printers, which are still listed
                     logger.debug('No printers through PyUSB', exc_info=True)
-                    found_usb = []
+                    found_usb, shared = [], []
                     hints.append(devices.unanswered_reason(e))
+                hints += [devices.shared_over_usbip(bus_id) for bus_id in shared]
                 for spec in found_usb:
                     fields = devices.device_id_fields(devices.usb_device_id(spec))
                     driver, model = drivers.resolve(spec, fields.get('MDL', 'Unknown'))
@@ -348,6 +351,11 @@ def get_ptr_status(config: Config):
                         found_list.append(printer_state)
                         logger.debug('Found compatible printer at %s -> %s', spec, printer_state.get('model'))
                     except Exception as e:
+                        # A device file left without a printer, e.g. in a
+                        # container that copied /dev when it started
+                        if getattr(e, 'errno', None) in devices.NOT_THERE:
+                            logger.debug('No printer at %s: %s', spec, e)
+                            continue
                         # Keep the printer in the list with the error, otherwise
                         # the label designer switches to another printer (often
                         # the simulator) without telling why
@@ -398,8 +406,9 @@ def get_ptr_status(config: Config):
             if not any(p.get('path') == 'simulation' for p in printers):
                 printers.append(sim)
             if printers:
-                # Use first detected printer as default top-level status for backward compatibility
-                first = printers[0]
+                # The default is the first printer that answered, else the
+                # first listed: never the simulator while a printer is listed
+                first = next((p for p in printers if not p.get('errors') and p.get('path') != 'simulation'), printers[0])
                 for key, value in first.items():
                     status[key] = value
                 return {
