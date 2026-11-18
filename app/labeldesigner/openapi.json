@@ -1869,7 +1869,7 @@
     "/labeldesigner/api/homebox": {
       "get": {
         "summary": "Label for Homebox",
-        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the demo label \"Homebox\" placed on the tape in the printer: its QR code of `URL` next to `TitleText`, `DescriptionText` and `AdditionalInformation`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at its resolution; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the demo label \"Homebox\" placed on the tape in the printer, or on the one set in its printer settings: its QR code of `URL` next to `TitleText`, `DescriptionText` and `AdditionalInformation`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
         "operationId": "homeboxLabel",
         "parameters": [
           {
@@ -1941,7 +1941,7 @@
       },
       "post": {
         "summary": "Print a label of Homebox",
-        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it.",
+        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it. The quality, the cutting and which end leaves first are as set for the printer.",
         "operationId": "homeboxPrint",
         "parameters": [],
         "requestBody": {
@@ -2002,7 +2002,7 @@
     "/labeldesigner/api/homebox/{name}": {
       "get": {
         "summary": "Label for Homebox, from a saved label",
-        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the saved label `name`, its blanks named like the fields filled with them, e.g. `{{blank:TitleText}}`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at its resolution; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the saved label `name`, its blanks named like the fields filled with them, e.g. `{{blank:TitleText}}`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
         "operationId": "homeboxLabelNamed",
         "parameters": [
           {
@@ -2083,7 +2083,7 @@
       },
       "post": {
         "summary": "Print a label of Homebox on the size of a saved label",
-        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it.",
+        "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it. The quality, the cutting and which end leaves first are as set for the printer.",
         "operationId": "homeboxPrintNamed",
         "parameters": [
           {

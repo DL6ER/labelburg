@@ -11,6 +11,7 @@ from tests.helpers import make_client, pixels
 from tests.repository.helpers import SAVE_URL
 
 URL = '/labeldesigner/api/homebox'
+SETTINGS_URL = '/labeldesigner/api/settings'
 DEMO = 'storage/013-homebox-62.json'
 # What Homebox 0.27 sends to its external label service
 # (HBOX_LABEL_MAKER_LABEL_SERVICE_URL) for an item, with its default sizes
@@ -35,11 +36,12 @@ def client(tmp_path):
 
 @pytest.fixture
 def queued(monkeypatch):
-    """The labels printed, and the label size of their job."""
+    """The labels printed, and the label size of their job. Each label tells
+    how it was printed and its job."""
     labels = []
 
     def add(self, label, high_res=False, fast=False):
-        label.high_res = high_res
+        label.high_res, label.fast, label.job = high_res, fast, self
         labels.append((self.label_size, label))
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', add)
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
@@ -183,3 +185,48 @@ def test_homebox_prints_a_saved_label_at_its_resolution(client, queued):
     printed = io.BytesIO()
     printed_label.generate().save(printed, 'PNG')
     assert pixels(printed.getvalue()) == pixels(image)
+
+
+def _printed(label) -> bytes:
+    printed = io.BytesIO()
+    label.generate().save(printed, 'PNG')
+    return printed.getvalue()
+
+
+def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
+    # As in the label designer, a tape set in the printer settings rather
+    # than the one the printer reports
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=62))
+    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert _size(image) == (991, 306)
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, label)] = queued
+    assert label_size == '29x90'
+    assert pixels(_printed(label)) == pixels(image)
+
+
+@pytest.mark.parametrize('quality, high_res, fast', [('high', True, False), ('fast', False, True), ('quality', False, False)])
+def test_homebox_prints_in_the_quality_set_for_the_printer(client, queued, quality, high_res, fast):
+    # Also a label saved in the label designer, which saves high_res 0
+    label = {'name': 'Bin', 'label_size': '62', 'print_type': 'text', 'high_res': '0', 'fast_printing': '1',
+             'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
+    assert client.post(SAVE_URL, json=label).status_code == 200
+    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'quality': quality}).status_code == 200
+    for name in ('', '/Bin'):
+        queued.clear()
+        image = client.get(URL + name, query_string=HOMEBOX_QUERY).data
+        assert client.post(URL + name, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+        [(_, printed)] = queued
+        assert (printed.high_res, printed.fast) == (high_res, fast)
+        # Made and printed at the same resolution, dot for dot
+        assert pixels(_printed(printed)) == pixels(image)
+
+
+def test_homebox_cuts_and_leaves_first_as_set_for_the_printer(client, queued):
+    settings = {'printer': 'simulation', 'cut': 'none', 'leaves_first': 'bottom'}
+    assert client.post(SETTINGS_URL, data=settings).status_code == 200
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(_, label)] = queued
+    assert (label.job.cut, label.job.leaves_first) == ('none', 'bottom')

@@ -2278,12 +2278,24 @@ HOMEBOX_NO_IMAGE = 'Send the label as an image, e.g. the file Homebox made'
 
 def _homebox_printer() -> tuple[str, str, str]:
     """The printer labels for Homebox are made for, the first one as in the
-    label designer: its device, model and the label size of its tape."""
+    label designer: its device, model and the label size of its tape, as in
+    the label designer one set by hand before the one the printer reports."""
     status = get_ptr_status(current_app.config)
     printers = status.get('printers') or [status]
     chosen = next((p for p in printers if p.get('path') == status.get('selected')), printers[0])
-    label_size, _ = printer_label_size(chosen, current_app.config['LABEL_DEFAULT_SIZE'])
+    label_size = printer_settings.of_printer(_kept_settings(), chosen.get('path') or '').get('label_size')
+    if not any(label.identifier == label_size for label in LABELS):
+        label_size, _ = printer_label_size(chosen, current_app.config['LABEL_DEFAULT_SIZE'])
     return chosen.get('path'), chosen.get('model'), label_size
+
+
+def _as_set_for_printer(data: dict, device: str, model: str) -> dict:
+    """A label as printed on the printer: in the quality and leaving first
+    as set in its printer settings rather than as saved with the label, cut
+    as set there where the label leaves it out."""
+    own = {key: value for key, value in data.items() if key not in ('high_res', 'fast_printing', 'leaves_first')}
+    kept = printer_settings.for_printing(_kept_settings(), device, model, own)
+    return {**{key: value for key, value in data.items() if key != 'leaves_first'}, **kept}
 
 
 def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes | None]:
@@ -2322,6 +2334,8 @@ def homebox(name: str | None = None):
     try:
         device, model, label_size = _homebox_printer()
         data, image_dir, image_bytes = _homebox_label(name, label_size)
+        # Made as printed, at the resolution of the quality set
+        data = _as_set_for_printer(data, device, model)
     except FileNotFoundError:
         return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     except LabelsBusy:
@@ -2344,7 +2358,7 @@ def homebox(name: str | None = None):
         printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size)
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
-        printer.leaves_first = _leaves_first(_requested('leaves_first'))
+        printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))
         kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
         if _label_type(kind) == LabelType.ENDLESS_LABEL:
             orientation = _along_endless_tape(img, label_size, high_res)

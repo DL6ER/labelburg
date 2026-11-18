@@ -18,7 +18,7 @@ Labels of Homebox's own label templates go through the same print command, Label
 
 ## The label
 
-Without more, Homebox gets the demo label "Homebox" from the storage category: the QR code next to the name, where the item is and the text of `HBOX_LABEL_MAKER_ADDITIONAL_INFORMATION`, if set. It is placed on the tape in the printer, along endless tape and across die-cut labels.
+Without more, Homebox gets the demo label "Homebox" from the storage category: the QR code next to the name, where the item is and the text of `HBOX_LABEL_MAKER_ADDITIONAL_INFORMATION`, if set. It is placed on the tape in the printer, or on the one set in the printer settings, along endless tape and across die-cut labels. Labels are printed in the quality set there, cut and leaving the printer as set there.
 
 To change it, open the demo label in the label designer, change it and save it, e.g., as `Homebox`. Then name it at the end of both addresses: `http://<host>:8013/labeldesigner/api/homebox/Homebox`. Homebox replaces everything after a `?` in the address, so the name goes into the path. A saved label keeps the size it was saved with. These blanks take what Homebox sends:
 
