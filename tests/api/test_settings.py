@@ -2,7 +2,10 @@
 
 import json
 
+import pytest
+
 from app.labeldesigner import printer_settings
+from app.labeldesigner.drivers.devices import lock_key
 
 from tests.helpers import make_client
 
@@ -111,6 +114,17 @@ def test_a_usb_printer_switched_off_keeps_its_settings(tmp_path, monkeypatch):
     client.post(URL, data={**lp0, 'label_size': '29'})
     device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
     assert client.get(URL, query_string=lp0).get_json() == {'label_size': '29'}
+
+
+@pytest.mark.parametrize('device_id', ['MFG:Brother;MDL:QL-800;SN:000F1Z123;', ''], ids=['on', 'switched off'])
+def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, device_id):
+    # Over USB/IP each read is a connection
+    data = {'printers': {'usb:QL-800/000F1Z123': {'label_size': '62'}},
+            'seen': {lock_key('file:///dev/usb/lp0'): 'usb:QL-800/000F1Z123'}}
+    read = []
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: read.append(device) or device_id)
+    assert printer_settings.of_printer(data, 'file:///dev/usb/lp0') == {'label_size': '62'}
+    assert read == ['file:///dev/usb/lp0']
 
 
 def test_a_settings_file_that_cannot_be_read_is_kept(tmp_path, monkeypatch):
