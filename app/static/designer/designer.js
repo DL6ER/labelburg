@@ -259,20 +259,24 @@ function formatDate(iso, fmt = dateFormat()) {
 }
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
-// moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
+// moved, e.g., [today+5d]), [now] for a date with its time (also moved,
+// e.g., [now+2h]), [counter] (also with a start and step, e.g.,
 // [counter:001:5]), [ASN] (also with digits, e.g., [ASN:5]) and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+(?:min|[hdwmy]))?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
-    if (m[2]) return `[today${m[3] || ''}]`;
+    if (m[2]) return `[${/%[HIMp]/.test(m[0]) ? 'now' : 'today'}${m[3] || ''}]`;
     if (m[0].startsWith('{{counter')) return `[counter${m[4] || ''}]`;
     if (m[0].startsWith('{{asn')) return `[ASN${m[5] || ''}]`;
     return '[id]';
 }
 // [today], or a day moved from it as typed, e.g., [today+5d] or [today + 2
-// weeks]: the offset as the server takes it, e.g., +5d or +2w
-const TODAY_RE = /^today(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?))?$/i;
-const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
+// weeks], or [now], the date and time, e.g., [now+2h] or [now+30min]: the
+// offset as the server takes it, e.g., +5d, +2w, +2h or +30min
+const TODAY_RE = /^(?:today|now)(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?|h|hours?|min|minutes?))?$/i;
+const offsetOf = m => m[1] ? m[1] + m[2] + (/^min/i.test(m[3]) ? 'min' : m[3][0].toLowerCase()) : '';
+// [now], or a date moved by hours or minutes, shows its time too
+const withTime = m => /^now/i.test(m[0]) || (!!m[3] && /^(h|min)/i.test(m[3]));
 // [counter], or one with a start and a step as typed, e.g., [counter:001:5]
 // or [Counter : A]
 const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
@@ -323,7 +327,12 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         if (own) return own.template;
         const n = name.trim();
         const day = n.match(TODAY_RE);
-        if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
+        if (day) {
+            let format = formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat();
+            // The format of another date, with the time only where this one has it
+            if (/%[HIMp]/.test(format) !== withTime(day)) format = withTime(day) ? format + ' %H:%M' : dateFormat();
+            return `{{datetime${offsetOf(day)}:${format}}}`;
+        }
         const counter = n.match(COUNTER_RE);
         if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
         const asn = n.match(ASN_RE);
@@ -1912,7 +1921,8 @@ function varsHelpHTML() {
         <ul>
             <li><code>[Name]</code> - a blank: whoever prints the label fills it in, in the editor or in the wizard. A name ending in "on" or containing "date" (like <code>[Frozen on]</code>) asks for a date, <code>[Box]</code>, <code>[Number]</code>, <code>[Portions]</code> and <code>[Count]</code> ask for a number, every other name for text.</li>
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
-            <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
+            <li><code>[now]</code> - the date and the time, e.g., when food was prepared, and counted from now like a date, e.g., <code>[now+2h]</code>.</li>
+            <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now, or h for hours or min for minutes with the time, e.g., <code>[now+30min]</code>.</li>
             <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
             <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx: each label gets the next free one, also when labels are printed again before their documents are scanned. <code>[ASN:5]</code> writes it with 5 digits, e.g., 00042.</li>
             <li><code>[id]</code> - a short random ID.</li>
