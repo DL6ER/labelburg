@@ -129,6 +129,8 @@ ENV_OVERRIDES = {
     'PROXY_COUNT': _non_negative_int,
     'FONT_FOLDER': str,
     'SYSTEM_FONTS': _bool,
+    'PAPERLESS_URL': str,
+    'PAPERLESS_TOKEN': str,
 }
 
 

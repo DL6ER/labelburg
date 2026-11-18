@@ -5,7 +5,7 @@ import struct
 
 import pytest
 
-from app.labeldesigner.drivers import devices, niimbot
+from app.labeldesigner.drivers import devices, niimbot, progress
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client
 
@@ -86,6 +86,19 @@ def test_label_is_printed_in_the_order_of_the_script(client, fake):
     rows = [c for c in fake.commands if c in (0x84, 0x85)]
     sent = [c for c in fake.commands if c not in (0x84, 0x85)]
     assert rows and sent == [0xdc, 0x1a, 0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
+
+
+def test_labels_are_counted_while_printing(client, fake):
+    # Noted at the start of each label
+    seen = []
+    send = fake.sendall
+    fake.sendall = lambda data: (data[2] == 0x01 and seen.append(progress.state(DEVICE))) or send(data)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT, 'print_count': '3'})
+    assert response.get_json() == {'success': True}
+    assert [(state['label'], state['labels']) for state in seen] == [(1, 3), (2, 3), (3, 3)]
+    assert all(state['seconds_left'] >= 0 for state in seen)
+    assert progress.state(DEVICE) is None
 
 
 def test_rows_are_as_wide_as_the_label_across_the_printhead():

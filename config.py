@@ -65,6 +65,11 @@ class Config(object):
     # WEBHOOK_PASSWORD.
     LABEL_TEMPLATE_ENV_VARS = ''
 
+    # Paperless-ngx, where {{asn}} takes the next archive serial number from,
+    # and an API token of a user there
+    PAPERLESS_URL = ''
+    PAPERLESS_TOKEN = ''
+
     # Maximum number of labels a single print request may produce
     PRINT_MAX_COUNT = 100
 

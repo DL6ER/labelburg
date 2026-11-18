@@ -19,6 +19,10 @@ from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problem
 from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, resolution_problem
+from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
+from .printer_settings import SETTINGS_MESSAGE, TOO_MANY_PRINTERS
+
+SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
 # A detected printer whose status names no model this server knows
@@ -33,6 +37,9 @@ FIELDS_MESSAGE = ('fields must be a JSON object with the settings of each blank:
 # Errors whose text is sent as it is
 MESSAGES = (
     'Unsupported file type',
+    PAPERLESS_UNREACHABLE,
+    PAPERLESS_REFUSED,
+    ASN_BUSY,
     'Cannot read the page size of the PDF',
     'Unknown label_size',
     'Font size is required',
@@ -54,6 +61,8 @@ MESSAGES = (
     TAGS_LIMIT,
     TAGS_MISSING,
     FIELDS_MESSAGE,
+    SETTINGS_MESSAGE,
+    TOO_MANY_PRINTERS,
     'image_position must be above, below, left or right',
     'label_length must be a length in millimeters or empty',
     *label_length_problems(),

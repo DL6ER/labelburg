@@ -62,9 +62,24 @@ function toast(text, action, ms = 0) {
     const el = $('#toast');
     el.innerHTML = esc(text) + (action ? ` <button class="btn sm quiet" style="color:inherit;text-decoration:underline" type="button">${esc(action.label)}</button>` : '');
     el.hidden = false;
+    placeToast(el);
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; action.run(); };
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
+}
+
+// In the editor over the label preview, above the cutting shown below the
+// label and the large preview button
+function placeToast(el) {
+    Object.assign(el.style, { left: '', bottom: '', maxWidth: '' });
+    const stage = $('#edStage');
+    if (!stage || !stage.offsetParent) return;
+    const box = stage.getBoundingClientRect();
+    if (box.width < innerWidth - 1) Object.assign(el.style, { left: `${box.left + box.width / 2}px`, maxWidth: `${box.width - 32}px` });
+    const t = el.getBoundingClientRect();
+    const covered = [...stage.querySelectorAll('.cuts, .zoom')].map(c => c.getBoundingClientRect())
+        .filter(r => r.width && t.left < r.right && r.left < t.right && t.top < r.bottom && r.top < t.bottom);
+    if (covered.length) el.style.bottom = `${innerHeight - Math.min(...covered.map(r => r.top)) + 8}px`;
 }
 
 function fmtTime(ts) {
@@ -83,7 +98,7 @@ const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].m
 // ZINK tape of the VC-500W, which prints in any color
 const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 // What the server's driver of a printer model offers, see Driver.capabilities()
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, job_stages: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false };
 const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
@@ -245,12 +260,13 @@ function formatDate(iso, fmt = dateFormat()) {
 
 // Templates as text fields show them: [Name] for a blank, [today] (also
 // moved, e.g., [today+5d]), [counter] (also with a start and step, e.g.,
-// [counter:001:5]) and [id]
-const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|short-uuid)\}\}/g;
+// [counter:001:5]), [ASN] (also with digits, e.g., [ASN:5]) and [id]
+const TEMPLATE_RE = /\{\{(?:blank:([^}]+)|(datetime)([+-]\d+[dwmy])?:[^}]+|counter(:[0-9A-Za-z]+(?::-?\d+)?)?|asn(:\d{1,2})?|short-uuid)\}\}/g;
 function shownAs(m) {
     if (m[1] !== undefined) return `[${m[1]}]`;
     if (m[2]) return `[today${m[3] || ''}]`;
     if (m[0].startsWith('{{counter')) return `[counter${m[4] || ''}]`;
+    if (m[0].startsWith('{{asn')) return `[ASN${m[5] || ''}]`;
     return '[id]';
 }
 // [today], or a day moved from it as typed, e.g., [today+5d] or [today + 2
@@ -260,8 +276,10 @@ const offsetOf = m => m[1] ? m[1] + m[2] + m[3][0].toLowerCase() : '';
 // [counter], or one with a start and a step as typed, e.g., [counter:001:5]
 // or [Counter : A]
 const COUNTER_RE = /^counter(?:\s*:\s*([0-9A-Za-z]+)(?:\s*:\s*(-?\d+))?)?$/i;
+// [ASN], or one with digits as typed, e.g., [ASN:5] or [asn : 5]
+const ASN_RE = /^asn(?:\s*:\s*(\d{1,2}))?$/i;
 // Names of variables, a blank cannot have them
-const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || /^id$/i.test(n);
+const isVariable = n => TODAY_RE.test(n) || COUNTER_RE.test(n) || ASN_RE.test(n) || /^id$/i.test(n);
 // The text as its field shows it, and where each template is shown
 function displayed(text) {
     text = String(text || '');
@@ -308,6 +326,8 @@ function fromDisplay(text, previous = '', caret = null, inOrder = false) {
         if (day) return `{{datetime${offsetOf(day)}:${formats.length ? formats[Math.min(k++, formats.length - 1)] : dateFormat()}}}`;
         const counter = n.match(COUNTER_RE);
         if (counter) return `{{counter${counter[1] ? ':' + counter[1] : ''}${counter[2] ? ':' + counter[2] : ''}}}`;
+        const asn = n.match(ASN_RE);
+        if (asn) return `{{asn${asn[1] ? ':' + asn[1] : ''}}}`;
         if (n.toLowerCase() === 'id') return '{{short-uuid}}';
         return `{{blank:${n}}}`;
     });
@@ -365,7 +385,7 @@ function b64ToBlob(b64, mime) {
 }
 
 // 600 dpi, if chosen and the printer can print it
-const highRes = () => S.settings.quality === 'high' && (!S.printer || printerCaps().high_res);
+const highRes = () => kept().quality === 'high' && (!S.printer || printerCaps().high_res);
 // The dots of a label size per inch as the server tells, e.g. 180 on TZe
 // tape, 300 or 600 on DK rolls
 const dpiOf = (labelSize, high = highRes()) => SIZES[labelSize] ? SIZES[labelSize].dpi[high ? 1 : 0] : 300 * (high ? 2 : 1);
@@ -390,11 +410,10 @@ const noCutter = k => k.cutter === false;
 const noCutterWhy = k => k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
 const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
-// Printers without a setting of their own cut as set before for all
-const printerCut = () => usableCut(Object.assign({ cut: S.settings.cut || 'each', half_cut: '1', chain: '0' }, (S.settings.cuts || {})[printerKey()]), printerCaps());
+const printerCut = () => { const k = kept(); return usableCut({ cut: k.cut || 'each', half_cut: k.half_cut || '1', chain: k.chain || '0' }, printerCaps()); };
 // The end of the labels that leaves the printer first, set for each printer,
 // else as its driver prints them
-const leavesSet = () => (S.settings.leaves || {})[printerKey()] || '';
+const leavesSet = () => kept().leaves_first || '';
 const leavesFirst = (k = printerCaps()) => leavesSet() || (k.leaves_turned ? 'top' : 'bottom');
 // A label on the tape in the printer with its ends named, to see which one
 // comes out first, at its left and right end where it leaves sideways
@@ -495,7 +514,7 @@ function formFor(design, copies = 1, forPrint = false, values = null, marks = fa
     // resolution as well
     fd.set('high_res', highRes() ? '1' : '0');
     if (forPrint) {
-        fd.set('fast_printing', S.settings.quality === 'fast' ? '1' : '0');
+        fd.set('fast_printing', kept().quality === 'fast' ? '1' : '0');
         fd.set('collate', collated() ? '1' : '0');
         const c = cutOf(design);
         fd.set('cut', c.cut);
@@ -764,8 +783,9 @@ const S = {
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
     fitsOnly: true,
     libCatChosen: false, typedGen: 0,
-    // tapes: the tape set by hand for each printer
-    settings: Object.assign({ quality: 'quality', cut: 'each', tapes: {}, dateFmt: '', largePreview: false }, load(own('designer_settings'), {})),
+    // Of this browser: the order of copies, the date format and the large
+    // preview, the settings of the printer are kept on the server
+    settings: (({ collate, dateFmt, largePreview }) => ({ collate, dateFmt, largePreview: !!largePreview }))(load(own('designer_settings'), {})),
     wizardText: '',
     libCat: 'saved', libSel: null,
     fillValues: {},
@@ -860,11 +880,18 @@ const madeDesign = E => unchangedSincePlaced(E) ? Object.assign({}, E.design, E.
 
 // look: also look for Bluetooth printers that did not answer before, which
 // the status every 20 s leaves alone
+// Changes of the printer settings on their way to the server, and those it
+// answered: a status asked for before keeps the settings as shown
+let settingsPending = 0, settingsAnswered = 0;
 async function refreshPrinters(look = false) {
     try {
+        const answered = settingsAnswered;
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
-        S.printers = Array.isArray(data.printers) ? data.printers : [data];
+        const printers = Array.isArray(data.printers) ? data.printers : [data];
+        if (settingsPending || answered !== settingsAnswered)
+            printers.forEach(p => { const shown = [S.printer, ...S.printers].find(o => o && o.path === p.path); if (shown) p.settings = shown.settings; });
+        S.printers = printers;
         S.printerHints = Array.isArray(data.hints) ? data.hints : [];
         const chosen = load(own('designer_printer'), null);
         const kept = S.printers.find(p => p.path === chosen);
@@ -905,7 +932,10 @@ const printerKey = () => (S.printer && S.printer.path) || '';
 // Sentences put "the" before a model, not before a name.
 const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
 const thePrinter = (p, start = false) => p && p.name ? p.name : `${start ? 'The' : 'the'} ${(p && printerName(p)) || 'printer'}`;
-const manualTape = () => (S.settings.tapes || {})[printerKey()] || '';
+// The settings of the printer kept on the server, the common ones with its own
+const kept = () => (S.printer && S.printer.settings) || {};
+const manualTape = () => kept().label_size || '';
+const COMMON_SETTINGS = ['quality'];
 
 // Whether the printer takes a label size, any size if its model is unknown
 function printerTakes(s) {
@@ -926,27 +956,31 @@ function detectTape() {
         return;
     }
     S.tapeManual = false;
-    let found = null;
-    if (p && p.media_width) {
-        // The width and length of DK and TZe tape can be the same. The color
-        // of the text on TZe tape is no black and red roll.
-        const red = p.red_roll === true || /red/i.test(p.media_type || '');
-        found = C.label_sizes.find(s => printerTakes(s) && s.tape[0] === p.media_width && s.tape[1] === (p.media_length || 0) && !!s.red === red);
-        // Only the QL-800 series tells whether a roll is black and red
-        S.tapeRedUnknown = !!found && !red && p.red_roll == null;
-        if (!found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
-    }
-    // Assumed is the default size, or the first one the printer takes if it
-    // does not take that, e.g. a PUQU Q00 no 62 mm endless tape
-    const fallback = C.label_sizes.find(s => s.id === C.default_label_size && printerTakes(s)) || C.label_sizes.find(printerTakes);
-    S.tape = found ? found.id : fallback ? fallback.id : C.default_label_size;
+    // The server tells the label size of the tape the printer reports, or
+    // the one it assumes without
+    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
+    // Only the QL-800 series tells whether a roll is black and red
+    S.tapeRedUnknown = !!found && !found.red && p.red_roll == null;
+    if (p && p.media_width && !found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
+    S.tape = p && SIZES[p.label_size] ? p.label_size : C.default_label_size;
     S.tapeAssumed = !found;
 }
 
-// What a VC-500W does: the stage of the label it prints, the label of how
-// many, how far along it is
+// What a printer does with a job: the stage of the label (VC-500W), the
+// label of how many, how long the job still takes
 function jobText(job) {
-    return job.stage + (job.percent !== undefined ? ` ${job.percent} %` : '') + (job.labels > 1 ? `, label ${job.label} of ${job.labels}` : '');
+    const parts = [];
+    if (job.stage) parts.push(job.stage + (job.percent !== undefined ? ` ${job.percent} %` : ''));
+    if (job.label !== undefined && job.labels > 1) parts.push(`label ${job.label} of ${job.labels}`);
+    if (job.seconds_left !== undefined) parts.push(timeLeft(job.seconds_left));
+    const text = parts.join(', ');
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function timeLeft(seconds) {
+    if (seconds < 10) return 'a few seconds left';
+    if (seconds < 60) return `about ${Math.round(seconds / 5) * 5} s left`;
+    return `about ${Math.round(seconds / 60)} min left`;
 }
 
 // The tape left in the cassette of a VC-500W
@@ -995,13 +1029,14 @@ async function printJob(job) {
     saveHistory();
     updateCounts();
     toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`);
-    // A VC-500W takes about 40 s for a label, what it does is shown meanwhile
-    const followed = S.printer && printerCaps().job_stages ? S.printer.path : '';
+    // How far the job is and how long it still takes are shown meanwhile
+    const followed = S.printer && S.printer.path !== 'simulation' ? S.printer.path : '';
     const follow = followed && setInterval(async () => {
         try {
             const data = await (await fetch(API + '/printer_status')).json();
             const p = (Array.isArray(data.printers) ? data.printers : [data]).find(x => x.path === followed);
-            if (p && p.job && entry.state === 'printing') toast(jobText(p.job), null, 10000);
+            const text = p && p.job ? jobText(p.job) : '';
+            if (text && entry.state === 'printing') toast(text, null, 10000);
         } catch (e) { }
     }, 1500);
     try {
@@ -1770,50 +1805,96 @@ async function loadIcons() {
     } catch (e) { return []; }
     return iconList;
 }
-// Icons whose names contain all words of the search, exact and leading
-// matches first. Without a search all icons, by name.
+// Icons and symbols whose names contain all words of the search, exact and
+// leading matches first. Without a search all of them, by name.
 function findIcons(list, query) {
-    const words = query.toLowerCase().replace(/^mdi:/, '').split(/[\s:]+/).filter(Boolean);
+    const words = query.toLowerCase().replace(/^[a-z]+:/, '').split(/[\s:]+/).filter(Boolean);
     if (!words.length) return list;
     const rank = i => i.name === words.join('-') ? 0 : i.name.startsWith(words[0]) ? 1 : 2;
     return list.filter(i => words.every(w => i.name.includes(w)))
         .sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length || a.name.localeCompare(b.name));
 }
 
+// The symbols of fasteners and electronic components for {{fastener:<name>}}
+// and {{electronic:<name>}}, by set
+let symbolSets = null;
+async function loadSymbolSets() {
+    if (symbolSets) return symbolSets;
+    try {
+        symbolSets = await (await fetch(STATIC + 'symbols/symbols.json')).json();
+    } catch (e) { return {}; }
+    return symbolSets;
+}
+const SYMBOL_SETS = { fastener: 'Fasteners', electronic: 'Electronic components' };
+// The examples in the hints
+const SYMBOL_EXAMPLES = { mdi: 'power', fastener: 'head-torx', electronic: 'resistor-iec-standard' };
+// The sections of the dialog open, as left last time
+const openSymbolSections = new Set(['symbols', 'mdi']);
+
 async function openSymbols(input) {
     if (!input) return;
     // Open at once, so that Escape closes it while the lists load
     openLayer('<div class="dialog narrow" role="dialog" aria-label="Insert a symbol"><p class="muted">Loading the symbols</p></div>');
     const loading = $('#layer .dialog');
-    const [list, icons] = await Promise.all([loadSymbols(), loadIcons()]);
+    const [list, icons, sets] = await Promise.all([loadSymbols(), loadIcons(), loadSymbolSets()]);
     if (!loading.isConnected) return;
-    openLayer(`<div class="dialog narrow${icons.length ? ' symbols' : ''}" role="dialog" aria-label="Insert a symbol">
+    // The sets inserted by name, {{<set>:<name>}}: the icons first, then
+    // the symbols
+    const named = [
+        ...(icons.length ? [{ id: 'mdi', title: 'Icons', note: 'Material Design Icons', items: icons }] : []),
+        ...Object.entries(SYMBOL_SETS).filter(([set]) => sets[set]).map(([set, title]) => ({ id: set, title,
+            items: Object.entries(sets[set]).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) })) })),
+    ];
+    const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
+            <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
+    openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
         <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
             <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
-        <div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>
-        ${icons.length ? `<div class="sym-icons"><h3>Icons <span class="muted small">Material Design Icons, in every font</span></h3>
-            <input class="field" type="search" id="icoQ" placeholder="Search, e.g. power or lightbulb" autocomplete="off" aria-label="Search the icons">
-            <div class="sym-grid" id="icoGrid"></div>
-            <p class="muted small" id="icoHint" style="margin:0"></p>
-            <button class="btn sm" type="button" id="icoAll" style="align-self:flex-start" hidden></button></div>` : ''}</div>`);
+        ${named.length ? '<input class="field" type="search" id="symQ" placeholder="Search icons and symbols, e.g. lightbulb, torx or resistor" autocomplete="off" aria-label="Search the icons and symbols">' : ''}
+        ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
+        ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
+        ${named.map(x => section(x.id, `${x.title} <span class="muted small">${x.note || ''}</span>`, `<div class="sym-grid" data-grid="${x.id}"></div>
+            <p class="muted small" style="margin:0">Inserts the name, e.g. <code>{{${x.id}:${SYMBOL_EXAMPLES[x.id]}}}</code>. Point at one to see its name.</p>
+            <button class="btn sm" type="button" data-all="${x.id}" style="align-self:flex-start" hidden></button>`)).join('')}` : ''}
+        <p class="muted" id="symNone" hidden>Nothing found.</p></div>`);
+    const symbolsSection = $('#layer [data-section="symbols"]');
+    // Opened and closed by hand, not by the search, whose toggle events
+    // come only after draw()
+    $$('#layer .sym-set > summary').forEach(s => s.addEventListener('click', () => {
+        openSymbolSections[s.parentElement.open ? 'delete' : 'add'](s.parentElement.dataset.section);
+    }));
     $$('[data-sym]').forEach(b => b.onclick = () => { closeLayer(true); insertAt(input, list[+b.dataset.sym], false); });
-    if (!icons.length) return;
-    // The first ones, all of them on request
-    const draw = all => {
-        const found = findIcons(icons, $('#icoQ').value);
-        const shown = all ? found : found.slice(0, 120);
-        $('#icoGrid').innerHTML = shown.map(i => `<button type="button" class="sym ico" data-ico="${esc(i.name)}" title="mdi:${esc(i.name)}">${i.char}</button>`).join('');
-        $('#icoHint').innerHTML = found.length ? 'Inserts the name, e.g. <code>{{mdi:power}}</code>. Point at an icon to see its name.' : 'No icon found.';
-        $('#icoAll').hidden = shown.length >= found.length;
-        $('#icoAll').textContent = `Show all ${found.length} icons`;
+    $('#layer .dialog').addEventListener('click', e => {
+        const b = e.target.closest('[data-tpl]');
+        if (b) { closeLayer(true); insertAt(input, `{{${b.dataset.tpl}}}`, false); }
+    });
+    if (!named.length) return;
+    // The first ones of each set, all of them on request. A search shows
+    // the sets with something found, "fastener:torx" only those of the set.
+    const showAll = new Set();
+    const draw = () => {
+        const query = $('#symQ').value.trim();
+        const only = (query.match(/^([a-z]+):/) || [])[1];
+        symbolsSection.hidden = !!query;
+        if (!query) symbolsSection.open = openSymbolSections.has('symbols');
+        let any = !query;
+        for (const x of named) {
+            const found = only && named.some(y => y.id === only) && only !== x.id ? [] : findIcons(x.items, query);
+            const shown = showAll.has(x.id) ? found : found.slice(0, 120);
+            $(`[data-grid="${x.id}"]`).innerHTML = shown.map(i => `<button type="button" class="sym ${x.id === 'mdi' ? 'ico' : 'sx'}${i.name.startsWith('bolt-') && x.id === 'fastener' ? ' wide' : ''}" data-tpl="${x.id}:${esc(i.name)}" title="${x.id}:${esc(i.name)}">${i.char}</button>`).join('');
+            const all = $(`[data-all="${x.id}"]`);
+            all.hidden = shown.length >= found.length;
+            all.textContent = `Show all ${found.length}`;
+            const d = $(`#layer [data-section="${x.id}"]`);
+            d.hidden = !!query && !found.length;
+            d.open = query ? found.length > 0 : openSymbolSections.has(x.id);
+            any = any || found.length > 0;
+        }
+        $('#symNone').hidden = any;
     };
-    draw(false);
-    $('#icoQ').addEventListener('input', () => draw(false));
-    $('#icoAll').onclick = () => draw(true);
-    $('#icoGrid').onclick = e => {
-        const b = e.target.closest('[data-ico]');
-        if (b) { closeLayer(true); insertAt(input, `{{mdi:${b.dataset.ico}}}`, false); }
-    };
+    draw();
+    $('#symQ').addEventListener('input', () => { showAll.clear(); draw(); });
+    $$('[data-all]').forEach(b => b.onclick = () => { showAll.add(b.dataset.all); draw(); });
 }
 
 // The codes of {{datetime:<format>}}, with examples made by the server
@@ -1833,14 +1914,17 @@ function varsHelpHTML() {
             <li><code>[today]</code> - today's date, in the date format chosen in the printer settings (like the browser by default).</li>
             <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d for days, w for weeks, m for months or y for years, e.g., <code>[today+6m]</code> for half a year from now.</li>
             <li><code>[counter]</code> - a number that counts up, each copy gets the next one. Written with a start, it counts as the start looks: <code>[counter:001]</code> 001, 002, ..., <code>[counter:A]</code> A, B, C, and with a step <code>[counter:10:5]</code> 10, 15, 20.</li>
+            <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx: each label gets the next free one, also when labels are printed again before their documents are scanned. <code>[ASN:5]</code> writes it with 5 digits, e.g., 00042.</li>
             <li><code>[id]</code> - a short random ID.</li>
         </ul>
         <p>The variables of the server work as well:</p>
         <ul>
             <li><code>{{datetime:&lt;format&gt;}}</code> - the current date and time. The format uses <button type="button" class="link" data-dtcodes>date and time codes</button>, e.g., <code>%H:%M:%S %d.%m.%Y</code>. <code>{{datetime+5d:&lt;format&gt;}}</code> is 5 days later, like <code>[today+5d]</code>.</li>
             <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code> - a number that counts up, starting at &lt;start&gt; (default 1) in steps of &lt;step&gt; (default 1), like <code>[counter]</code>. When you print several labels at once, each gets the next number.</li>
+            <li><code>{{asn}}</code>, <code>{{asn:&lt;digits&gt;}}</code> - the next archive serial number for Paperless-ngx, like <code>[ASN]</code>.</li>
             <li><code>{{uuid}}</code> - a random UUID, <code>{{short-uuid}}</code> - a shorter random UUID.</li>
             <li><code>{{mdi:&lt;name&gt;}}</code> - the Material Design Icon &lt;name&gt;, e.g. <code>{{mdi:lightbulb}}</code>. The Symbol button finds the names.</li>
+            <li><code>{{fastener:&lt;name&gt;}}</code> and <code>{{electronic:&lt;name&gt;}}</code> - a fastener or an electronic component, e.g. <code>{{fastener:head-torx}}</code> or <code>{{electronic:resistor-iec-standard}}</code>. The Symbol button shows them.</li>
             <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
             <li><code>{{random[:&lt;len&gt;][:shift]}}</code> - a random string of &lt;len&gt; characters (default 64, at most 10000). <code>shift</code> shifts it around to fill gaps.</li>
         </ul>`;
@@ -3372,7 +3456,37 @@ function bindPrinterPanel() {
     const box = $('.pp');
     if (!box) return;
     const redraw = () => { box.innerHTML = printerPanelHTML(); bindPrinterPanel(); };
-    const saveSettings = () => { store(own('designer_settings'), S.settings); detectTape(); renderPrinterChip(); tapeChanged = true; redraw(); };
+    // Shown at once, then kept on the server. Only the setting changed goes
+    // there, another browser may change another one at the same time.
+    const saveSettings = changes => {
+        // No printer is listed where its status did not come
+        if (!S.printer) return toast('The label designer could not be reached');
+        const printers = [...new Set([S.printer, ...S.printers])], before = printers.map(p => p.settings);
+        const shown = () => {
+            detectTape(); renderPrinterChip(); tapeChanged = true;
+            const open = $('.pp');
+            if (open) { open.innerHTML = printerPanelHTML(); bindPrinterPanel(); }
+        };
+        printers.forEach(p => {
+            p.settings = Object.assign({}, p.settings);
+            // The quality is the same for all
+            Object.entries(changes).filter(([k]) => p === S.printer || COMMON_SETTINGS.includes(k))
+                .forEach(([k, v]) => { if (v) p.settings[k] = v; else delete p.settings[k]; });
+        });
+        shown();
+        const fd = new FormData();
+        fd.set('printer', printerKey());
+        if (C.models[S.printer.model]) fd.set('model', S.printer.model);
+        Object.entries(changes).forEach(([k, v]) => fd.set(k, v));
+        settingsPending++;
+        post('/settings', fd).catch(() => { throw new Error('The label designer could not be reached'); }).then(async r => {
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The settings could not be saved');
+        }).catch(e => {
+            printers.forEach((p, i) => { p.settings = before[i]; });
+            toast(e.message);
+            shown();
+        }).finally(() => { settingsPending--; settingsAnswered++; });
+    };
     $$('[data-printer]', box).forEach(b => b.onclick = () => {
         S.printer = S.printers.find(p => p.path === b.dataset.printer) || S.printer;
         store(own('designer_printer'), S.printer.path);
@@ -3382,28 +3496,20 @@ function bindPrinterPanel() {
         redraw();
     });
     $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
-    $('#setTape', box).onchange = e => {
-        S.settings.tapes = Object.assign({}, S.settings.tapes, { [printerKey()]: e.target.value });
-        if (!e.target.value) delete S.settings.tapes[printerKey()];
-        saveSettings();
-    };
-    $('#setDate', box).onchange = e => { S.settings.dateFmt = e.target.value; saveSettings(); };
+    $('#setTape', box).onchange = e => saveSettings({ label_size: e.target.value });
+    // Of this browser only
+    const keepHere = () => { store(own('designer_settings'), S.settings); tapeChanged = true; redraw(); };
+    $('#setDate', box).onchange = e => { S.settings.dateFmt = e.target.value; keepHere(); };
     $('#qInfoBtn', box).onclick = () => {
         S.qualityInfo = !S.qualityInfo;
         $('#qInfo', box).hidden = !S.qualityInfo;
         $('#qInfoBtn', box).setAttribute('aria-expanded', String(S.qualityInfo));
     };
-    $$('[data-q]', box).forEach(b => b.onclick = () => { S.settings.quality = b.dataset.q; saveSettings(); });
-    $$('[data-col]', box).forEach(b => b.onclick = () => { S.settings.collate = b.dataset.col; saveSettings(); });
+    $$('[data-q]', box).forEach(b => b.onclick = () => saveSettings({ quality: b.dataset.q }));
+    $$('[data-col]', box).forEach(b => b.onclick = () => { S.settings.collate = b.dataset.col; keepHere(); });
     $('#setLfTest', box).onclick = () => printJob({ title: 'Which end first', design: endsTest(), values: {}, copies: 1, source: { kind: 'test' } });
-    $$('[data-lf]', box).forEach(b => b.onclick = () => {
-        S.settings.leaves = Object.assign({}, S.settings.leaves, { [printerKey()]: b.dataset.lf });
-        saveSettings();
-    });
-    $$('[data-c]', box).forEach(b => b.onclick = () => {
-        S.settings.cuts = Object.assign({}, S.settings.cuts, { [printerKey()]: Object.assign(printerCut(), { [b.dataset.c]: b.dataset.v }) });
-        saveSettings();
-    });
+    $$('[data-lf]', box).forEach(b => b.onclick = () => saveSettings({ leaves_first: b.dataset.lf }));
+    $$('[data-c]', box).forEach(b => b.onclick = () => saveSettings({ [b.dataset.c]: b.dataset.v }));
     $('a.link', box).onclick = () => closeLayer(true);
 }
 
@@ -3415,7 +3521,8 @@ function settingsCard() {
     // Printers without 600 dpi, e.g. the VC-500W, print those labels in
     // quality, those with one quality, e.g. the PUQU Q00, all of them
     const oneQuality = !caps.qualities.includes('fast'), ONE = ' disabled title="This printer prints in one quality only"';
-    const q = oneQuality || (!offersHigh && S.settings.quality === 'high') ? 'quality' : S.settings.quality, c = printerCut();
+    const quality = kept().quality || 'quality';
+    const q = oneQuality || (!offersHigh && quality === 'high') ? 'quality' : quality, c = printerCut();
     const without600 = Object.keys(C.models).filter(m => C.models[m].qualities.includes('high') && !C.models[m].high_res).sort();
     // New labels start on the assumed tape, the default only if the printer takes it
     const assumed = `Labels keep their own size, new ones are ${esc(sizeName(S.tape))}.`;
@@ -3627,4 +3734,6 @@ addEventListener('pagehide', () => { if (S.edit) storeEdit(); });
     S.history.forEach(h => { if (h.state === 'printing') { h.state = 'failed'; h.message = 'The page was closed while printing'; } });
     route();
     setInterval(refreshPrinters, 20000);
+    // Settings changed in another browser show when coming back
+    addEventListener('visibilitychange', () => { if (!document.hidden) refreshPrinters(); });
 })();

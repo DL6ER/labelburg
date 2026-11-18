@@ -6,7 +6,7 @@ compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
 import socket
 import time
 
-from .. import devices
+from .. import devices, progress
 
 # 8 dots per mm, the printhead is 48 mm wide
 DPI = 203
@@ -151,7 +151,8 @@ def print_labels(device: str, labels: list[list[list[int]]], mm_per_label: list[
     The state is asked once per label, after it is printed: the printer
     takes a state query while it prints for a label and feeds an empty one."""
     with connect(device) as s:
-        for rows, length in zip(labels, mm_per_label):
+        progress.counting(device)
+        for i, (rows, length) in enumerate(zip(labels, mm_per_label)):
             header, body = label_parts(rows)
             s.sendall(header)
             time.sleep(HEADER_PAUSE)
@@ -159,6 +160,7 @@ def print_labels(device: str, labels: list[list[list[int]]], mm_per_label: list[
             error = _wait_printed(s, max(PRINT_WAIT, length * SECONDS_PER_MM))
             if error:
                 return error
+            progress.printed(device, i + 1)
     return ''
 
 

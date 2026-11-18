@@ -4,6 +4,8 @@ import io
 
 from PIL import Image
 
+from app.labeldesigner.label_names import printer_label_size
+
 
 def type_line(page, row, text):
     page.fill(f'[data-row="{row}"] .tx', text)
@@ -33,6 +35,13 @@ def png(width=200, height=100) -> bytes:
     out = io.BytesIO()
     Image.new('L', (width, height), 'black').save(out, format='PNG')
     return out.getvalue()
+
+
+def with_tape(printer: dict, default: str = '62') -> dict:
+    """A printer as /api/printer_status tells it, with the label size it
+    prints on."""
+    label_size, assumed = printer_label_size(printer, default)
+    return {**printer, 'label_size': label_size, 'label_size_assumed': assumed}
 
 
 def set_tape(page, size):
