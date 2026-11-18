@@ -98,7 +98,7 @@ const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].m
 // ZINK tape of the VC-500W, which prints in any color
 const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 // What the server's driver of a printer model offers, see Driver.capabilities()
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false };
 const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
@@ -3447,6 +3447,7 @@ function printerPanelHTML() {
     const hints = S.printerHints.map(h => `<p class="small hint">${esc(h)}</p>`).join('');
     return `<div class="row"><h2 class="grow">Printer</h2><button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
         <div class="plist">${list}${hints}</div>
+        ${calibrationCard()}
         <button class="btn sm" type="button" id="ppRefresh" style="align-self:flex-start"><i class="fa-solid fa-magnifying-glass"></i>Look for printers</button>
         ${settingsCard()}
         <a class="link" href="#wizard/printed"><i class="fa-solid fa-clock-rotate-left"></i> Printed labels</a>`;
@@ -3511,6 +3512,110 @@ function bindPrinterPanel() {
     $$('[data-lf]', box).forEach(b => b.onclick = () => saveSettings({ leaves_first: b.dataset.lf }));
     $$('[data-c]', box).forEach(b => b.onclick = () => saveSettings({ [b.dataset.c]: b.dataset.v }));
     $('a.link', box).onclick = () => closeLayer(true);
+    if ($('#calOpen', box)) {
+        $('#calOpen', box).onclick = () => openCalibration();
+        if ($('#calNotNow', box)) $('#calNotNow', box).onclick = () => postCalibration({}).then(r => { if (r) redraw(); });
+        if ($('#calPrintNew', box)) $('#calPrintNew', box).onclick = () => { printCalibration(); openCalibration(); };
+    }
+}
+
+// --- Calibration of the print position ---------------------------------------------
+
+// A printer that takes rolls by hand, e.g. the Niimbot B1, prints off to one
+// side by how the roll sits. The server keeps how its labels are moved.
+function calibrationCard() {
+    const p = S.printer;
+    if (!p || !capsOf(p.model).calibration) return '';
+    const fresh = p.roll && p.roll !== (p.calibration || {}).roll;
+    return `<div class="cal">${fresh ? `<p class="small hint">A new roll is in the printer. Print a calibration label so the labels sit straight on it.</p>
+            <div class="row" style="gap:.5rem"><button class="btn sm" type="button" id="calPrintNew"><i class="fa-solid fa-print"></i>Print calibration label</button>
+            <button class="btn sm quiet" type="button" id="calNotNow">Not now</button></div>` : ''}
+        <button class="btn sm" type="button" id="calOpen" style="align-self:flex-start"><i class="fa-solid fa-ruler-horizontal"></i>Line up the labels</button></div>`;
+}
+
+function calibrationForm(extra) {
+    const fd = new FormData();
+    fd.set('printer', printerKey());
+    if (C.models[S.printer.model]) fd.set('model', S.printer.model);
+    // The roll it holds for, the hint then stays away
+    if (S.printer.roll) fd.set('roll', S.printer.roll);
+    Object.entries(extra).forEach(([k, v]) => fd.set(k, String(v)));
+    return fd;
+}
+
+// The answer of the server, null with the reason shown
+async function postCalibration(extra, shown = toast) {
+    try {
+        const r = await post('/calibration', calibrationForm(extra));
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) return shown(j.message || 'The calibration could not be saved'), null;
+        S.printer.calibration = j.calibration;
+        return j;
+    } catch {
+        return shown('The label designer could not be reached'), null;
+    }
+}
+
+async function printCalibration() {
+    const fd = calibrationForm({ label_size: S.tape });
+    fd.delete('roll');
+    try {
+        const r = await post('/calibration/print', fd);
+        if (!r.ok) toast((await r.json().catch(() => ({}))).message || 'The calibration label could not be printed');
+    } catch {
+        toast('The label designer could not be reached');
+    }
+}
+
+async function openCalibration() {
+    const q = new URLSearchParams({ printer: printerKey(), model: S.printer.model, label_size: S.tape });
+    let kept;
+    try {
+        const r = await fetch(`${API}/calibration?${q}`);
+        kept = await r.json();
+        if (!r.ok) return toast(kept.message || 'The calibration could not be read');
+    } catch {
+        return toast('The label designer could not be reached');
+    }
+    const narrow = kept.kind !== 'wide', step = narrow ? 0.5 : 0.25;
+    const readings = ['<option value=""></option>', ...Array.from({ length: 25 }, (_, i) => -3 + i / 4)
+        .map(v => `<option value="${v}">${v > 0 ? '+' : ''}${v}</option>`)].join('');
+    const move = (dir, label) => `<button class="btn sm" type="button" data-move="${dir}"><i class="fa-solid fa-arrow-${dir}"></i>${label}</button>`;
+    sheet(`<h2>Line up the labels</h2>
+        <p>Print a calibration label, then look at it as the picture shows.</p>
+        <button class="btn sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
+        <img class="cal-example" alt="" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
+        ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
+        <div class="row" style="gap:1rem"><label>Left <select class="field" id="calLeft">${readings}</select></label>
+            <label>Right <select class="field" id="calRight">${readings}</select></label></div>
+        <button class="btn-print" type="button" id="calSave">Save</button>`
+        : '<p>Compare the white strips left and right of the frame.</p>'}
+        <p id="calResult" class="small" aria-live="polite"></p>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('left', `${step} mm`)}${move('right', `${step} mm`)}</div>
+        <p class="muted small">Compare the white strip above the top line with the one below the bottom line.</p>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap">${move('up', '0.25 mm')}${move('down', '0.25 mm')}</div>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap"><button class="btn sm" type="button" data-cal-print><i class="fa-solid fa-print"></i>Print a check label</button>
+            <button class="btn sm quiet" type="button" id="calReset">No fine correction</button></div>
+        <button class="btn quiet" type="button" data-close>Done</button>`);
+    const box = $('#layer'), result = $('#calResult', box);
+    const say = (text, warn = false) => { result.textContent = text; result.classList.toggle('warn', warn); };
+    const save = async extra => {
+        const before = kept.across, j = await postCalibration(extra, text => say(text, true));
+        if (!j) return;
+        kept = Object.assign(kept, j.calibration);
+        if (j.shift === null || j.shift === undefined) return say('Saved.');
+        const moved = kept.across - before, n = +Math.abs(moved).toFixed(2);
+        say(moved ? `The printer prints ${n} mm too far ${moved < 0 ? 'right' : 'left'}. Labels are moved ${n} mm to the ${moved < 0 ? 'left' : 'right'} from now on.`
+            : 'The labels sit straight.');
+    };
+    $$('[data-cal-print]', box).forEach(b => b.onclick = () => printCalibration());
+    if (narrow) $('#calSave', box).onclick = () => save({ left: $('#calLeft', box).value, right: $('#calRight', box).value });
+    $$('[data-move]', box).forEach(b => b.onclick = () => {
+        const d = b.dataset.move, along = d === 'up' || d === 'down';
+        const by = along ? (d === 'down' ? 0.25 : -0.25) : (d === 'right' ? step : -step);
+        save(along ? { across: kept.across, along: kept.along + by } : { across: kept.across + by, along: kept.along });
+    });
+    $('#calReset', box).onclick = () => save({ across: 0, along: 0 });
 }
 
 const listJoin = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];

@@ -3129,6 +3129,10 @@
             "type": ["string", "null"],
             "description": "Niimbot: the serial number of the roll in the printer, from its RFID tag, null without one."
           },
+          "calibration": {
+            "$ref": "#/components/schemas/Calibration",
+            "description": "Of a printer that offers calibration (the Niimbot B1): how its labels are moved, see /api/calibration."
+          },
           "job": {
             "type": "object",
             "description": "The job the printer prints for this server, also what a VC-500W does while it prints a label, which takes about 40 s.",

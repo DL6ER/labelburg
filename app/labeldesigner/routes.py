@@ -1328,6 +1328,8 @@ def get_printer_status():
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
+            printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
         # Labels are shown and printed on the tape in the printer
         printer['label_size'], printer['label_size_assumed'] = printer_label_size(printer, current_app.config['LABEL_DEFAULT_SIZE'])
         # A job of this server, added to what the printer tells of it

@@ -179,3 +179,15 @@ def test_settings_from_before_the_serial_number_was_known_are_kept(monkeypatch):
     # Kept by the serial number from the next change on
     data = printer_settings.calibrated(data, USBIP, 0.25, 0, None)
     assert list(data['printers']) == ['serial:Niimbot/B1/TEST000001']
+
+
+def test_printer_status_tells_the_calibration(b1, monkeypatch):
+    from app.labeldesigner import routes
+    b1.post(URL, data={**B1, 'across': '0.5', 'roll': 'PZ1TEST00001'})
+    state = {'errors': [], 'path': B1['printer'], 'model': 'Niimbot/B1', 'roll': 'PZ1TEST00002'}
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: {**state, 'printers': [dict(state)], 'selected': B1['printer']})
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert printer_['calibration'] == {'across': 0.5, 'along': 0.0, 'roll': 'PZ1TEST00001'}
+    # Only where the model offers it
+    monkeypatch.setitem(state, 'model', 'QL-800')
+    assert 'calibration' not in b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]

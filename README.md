@@ -18,7 +18,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
 | Epson | TM-T20II (USB) | 80 and 58 mm receipt paper, cut |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
-| Niimbot | B1 (Bluetooth) | 40 and 50 mm wide die-cut thermal labels, torn off |
+| Niimbot | B1 (Bluetooth or USB) | 40 and 50 mm wide die-cut thermal labels, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
@@ -32,7 +32,7 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, and today's date or a date some days ahead, e.g., "best before".
 - **Icons:** 7400 icons, e.g., a light bulb, and symbols of screws, nuts, washers and electronic parts for workshop bins, next to the text, found by name.
 - **Labels:** save your labels, group them by tags and print them again, pass them on as files, or start from one of about 680 ready-made labels in English and German, e.g., addresses, safety signs, hazard labels, name badges, price tags and pictures for kids.
-- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes.
+- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes. Labels that come out off to one side on a Niimbot B1 are lined up with a calibration label: open the printer and choose "Line up the labels".
 - **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
 - **Several printers:** use several printers at once, each with a name of your choice and the same settings in every browser, or try everything without a printer.
 - **Other programs:** e.g., [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md) can print their labels through Labelburg, and labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents.
