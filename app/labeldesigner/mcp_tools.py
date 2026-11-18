@@ -17,7 +17,7 @@ from werkzeug.sansio.utils import host_is_trusted
 from werkzeug.wrappers import Response
 
 from .label import BLANK_TEMPLATE, DATE_OFFSET, _iso_date
-from .label_names import LABELS, label_printers
+from .label_names import LABELS, labels_taken
 from .refusals import BARCODE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -78,9 +78,8 @@ def loaded_label_sizes(printer: dict) -> list[str]:
     # color of TZe tape does not
     red = printer.get('red_roll') is True or bool(re.search('red', printer.get('media_type') or '', re.IGNORECASE))
     unknown = not red and printer.get('red_roll') is None
-    return [label.identifier for label in LABELS
+    return [label.identifier for label in labels_taken(printer.get('model'))
             if label.tape_size[1] == length and (not width or label.tape_size[0] == width)
-            and printer.get('model') in label_printers(label)
             and (unknown or (label.color == 1) == red)]
 
 
@@ -167,7 +166,7 @@ def label_size_for(model: str | None, label_size: str) -> str:
     that label_size names, also without the prefix of its driver and written
     as "100 x 30 mm", e.g. zpl100x30 for 100x30 on a ZPL printer."""
     from mcp.server.mcpserver.exceptions import ToolError
-    takes = [label.identifier for label in LABELS if model is None or model in label_printers(label)]
+    takes = [label.identifier for label in (LABELS if model is None else labels_taken(model))]
     if not takes or label_size in takes:
         return label_size
     plain = re.sub(r'\s|mm', '', str(label_size).lower()).replace('×', 'x')
@@ -287,7 +286,7 @@ class Tools:
         name = found.get('name') or found.get('path')
         if saved:
             raise AskUser(f'Nothing printed yet. Ask the user whether {_named([saved])} is loaded in {name}, then call again with label_size.')
-        takes = loaded or [label.identifier for label in LABELS if found.get('model') in label_printers(label)]
+        takes = loaded or [label.identifier for label in labels_taken(found.get('model'))]
         told = 'may have one of these loaded' if loaded else 'does not tell which label is loaded, it takes'
         raise AskUser(f'Nothing done yet. {name} {told}: {_named(takes)}. Ask the user which one, then call again with label_size.')
 
