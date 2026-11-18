@@ -3556,15 +3556,18 @@ async function postCalibration(extra, shown = toast) {
     }
 }
 
-async function printCalibration() {
+// Whether it printed, else the reason shown
+async function printCalibration(shown = toast) {
     const fd = calibrationForm({ label_size: S.tape });
     fd.delete('roll');
     try {
         const r = await post('/calibration/print', fd);
-        if (!r.ok) toast((await r.json().catch(() => ({}))).message || 'The calibration label could not be printed');
+        if (r.ok) return true;
+        shown((await r.json().catch(() => ({}))).message || 'The calibration label could not be printed');
     } catch {
-        toast('The label designer could not be reached');
+        shown('The label designer could not be reached');
     }
+    return false;
 }
 
 async function openCalibration() {
@@ -3584,7 +3587,8 @@ async function openCalibration() {
     sheet(`<h2>Line up the labels</h2>
         <p>Print a calibration label, then look at it as the picture shows.</p>
         <button class="btn sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
-        <img class="cal-example" alt="" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
+        <img class="cal-example" alt="${narrow ? 'A calibration label printed 1 mm too far right: read where the black starts at each edge of the label'
+            : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it'}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
         ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
         <div class="row" style="gap:1rem"><label>Left <select class="field" id="calLeft">${readings}</select></label>
             <label>Right <select class="field" id="calRight">${readings}</select></label></div>
@@ -3601,15 +3605,28 @@ async function openCalibration() {
     const say = (text, warn = false) => { result.textContent = text; result.classList.toggle('warn', warn); };
     const save = async extra => {
         const before = kept.across, j = await postCalibration(extra, text => say(text, true));
-        if (!j) return;
+        if (!j) return null;
         kept = Object.assign(kept, j.calibration);
-        if (j.shift === null || j.shift === undefined) return say('Saved.');
+        if (j.shift === null || j.shift === undefined) return say('Saved.'), j;
         const moved = kept.across - before, n = +Math.abs(moved).toFixed(2);
         say(moved ? `The printer prints ${n} mm too far ${moved < 0 ? 'right' : 'left'}. Labels are moved ${n} mm to the ${moved < 0 ? 'left' : 'right'} from now on.`
             : 'The labels sit straight.');
+        return j;
     };
-    $$('[data-cal-print]', box).forEach(b => b.onclick = () => printCalibration());
-    if (narrow) $('#calSave', box).onclick = () => save({ left: $('#calLeft', box).value, right: $('#calRight', box).value });
+    // Once at a time, a second click would print a second label
+    const printers = $$('[data-cal-print]', box);
+    printers.forEach(b => b.onclick = async () => {
+        printers.forEach(x => { x.disabled = true; });
+        say('Printing the calibration label.');
+        if (await printCalibration(text => say(text, true))) say('');
+        printers.forEach(x => { x.disabled = false; });
+    });
+    if (narrow) $('#calSave', box).onclick = async () => {
+        const left = $('#calLeft', box), right = $('#calRight', box);
+        if (!left.value || !right.value) return say('Choose the number on each side.', true);
+        // Read on a label printed before, saved again it would move the labels again
+        if (await save({ left: left.value, right: right.value })) left.value = right.value = '';
+    };
     $$('[data-move]', box).forEach(b => b.onclick = () => {
         const d = b.dataset.move, along = d === 'up' || d === 'down';
         const by = along ? (d === 'down' ? 0.25 : -0.25) : (d === 'right' ? step : -step);

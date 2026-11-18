@@ -89,6 +89,8 @@ def test_refused_readings_tell_why(designer, calibration):
     designer.click('#calSave')
     designer.wait_for_function('() => document.querySelector("#calResult").textContent')
     assert designer.inner_text('#calResult') == 'Left and right do not fit together.'
+    # Kept to be corrected
+    assert designer.eval_on_selector('#calLeft', 'e => e.value') == '-1.5'
 
 
 def test_fine_tuning_moves_from_the_kept_offsets(designer, calibration):
@@ -106,3 +108,47 @@ def test_fine_tuning_moves_from_the_kept_offsets(designer, calibration):
     designer.click('#calReset')
     _until(designer, lambda: len(sent) == 2)
     assert (sent[1][1]['across'], sent[1][1]['along']) == ('0', '0')
+
+
+def _dialog(designer, calibration):
+    _panel(designer)
+    designer.click('#calOpen')
+    designer.wait_for_selector('#calLeft')
+
+
+def test_save_needs_a_number_on_each_side(designer, calibration):
+    sent, _ = calibration
+    _dialog(designer, calibration)
+    designer.select_option('#calLeft', '-1')
+    designer.click('#calSave')
+    assert designer.inner_text('#calResult') == 'Choose the number on each side.'
+    assert sent == []
+
+
+def test_numbers_are_cleared_once_saved(designer, calibration):
+    # Saved twice, the labels would be moved twice
+    sent, _ = calibration
+    _dialog(designer, calibration)
+    designer.select_option('#calLeft', '-1')
+    designer.select_option('#calRight', '1')
+    designer.click('#calSave')
+    _until(designer, lambda: len(sent) == 1)
+    designer.wait_for_function('() => document.querySelector("#calResult").textContent')
+    assert designer.eval_on_selector('#calLeft', 'e => e.value') == designer.eval_on_selector('#calRight', 'e => e.value') == ''
+
+
+def test_example_tells_what_it_shows(designer, calibration):
+    _dialog(designer, calibration)
+    assert 'where the black starts' in designer.get_attribute('.cal-example', 'alt')
+
+
+def test_printing_waits_for_the_printer(designer, calibration):
+    pending = []
+    designer.route('**/api/calibration/print', lambda route: pending.append(route))
+    _dialog(designer, calibration)
+    designer.click('[data-cal-print]')
+    _until(designer, lambda: len(pending) == 1)
+    assert designer.eval_on_selector_all('[data-cal-print]', 'all => all.every(b => b.disabled)')
+    assert designer.inner_text('#calResult') == 'Printing the calibration label.'
+    pending[0].fulfill(content_type='application/json', body='{"success": true}')
+    designer.wait_for_function('() => [...document.querySelectorAll("[data-cal-print]")].every(b => !b.disabled)')

@@ -36,10 +36,11 @@ def test_top_and_bottom_lines_are_1_mm_inside():
     assert img.getpixel((150, 4)) == img.getpixel((150, 236)) == 255
 
 
-def test_wide_frame_is_1_mm_inside_the_printhead():
+def test_wide_frame_is_1_5_mm_inside_the_printhead():
+    # Moved 1 mm by a calibration and 0.25 mm by the B1 it stays on the paper
     img = calibration.wide(50, 30)
-    assert img.getpixel((8, 120)) < 128 and img.getpixel((375, 120)) < 128
-    assert all(img.getpixel((x, 120)) == 255 for x in range(8))
+    assert img.getpixel((12, 120)) < 128 and img.getpixel((371, 120)) < 128
+    assert all(img.getpixel((x, 120)) == 255 for x in range(12))
     assert img.getpixel((150, 8)) < 128 and img.getpixel((150, 231)) < 128
 
 
@@ -53,3 +54,7 @@ def test_example_images_are_pngs():
     assert calibration.example('wide').startswith(b'\x89PNG')
     with pytest.raises(ValueError):
         calibration.example('other')
+
+
+def test_example_images_are_made_once():
+    assert calibration.example('wide') is calibration.example('wide')

@@ -48,6 +48,9 @@ ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
 # for printers and when printing, the other status queries are answered from
 # the last state. When each was last asked:
 _asked: dict[str, float] = {}
+# B1s that told no serial number, not asked again: each question unanswered
+# waits for its answer
+_no_serial: set[str] = set()
 
 
 def _label(width: int, length: int, model: str) -> Label:
@@ -170,8 +173,17 @@ class Niimbot(Driver):
             with protocol.connect(device) as c:
                 beat = protocol.heartbeat(c)
                 roll = protocol.roll(c)
-                serial = protocol.printer_serial(c) if model == 'Niimbot/B1' else None
+                serial = self._serial(c, device, model)
         return self._keep(device, model, beat, roll, serial)
+
+    def _serial(self, c, device, model):
+        """The serial number of a B1, asked once more after it told none."""
+        if model != 'Niimbot/B1' or device in _no_serial:
+            return None
+        serial = protocol.printer_serial(c)
+        if serial is None:
+            _no_serial.add(device)
+        return serial
 
     def _keep(self, device, model, beat, roll, serial=None):
         """The state of the printer by its heartbeat and roll, kept for the
@@ -191,7 +203,8 @@ class Niimbot(Driver):
         # The settings of a B1 follow it by its serial number, the label
         # designer tells when another roll is in it
         state['serial'] = serial
-        state['roll'] = roll.get('serial') if roll else None
+        serial_of_roll = roll.get('serial') if roll else None
+        state['roll'] = serial_of_roll if serial_of_roll and serial_of_roll.isalnum() and len(serial_of_roll) <= 32 else None
         # The label designer then picks the labels of the roll
         if roll and roll['barcode'] in ROLLS:
             state['media_width'], state['media_length'] = ROLLS[roll['barcode']]
@@ -226,8 +239,7 @@ class Niimbot(Driver):
                 # What the status keeps is updated, e.g. another roll
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
-                serial = protocol.printer_serial(c) if model == 'Niimbot/B1' else None
-                state = self._keep(device, model, beat, loaded, serial)
+                state = self._keep(device, model, beat, loaded, self._serial(c, device, model))
                 if state['errors']:
                     devices.note_answer(device)
                     return state['errors'][0]

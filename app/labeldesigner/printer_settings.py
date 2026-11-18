@@ -47,6 +47,7 @@ CALIBRATION_MESSAGE = ('across and along are millimeters in steps of 0.25 from -
 READINGS_DISAGREE = ('Left and right do not fit together. Look at the label again; if they still do not fit, '
                      'put the roll in again and print a new calibration label.')
 NO_CALIBRATION = 'This printer offers no calibration'
+OFFSET_LIMIT = 'The labels cannot be moved further than 5 mm.'
 _ROLL = re.compile(r'[A-Za-z0-9]{1,32}')
 
 
@@ -86,8 +87,11 @@ def _key(data: dict, device: str) -> str:
     printer, seen = key(device), data.get('seen')
     if printer.startswith('serial:') and printer not in data['printers'] and lock_key(device) in data['printers']:
         return lock_key(device)
-    off = isinstance(seen, dict) and not usb_device_id(device)
-    return seen.get(printer, printer) if off else printer
+    last = seen.get(printer) if isinstance(seen, dict) else None
+    if not isinstance(last, str):
+        return printer
+    # A B1 on USB tells a device ID without its serial number
+    return last if not usb_device_id(device) or (printer == lock_key(device) and last.startswith('serial:')) else printer
 
 
 def of_printer(data: dict, device: str) -> dict:
@@ -170,7 +174,7 @@ def for_printing(data: dict, device: str, model: str, values: dict) -> dict:
 
 def _in_steps(value, limit: float) -> bool:
     return (isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) <= limit
-            and float(value * 4).is_integer())
+            and abs(value) != float('inf') and float(value * 4).is_integer())
 
 
 def _roll(value) -> bool:
@@ -189,8 +193,10 @@ def calibration_of(data: dict, device: str) -> dict:
 def calibrated(data: dict, device: str, across: float, along: float, roll: str | None) -> dict:
     """data with the calibration of a printer kept, ValueError for values off
     the steps."""
-    if not (_in_steps(across, MAX_OFFSET) and _in_steps(along, MAX_OFFSET)) or (roll is not None and not _roll(roll)):
+    if not (_in_steps(across, float('inf')) and _in_steps(along, float('inf'))) or (roll is not None and not _roll(roll)):
         raise ValueError(CALIBRATION_MESSAGE)
+    if abs(across) > MAX_OFFSET or abs(along) > MAX_OFFSET:
+        raise ValueError(OFFSET_LIMIT)
     printer = _keeping(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}

@@ -216,7 +216,7 @@ def printer_serial(c: Connection) -> str | None:
     """The serial number the printer tells, None if it tells none."""
     try:
         data = c.ask(0x40, b'\x0b', 0x4b)
-    except NoAnswer:
+    except NiimbotError:
         return None
     text = data.decode('ascii', 'replace').strip('\x00 ')
     return text if text.isalnum() else None

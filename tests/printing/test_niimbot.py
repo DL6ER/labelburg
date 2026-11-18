@@ -60,6 +60,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(niimbot, '_asked', {})
+    monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
 
 
@@ -541,3 +542,33 @@ def test_example_of_the_calibration_label(b1, kind, status):
     r = b1.get('/labeldesigner/api/calibration/example.png', query_string={'kind': kind})
     assert r.status_code == status
     assert (r.mimetype == 'image/png') is (status == 200)
+
+
+def test_b1_refusing_its_serial_number_still_prints(b1, fake, monkeypatch):
+    monkeypatch.setitem(REPLIES, (0x40, 0x0b), (protocol.ERROR, b'\x01'))
+    printer_ = b1.get('/labeldesigner/api/printer_status?look=1').get_json()['printers'][0]
+    assert (printer_['errors'], printer_['serial']) == ([], None)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+
+
+def test_b1_not_telling_its_serial_number_is_not_asked_again(b1, fake, monkeypatch):
+    monkeypatch.delitem(REPLIES, (0x40, 0x0b))
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    b1.get('/labeldesigner/api/printer_status?look=1')
+    b1.get('/labeldesigner/api/printer_status?look=1')
+    assert sum(packet[2] == 0x40 and packet[4] == 0x0b for packet in fake.packets) == 1
+
+
+def test_roll_serial_number_other_than_letters_and_digits_is_left_out(b1, fake, monkeypatch):
+    tag = B1_TAG.replace(b'PZ1G221322004205', b'PZ1-TEST00000001')
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+    assert b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['roll'] is None
+
+
+@pytest.mark.parametrize('across, column', [(-1.0, range(0, 6)), (1.0, range(372, 384))])
+def test_wide_frame_stays_on_the_paper_when_moved_1_mm(across, column):
+    from types import SimpleNamespace
+    [rows] = niimbot.DRIVER.calibration_job(SimpleNamespace(label_size='niimbot50x30', offset=(across, 0)))
+    assert any(rows[120][x] for x in column)

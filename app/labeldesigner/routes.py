@@ -1356,6 +1356,8 @@ def _kept_settings(changing: bool = False) -> dict:
             return printer_settings.parsed(fh.read())
     except FileNotFoundError:
         return {'printers': {}}
+    except UnicodeDecodeError:
+        return printer_settings.parsed('')
     except OSError as e:
         if changing:
             raise
@@ -1412,6 +1414,9 @@ def calibration_route():
             kept = _kept_settings()
             label_size = values.get('label_size') or printer_settings.of_printer(kept, device).get('label_size', '')
             return jsonify({**printer_settings.calibration_of(kept, device), 'kind': driver.calibration_kind(model, label_size)})
+        # Numbers read on the label are given on both sides, none left empty
+        if any(name in values and values[name] in (None, '') for name in ('left', 'right')):
+            raise ValueError(printer_settings.CALIBRATION_MESSAGE)
         given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along')
                  if values.get(name) not in (None, '')}
         roll, shift = values.get('roll') or None, None
@@ -1459,7 +1464,7 @@ def print_calibration():
         device, model, _ = _calibrating(values)
         label_size = values.get('label_size') or printer_settings.of_printer(_kept_settings(), device).get('label_size', '')
         message = _queue(model, device, label_size).print_calibration()
-    except ValueError as e:
+    except Exception as e:
         _log_refused_request('Printing the calibration label', e)
         return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
     if message:

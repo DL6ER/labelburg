@@ -8,6 +8,7 @@ print sits. The number next to that point tells how far. On wider rolls a
 frame inside the printhead's edges shows the white strips beside it. Lines
 1 mm inside the top and bottom show the white strips there."""
 
+import functools
 import io
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -82,15 +83,17 @@ def narrow(width_mm: float, length_mm: float, head: int = protocol.B1_HEAD) -> I
 
 
 def wide(width_mm: float, length_mm: float, head: int = protocol.B1_HEAD) -> Image.Image:
-    """The calibration label of a roll wider than that: a frame 1 mm inside
-    the printhead's edges and the label's top and bottom."""
-    height = round(length_mm * MM)
+    """The calibration label of a roll wider than that: a frame 1.5 mm inside
+    the printhead's edges, which stays on it moved by 1 mm and the B1's own
+    0.25 mm, and 1 mm inside the label's top and bottom."""
+    height, side = round(length_mm * MM), round(1.5 * MM)
     img = Image.new('L', (head, height), 255)
-    ImageDraw.Draw(img).rectangle((MM, MM, head - 1 - MM, height - 1 - MM), outline=0, width=2)
+    ImageDraw.Draw(img).rectangle((side, MM, head - 1 - side, height - 1 - MM), outline=0, width=2)
     _title(img, head // 2, CORNER * MM, height - CORNER * MM)
     return img
 
 
+@functools.cache
 def example(kind: str) -> bytes:
     """A calibration label printed 1 mm too far right, as a PNG for the
     label designer: on a 40 x 30 mm roll with the reading points marked, or

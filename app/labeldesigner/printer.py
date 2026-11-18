@@ -144,16 +144,20 @@ class PrinterQueue:
             fast = all(entry['fast'] for entry in entries)
             red = 'red' in str(self.label_size)
             mode = (fast, any(entry['high_res'] for entry in entries), red)
-            lengths = self.driver.label_lengths(job) or [0.0] * len(entries)
-            progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
-            printed = False
-            try:
-                message = self.driver.send(self, job)
-                printed = not message
-                return message
-            finally:
-                progress.finish(self.device_specifier, printed)
+            return self._send(job, len(entries), mode)
 
+    def _send(self, job, labels: int, mode: tuple[bool, bool, bool]) -> str:
+        """Send the job of the locked printer, its progress counted."""
+        fast, _, red = mode
+        lengths = self.driver.label_lengths(job) or [0.0] * labels
+        progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
+        printed = False
+        try:
+            message = self.driver.send(self, job)
+            printed = not message
+            return message
+        finally:
+            progress.finish(self.device_specifier, printed)
 
     def print_calibration(self) -> str:
         """Print the calibration label of the printer, see
@@ -164,16 +168,7 @@ class PrinterQueue:
             if not acquired:
                 logger.warning('Printer %s is busy with another job', self.device_specifier)
                 return "Printer is busy with another print job, please try again"
-            job = self.driver.calibration_job(self)
-            progress.start(self.device_specifier, self.driver.label_lengths(job),
-                           self.driver.print_speed(self.model, False, False), (False, False, False))
-            printed = False
-            try:
-                message = self.driver.send(self, job)
-                printed = not message
-                return message
-            finally:
-                progress.finish(self.device_specifier, printed)
+            return self._send(self.driver.calibration_job(self), 1, (False, False, False))
 
 
 def _discovered_label_printers() -> list[tuple[str, str]]:

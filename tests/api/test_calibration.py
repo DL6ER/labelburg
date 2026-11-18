@@ -23,11 +23,18 @@ def test_calibration_is_kept_per_printer():
     assert 'calibration' not in printer_settings.of_printer(data, 'tcp://192.0.2.1')
 
 
-@pytest.mark.parametrize('across, along, roll', [(0.3, 0, None), (5.25, 0, None), (0, -5.5, None), (0, 0, 'PZ1/../x')])
+@pytest.mark.parametrize('across, along, roll', [(0.3, 0, None), (float('nan'), 0, None), (0, 0, 'PZ1/../x')])
 def test_calibration_off_the_steps_is_refused(across, along, roll):
     with pytest.raises(ValueError) as e:
         printer_settings.calibrated({'printers': {}}, 'tcp://192.0.2.1', across, along, roll)
     assert str(e.value) == printer_settings.CALIBRATION_MESSAGE
+
+
+@pytest.mark.parametrize('across, along', [(5.25, 0), (0, -5.5)])
+def test_labels_are_not_moved_further_than_5_mm(across, along):
+    with pytest.raises(ValueError) as e:
+        printer_settings.calibrated({'printers': {}}, 'tcp://192.0.2.1', across, along, None)
+    assert str(e.value) == printer_settings.OFFSET_LIMIT
 
 
 def test_readings_tell_how_far_the_print_sits_right():
@@ -146,11 +153,11 @@ def test_the_calibration_label_follows_the_roll(b1, label_size, kind):
 USBIP, BT = 'usbip://192.0.2.7/1-1', 'bt://00:00:5E:00:53:01'
 
 
-def _told(monkeypatch, *devices_, serial='TEST000001'):
+def _told(monkeypatch, *devices_, serial='TEST000001', device_id=''):
     """The status of the devices told the printer's serial number."""
     from app.labeldesigner.drivers import devices
     # Not asked over the network for a device ID
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
     monkeypatch.setattr(devices, 'status_cache', {devices.lock_key(d): {'serial': serial, 'model': 'Niimbot/B1'} for d in devices_})
 
 
@@ -191,3 +198,51 @@ def test_printer_status_tells_the_calibration(b1, monkeypatch):
     # Only where the model offers it
     monkeypatch.setitem(state, 'model', 'QL-800')
     assert 'calibration' not in b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+
+
+def test_a_b1_on_usb_keeps_its_calibration_after_a_restart(monkeypatch):
+    # On USB/IP it tells a device ID, without a serial number in it
+    b1_id = 'MFG:NIIMBOT;CMD:ESC;MDL: B1;'
+    _told(monkeypatch, USBIP, device_id=b1_id)
+    data = printer_settings.calibrated({'printers': {}}, USBIP, 0.5, 0, None)
+    _told(monkeypatch, device_id=b1_id)
+    assert printer_settings.calibration_of(data, USBIP)['across'] == 0.5
+
+
+def test_seen_that_is_not_a_printer_is_left_out(monkeypatch):
+    _told(monkeypatch)
+    from app.labeldesigner.drivers import devices
+    data = {'printers': {}, 'seen': {devices.lock_key(USBIP): ['not', 'a', 'printer']}}
+    assert printer_settings.calibration_of(data, USBIP) == {'across': 0.0, 'along': 0.0, 'roll': None}
+
+
+def test_settings_that_are_not_text_print_without_calibration(tmp_path, offsets):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_bytes(b'\xff\xfe\x00broken')
+    assert _print(client, 'print').get_json()['success'] is True
+    assert offsets == [(0.0, 0.0)]
+
+
+@pytest.mark.parametrize('values', [{'left': '', 'right': ''}, {'left': '-1', 'right': ''}])
+def test_readings_left_empty_are_refused(b1, values):
+    r = b1.post(URL, data={**B1, **values, 'roll': 'PZ1TEST00001'})
+    assert r.status_code == 400 and r.get_json()['message'] == printer_settings.CALIBRATION_MESSAGE
+    assert b1.get(URL, query_string=B1).get_json()['roll'] is None
+
+
+def test_moving_further_than_5_mm_is_refused_plainly(b1):
+    b1.post(URL, data={**B1, 'across': '5'})
+    r = b1.post(URL, data={**B1, 'left': '-1', 'right': '1'})
+    assert r.status_code == 200
+    r = b1.post(URL, data={**B1, 'across': '5.25'})
+    assert r.status_code == 400 and r.get_json()['message'] == printer_settings.OFFSET_LIMIT
+
+
+def test_a_failing_calibration_print_answers_plainly(b1, monkeypatch):
+    from app.labeldesigner import refusals
+
+    def broken(self):
+        raise RuntimeError('broken')
+    monkeypatch.setattr(printer.PrinterQueue, 'print_calibration', broken)
+    r = b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30'})
+    assert r.status_code == 400 and r.get_json()['message'] == refusals.PRINT_FAILED
