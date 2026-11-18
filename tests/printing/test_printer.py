@@ -1,4 +1,5 @@
 import errno
+import functools
 import os
 import threading
 import time
@@ -310,6 +311,26 @@ def test_print_error_of_the_printer_is_reported(client, monkeypatch):
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
     assert response.status_code == 503
     assert response.get_json()['message'] == 'The printer reports: Replace media error'
+
+
+def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monkeypatch):
+    # A QL-1100 answers no status request while it holds the error
+    def refused(self, data):
+        # Only the end of a job is answered, status requests and resets are not
+        if data.endswith(b'\x1a'):
+            # Error information 2, bit 0: "Replace media error"
+            packet = bytearray(_status_packet(0x02))
+            packet[9] = 0x01
+            self.responses.append(bytes(packet))
+    monkeypatch.setattr(ExclusiveUsbPrinter, 'write', refused)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
+    response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
+    assert response.get_json()['message'] == 'The printer reports: Replace media error'
+    status = client.get('/labeldesigner/api/printer_status').get_json()
+    assert (status['errors'], status['media_width']) == (['Replace media error, clear it at the printer'], 62)
+    # Cleared
+    monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
+    assert client.get('/labeldesigner/api/printer_status').get_json()['errors'] == []
 
 
 @pytest.mark.parametrize('info, message', [

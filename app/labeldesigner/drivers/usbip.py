@@ -126,8 +126,12 @@ def shared_devices(host: str, port: int = PORT, timeout: float = CONNECT_TIMEOUT
 
 
 def _printer_busid(host: str, port: int, timeout: float) -> str:
-    printers = [device for device in shared_devices(host, port, timeout)
-                if PRINTER_CLASS in (device['device_class'], *device['interface_classes'])]
+    shared = shared_devices(host, port, timeout)
+    printers = [device for device in shared if PRINTER_CLASS in (device['device_class'], *device['interface_classes'])]
+    if not printers:
+        # Linux lists a device it has not configured without interfaces,
+        # whether it is a printer shows once it is imported
+        printers = [device for device in shared if not device['device_class'] and not device['interface_classes']]
     if not printers:
         raise OSError(errno.ENODEV, f'{host} shares no printer')
     if len(printers) > 1:

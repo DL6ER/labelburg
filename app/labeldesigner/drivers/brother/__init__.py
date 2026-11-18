@@ -6,7 +6,7 @@ brother_ql-inventree by Matthias Mair, both GPLv3."""
 import logging
 import re
 
-from .. import devices
+from .. import devices, usbip
 from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
@@ -31,6 +31,13 @@ class BrotherRaster(Driver):
     )
     mac_address_prefixes = network.MAC_ADDRESS_PREFIXES
     refusals = tuple(length_problem(model) for model in MODELS)
+
+    def model_of(self, device):
+        # Over USB/IP the device ID read at the import names the model
+        if not usbip.is_address(device):
+            return None
+        model = devices.device_id_fields(devices.usb_device_id(device)).get('MDL')
+        return model if model in MODELS else None
 
     def fits(self, label, model):
         return tables.label_fits(label, model)

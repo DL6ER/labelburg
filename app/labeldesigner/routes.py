@@ -1487,7 +1487,11 @@ def _printer(requested_device, requested_model, ask: bool = False) -> tuple[str,
     if device not in (configured, 'simulation', '?', *listed) and \
             not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
         raise ValueError(f"Unsupported printer: {device}")
-    model = drivers.canonical(requested_model) if requested_model else next((m for m, d, _ in printers if d == device), model)
+    if requested_model:
+        model = drivers.canonical(requested_model)
+    else:
+        # The model a printer tells, e.g. in its device ID, else the configured one
+        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
     if model not in PRINTER_MODELS:
