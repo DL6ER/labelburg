@@ -1251,6 +1251,10 @@ async function saveLabel(title, design, overwrite = null, tags = null) {
     if (!r.ok || !data.success) throw new Error(data.message || 'The label could not be saved');
     forget(data.name);
     await loadSaved();
+    // The wizard shows the label as saved, also when it was opened meanwhile
+    const shown = S.libSel && S.libSel.kind === 'saved' && S.libSel.id === data.name && S.saved.find(x => x.name === data.name);
+    if (shown) S.libSel = Object.assign(savedItem(shown), { values: S.libSel.values, starts: S.libSel.starts });
+    if ($('#libGrid')) { renderLibGrid(); if (shown) showDetail(S.libSel); }
     return data.name;
 }
 // All tags of the saved labels, each once, as first written

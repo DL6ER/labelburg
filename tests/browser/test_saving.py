@@ -115,6 +115,53 @@ def test_saved_label_keeps_its_title_and_changes(designer, server):
         designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': name})
 
 
+def saved_and_changed(page, title, text):
+    """Save a new label, choose it in the wizard and change its design."""
+    page.fill('#edTitle', title)
+    type_line(page, 0, text)
+    save_as(page, title)
+    page.wait_for_function("title => S.edit.origin && S.saved.some(x => x.title === title)", arg=title)
+    name = page.evaluate('() => S.edit.origin.id')
+    page.click('[data-tab="wizard"]')
+    page.click('.lib-nav [data-cat="saved"]')
+    page.click(f'#libGrid .thumb:has(.t:text-is("{title}"))')
+    wait_for_preview(page, '#libStage')
+    page.click('#libEdit')
+    page.wait_for_selector('#edStage')
+    return name
+
+
+def test_the_wizard_opened_while_a_label_is_saved_shows_it_as_saved(designer, server):
+    name = saved_and_changed(designer, 'Hall', 'Keys')
+    try:
+        type_line(designer, 0, 'Gloves')
+        held = []
+        designer.route('**/api/repository/save', lambda route: held.append(route))
+        designer.click('#edSave')
+        while not held:
+            designer.wait_for_timeout(50)
+        designer.click('[data-tab="wizard"]')
+        wait_for_preview(designer, '#libStage')
+        held[0].continue_()
+        designer.unroute('**/api/repository/save')
+        designer.wait_for_function("""() => { const f = document.querySelector('#libFields [data-line="0"]'); return f && f.value === 'Gloves'; }""")
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': name})
+
+
+def test_the_wizard_shows_the_new_title_of_a_saved_label(designer, server):
+    name = saved_and_changed(designer, 'Garage', 'Tools')
+    try:
+        designer.fill('#edTitle', 'Garage, left')
+        designer.click('#edSave')
+        designer.wait_for_selector('#toast:has-text("Saved \\"Garage, left\\" as")')
+        designer.click('[data-tab="wizard"]')
+        wait_for_preview(designer, '#libStage')
+        assert designer.inner_text('#libDetail h2') == 'Garage, left'
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': name})
+
+
 def saved_titles(page) -> list:
     return sorted(page.evaluate('() => S.saved.map(x => x.title)'))
 
