@@ -109,7 +109,7 @@ def test_saved_label_keeps_its_title_and_changes(designer, server):
         designer.wait_for_function("() => document.getElementById('toast').innerText.startsWith('Saved')")
         designer.click('[data-tab="wizard"]')
         wait_for_preview(designer, '#libStage')
-        assert designer.input_value('#libFields input') == 'Tea'
+        assert designer.input_value('#libFields [data-line="0"]') == 'Tea'
     finally:
         designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': name})
 
@@ -257,3 +257,24 @@ def test_saved_label_without_a_size_fits(designer, app):
         assert 'Needs' not in designer.inner_text('#libGrid .thumb:has(.t:text-is("No Size"))')
     finally:
         os.remove(path)
+
+
+def test_a_saved_line_of_several_lines_keeps_them_in_its_field(designer, server):
+    type_line(designer, 0, 'Jam\nStrawberry')
+    save_as(designer, 'Jam jar')
+    designer.wait_for_function("() => S.edit.origin && S.saved.some(x => x.title === 'Jam jar')")
+    name = designer.evaluate('() => S.edit.origin.id')
+    try:
+        designer.click('[data-tab="wizard"]')
+        designer.click('.lib-nav [data-cat="saved"]')
+        designer.click('#libGrid .thumb:has(.t:text-is("Jam jar"))')
+        wait_for_preview(designer, '#libStage')
+        assert designer.input_value('#libFields [data-line="0"]') == 'Jam\nStrawberry'
+        designer.focus('#libFields [data-line="0"]')
+        designer.keyboard.press('Control+End')
+        designer.keyboard.press('Enter')
+        designer.keyboard.type('2026')
+        wait_for_preview(designer, '#libStage')
+        assert designer.input_value('#libFields [data-line="0"]') == 'Jam\nStrawberry\n2026'
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': name})

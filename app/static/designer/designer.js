@@ -2293,7 +2293,7 @@ function renderFields(box, item, work, refresh, onEnter) {
     if (blanks.length) {
         html = blanks.map((name, i) => fieldHTML(item, name, work.values[name], i)).join('');
     } else {
-        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><input class="field" id="ln${i}" data-line="${i}" value="${esc(toDisplay(l.text))}"></div>`).join('');
+        html = work.design.text.map((l, i) => `<div><label class="label-s" for="ln${i}">Line ${i + 1}</label><textarea class="field" id="ln${i}" data-line="${i}" rows="${lineRows(toDisplay(l.text))}">\n${esc(toDisplay(l.text))}</textarea></div>`).join('');
         if (['qrcode_text', 'qrcode', 'image_qrcode_text'].includes(work.design.print_type)) {
             html += `<div><label class="label-s" for="lnCode">Code content</label>${codeField('lnCode', work.design.code_text, work.design.print_type !== 'qrcode' ? ' placeholder="Empty: the text of the label"' : '')}</div>`;
         }
@@ -2301,11 +2301,16 @@ function renderFields(box, item, work, refresh, onEnter) {
     }
     box.innerHTML = html;
     $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { work.values[inp.dataset.blank] = inp.value; refresh(); }));
-    $$('[data-line]', box).forEach(inp => inp.addEventListener('input', () => {
-        const l = work.design.text[+inp.dataset.line];
-        l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
-        refresh();
-    }));
+    $$('[data-line]', box).forEach(inp => {
+        inp.addEventListener('input', () => {
+            const l = work.design.text[+inp.dataset.line];
+            l.text = fromDisplay(inp.value, l.text, inp.selectionStart);
+            inp.rows = lineRows(inp.value);
+            refresh();
+        });
+        // Enter breaks the line, Ctrl+Enter prints as in the field of the code
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onEnter(); } });
+    });
     if ($('#lnCode', box)) {
         $('#lnCode', box).addEventListener('input', e => { e.target.rows = codeRows(e.target.value); work.design.code_text = fromDisplay(e.target.value, work.design.code_text, e.target.selectionStart); refresh(); });
         // Enter starts a new line of the code
@@ -2842,6 +2847,28 @@ const hexOf = c => c === 'red' ? '#ff0000' : /^#[0-9a-f]{6}$/i.test(c || '') ? c
 const colorOf = hex => hex === '#000000' ? 'black' : hex === '#ff0000' ? 'red' : hex;
 const colorField = (id, color, title) => `<input type="color" class="color-in" id="${id}" value="${hexOf(color)}" title="${title}" aria-label="${title}">`;
 const SPACINGS = [100, 150, 200, 250, 300];
+// The field of a line grows with its line breaks, each is a line on the label
+const lineRows = text => Math.min(8, Math.max(1, String(text).split('\n').length));
+
+// A style set while lines of line i are selected in its field applies to
+// those lines only: they become a line of their own, the lines before and
+// after them stay as they were. A style is one of whole lines on the label,
+// so a selection takes the whole lines it touches. The line to style.
+function selectedLines(d, i, tx) {
+    if (!tx || tx.selectionStart === tx.selectionEnd) return i;
+    const shown = tx.value;
+    let end = tx.selectionEnd;
+    if (end > tx.selectionStart && shown[end - 1] === '\n') end--;
+    const first = shown.slice(0, tx.selectionStart).split('\n').length - 1;
+    const last = shown.slice(0, end).split('\n').length - 1;
+    // The templates have no line breaks: the lines of the text are those shown
+    const lines = String(d.text[i].text).split('\n');
+    if (lines.length !== shown.split('\n').length || (first === 0 && last === lines.length - 1)) return i;
+    const parts = [lines.slice(0, first), lines.slice(first, last + 1), lines.slice(last + 1)]
+        .map(part => part.length ? Object.assign({}, d.text[i], { text: part.join('\n') }) : null);
+    d.text.splice(i, 1, ...parts.filter(Boolean));
+    return i + (parts[0] ? 1 : 0);
+}
 
 // Two rows per line: the text on top, all settings of the line below it
 function lineRow(l, i, main, families, red, color) {
@@ -2850,7 +2877,7 @@ function lineRow(l, i, main, families, red, color) {
     const noBold = wantsBold(l) && !hasBold(fam);
     const spacing = +(l.line_spacing || 100);
     return `<div class="lrow${wantsBold(l) && !noBold ? ' bold' : ''}${i === S.editSel ? ' sel' : ''}${l.color === 'red' ? ' red' : ''}" data-row="${i}">
-        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<input class="tx"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} value="${esc(toDisplay(l.text))}" placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">
+        <span class="txw">${l.checkbox ? '<i class="fa-regular fa-square" title="To-do box"></i>' : ''}<textarea class="tx" rows="${lineRows(toDisplay(l.text))}"${color && hexOf(l.color) !== '#000000' ? ` style="color:${hexOf(l.color)}"` : ''} placeholder="${i === 0 ? 'Type the label text' : 'Line ' + (i + 1)}" aria-label="Line ${i + 1}">\n${esc(toDisplay(l.text))}</textarea>
             <button class="mini quiet" type="button" data-act="del" title="Remove the line"><i class="fa-solid fa-xmark"></i></button></span>
         <div class="st">
             <select class="mini lf${fam !== main ? ' on' : ''}" title="Font of line ${i + 1}" aria-label="Font of line ${i + 1}">${missingFont(fam)}${families.map(f => `<option${f === fam ? ' selected' : ''}>${esc(f)}</option>`).join('')}</select>
@@ -3155,9 +3182,10 @@ function bindEditor() {
     if ($('#edAdd')) $('#edAdd').onclick = () => {
         const last = d.text[d.text.length - 1];
         d.text.push(L('', last ? Math.max(20, Math.round(last.size * .6)) : 50, false, last ? last.align : 'center', { font: fontOf(familyOf(last && last.font), false) }));
-        S.editSel = d.text.length - 1;
+        // Drawn anew the line that had the focus gets it back first
+        const added = S.editSel = d.text.length - 1;
         renderEditor();
-        const inp = $(`[data-row="${S.editSel}"] .tx`);
+        const inp = $(`[data-row="${added}"] .tx`);
         if (inp) inp.focus();
     };
     $$('[data-tok]').forEach(b => b.onclick = () => {
@@ -3172,24 +3200,40 @@ function bindEditor() {
         const i = +row.dataset.row, l = d.text[i];
         const tx = $('.tx', row);
         tx.addEventListener('focus', () => { S.editSel = i; $$('[data-row]').forEach(r => r.classList.toggle('sel', r === row)); });
-        tx.addEventListener('input', () => { l.text = fromDisplay(tx.value, l.text, tx.selectionStart); redrawEditor(); });
+        tx.addEventListener('input', () => { l.text = fromDisplay(tx.value, l.text, tx.selectionStart); tx.rows = lineRows(tx.value); redrawEditor(); });
         tx.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); $('#edAdd').click(); }
+            // Enter breaks the line in the field, Shift+Enter starts a line
+            // with settings of its own
+            if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); $('#edAdd').click(); }
             if (e.key === 'Backspace' && !tx.value && d.text.length > 1) { e.preventDefault(); d.text.splice(i, 1); S.editSel = Math.max(0, i - 1); renderEditor(); const p = $(`[data-row="${S.editSel}"] .tx`); if (p) p.focus(); }
         });
-        $('input.mini', row).addEventListener('input', e => { const v = Math.round(+e.target.value); if (v > 0) { l.size = String(v); redrawEditor(); } });
-        $('select.lf', row).onchange = e => { l.bold = wantsBold(l); l.font = fontOf(e.target.value, l.bold); S.editSel = i; renderEditor(); };
-        $('select.lsp', row).onchange = e => { l.line_spacing = e.target.value; S.editSel = i; renderEditor(); };
-        if ($('input.lcol', row)) $('input.lcol', row).onchange = e => { l.color = colorOf(e.target.value); S.editSel = i; renderEditor(); };
+        // The line a style applies to: the selected lines of the field as a
+        // line of their own, else the whole line
+        const styled = () => { const j = selectedLines(d, i, tx); S.editSel = j; return d.text[j]; };
+        $('input.mini', row).addEventListener('input', e => {
+            const v = Math.round(+e.target.value);
+            if (!(v > 0)) return;
+            const count = d.text.length, m = styled();
+            m.size = String(v);
+            if (d.text.length === count) return redrawEditor();
+            // Split, the size typed next goes on in the field of the new line
+            renderEditor();
+            const size = $(`[data-row="${S.editSel}"] input.mini`);
+            // Set anew, the value puts the caret after the digits typed so far
+            if (size) { size.focus(); size.value = ''; size.value = m.size; }
+        });
+        $('select.lf', row).onchange = e => { const m = styled(); m.bold = wantsBold(m); m.font = fontOf(e.target.value, m.bold); renderEditor(); };
+        $('select.lsp', row).onchange = e => { styled().line_spacing = e.target.value; renderEditor(); };
+        if ($('input.lcol', row)) $('input.lcol', row).onchange = e => { styled().color = colorOf(e.target.value); renderEditor(); };
         $$('button[data-act]', row).forEach(b => b.onclick = () => {
             const act = b.dataset.act;
-            if (act === 'todo') l.checkbox = !l.checkbox;
-            if (act === 'red') l.color = l.color === 'red' ? 'black' : 'red';
-            if (act === 'bold') { l.bold = !wantsBold(l); if (FONTS[familyOf(l.font)]) l.font = fontOf(familyOf(l.font), l.bold); }
-            if (act === 'align') l.align = { left: 'center', center: 'right', right: 'left' }[l.align] || 'left';
-            if (act === 'invert') l.inverted = !l.inverted;
-            if (act === 'del') d.text.splice(i, 1);
-            S.editSel = i;
+            if (act === 'del') { d.text.splice(i, 1); S.editSel = i; renderEditor(); return; }
+            const m = styled();
+            if (act === 'todo') m.checkbox = !m.checkbox;
+            if (act === 'red') m.color = m.color === 'red' ? 'black' : 'red';
+            if (act === 'bold') { m.bold = !wantsBold(m); if (FONTS[familyOf(m.font)]) m.font = fontOf(familyOf(m.font), m.bold); }
+            if (act === 'align') m.align = { left: 'center', center: 'right', right: 'left' }[m.align] || 'left';
+            if (act === 'invert') m.inverted = !m.inverted;
             renderEditor();
         });
     });
