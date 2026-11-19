@@ -792,7 +792,7 @@ def _label_for_designer(data: dict, image_dir: str) -> dict:
     image_data, so that the page can put it into its image upload. An
     image that is there but cannot be read raises OSError: without it, the
     label saved again would lose it."""
-    text = data.get('text', [])
+    text = _saved_lines(data)
     if data.get('print_type') == 'qrcode':
         text = _code_with_text(data, text)
     data['text'] = json.dumps(text)
@@ -1030,8 +1030,15 @@ def _load_repo_json(name: str) -> tuple[dict, bytes | None]:
         if isinstance(image, str) and image and os.path.exists(image_path := os.path.join(repo, secure_filename(image))):
             with open(image_path, 'rb') as fh:
                 image_bytes = fh.read()
-    data['text'] = json.dumps(data.get('text', []))
+    data['text'] = json.dumps(_saved_lines(data))
     return data, image_bytes
+
+
+def _saved_lines(data: dict) -> list:
+    """The lines of a saved label, none for text that is no list, e.g. null,
+    which saving takes."""
+    text = data.get('text')
+    return text if isinstance(text, list) else []
 
 
 def _saved_response(respond, failure: str):

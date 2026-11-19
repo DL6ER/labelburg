@@ -312,6 +312,19 @@ def test_cable_flag_is_saved_and_loaded(tmp_path):
     assert (loaded['cable_flag'], loaded['cable_diameter']) == (True, '8')
 
 
+@pytest.mark.parametrize('text', [None, []])
+def test_a_label_saved_without_lines_is_loaded_and_printed(tmp_path, text):
+    # Saving takes text null, the label has no lines
+    client = make_client(tmp_path, empty_repo=True)
+    label = {'name': 'Code.json', 'label_size': '62', 'print_type': 'qrcode_text', 'code_text': 'A1', 'text': text}
+    assert client.post(SAVE_URL, json=label).status_code == 200
+    loaded = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Code.json'})
+    assert loaded.status_code == 200 and json.loads(loaded.get_json()['text']) == []
+    assert client.get('/labeldesigner/api/repository/preview', query_string={'name': 'Code.json'}).status_code == 200
+    printed = client.post('/labeldesigner/api/repository/print', json={'name': 'Code.json', 'printer': 'simulation'})
+    assert printed.get_json() == {'success': True}
+
+
 def test_a_label_whose_image_cannot_be_read_is_not_loaded_without_it(tmp_path):
     # Loaded without its image, the label saved again in the label designer
     # removed the image for good
