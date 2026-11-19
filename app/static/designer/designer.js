@@ -792,7 +792,7 @@ async function typedThumb(img, job) {
 // --- State -------------------------------------------------------------------
 
 const S = {
-    printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeAssumed: true,
+    printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeKnown: false, tapeAssumed: true, tapeFits: [], tapeMoves: [], tapePlace: {}, tapeCandidates: [],
     demos: null, demoList: [], saved: [], codes: [{ type: 'QR', name: 'QR', two_d: true, corrections: ['L', 'M', 'Q', 'H'] }],
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
@@ -833,7 +833,7 @@ function setWide(d, wide) {
 // puts it along the longer side of the label, which is across the tape on
 // endless tape and e.g. on 62 x 29 mm labels
 const longAlongTape = id => !!SIZES[id] && SIZES[id].tape[1] > SIZES[id].tape[0];
-const runsAlong = d => (d.orientation === 'standard') === longAlongTape(d.label_size);
+const runsAlong = d => (d.orientation !== 'rotated') === longAlongTape(d.label_size);
 function setRunsAlong(d, along) {
     d.orientation = along === longAlongTape(d.label_size) ? 'standard' : 'rotated';
     return d;
@@ -843,39 +843,20 @@ function flagOn(d) {
     const v = String(d.cable_flag).trim().toLowerCase();
     return v === 'true' || (/^[+-]?\d+$/.test(v) && parseInt(v, 10) > 0);
 }
-// Another label size: die-cut labels start wide, on endless tape the text
-// keeps its direction
-function setSize(d, id) {
-    const along = runsAlong(d);
-    d.label_size = id;
-    if (isDieCut(id)) d.cable_flag = '0';
-    return isDieCut(id) ? setWide(d, true) : setRunsAlong(d, along);
-}
-
-function fitsTape(sizeId) {
-    if (sizeId === S.tape) return true;
-    const a = SIZES[sizeId], b = SIZES[S.tape];
-    return !!(a && b && a.form === b.form && a.tape[0] === b.tape[0] && a.tape[1] === b.tape[1] && (!a.red || S.tapeRedUnknown));
-}
-
 // Labels are shown and printed on the tape in the printer, a label made for
-// another one as setSize() places it, not scaled. Where the printer does not
-// say which tape it has, labels keep their own.
-const tapeKnown = () => !S.tapeAssumed && !!SIZES[S.tape];
-// The tape the printer reports, which is not set by hand
-const tapeReported = () => tapeKnown() && !S.tapeManual;
-// A label of the size of the tape only takes its name, e.g. that of black
-// and red tape. One for black and red keeps it where the printer cannot
-// tell whether its roll has red.
-const movesTo = sizeId => tapeKnown() && sizeId !== S.tape && !(S.tapeRedUnknown && fitsTape(sizeId));
+// another one as the server places it, not scaled. Where the printer does not
+// say which tape it has, labels keep their own, one for the same paper of
+// another model takes the printer's size of it.
+const tapeKnown = () => S.tapeKnown;
+const fitsTape = sizeId => sizeId === S.tape || S.tapeFits.includes(sizeId);
+const movesTo = sizeId => S.tapeMoves.includes(sizeId);
 // Whether a label is placed on a tape of another size, which is said
 const placed = sizeId => tapeKnown() && !fitsTape(sizeId);
-const putOnTape = d => fitsTape(d.label_size) ? Object.assign(d, { label_size: S.tape }) : setSize(d, S.tape);
-// The printer's size of the same paper, also while the tape is not known
-const samePaper = id => ((SIZES[id] || {}).same_paper || {})[S.printer && S.printer.model];
-// Both only set these, a shallow copy keeps the images shared
-const onTape = d => movesTo(d.label_size) ? putOnTape(Object.assign({}, d))
-    : samePaper(d.label_size) ? Object.assign({}, d, { label_size: samePaper(d.label_size) }) : d;
+// Anything but rotated is standard, as the label is rendered
+const putOnTape = d => Object.assign(d, S.tapePlace[`${d.label_size}|${d.orientation === 'rotated' ? 'rotated' : 'standard'}`]);
+// Placing sets the size, orientation and cable flag only, a shallow copy
+// keeps the images shared
+const onTape = d => movesTo(d.label_size) ? putOnTape(Object.assign({}, d)) : d;
 
 // The label in the editor is placed on the tape in the printer. E.made keeps
 // what placing it changed, a label saved without a change since keeps the
@@ -901,16 +882,24 @@ const madeDesign = E => unchangedSincePlaced(E) ? Object.assign({}, E.design, E.
 // look: also look for Bluetooth printers that did not answer before, which
 // the status every 20 s leaves alone
 // Changes of the printer settings on their way to the server, and those it
-// answered: a status asked for before keeps the settings as shown
-let settingsPending = 0, settingsAnswered = 0;
+// answered: a status asked for before keeps the settings as shown, and the
+// tape where one was set by hand since
+let settingsPending = 0, settingsAnswered = 0, tapesSet = 0;
+// Tapes set by hand on their way to the server, by printer: the printer
+// panel shows the one chosen until the server tells whether it uses it
+const tapesSaving = {};
 async function refreshPrinters(look = false) {
     try {
-        const answered = settingsAnswered;
+        const answered = settingsAnswered, tapes = tapesSet;
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
         const printers = Array.isArray(data.printers) ? data.printers : [data];
         if (settingsPending || answered !== settingsAnswered)
-            printers.forEach(p => { const shown = [S.printer, ...S.printers].find(o => o && o.path === p.path); if (shown) p.settings = shown.settings; });
+            printers.forEach(p => {
+                const shown = [S.printer, ...S.printers].find(o => o && o.path === p.path);
+                if (shown) p.settings = shown.settings;
+                if (shown && tapes !== tapesSet) p.tape = shown.tape;
+            });
         S.printers = printers;
         S.printerHints = Array.isArray(data.hints) ? data.hints : [];
         const chosen = load(own('designer_printer'), null);
@@ -955,37 +944,32 @@ const thePrinter = (p, start = false) => p && p.name ? p.name : `${start ? 'The'
 // The settings of the printer kept on the server, the common ones with its own
 const kept = () => (S.printer && S.printer.settings) || {};
 const manualTape = () => kept().label_size || '';
+// A tape the printer reports is the one in it, one set by hand counts only
+// where it reports none
+const tapeReported = () => tapeKnown() && !S.tapeManual;
+// The printer measured the length of its labels, e.g. a ZPL printer, and
+// none of that length is set by hand
+const measuredOnly = () => !tapeKnown() && S.tapeCandidates.length > 0;
 const COMMON_SETTINGS = ['quality'];
 
-// Whether the printer takes a label size, any size if its model is unknown
-function printerTakes(s) {
-    const model = S.printer && S.printer.model;
-    const known = model && C.label_sizes.some(x => x.models.includes(model));
-    return known ? s.models.includes(model) : s.models.length > 0;
-}
+// Whether the printer takes a label size, as the server tells it. Without a
+// printer, e.g. before the first status, those of an unknown one.
+const printerTakes = s => ((S.printer && S.printer.takes) || C.takes).includes(s.id);
 
+// The tape in the printer and where labels go on it, as the server finds
+// them. Without them, e.g. without a printer, the default tape is assumed.
 function detectTape() {
-    const p = S.printer;
-    // The server tells the label size of the tape the printer reports, or
-    // the one it assumes without
-    const found = p && !p.label_size_assumed ? SIZES[p.label_size] : null;
-    // What the printer reported says nothing about a tape set by hand
-    S.tapeUnknown = '';
-    S.tapeRedUnknown = false;
-    // A tape set by hand counts only where the printer reports none, the
-    // printer refuses a job for another roll
-    if (!found && SIZES[manualTape()]) {
-        S.tape = manualTape();
-        S.tapeAssumed = false;
-        S.tapeManual = true;
-        return;
-    }
-    S.tapeManual = false;
-    // Only the QL-800 series tells whether a roll is black and red
-    S.tapeRedUnknown = !!found && !found.red && p.red_roll == null;
-    if (p && p.media_width && !found) S.tapeUnknown = p.media_length ? `${p.media_width} x ${p.media_length} mm` : `${p.media_width} mm`;
-    S.tape = p && SIZES[p.label_size] ? p.label_size : C.default_label_size;
-    S.tapeAssumed = !found;
+    const t = (S.printer && S.printer.tape) || { id: C.default_label_size, assumed: true };
+    S.tape = t.id;
+    S.tapeKnown = !!t.known;
+    S.tapeAssumed = !!t.assumed;
+    S.tapeManual = !!t.manual;
+    S.tapeUnknown = t.unknown || '';
+    S.tapeRedUnknown = !!t.red_unknown;
+    S.tapeCandidates = t.candidates || [];
+    S.tapeFits = t.fits || [];
+    S.tapeMoves = t.moves || [];
+    S.tapePlace = t.place || {};
 }
 
 // What a printer does with a job: the stage of the label (VC-500W), the
@@ -2685,10 +2669,12 @@ function renderEditor() {
 // one is always offered, e.g. that of a label made for another printer.
 function sizeOptions(chosen, name) {
     const offered = s => s.id === chosen || printerTakes(s);
-    const groups = [['Endless', s => s.form === 'endless' && !isPtouch(s.id) && !isColorTape(s.id)], ['Die-cut', s => s.form === 'die_cut'],
+    // Those of the length the printer measured first
+    const measured = s => S.tapeCandidates.includes(s.id);
+    const groups = [['Of the measured length', measured], ['Endless', s => s.form === 'endless' && !isPtouch(s.id) && !isColorTape(s.id)], ['Die-cut', s => s.form === 'die_cut'],
         ['Round', s => s.form === 'round_die_cut'], ['P-touch tape', s => isPtouch(s.id)], ['Color tape', s => isColorTape(s.id)]];
-    return groups.map(([group, inGroup]) => {
-        const sizes = C.label_sizes.filter(s => inGroup(s) && offered(s));
+    return groups.map(([group, inGroup], i) => {
+        const sizes = C.label_sizes.filter(s => inGroup(s) && offered(s) && (i === 0 || !measured(s)));
         return sizes.length ? `<optgroup label="${group}">${sizes.map(s => `<option value="${esc(s.id)}"${s.id === chosen ? ' selected' : ''}>${name(s)}</option>`).join('')}</optgroup>` : '';
     }).join('');
 }
@@ -2706,10 +2692,11 @@ function flagRow(d) {
 // Where the printer does not say, the label keeps its own.
 function tapeLine(d) {
     const who = esc(thePrinter(S.printer, true));
-    const note = S.tapeUnknown ? `<span class="tape-note warn">${who} reports ${esc(S.tapeUnknown)} tape, which is not offered here.</span>`
+    const note = measuredOnly() ? `<span class="tape-note warn">${who} measures labels ${esc(S.tapeUnknown)}. Choose which ones in the printer settings.</span>`
+        : S.tapeUnknown ? `<span class="tape-note warn">${who} reports ${esc(S.tapeUnknown)} tape, which is not offered here.</span>`
         : !tapeKnown() ? `<span class="tape-note warn">${who} does not say which tape it has.</span>`
         : `<span class="tape-note ok"><i class="fa-solid fa-check"></i> ${S.tapeManual ? 'Set in the printer settings' : 'In the printer'}${tapeLeft(S.printer) ? ', ' + esc(tapeLeft(S.printer)) : ''}</span>`;
-    const change = tapeReported() ? '' : `<button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button>`;
+    const change = !tapeReported() ? `<button type="button" class="link" id="edTapeChange">${tapeKnown() ? 'Change' : 'Set the tape'}</button>` : '';
     return `${note}<div class="field tape-line"><span class="grow">${esc(sizeName(d.label_size))}</span>${change}</div>`;
 }
 const bindTapeLine = () => { const b = $('#edTapeChange'); if (b) b.onclick = () => openPrinterPanel(); };
@@ -3549,15 +3536,32 @@ function bindPrinterPanel() {
             Object.entries(changes).filter(([k]) => p === S.printer || COMMON_SETTINGS.includes(k))
                 .forEach(([k, v]) => { if (v) p.settings[k] = v; else delete p.settings[k]; });
         });
+        const path = printerKey(), tape = 'label_size' in changes;
+        let saving = tape;
+        if (saving) tapesSaving[path] = (tapesSaving[path] || 0) + 1;
+        const answered = () => { if (saving) { saving = false; tapesSaving[path]--; } };
         shown();
         const fd = new FormData();
-        fd.set('printer', printerKey());
+        fd.set('printer', path);
         if (C.models[S.printer.model]) fd.set('model', S.printer.model);
         Object.entries(changes).forEach(([k, v]) => fd.set(k, v));
         settingsPending++;
         post('/settings', fd).catch(() => { throw new Error('The label designer could not be reached'); }).then(async r => {
-            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The settings could not be saved');
+            const answer = await r.json().catch(() => ({}));
+            answered();
+            if (!r.ok) throw new Error(answer.message || 'The settings could not be saved');
+            if (!tape) return;
+            // The tape the server finds now, shown right away: the status of
+            // all printers can take a while and follows
+            tapesSet++;
+            [S.printer, ...S.printers].forEach(p => { if (p && p.path === path) p.tape = answer.tape; });
+            shown();
+            // Closed meanwhile: the view shows the tape now, or once the layer
+            // that took the place of the panel closes
+            if (!$('.pp')) { if ($('#layer').hidden) route(); else S.routeLater = true; }
+            refreshPrinters();
         }).catch(e => {
+            answered();
             // On the printers shown now, a status may have replaced them
             [S.printer, ...S.printers].forEach(p => { if (p && before.has(p.path)) p.settings = before.get(p.path); });
             toast(e.message);
@@ -3573,6 +3577,7 @@ function bindPrinterPanel() {
         redraw();
     });
     $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
+    // Offered only where the printer does not report its tape
     const setTape = $('#setTape', box);
     if (setTape) setTape.onchange = e => saveSettings({ label_size: e.target.value });
     // Of this browser only
@@ -3604,12 +3609,16 @@ function settingsCard() {
     const without600 = Object.keys(C.models).filter(m => C.models[m].qualities.includes('high') && !C.models[m].high_res).sort();
     // New labels start on the assumed tape, the default only if the printer takes it
     const assumed = `Labels keep their own size, new ones are ${esc(sizeName(S.tape))}.`;
-    const note = S.tapeManual ? 'Set by hand.' : S.tapeUnknown ? `The printer reports ${S.tapeUnknown} tape, which is not offered here. ${assumed}`
+    const note = S.tapeManual ? 'Set by hand.' : measuredOnly() ? `The printer measures labels ${esc(S.tapeUnknown)}, choose which ones. ${assumed}`
+        : S.tapeUnknown ? `The printer reports ${S.tapeUnknown} tape, which is not offered here. ${assumed}`
         : S.tapeAssumed ? `The printer does not report its tape. ${assumed}` : 'Read from the printer.';
+    // The tape set by hand is selected while it is saved, else the size the
+    // server uses it as, not one kept for another model at this address
+    const chosen = tapesSaving[printerKey()] > 0 ? manualTape() : S.tapeManual ? S.tape : '';
     const tapeField = tapeReported() ? `<span class="label-s">Tape in the printer</span><div id="ppTape">${esc(sizeName(S.tape))}</div>`
         : `<label class="label-s" for="setTape">Tape in the printer</label>
             <select class="field" id="setTape"><option value="">Automatic</option>
-            ${sizeOptions(manualTape(), x => esc(sizeName(x.id)))}
+            ${sizeOptions(chosen, x => esc(sizeName(x.id)))}
             </select>`;
     return `<div class="settings">
         <div>${tapeField}<span class="muted small" id="ppTapeNote">${note}</span></div>

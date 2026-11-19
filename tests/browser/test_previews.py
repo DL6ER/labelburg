@@ -1,7 +1,7 @@
 """Previews in the label designer: the queue, time limits, thumbnails and
 what a failed one tells."""
 
-from tests.browser.helpers import fits_note, kept, preview_size, set_tape, type_line, wait_for_preview
+from tests.browser.helpers import fits_note, kept, preview_size, set_tape, type_line, wait_for_held, wait_for_preview
 
 
 def test_preview_of_typed_text(designer):
@@ -86,12 +86,10 @@ def test_an_earlier_preview_does_not_tell_whether_a_newer_label_prints(designer)
     held = []
     designer.route('**/api/preview', lambda route: held.append(route))
     designer.fill('#edCode', '123456789012')
-    while not held:
-        designer.wait_for_timeout(50)
+    wait_for_held(designer, held)
     designer.fill('#edCode', '13')
     held.pop(0).continue_()
-    while not held:
-        designer.wait_for_timeout(50)
+    wait_for_held(designer, held)
     assert designer.is_disabled('#edPrint')
     held.pop(0).continue_()
     designer.unroute('**/api/preview')
@@ -472,7 +470,7 @@ def in_stage(page):
 
 def test_large_preview_fills_the_stage(designer):
     # Taller than wide, the height of the window limits it
-    designer.evaluate("() => { setSize(S.edit.design, '29'); S.edit.design.text = 'ABCDEFGH'.split('').map(c => L(c, 60)); renderEditor(); }")
+    designer.evaluate("() => { Object.assign(S.edit.design, { label_size: '29', orientation: 'standard' }); S.edit.design.text = 'ABCDEFGH'.split('').map(c => L(c, 60)); renderEditor(); }")
     wait_for_preview(designer)
     small = paper(designer)
     assert designer.get_attribute('#edStage .zoom', 'aria-pressed') == 'false'
@@ -517,7 +515,7 @@ def test_stage_fits_the_label_again_when_the_window_changes(designer):
 
 
 def test_large_preview_follows_the_height_of_its_stage(designer):
-    designer.evaluate("() => { setSize(S.edit.design, '29'); S.edit.design.text = 'ABCDEFGH'.split('').map(c => L(c, 60)); renderEditor(); }")
+    designer.evaluate("() => { Object.assign(S.edit.design, { label_size: '29', orientation: 'standard' }); S.edit.design.text = 'ABCDEFGH'.split('').map(c => L(c, 60)); renderEditor(); }")
     wait_for_preview(designer)
     designer.click('#edStage .zoom')
     large = paper(designer)

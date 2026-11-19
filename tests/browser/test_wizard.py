@@ -1,8 +1,7 @@
 """The wizard of the label designer: looks, templates, demo labels and
 search."""
 
-from tests.browser.helpers import printed, wait_for_preview
-from tests.browser.test_printing import fake_printer
+from tests.browser.helpers import fake_printer, printed, wait_for_preview
 
 
 def test_looks_follow_typing_one_batch_at_a_time(designer):

@@ -8,7 +8,7 @@ import pytest
 
 from app.labeldesigner.drivers import backends, devices
 from app.labeldesigner.drivers.brother import usb
-from tests.helpers import EXAMPLE_FORMDATA, make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client, without_status
 
 REPLY, COMPLETED, PHASE_CHANGE, ERROR = 0x00, 0x01, 0x06, 0x02
 PRINTING, WAITING = 0x01, 0x00
@@ -313,6 +313,7 @@ def test_long_labels_printed_through_the_api(clock, monkeypatch, tmp_path):
                 self.due = clock.now
                 self.messages = page() * self.written.count(b'\x1biz')
     monkeypatch.setattr(backends, 'KernelPrinter', Backend)
+    without_status(monkeypatch)
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = 'file:///dev/usb/lp0'
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='7'))
