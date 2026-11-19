@@ -408,6 +408,14 @@ def test_sentences_call_a_printer_by_its_name(designer, name, called):
     assert designer.inner_text('#edMade').endswith(f'on the 29 x 90 mm in {called}.')
 
 
+def test_tape_line_stays_while_the_status_does_not_change_it(designer):
+    # Also for a printer named with quotes, the focus stays in it
+    fake_printer(designer, name='Bob\'s "big" printer')
+    designer.focus('#edTapeChange')
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.evaluate('() => document.activeElement.id') == 'edTapeChange'
+
+
 def test_no_600_dpi_on_the_ql1100(designer):
     type_line(designer, 0, 'Hello')
     width, _ = preview_size(designer)
@@ -1222,6 +1230,23 @@ def test_time_left_is_shown_while_printing(designer):
     designer.wait_for_function("() => document.querySelector('#toast').textContent === 'Label 2 of 3, about 40 s left'")
     pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
     assert printed(designer) == ['printed']
+
+
+@pytest.mark.parametrize('hidden', [False, True])
+def test_progress_is_asked_once_at_a_time_and_not_from_a_tab_in_the_background(designer, hidden):
+    pending = print_held(designer, {'labels': 3, 'label': 2, 'seconds_left': 40})
+    asked = []
+    designer.route('**/api/printer_status*', lambda route: asked.append(route))
+    if hidden:
+        designer.evaluate("() => Object.defineProperty(document, 'hidden', { value: true, configurable: true })")
+    # Asked every 1.5 s, the first answer does not come
+    designer.wait_for_timeout(3500)
+    assert len(asked) == (0 if hidden else 1)
+    wait_for_held(designer, pending)
+    pending[0].fulfill(content_type='application/json', body=json.dumps({'success': True}))
+    assert printed(designer) == ['printed']
+    for route in asked:
+        route.abort()
 
 
 def overlap(a, b) -> bool:

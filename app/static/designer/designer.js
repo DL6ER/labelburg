@@ -50,7 +50,7 @@ function load(key, fallback) {
     } catch (e) { return fallback; }
 }
 function store(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { toast('This browser could not keep the change'); }
+    if (!storeQuiet(key, value)) toast('This browser could not keep the change');
 }
 
 function storeQuiet(key, value) {
@@ -209,7 +209,7 @@ const hasRoom = d => !(SIZES[d.label_size] && isEndless(SIZES[d.label_size]) && 
 
 // Labels as the API stores them (text as JSON, booleans as true/false)
 function normalize(raw) {
-    const d = Object.assign(baseDesign(raw.label_size || C.default_label_size), {});
+    const d = baseDesign(raw.label_size || C.default_label_size);
     for (const k of Object.keys(d)) if (raw[k] !== undefined && raw[k] !== null) d[k] = raw[k];
     let text = raw.text;
     if (typeof text === 'string') { try { text = JSON.parse(text); } catch (e) { text = []; } }
@@ -543,9 +543,15 @@ function formFor(design, copies = 1, forPrint = false, values = null, marks = fa
 }
 
 async function post(path, body, signal = undefined) {
+    const headers = { 'X-Requested-With': 'XMLHttpRequest' };
     // Without files as a plain form, the server reads it faster
     if (body instanceof FormData && ![...body.values()].some(v => v instanceof Blob)) body = new URLSearchParams(body);
-    return fetch(API + path, { method: 'POST', body, signal, headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    // A plain object, e.g. a label to save, as JSON
+    else if (body && Object.getPrototypeOf(body) === Object.prototype) {
+        body = JSON.stringify(body);
+        headers['Content-Type'] = 'application/json';
+    }
+    return fetch(API + path, { method: 'POST', body, signal, headers });
 }
 // A preview that does not come gives way to the next one
 let previewTimeout = 60000;
@@ -753,27 +759,13 @@ function lazyImg(job) {
     LAZY.set(id, Object.assign(job, { made: Date.now() }));
     return `<img data-lazy="${id}" alt="">`;
 }
-function lazyTag(design, values) {
-    return lazyImg({ design, values });
-}
-function lazyUrlTag(url) {
-    return lazyImg({ url });
-}
 // A template with the text typed into the wizard, made when it comes into view
 function lazyTypedTag(item) {
     return lazyImg({ item, gen: S.typedGen });
 }
+// The designs of labels loaded last, see itemDesign()
 const designCache = new Map();
-function designOf(item) {
-    if (item.design) return Promise.resolve(item.design);
-    const key = item.kind + ':' + item.id;
-    if (!designCache.has(key)) {
-        const p = itemDesign(item);
-        designCache.set(key, p);
-        p.catch(() => designCache.delete(key));
-    }
-    return designCache.get(key);
-}
+const designOf = item => item.design ? Promise.resolve(item.design) : designCache.get(item.kind + ':' + item.id) || itemDesign(item);
 async function typedThumb(img, job) {
     const stale = () => job.gen !== S.typedGen;
     try {
@@ -803,7 +795,6 @@ const S = {
     settings: (({ collate, dateFmt, largePreview }) => ({ collate, dateFmt, largePreview: !!largePreview }))(load(own('designer_settings'), {})),
     wizardText: '',
     libCat: 'saved', libSel: null,
-    fillValues: {},
     edit: null, editSel: 0,
     hist: { undo: [], redo: [], last: null },
 };
@@ -896,12 +887,14 @@ let settingsPending = 0, settingsAnswered = 0, tapesSet = 0;
 // Tapes set by hand on their way to the server, by printer: the printer
 // panel shows the one chosen until the server tells whether it uses it
 const tapesSaving = {};
+// The printers of a status, a status of one printer alone lists none
+const printersIn = data => Array.isArray(data.printers) ? data.printers : [data];
 async function refreshPrinters(look = false) {
     try {
         const answered = settingsAnswered, tapes = tapesSet;
         const r = await fetch(API + '/printer_status' + (look ? '?look=1' : ''));
         const data = await r.json();
-        const printers = Array.isArray(data.printers) ? data.printers : [data];
+        const printers = printersIn(data);
         if (settingsPending || answered !== settingsAnswered)
             printers.forEach(p => {
                 const shown = [S.printer, ...S.printers].find(o => o && o.path === p.path);
@@ -961,23 +954,27 @@ function showPrinters() {
     const tapeBefore = tapeState();
     detectTape();
     renderPrinterChip();
-    // An open printer panel shows the new status, drawn again only when it
-    // changed so that what is focused in it stays focused
+    // An open printer panel shows the new status
     const box = $('.pp');
-    if (box) {
-        const fresh = document.createElement('div');
-        fresh.innerHTML = printerPanelHTML();
-        if (fresh.innerHTML !== box.innerHTML) { box.replaceChildren(...fresh.childNodes); bindPrinterPanel(); }
-    }
+    if (box) replaceIfChanged(box, printerPanelHTML(), bindPrinterPanel);
     // The editor follows the tape the printer reports: another tape places
     // the label anew, the tape left changes the note only
     const line = $('#edTapeBox');
     if (line && S.edit && S.editShown === S.edit) {
         if (tapeState() !== tapeBefore) renderEditor();
-        else if (line.innerHTML !== tapeLine(S.edit.design)) { line.innerHTML = tapeLine(S.edit.design); bindTapeLine(); }
+        else replaceIfChanged(line, tapeLine(S.edit.design), bindTapeLine);
     }
 }
 const tapeState = () => JSON.stringify([S.tape, S.tapeAssumed, S.tapeUnknown, S.tapeRedUnknown]);
+// Drawn again only when it changed, so that what is focused in it stays
+// focused. Compared as the browser writes it, which leaves quotes unescaped.
+function replaceIfChanged(el, html, bind) {
+    const fresh = document.createElement('div');
+    fresh.innerHTML = html;
+    if (fresh.innerHTML === el.innerHTML) return;
+    el.replaceChildren(...fresh.childNodes);
+    bind();
+}
 
 const printerKey = () => (S.printer && S.printer.path) || '';
 // A printer is called by its name, given in PRINTERS, else by its model.
@@ -1068,9 +1065,9 @@ function renderPrinterChip() {
 
 async function printJob(job) {
     // job: { title, design, values, copies, source }
-    // A copy: printing a job again passes its design, which the history may
-    // strip of its image before the request is sent
-    job = Object.assign({}, job, { design: clone(job.design) });
+    // A shallow copy: printing a job again passes its design, which the
+    // history may strip of its image before the request is sent
+    job = Object.assign({}, job, { design: Object.assign({}, job.design) });
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
         design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
@@ -1080,15 +1077,22 @@ async function printJob(job) {
     saveHistory();
     updateCounts();
     toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`);
-    // How far the job is and how long it still takes are shown meanwhile
+    // How far the job is and how long it still takes are shown meanwhile,
+    // asked once at a time and not from a tab in the background
     const followed = S.printer && S.printer.path !== 'simulation' ? S.printer.path : '';
+    let asking = false;
     const follow = followed && setInterval(async () => {
+        if (asking || document.hidden) return;
+        asking = true;
         try {
-            const data = await (await fetch(API + '/printer_status')).json();
-            const p = (Array.isArray(data.printers) ? data.printers : [data]).find(x => x.path === followed);
+            const p = printersIn(await (await fetch(API + '/printer_status')).json()).find(x => x.path === followed);
             const text = p && p.job ? jobText(p.job) : '';
             if (text && entry.state === 'printing') toast(text, null, 10000);
-        } catch (e) { }
+        } catch (e) {
+            // The next one shows it
+        } finally {
+            asking = false;
+        }
     }, 1500);
     try {
         // Printed on the tape in the printer, the history keeps it as made
@@ -1201,6 +1205,11 @@ function closeLayer(silent) {
 function sheet(inner, onClose, onGone) {
     openLayer(`<div class="sheet"><div class="grab"></div>${inner}</div>`, 'sheet-layer', onClose, onGone);
 }
+// The head of a dialog: its title, a line about it and the close button
+const dialogHead = (title, textHtml) => `<div class="dialog-h"><div class="grow"><h2>${esc(title)}</h2><p>${textHtml}</p></div>
+    <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>`;
+// Where a dialog says what is wrong with what was put in
+const errLine = id => `<p class="err small" id="${id}" hidden></p>`;
 // The label designer works without the internet, a link to a page there asks
 // before it opens it
 function askToLeave(url) {
@@ -1246,7 +1255,7 @@ function serverName(title) {
 }
 // Changes only the tags of a saved label, the rest stays as saved
 async function saveTags(name, tags) {
-    const r = await fetch(API + '/repository/tags', { method: 'POST', body: JSON.stringify({ name, tags }), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+    const r = await post('/repository/tags', { name, tags });
     const data = await r.json().catch(() => ({}));
     if (!r.ok || !data.success) throw new Error(data.message || 'The tags could not be saved');
     await loadSaved();
@@ -1272,7 +1281,7 @@ async function saveLabel(title, design, overwrite = null, tags = null) {
     delete body.image;
     delete body.more_images;
     if (design.image) Object.assign(body, { image_data: design.image.data, image_mime: design.image.mime, image_name: design.image.name });
-    const r = await fetch(API + '/repository/save', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
+    const r = await post('/repository/save', body);
     const data = await r.json().catch(() => ({}));
     if (r.status === 409) {
         await loadSaved();
@@ -1317,11 +1326,10 @@ function bindTagsField() {
 function tagsDialog(item) {
     const saved = S.saved.find(x => x.name === item.id);
     openLayer(`<div class="dialog narrow" role="dialog" aria-label="Tags">
-        <div class="dialog-h"><div class="grow"><h2>Tags of "${esc(item.title)}"</h2><p>Your saved labels are grouped by them in the wizard.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead(`Tags of "${item.title}"`, 'Your saved labels are grouped by them in the wizard.')}
         <form class="fields" id="tagsForm" novalidate>
             ${tagsField(saved ? saved.tags : [])}
-            <p class="err small" id="tagsErr" hidden style="padding:0;text-align:left"></p>
+            ${errLine('tagsErr')}
             <div class="acts"><button class="btn-print" type="submit" id="tagsGo">Save</button></div>
         </form></div>`);
     const tags = bindTagsField();
@@ -1347,12 +1355,11 @@ const savedAs = d => `as ${sizeName(d.label_size)} label`;
 // replace. A saved label of the same name is only replaced when asked again.
 function saveDialog(title, save, design, tags = []) {
     openLayer(`<div class="dialog narrow" role="dialog" aria-label="Save to your labels">
-        <div class="dialog-h"><div class="grow"><h2>Save to your labels</h2><p>It is saved ${esc(savedAs(design))} and listed under this name in the wizard and the search.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead('Save to your labels', `It is saved ${esc(savedAs(design))} and listed under this name in the wizard and the search.`)}
         <form class="fields" id="saveForm" novalidate>
             <label><span class="label-s">Name</span><input class="field" id="saveName" value="${esc(title)}" autocomplete="off"></label>
             ${tagsField(tags)}
-            <p class="err small" id="saveErr" hidden style="padding:0;text-align:left"></p>
+            ${errLine('saveErr')}
             <div class="acts"><button class="btn-print" type="submit" id="saveGo">Save</button></div>
         </form></div>`);
     const name = $('#saveName'), go = $('#saveGo');
@@ -1400,7 +1407,7 @@ function saveDialog(title, save, design, tags = []) {
     };
 }
 async function deleteLabel(name) {
-    const r = await post('/repository/delete', (() => { const f = new FormData(); f.append('name', name); return f; })());
+    const r = await post('/repository/delete', new URLSearchParams({ name }));
     if (!r.ok) throw new Error('The label could not be removed');
     forget(name);
     await loadSaved();
@@ -1423,16 +1430,23 @@ function levelFor(kind, level) {
 }
 
 // An "item" is anything that can be printed: one of your labels, a saved
-// label on the server, a ready-made label or a past print
-async function itemDesign(item) {
-    if (item.design) return item.design;
-    let url;
-    if (item.kind === 'demo') url = `${API}/demos/load?id=${encodeURIComponent(item.id)}`;
-    else if (item.kind === 'saved') url = `${API}/repository/load?name=${encodeURIComponent(item.id)}`;
-    const r = await fetch(url);
-    if (!r.ok) throw new Error('The label could not be loaded');
-    item.design = normalize(await r.json());
-    return item.design;
+// label on the server, a ready-made label or a past print. Loaded anew, the
+// thumbnails of the same label take it meanwhile.
+function itemDesign(item) {
+    if (item.design) return Promise.resolve(item.design);
+    const p = (async () => {
+        let url;
+        if (item.kind === 'demo') url = `${API}/demos/load?id=${encodeURIComponent(item.id)}`;
+        else if (item.kind === 'saved') url = `${API}/repository/load?name=${encodeURIComponent(item.id)}`;
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('The label could not be loaded');
+        item.design = normalize(await r.json());
+        return item.design;
+    })();
+    const key = item.kind + ':' + item.id;
+    designCache.set(key, p);
+    p.catch(() => { if (designCache.get(key) === p) designCache.delete(key); });
+    return p;
 }
 const demoItem = d => ({ kind: 'demo', id: d.id, title: d.title, size: d.label_size_id, sub: d.catName });
 const savedItem = s => ({ kind: 'saved', id: s.name, title: s.title, size: s.size, sub: s.tags && s.tags.length ? s.tags.join(', ') : 'Saved label', tags: s.tags || [] });
@@ -1441,10 +1455,10 @@ const histItem = h => ({ kind: 'printed', id: h.id, title: entryName(h), design:
 function thumbSrc(item) {
     // The server draws a template on its own tape, on another one it is drawn
     // here as it prints
-    if (item.kind === 'demo') return placed(item.size) ? lazyTypedTag(item) : lazyUrlTag(`${API}/demos/preview?id=${encodeURIComponent(item.id)}`);
+    if (item.kind === 'demo') return placed(item.size) ? lazyTypedTag(item) : lazyImg({ url: `${API}/demos/preview?id=${encodeURIComponent(item.id)}` });
     // Saved labels may have blanks, they are drawn here with the blank's name
     if (item.kind === 'saved') return lazyTypedTag(item);
-    return lazyTag(item.design, item.values || defaults(item));
+    return lazyImg({ design: item.design, values: item.values || defaults(item) });
 }
 
 // The text typed into the wizard goes into the blanks of a template, or
@@ -1573,7 +1587,6 @@ function route() {
     else if (view === 'printer') { renderLabels(''); openPrinterPanel(); }
     else if (isWizard) renderLabels(arg);
     else renderEditor();
-    requestAnimationFrame(() => hintScrollers(main));
 }
 
 // --- Stage -----------------------------------------------------------------------
@@ -1647,20 +1660,21 @@ async function showOnStage(el, design, values, onWarning, blank = false) {
     const w = img.naturalWidth, h = img.naturalHeight, span = size.dots[0] * scale;
     const side = Math.abs(w - span) > 4 * scale && Math.abs(h - span) <= 4 * scale;
     const along = Math.round((side ? w : h) / dpi * 25.4);
+    const caps = sizeCaps(design.label_size);
     // Some printers leave blank paper before each label, which was between
     // their printhead and cutter
-    const lead = isEndless(size) ? sizeCaps(design.label_size).lead_mm : 0;
+    const lead = isEndless(size) ? caps.lead_mm : 0;
     // An endless label of a given length is as long as that when cut
     const lengthMm = !isEndless(size) ? size.tape[1] : hasLength(design) && +design.label_length > 0 ? +design.label_length : along + lead;
     // Labels that leave the printer top first are shown leaving it upwards,
     // the printer below them. Those that leave sideways have it to their
     // left, with the other end first to their right.
-    const k = sizeCaps(design.label_size), top = leavesFirst(k) === 'top';
+    const top = leavesFirst(caps) === 'top';
     const turned = !side && top;
     // Turned for printing where the other end than the driver's leaves first
-    const back = top !== !!k.leaves_turned;
+    const back = top !== !!caps.leaves_turned;
     // The cut after the label, and how copies are cut
-    const caps = sizeCaps(design.label_size), cutNow = cutOf(design);
+    const cutNow = cutOf(design);
     // The selected pages of a PDF print like files, of those not shown as
     // their previews count them
     const labels = (await Promise.all(labelFiles(design).map((f, i) => i === 0 ? p.pages || 1
@@ -1835,26 +1849,23 @@ function lookDesign(i) {
     return d;
 }
 
-// The symbols of the symbol dialog
 const STATIC = ($('link[href*="designer/designer.css"]') || { getAttribute: () => '/static/designer/designer.css' }).getAttribute('href').replace(/designer\/designer\.css.*$/, '');
-let symbolList = null;
-async function loadSymbols() {
-    if (symbolList) return symbolList;
-    try {
-        symbolList = await (await fetch(STATIC + 'designer/symbols.json')).json();
-    } catch (e) { return []; }
-    return symbolList;
+// A static file, loaded when it is first needed. One that could not be
+// loaded is asked for again the next time, fallback meanwhile.
+function cachedJSON(path, fallback, make = data => data) {
+    let kept = null;
+    return async () => {
+        if (kept) return kept;
+        try {
+            kept = make(await (await fetch(STATIC + path)).json());
+        } catch (e) { return fallback; }
+        return kept;
+    };
 }
+// The symbols of the symbol dialog
+const loadSymbols = cachedJSON('designer/symbols.json', []);
 // Material Design Icons for {{mdi:<name>}}: their names and characters
-let iconList = null;
-async function loadIcons() {
-    if (iconList) return iconList;
-    try {
-        const data = await (await fetch(STATIC + 'mdi/icons.json')).json();
-        iconList = Object.entries(data.icons).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) }));
-    } catch (e) { return []; }
-    return iconList;
-}
+const loadIcons = cachedJSON('mdi/icons.json', [], data => Object.entries(data.icons).map(([name, code]) => ({ name, char: String.fromCodePoint(parseInt(code, 16)) })));
 // Icons and symbols whose names contain all words of the search, exact and
 // leading matches first. Without a search all of them, by name.
 function findIcons(list, query) {
@@ -1867,14 +1878,7 @@ function findIcons(list, query) {
 
 // The symbols of fasteners and electronic components for {{fastener:<name>}}
 // and {{electronic:<name>}}, by set
-let symbolSets = null;
-async function loadSymbolSets() {
-    if (symbolSets) return symbolSets;
-    try {
-        symbolSets = await (await fetch(STATIC + 'symbols/symbols.json')).json();
-    } catch (e) { return {}; }
-    return symbolSets;
-}
+const loadSymbolSets = cachedJSON('symbols/symbols.json', {});
 const SYMBOL_SETS = { fastener: 'Fasteners', electronic: 'Electronic components' };
 // The examples in the hints
 const SYMBOL_EXAMPLES = { mdi: 'power', fastener: 'head-torx', electronic: 'resistor-iec-standard' };
@@ -1898,8 +1902,7 @@ async function openSymbols(input) {
     const section = (id, title, body) => `<details class="sym-set" data-section="${id}"${openSymbolSections.has(id) ? ' open' : ''}>
             <summary>${title}</summary><div class="sym-body">${body}</div></details>`;
     openLayer(`<div class="dialog narrow symbols" role="dialog" aria-label="Insert a symbol">
-        <div class="dialog-h"><div class="grow"><h2>Insert a symbol</h2><p>Not every font has every symbol, the preview shows what prints.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead('Insert a symbol', 'Not every font has every symbol, the preview shows what prints.')}
         ${named.length ? '<input class="field" type="search" id="symQ" placeholder="Search icons and symbols, e.g. lightbulb, torx or resistor" autocomplete="off" aria-label="Search the icons and symbols">' : ''}
         ${section('symbols', 'Symbols', `<div class="sym-grid">${list.map((x, i) => `<button type="button" class="sym" data-sym="${i}">${esc(x)}</button>`).join('')}</div>`)}
         ${named.length ? `<h3 class="sym-group">Inserted by name, drawn in every font</h3>
@@ -1952,8 +1955,7 @@ function showDateCodes() {
     const dc = C.datetime_codes || { example: '', codes: [] };
     const rows = dc.codes.map(([code, meaning, example]) => `<tr><td><code>${esc(code)}</code></td><td>${esc(meaning)}</td><td>${esc(example)}</td></tr>`).join('');
     openLayer(`<div class="dialog narrow" role="dialog" aria-label="Date and time codes">
-        <div class="dialog-h"><div class="grow"><h2>Date and time codes</h2><p>For <code>{{datetime:&lt;format&gt;}}</code>, e.g. <code>{{datetime:%d.%m.%Y}}</code>. The examples are for ${esc(dc.example)}.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead('Date and time codes', `For <code>{{datetime:&lt;format&gt;}}</code>, e.g. <code>{{datetime:%d.%m.%Y}}</code>. The examples are for ${esc(dc.example)}.`)}
         <table class="codes"><thead><tr><th>Code</th><th>Stands for</th><th>Example</th></tr></thead><tbody>${rows}</tbody></table></div>`);
 }
 
@@ -2002,7 +2004,11 @@ function bindWizardChips(ta) {
     $$('[data-ins]').forEach(b => b.onclick = () => insertAt(ta, b.dataset.ins));
     $('#wzSym').onclick = () => openSymbols(ta);
     $('#wzVars').onclick = () => toggleVars($('#wzVars'), $('#wzVarsBox'));
-    $('#wzCode').onclick = () => openEditor({ title: 'New label', design: Object.assign(lookDesign(5), { text: wizardLines().length ? lookDesign(5).text : [L('Text', 100, true, 'left')], code_text: wizardLines().length ? '' : 'https://example.com' }) });
+    $('#wzCode').onclick = () => {
+        const d = lookDesign(5);
+        if (!wizardLines().length) Object.assign(d, { text: [L('Text', 100, true, 'left')], code_text: 'https://example.com' });
+        openEditor({ title: 'New label', design: d });
+    };
     $('#wzImage').onclick = () => openEditor({ title: 'New label', design: setWide(Object.assign(baseDesign(S.tape), { print_type: 'image', text: wizardLines().map((t, i) => L(t, i ? 60 : 90, i === 0, 'left')) }), true) });
 }
 
@@ -2030,7 +2036,7 @@ function renderLooks() {
     }
     box.dataset.tape = S.tape;
     box.innerHTML = `<div class="sec-h"><h2>Your text in six looks</h2><span class="muted">for the ${esc(sizeName(S.tape))} tape</span></div>
-        <div class="tiles compact">${LOOKS.map((look, i) => `
+        <div class="tiles">${LOOKS.map((look, i) => `
             <div class="tile" data-look="${i}" role="button" tabindex="0">
                 <div class="thumb"><div class="bed" id="flook${i}"></div></div>
                 <div class="foot"><div class="grow"><b>${esc(look.name)}</b></div>
@@ -2084,7 +2090,7 @@ function printLook(i) {
 function againCard(n) {
     const rows = S.history.slice(0, n);
     return `<div class="card hist"><h2>Print again</h2>${rows.length ? rows.map(h => `
-        <div class="hr"><div class="mini-bed">${lazyTag(h.design, h.values)}</div>
+        <div class="hr"><div class="mini-bed">${lazyImg({ design: h.design, values: h.values })}</div>
             <div><b>${esc(entryName(h))}</b><span>${h.state === 'failed' ? 'Failed ' + esc(fmtTime(h.time)) : `${h.copies} ${h.copies === 1 ? 'copy' : 'copies'}, ${esc(fmtTime(h.time))}`}</span></div>
             <button class="btn quiet icon" type="button" data-again="${h.id}" title="${h.noImage ? NO_IMAGE : 'Print again'}"${h.noImage ? ' disabled' : h.state === 'failed' ? ' style="color:var(--bad)"' : ''}><i class="fa-solid fa-rotate-right"></i></button></div>`).join('')
         : '<p class="empty small">Labels you print show up here, ready to print again.</p>'}</div>`;
@@ -2179,6 +2185,7 @@ function renderLabels(arg) {
     $('#libLang').onchange = e => { S.lang = e.target.value; store('designer_lang', S.lang); renderLabels(); };
     renderLibGrid();
     if (S.libSel) showDetail(S.libSel); else emptyDetail();
+    requestAnimationFrame(() => hintScrollers($('#view')));
 }
 
 // Without a chosen template the panel offers the last prints
@@ -2242,11 +2249,16 @@ async function showDetail(item) {
     S.libSel = item;
     const box = $('#libDetail');
     if (!box) return;
-    box.innerHTML = `<div class="row"><h2 class="grow">${esc(item.title)}</h2><button class="btn quiet icon close" type="button" title="Close"><i class="fa-solid fa-xmark"></i></button></div><p class="muted">Loading...</p>`;
+    // The title with the button that closes the panel, also while the label
+    // loads or after it could not be loaded
+    const show = html => {
+        box.innerHTML = `<div class="row"><h2 class="grow">${esc(item.title)}</h2><button class="btn quiet icon close" type="button" title="Close"><i class="fa-solid fa-xmark"></i></button></div>${html}`;
+        $('.close', box).onclick = () => { S.libSel = null; emptyDetail(); $$('#libGrid .thumb').forEach(x => x.classList.remove('sel')); };
+    };
+    show('<p class="muted">Loading...</p>');
     box.classList.add('open');
-    $('.close', box).onclick = () => { box.innerHTML = ''; S.libSel = null; };
     let design;
-    try { design = clone(await itemDesign(item)); } catch (e) { box.innerHTML = `<p class="empty">${esc(e.message)}</p>`; return; }
+    try { design = clone(await itemDesign(item)); } catch (e) { if (S.libSel === item) show(`<p class="empty">${esc(e.message)}</p>`); return; }
     if (S.libSel !== item) return;
     const blanks = blanksOf(design);
     const { values } = applyTyped(item, design, item.values ? Object.assign({}, item.values) : null);
@@ -2254,8 +2266,7 @@ async function showDetail(item) {
     // Printed before, they are as printed then.
     const starts = item.values ? item.starts : defaults(Object.assign({}, item, { design }));
     const work = { design, values };
-    box.innerHTML = `
-        <div class="row"><h2 class="grow">${esc(item.title)}</h2><button class="btn quiet icon close" type="button" title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+    show(`
         ${stageHTML('libStage')}
         ${!tapeKnown() ? '' : `<div>${placed(design.label_size) ? `<span class="badge warn"><i class="fa-solid fa-ruler-combined"></i>Made for ${esc(sizeName(design.label_size))}</span>`
             : `<span class="badge ok"><i class="fa-solid fa-check"></i>Fits the tape in ${esc(thePrinter(S.printer))}</span>`}</div>`}
@@ -2274,8 +2285,7 @@ async function showDetail(item) {
                         : `<button type="button" id="libKeep"><i class="fa-regular fa-bookmark"></i>Save to your labels</button>`}
                 </div></div>
         </div>
-        ${item.kind === 'saved' ? '<div class="hist-mini" id="libHist"></div>' : ''}`;
-    $('.close', box).onclick = () => { S.libSel = null; emptyDetail(); $$('#libGrid .thumb').forEach(x => x.classList.remove('sel')); };
+        ${item.kind === 'saved' ? '<div class="hist-mini" id="libHist"></div>' : ''}`);
     // The stage of this label: a delayed refresh after another label was
     // chosen finds it gone and does nothing
     const stage = $('#libStage', box), note = $('#libFitsNote', box);
@@ -2298,7 +2308,7 @@ async function showDetail(item) {
         // Ready for the next one: the first blank is emptied
         if (ok && item.kind === 'saved' && blanks.length) {
             const first = $$('#libFields [data-blank]').find(i => fieldType(item, i.dataset.blank) === 'text');
-            if (first) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); refresh(); }
+            if (first) { first.value = ''; first.dispatchEvent(new Event('input', { bubbles: true })); first.focus(); }
         }
     };
     renderFields($('#libFields'), item, work, refresh, doPrint);
@@ -2332,9 +2342,8 @@ async function showDetail(item) {
 // The content of a code, which may have several lines, e.g. a vCard: they
 // are not wrapped, the field grows with them. The line break after the tag
 // keeps one the code starts with.
-const codeRows = text => Math.min(8, Math.max(1, String(text).split('\n').length));
 const codeField = (id, code, attrs) =>
-    `<textarea class="field code" id="${id}" rows="${codeRows(toDisplay(code))}" wrap="off" spellcheck="false"${attrs}>\n${esc(toDisplay(code))}</textarea>`;
+    `<textarea class="field code" id="${id}" rows="${lineRows(toDisplay(code))}" wrap="off" spellcheck="false"${attrs}>\n${esc(toDisplay(code))}</textarea>`;
 
 // Labels with blanks get a field per blank. Labels without get a field
 // per line, which changes the line itself.
@@ -2351,7 +2360,7 @@ function renderFields(box, item, work, refresh, onEnter) {
         if (!work.design.text.length && work.design.print_type === 'image') html += '<p class="muted small">An image label without text. Change the design to replace the image.</p>';
     }
     box.innerHTML = html;
-    $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { work.values[inp.dataset.blank] = inp.value; refresh(); }));
+    bindBlanks(box, work.values, refresh, onEnter);
     $$('[data-line]', box).forEach(inp => {
         inp.addEventListener('input', () => {
             const l = work.design.text[+inp.dataset.line];
@@ -2363,20 +2372,28 @@ function renderFields(box, item, work, refresh, onEnter) {
         inp.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onEnter(); } });
     });
     if ($('#lnCode', box)) {
-        $('#lnCode', box).addEventListener('input', e => { e.target.rows = codeRows(e.target.value); work.design.code_text = fromDisplay(e.target.value, work.design.code_text, e.target.selectionStart); refresh(); });
+        $('#lnCode', box).addEventListener('input', e => { e.target.rows = lineRows(e.target.value); work.design.code_text = fromDisplay(e.target.value, work.design.code_text, e.target.selectionStart); refresh(); });
         // Enter starts a new line of the code
         $('#lnCode', box).addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onEnter(); } });
     }
+}
+
+// The fields of the blanks, in the wizard and the editor: a value draws the
+// label anew, Enter prints. Values put in by a button bubble like typed ones,
+// markBlanks() follows them on the document.
+function bindBlanks(box, values, refresh, onEnter) {
+    const put = (inp, value) => { inp.value = value; inp.dispatchEvent(new Event('input', { bubbles: true })); };
+    $$('[data-blank]', box).forEach(inp => {
+        inp.addEventListener('input', () => { values[inp.dataset.blank] = inp.value; refresh(); });
+        inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } });
+    });
     $$('[data-stepf]', box).forEach(b => b.onclick = () => {
         const inp = $('#' + b.dataset.for, box);
-        inp.value = Math.max(0, (parseInt(inp.value, 10) || 0) + +b.dataset.stepf);
-        inp.dispatchEvent(new Event('input'));
+        put(inp, Math.max(0, (parseInt(inp.value, 10) || 0) + +b.dataset.stepf));
     });
-    $$('input', box).forEach(inp => inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } }));
     $$('[data-reuse]', box).forEach(p => p.onclick = () => {
         const inp = $(`[data-blank="${CSS.escape(p.dataset.reuse)}"]`, box);
-        inp.value = p.textContent;
-        inp.dispatchEvent(new Event('input'));
+        put(inp, p.textContent);
         inp.focus();
     });
 }
@@ -2451,8 +2468,7 @@ function linksDialog(m) {
         text: [L('Scan to print a', 56, false, 'left'), L(m.title + ' label', 84, true, 'left')]
     }), true);
     openLayer(`<div class="dialog">
-        <div class="dialog-h"><div class="grow"><h2>Use "${esc(m.title)}" from anywhere</h2><p>Every label has its own address. Open it, fill it in, print it.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead(`Use "${m.title}" from anywhere`, 'Every label has its own address. Open it, fill it in, print it.')}
         <div class="links">
             <div class="opt"><h3><i class="fa-solid fa-qrcode"></i>A sticker where you need it</h3>
                 <div class="sticker" id="stickerBox"><span class="muted small">Making the sticker...</span></div>
@@ -2902,7 +2918,8 @@ const hexOf = c => c === 'red' ? '#ff0000' : /^#[0-9a-f]{6}$/i.test(c || '') ? c
 const colorOf = hex => hex === '#000000' ? 'black' : hex === '#ff0000' ? 'red' : hex;
 const colorField = (id, color, title) => `<input type="color" class="color-in" id="${id}" value="${hexOf(color)}" title="${title}" aria-label="${title}">`;
 const SPACINGS = [100, 150, 200, 250, 300];
-// The field of a line grows with its line breaks, each is a line on the label
+// The field of a line or a code grows with its line breaks, each is a line
+// on the label or of the code
 const lineRows = text => Math.min(8, Math.max(1, String(text).split('\n').length));
 
 // A style set while lines of line i are selected in its field applies to
@@ -3095,11 +3112,6 @@ function drawEditor() {
                 setField(r.dataset.bname, { default: offsetIn(r) });
             }));
         });
-        $$('[data-reuse]', box).forEach(pl => pl.onclick = () => {
-            const inp = $(`[data-blank="${CSS.escape(pl.dataset.reuse)}"]`, box);
-            inp.value = pl.textContent;
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-        });
         markBlanks(box.parentElement);
         // Made a list of choices, they are typed next
         const typing = S.focusChoices && $(`[data-bname="${CSS.escape(S.focusChoices)}"] [data-choices]`, box);
@@ -3107,9 +3119,7 @@ function drawEditor() {
         if (typing) { typing.focus(); typing.setSelectionRange(typing.value.length, typing.value.length); }
         if (S.focusBlank && window.matchMedia('(min-width: 761px)').matches) { const f = $('input.need', box); if (f) f.focus(); }
         S.focusBlank = false;
-        $$('[data-blank]', box).forEach(inp => inp.addEventListener('input', () => { E.values[inp.dataset.blank] = inp.value; redrawEditor(); }));
-        $$('[data-blank]', box).forEach(inp => inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('#edPrint').click(); } }));
-        $$('[data-stepf]', box).forEach(b => b.onclick = () => { const inp = $('#' + b.dataset.for, box); inp.value = Math.max(0, (parseInt(inp.value, 10) || 0) + +b.dataset.stepf); inp.dispatchEvent(new Event('input')); });
+        bindBlanks(box, E.values, redrawEditor, () => $('#edPrint').click());
     }
     // An empty label is shown blank, as large as one line of text in the
     // first line's size makes it, and cannot be printed or saved yet
@@ -3152,7 +3162,6 @@ const drawStage = latest(async () => {
             const side = imageSide(E.design);
             $$('[data-side]').forEach(b => b.classList.toggle('on', b.dataset.side === side));
         }
-        if (p && p.auto && !empty) setTimeout(() => $('#edFits') && $('#edFits').insertAdjacentHTML('beforeend', ' <span class="muted">Turned automatically to fit the label best.</span>'));
         if (gap && p && paired(E.design)) gap.placeholder = p.gap ? `Automatic, ${dotsToMm(p.gap, dpiOf(E.design.label_size, p.highRes))}` : 'Automatic';
         // The server finds the image light, stronger contrast would help it
         if ($('#edContrastHint')) $('#edContrastHint').hidden = !(p && p.faint && !empty);
@@ -3160,6 +3169,7 @@ const drawStage = latest(async () => {
         else {
             const missing = choicesMissing(editItem(E));
             fitsNote($('#edFits'), missing.length ? `Type the choices of [${missing[0]}] in Blank settings.` : w, err, E.design, () => renderEditor());
+            if (p && p.auto) $('#edFits').insertAdjacentHTML('beforeend', ' <span class="muted">Turned automatically to fit the label best.</span>');
         }
         // Which tape it was made for is said where it does not fit as it is
         const made = $('#edMade');
@@ -3219,7 +3229,7 @@ function bindEditor() {
         if (!d.text.length) d.text.push(L('Text', 80, true, 'left'));
         renderEditor();
     });
-    if ($('#edCode')) $('#edCode').oninput = e => { e.target.rows = codeRows(e.target.value); d.code_text = fromDisplay(e.target.value, d.code_text, e.target.selectionStart); redrawEditor(); };
+    if ($('#edCode')) $('#edCode').oninput = e => { e.target.rows = lineRows(e.target.value); d.code_text = fromDisplay(e.target.value, d.code_text, e.target.selectionStart); redrawEditor(); };
     if ($('#edBarcode')) $('#edBarcode').onchange = e => {
         d.barcode_type = e.target.value;
         const kind = codeKind(d.barcode_type);
@@ -3405,15 +3415,14 @@ function openBlankDialog(d, target) {
     const suggest = ['What', 'Name', 'Where', 'Number', 'Note'].find(n => !used.includes(n)) || 'Blank ' + (used.length + 1);
     let kind = guessKind(suggest), chosen = false;
     openLayer(`<div class="dialog narrow" role="dialog" aria-label="Add a blank">
-        <div class="dialog-h"><div class="grow"><h2>Add a blank</h2><p>Whoever prints the label fills it in.</p></div>
-            <button class="btn quiet icon" type="button" data-close title="Close"><i class="fa-solid fa-xmark"></i></button></div>
+        ${dialogHead('Add a blank', 'Whoever prints the label fills it in.')}
         <form class="fields" id="blankForm" novalidate>
             <label><span class="label-s">Name, shown next to the field</span><input class="field" id="bName" value="${esc(suggest)}" autocomplete="off"></label>
             <div><span class="label-s">Kind</span><div class="seg" id="bKinds">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-bkind="${v}">${n}</button>`).join('')}</div></div>
             <label id="bDefWrap"><span class="label-s">Default value, optional</span><input class="field" id="bDef" autocomplete="off" placeholder="Empty"></label>
             <label id="bChoicesWrap" hidden><span class="label-s">Choices, one per line, the first is the default</span><textarea class="field choices" id="bChoices" rows="3"></textarea></label>
             <div id="bDateStart" hidden><span class="label-s">Starts at</span>${offsetFields('', 'Today +')}</div>
-            <p class="err small" id="bErr" hidden style="padding:0;text-align:left"></p>
+            ${errLine('bErr')}
             <div class="acts"><button class="btn-print" type="submit" id="bInsert"></button></div>
         </form></div>`);
     const name = $('#bName'), def = $('#bDef');
@@ -3559,17 +3568,19 @@ function bindPrinterPanel() {
     const box = $('.pp');
     if (!box) return;
     const redraw = () => { box.innerHTML = printerPanelHTML(); bindPrinterPanel(); };
+    // Another printer or settings of the printer: its tape, the chip and the
+    // panel, if it is still open
+    const shown = () => {
+        detectTape(); renderPrinterChip(); tapeChanged = true;
+        const open = $('.pp');
+        if (open) { open.innerHTML = printerPanelHTML(); bindPrinterPanel(); }
+    };
     // Shown at once, then kept on the server. Only the setting changed goes
     // there, another browser may change another one at the same time.
     const saveSettings = changes => {
         // No printer is listed where its status did not come
         if (!S.printer) return toast('The label designer could not be reached');
         const printers = [...new Set([S.printer, ...S.printers])], before = new Map(printers.map(p => [p.path, p.settings]));
-        const shown = () => {
-            detectTape(); renderPrinterChip(); tapeChanged = true;
-            const open = $('.pp');
-            if (open) { open.innerHTML = printerPanelHTML(); bindPrinterPanel(); }
-        };
         printers.forEach(p => {
             p.settings = Object.assign({}, p.settings);
             // The quality is the same for all
@@ -3611,12 +3622,10 @@ function bindPrinterPanel() {
     $$('[data-printer]', box).forEach(b => b.onclick = () => {
         S.printer = S.printers.find(p => p.path === b.dataset.printer) || S.printer;
         store(own('designer_printer'), S.printer.path);
-        detectTape();
-        renderPrinterChip();
-        tapeChanged = true;
-        redraw();
+        shown();
     });
-    $('#ppRefresh', box).onclick = async () => { await refreshPrinters(true); redraw(); };
+    // The status draws the panel anew where it changed
+    $('#ppRefresh', box).onclick = () => refreshPrinters(true);
     // Offered only where the printer does not report its tape
     const setTape = $('#setTape', box);
     if (setTape) setTape.onchange = e => saveSettings({ label_size: e.target.value });

@@ -836,10 +836,9 @@ def test_automatic_orientation_is_explained(designer):
     designer.click('[data-lay="image"]')
     designer.set_input_files('#edFile', files=[{'name': 'portrait.png', 'mimeType': 'image/png', 'buffer': png(100, 300)}])
     designer.wait_for_function("() => document.getElementById('edFits').innerText.includes('Turned automatically to fit the label best.')")
-    # Scaled, the direction counts again. The hint follows the preview with a timeout.
+    # Scaled, the direction counts again
     designer.click('[data-fit="0"]')
     wait_for_preview(designer)
-    designer.evaluate('() => new Promise(resolve => setTimeout(resolve))')
     assert 'Turned automatically' not in fits_note(designer)
 
 

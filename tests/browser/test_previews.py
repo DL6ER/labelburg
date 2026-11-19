@@ -236,11 +236,11 @@ def test_thumbnails_made_before_they_are_on_the_page_render(designer):
     designer.click('[data-tab="wizard"]')
     designer.wait_for_selector('#wzText')
     attached = designer.evaluate("""() => {
-        for (let i = 0; i < 1001; i++) lazyTag(baseDesign('62'), {});
+        for (let i = 0; i < 1001; i++) lazyImg({ design: baseDesign('62'), values: {} });
         for (const job of LAZY.values()) job.made -= 60000;
         const a = document.createElement('div'), b = document.createElement('div');
-        a.innerHTML = lazyTag(baseDesign('62'), {});
-        b.innerHTML = lazyTag(baseDesign('62'), {});
+        a.innerHTML = lazyImg({ design: baseDesign('62'), values: {} });
+        b.innerHTML = lazyImg({ design: baseDesign('62'), values: {} });
         document.body.append(a);
         attachLazy(a);
         document.body.append(b);
@@ -336,7 +336,7 @@ def test_thumbnails_drawn_over_are_let_go(designer):
     result = designer.evaluate("""() => {
         renderLibGrid();
         renderLibGrid();
-        for (let i = 0; i < 1001; i++) lazyTag(baseDesign('62'), {});
+        for (let i = 0; i < 1001; i++) lazyImg({ design: baseDesign('62'), values: {} });
         for (const job of LAZY.values()) job.made -= 60000;
         const one = document.querySelector.bind(document), all = document.querySelectorAll.bind(document);
         let queries = 0;
