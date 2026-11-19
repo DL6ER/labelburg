@@ -793,7 +793,7 @@ async function typedThumb(img, job) {
 
 const S = {
     printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeKnown: false, tapeAssumed: true, tapeFits: [], tapeMoves: [], tapePlace: {}, tapeCandidates: [],
-    demos: null, demoList: [], saved: [], codes: [{ type: 'QR', name: 'QR', two_d: true, corrections: ['L', 'M', 'Q', 'H'] }],
+    demos: null, demoList: [], saved: [], codes: C.codes,
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
     fitsOnly: true,
@@ -1409,13 +1409,6 @@ async function deleteLabel(name) {
 function forget(name) {
     designCache.delete('saved:' + name);
     if (S.libSel && S.libSel.kind === 'saved' && S.libSel.id === name) delete S.libSel.design;
-}
-async function loadBarcodes() {
-    try {
-        const r = await fetch(API + '/barcodes');
-        const data = await r.json();
-        if (Array.isArray(data.codes) && data.codes.length) S.codes = data.codes;
-    } catch (e) { }
 }
 // What the server tells of a kind of code: its name, whether it is a 2D code
 // and the levels of error correction it has
@@ -4014,7 +4007,7 @@ addEventListener('pagehide', () => { if (S.edit) storeEdit(); });
 
 (async function start() {
     renderPrinterChip();
-    await Promise.all([refreshPrinters(true), loadDemos(), loadSaved(), loadBarcodes()]);
+    await Promise.all([refreshPrinters(true), loadDemos(), loadSaved()]);
     await receiveShared();
     // Printing state from a page that was closed while printing is unknown
     S.history.forEach(h => { if (h.state === 'printing') { h.state = 'failed'; h.message = 'The page was closed while printing'; } });

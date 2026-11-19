@@ -249,6 +249,8 @@ def index():
             },
             # What the label designer offers for each printer model
             'models': {model: drivers.for_model(model).capabilities(model) for model in MODELS},
+            # The kinds of codes, as /api/barcodes lists them
+            'codes': _code_kinds(),
             'datetime_codes': datetime_codes(),
             'preview_parallel': max(1, min(16, cpus - 1)),
         },
@@ -1238,15 +1240,16 @@ def _check_print_count(print_count: int) -> int:
     return print_count
 
 
+def _code_kinds() -> list:
+    """The kinds of codes, the 2D codes at the top, QR codes first: which
+    are 2D and which levels of error correction each has."""
+    return [{'type': code, 'name': codes.NAMES.get(code, code), 'two_d': code in codes.NAMES,
+             'corrections': list(codes.CORRECTIONS.get(code, ()))} for code in codes.TYPES]
+
+
 @bp.route('/api/barcodes', methods=['GET'])
 def get_barcodes():
-    # The 2D codes at the top, QR codes first. codes tells which are 2D and
-    # which levels of error correction each has.
-    return {
-        'barcodes': codes.TYPES,
-        'codes': [{'type': code, 'name': codes.NAMES.get(code, code), 'two_d': code in codes.NAMES,
-                   'corrections': list(codes.CORRECTIONS.get(code, ()))} for code in codes.TYPES],
-    }
+    return {'barcodes': codes.TYPES, 'codes': _code_kinds()}
 
 
 @bp.route('/api/preview', methods=['POST'])
