@@ -1,11 +1,14 @@
 name: Python tests
 
+# A branch of this repository is tested when it is pushed, a pull request
+# only when it comes from a fork: each commit once
 on:
   push:
   pull_request:
 
 jobs:
   test:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,6 +20,7 @@ jobs:
   # The label designer in a browser, see tests/browser. Not in the devcontainer:
   # Playwright's Chromium does not run on Alpine.
   browser:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,6 +41,7 @@ jobs:
   # Typos and British spellings in code, comments and docs, see .codespellrc,
   # and the spelling of the German demo labels
   spelling:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
