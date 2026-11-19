@@ -1,10 +1,9 @@
 """Label sizes in the label designer: their names and which printer models
 print them. Each driver (drivers/) has the label sizes of its printers."""
 
-import functools
 import math
 
-from .drivers.labels import Color, Label
+from .drivers.labels import Label
 
 from . import drivers
 from .drivers import LABELS, MODELS
@@ -45,36 +44,6 @@ def label_printers(label: Label) -> list:
     if label.identifier in drivers.for_label(label.identifier).hidden_labels:
         return []
     return [model for model in MODELS if label_fits(label, model)]
-
-
-@functools.cache
-def _offered() -> dict[str, list]:
-    return {label.identifier: label_printers(label) for label in LABELS}
-
-
-def labels_taken(model) -> list[Label]:
-    """The label sizes a printer of model takes. A printer of no known model,
-    e.g. one that did not tell it, takes every label size offered."""
-    offered = _offered()
-    known = any(model in models for models in offered.values())
-    return [label for label in LABELS if (model in offered[label.identifier] if known else offered[label.identifier])]
-
-
-def printer_label_size(printer: dict, default: str) -> tuple[str, bool]:
-    """The label size a printer of /api/printer_status prints on, and whether
-    it is assumed: the tape the printer reports, else default, else the first
-    label size its model takes. Printers of no known model take every label
-    size offered. DK and TZe tape of the same size are told apart by the
-    model, and only the QL-800 series tells a black and red roll."""
-    takes = labels_taken(printer.get('model'))
-    if printer.get('media_width'):
-        tape = (printer['media_width'], printer.get('media_length') or 0)
-        red = printer.get('red_roll') is True or 'red' in str(printer.get('media_type') or '').lower()
-        found = next((label for label in takes if label.tape_size == tape and (label.color == Color.BLACK_RED_WHITE) == red), None)
-        if found:
-            return found.identifier, False
-    assumed = next((label for label in takes if label.identifier == default), None) or next(iter(takes), None)
-    return (assumed.identifier if assumed else default), True
 
 
 def label_size_problem(label_size: str, model: str) -> str:

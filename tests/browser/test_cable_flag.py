@@ -5,8 +5,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from tests.browser.helpers import kept, preview_size, printed, save_as, set_tape, type_line, wait_for_preview
-from tests.browser.test_printing import fake_printer
+from tests.browser.helpers import fake_printer, kept, preview_size, printed, save_as, set_tape, type_line, wait_for_preview
 
 TAPE = 'Cable flags need continuous tape'
 

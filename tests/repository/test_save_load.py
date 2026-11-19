@@ -441,7 +441,8 @@ def test_a_label_saved_with_a_number_as_its_size_is_read_as_the_size_it_names(tm
 
 
 def test_a_label_saved_without_a_size_prints_on_the_size_its_preview_shows(tmp_path, monkeypatch):
-    # The printer took LABEL_DEFAULT_SIZE, the label was made for 62 mm
+    # Where the printer has no tape known, LABEL_DEFAULT_SIZE, as the label
+    # designer shows it
     from app.labeldesigner import printer
     sizes = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, *args, **kwargs: sizes.append(self.label_size))
@@ -450,10 +451,28 @@ def test_a_label_saved_without_a_size_prints_on_the_size_its_preview_shows(tmp_p
     client.application.config['LABEL_DEFAULT_SIZE'] = '29'
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'text': TEXT}).status_code == 200
     preview = client.get('/labeldesigner/api/repository/preview?name=Shelf.json')
-    on_62 = client.post('/labeldesigner/api/preview', data={'label_size': '62', 'text': json.dumps(TEXT)})
-    assert preview.data == on_62.data
+    on_29 = client.post('/labeldesigner/api/preview', data={'label_size': '29', 'text': json.dumps(TEXT)})
+    assert preview.data == on_29.data
     assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'}).get_json() == {'success': True}
-    assert sizes == ['62']
+    assert sizes == ['29']
+
+
+@pytest.mark.parametrize('default, values, message', [
+    ('62x29', {'label_length': '10'}, None),
+    ('62red', {'label_length': '2000'}, 'label_length must not be longer than 1000 mm on this tape'),
+    ('nope', {'label_length': '10'}, 'label_length must be at least 18.7 mm on this tape'),
+    ('62x29', {'cable_flag': '1'}, 'Cable flags need continuous tape'),
+], ids=['die-cut', 'endless', 'no label size', 'cable flag on die-cut'])
+def test_a_label_saved_without_a_size_is_checked_on_the_default_size(tmp_path, default, values, message):
+    # Where the printer has no tape known it prints on LABEL_DEFAULT_SIZE,
+    # die-cut labels keep their own length and take no cable flag
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config['LABEL_DEFAULT_SIZE'] = default
+    resp = client.post(SAVE_URL, json={'name': 'Shelf.json', 'text': TEXT, **values})
+    if message is None:
+        assert resp.status_code == 200
+        return
+    assert resp.status_code == 400 and resp.get_json()['message'] == message
 
 
 @pytest.mark.parametrize('barcode_type, code_text, lines, code', [

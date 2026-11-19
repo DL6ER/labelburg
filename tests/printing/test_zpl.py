@@ -9,7 +9,7 @@ import pytest
 
 from app.labeldesigner.drivers import devices, zpl
 from app.labeldesigner.drivers.zpl import protocol
-from tests.helpers import make_client
+from tests.helpers import make_client, without_status
 
 DEVICE = 'file:///dev/usb/lp_zpl'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
@@ -99,6 +99,7 @@ def test_rows_top_of_a_label_wider_than_long_first():
 
 
 def test_label_over_the_network(client, monkeypatch):
+    without_status(monkeypatch)
     server = socket.create_server(('127.0.0.1', 0))
     received = []
 

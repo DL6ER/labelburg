@@ -128,8 +128,8 @@ def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, devi
 
 
 def test_a_printer_last_seen_that_is_no_printer_key_is_left_out(monkeypatch):
-    # The file may be edited by hand, a USB/IP printer switched off tells
-    # no device ID
+    # The file may be edited by hand, a USB/IP printer not reached since the
+    # server started tells no device ID
     device = 'usbip://192.0.2.1/1-1'
     data = {'printers': {}, 'quality': 'fast', 'seen': {lock_key(device): ['not', 'a', 'printer']}}
     monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
@@ -160,7 +160,7 @@ def test_a_settings_file_that_cannot_be_read_is_kept(tmp_path, monkeypatch):
 def test_settings_take_json_numbers_as_printing_does(tmp_path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     r = client.post(URL, json={'printer': 'tcp://a', 'label_size': 62, 'chain': 0, 'half_cut': False})
-    assert r.get_json() == {'success': True, 'settings': {'label_size': '62', 'chain': '0', 'half_cut': '0'}}
+    assert (r.get_json()['success'], r.get_json()['settings']) == (True, {'label_size': '62', 'chain': '0', 'half_cut': '0'})
     assert client.post(URL, json={'printer': 5, 'quality': 'fast'}).status_code == 400
 
 
@@ -186,7 +186,8 @@ def test_print_requests_take_what_they_leave_out_as_set(tmp_path, monkeypatch):
     Image.new('RGB', (200, 100), 'white').save(image, 'PNG')
     client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': 'simulation',
                                                           'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
-    assert jobs == [('29', 'none', [True]), ('62', 'each', [False]), ('62', 'none', [True]), ('29', 'each', [True])]
+    # Each label is placed on the tape set by hand, the simulator reports none
+    assert jobs == [('29', 'none', [True]), ('29', 'each', [False]), ('29', 'none', [True]), ('29', 'each', [True])]
 
 
 def test_another_usb_printer_without_a_serial_has_settings_of_its_own(tmp_path, monkeypatch):
@@ -277,7 +278,7 @@ def test_a_preview_takes_what_it_leaves_out_as_set(tmp_path):
 def test_which_end_leaves_first_is_a_setting_of_each_printer(tmp_path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     r = client.post(URL, data={'printer': 'tcp://a', 'leaves_first': 'top'})
-    assert r.get_json() == {'success': True, 'settings': {'leaves_first': 'top'}}
+    assert (r.get_json()['success'], r.get_json()['settings']) == (True, {'leaves_first': 'top'})
     assert client.get(URL, query_string={'printer': 'tcp://b'}).get_json() == {}
     assert client.post(URL, data={'printer': 'tcp://a', 'leaves_first': 'left'}).status_code == 400
     assert client.post(URL, data={'printer': 'tcp://a', 'leaves_first': ''}).get_json()['settings'] == {}
@@ -313,17 +314,17 @@ def test_a_usb_printer_is_kept_by_its_serial_also_with_spaces_in_its_device_id(m
 
 
 def test_print_requests_that_leave_out_the_label_size_take_the_tape_the_printer_reported(tmp_path, monkeypatch):
-    # A size set by hand counts only where the printer reported no tape: one
+    # A size set by hand counts only where the printer reports no tape: one
     # set for another roll makes the printer refuse the job
     import base64
     import io
     from PIL import Image
     from app.labeldesigner import printer
-    from app.labeldesigner.drivers import devices
     jobs = []
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: jobs.append(self.label_size) or '')
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
-    client.post(URL, data={'printer': 'simulation', 'label_size': '29'})
+    network = 'tcp://192.0.2.10'
+    client.post(URL, data={'printer': network, 'label_size': '29'})
     text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'
     image = io.BytesIO()
@@ -334,24 +335,22 @@ def test_print_requests_that_leave_out_the_label_size_take_the_tape_the_printer_
     assert client.post('/labeldesigner/api/repository/save', json={'name': 'Shelf', 'text': text}).status_code == 200
 
     def preview(**given):
-        r = client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text, **given})
+        r = client.post('/labeldesigner/api/preview', data={'printer': network, 'text': text, **given})
         return Image.open(io.BytesIO(r.data)).size
     # 40 mm is no tape of a label size
     for reported, size in ((62, '62'), (40, '29'), (None, '29')):
         state = {'model': 'QL-800', 'media_width': reported, 'media_length': 0}
-        monkeypatch.setattr(devices, 'status_cache', {devices.lock_key('simulation'): state})
-        client.post('/labeldesigner/api/print', data={'printer': 'simulation', 'text': text})
-        client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': 'simulation', 'images': [image]})
-        client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': 'simulation'})
+        monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
+        client.post('/labeldesigner/api/print', data={'printer': network, 'text': text})
+        client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'printer': network, 'images': [image]})
+        client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'printer': network})
         assert preview() == preview(label_size=size)
     assert jobs == ['62'] * 3 + ['29'] * 6
 
 
 def test_the_tape_a_printer_reported_is_named_for_the_model_it_prints_with(tmp_path, monkeypatch):
-    # Its last status may be of another printer at the address, or tell no
-    # model; the status of a network printer is kept by its port
+    # Its status may be of another printer at the address, or tell no model
     from app.labeldesigner import printer
-    from app.labeldesigner.drivers import devices
     jobs = []
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: jobs.append(self.label_size) or '')
     client = make_client(tmp_path, empty_repo=True, model='PT-P750W')
@@ -361,6 +360,6 @@ def test_the_tape_a_printer_reported_is_named_for_the_model_it_prints_with(tmp_p
     for state, size in (({'model': 'Unknown', 'media_width': 24, 'media_length': 0}, 'pt24'),
                         ({'model': 'QL-800', 'media_width': 62, 'media_length': 0}, 'pt12'),
                         ({'model': 'QL-800', 'media_width': 18, 'media_length': 0}, 'pt18')):
-        monkeypatch.setattr(devices, 'status_cache', {'tcp://192.0.2.7:9100': state})
+        monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
         assert client.post('/labeldesigner/api/print', data={'text': text}).status_code == 200
     assert jobs == ['pt24', 'pt12', 'pt18']

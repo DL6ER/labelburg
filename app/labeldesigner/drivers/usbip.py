@@ -375,6 +375,9 @@ _locks: dict[str, threading.RLock] = {}
 _locks_lock = threading.Lock()
 # Until when a printer is not asked for its device ID, by key()
 _unreachable: dict[str, float] = {}
+# The device ID of each printer at its last import, by key(): one that
+# cannot be reached is still the model it was
+_device_ids: dict[str, str] = {}
 
 
 def _lock(name: str) -> threading.RLock:
@@ -391,6 +394,7 @@ def connect(address: str) -> SharedPrinter:
             if printer is not None:
                 printer.close()
             printer = _printers[name] = SharedPrinter(address)
+            _device_ids[name] = printer.device_id
         return printer
 
 
@@ -401,20 +405,28 @@ def release(printer: SharedPrinter):
         printer.close()
 
 
+def unreachable(address: str) -> bool:
+    """Whether the printer could not be reached a moment ago and is not
+    imported meanwhile, see UNREACHABLE_FOR."""
+    name = key(address)
+    printer = _printers.get(name)
+    return (printer is None or printer.broken) and time.monotonic() < _unreachable.get(name, 0)
+
+
 def device_id(address: str) -> str:
-    """The IEEE 1284 device ID of the printer, empty if it cannot be reached."""
+    """The IEEE 1284 device ID of the printer, while it cannot be reached the
+    one it told at its last import, empty if it was never reached."""
     name = key(address)
     # Held while it is tried, so that others wait for the answer instead of trying too
     with _lock(name):
-        printer = _printers.get(name)
-        if (printer is None or printer.broken) and time.monotonic() < _unreachable.get(name, 0):
-            return ''
+        if unreachable(address):
+            return _device_ids.get(name, '')
         try:
             return connect(address).device_id
         except (OSError, ValueError) as e:
             logger.debug('No device ID of %s: %s', address, e)
             _unreachable[name] = time.monotonic() + UNREACHABLE_FOR
-            return ''
+            return _device_ids.get(name, '')
 
 
 class Socket:

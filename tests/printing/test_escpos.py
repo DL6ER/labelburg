@@ -2,7 +2,10 @@
 printer in place of /dev/usb/lp<N>, and printing and status through the
 label designer."""
 import json
+import os
 import select
+import socket
+import threading
 
 import pytest
 
@@ -106,6 +109,77 @@ def test_printer_through_pyusb(monkeypatch):
         assert c.ask(protocol.PAPER) == QUIET
         c.write(b'0123456789')
     assert c.printer.written == [protocol.PAPER, b'0123', b'4567', b'89'] and c.printer.disposed
+
+
+def test_answers_of_many_polls_are_not_taken_for_the_status(monkeypatch):
+    # Over USB/IP each late answer comes in a transfer, and a read, of its own
+    class Printer:
+        def __init__(self, device):
+            self.unread = [bytes([QUIET | 0x20])] * 30
+
+        def read(self, length):
+            return self.unread.pop(0) if self.unread else b''
+
+        def write(self, data):
+            self.unread.append(bytes([QUIET]))
+
+        def dispose(self):
+            pass
+    monkeypatch.setattr(protocol.backends, 'UsbipPrinter', Printer)
+    with protocol.connect('usbip://192.0.2.1') as c:
+        assert c.ask(protocol.PAPER) == QUIET
+
+
+def asked_while_sending(c, quiet):
+    """c.ask(PAPER) of a printer that keeps sending, run aside so that a hang
+    fails the test; then quiet() silences the printer and the thread ends."""
+    outcome = []
+
+    def ask():
+        try:
+            outcome.append(c.ask(protocol.PAPER))
+        except protocol.EscposError as e:
+            outcome.append(e)
+    thread = threading.Thread(target=ask, daemon=True)
+    thread.start()
+    thread.join(5)
+    hung = thread.is_alive()
+    quiet()
+    thread.join(5)
+    assert not hung
+    return outcome[0]
+
+
+def test_printer_that_keeps_sending_through_usblp(monkeypatch):
+    # /dev/zero has always something to read, /dev/null nothing
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    with protocol.Connection('/dev/zero') as c:
+        null = os.open(os.devnull, os.O_RDWR)
+        try:
+            assert asked_while_sending(c, lambda: os.dup2(null, c.dev)) == 0
+        finally:
+            os.close(null)
+
+
+def test_printer_that_keeps_sending_through_pyusb(monkeypatch):
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    quiet = threading.Event()
+
+    class Printer:
+        def __init__(self, device):
+            pass
+
+        def read(self, length):
+            return b'' if quiet.is_set() else bytes([QUIET])
+
+        def write(self, data):
+            pass
+
+        def dispose(self):
+            pass
+    monkeypatch.setattr(protocol.backends, 'UsbPrinter', Printer)
+    with protocol.connect('usb://0x04b8:0x0e15/TM1') as c:
+        assert asked_while_sending(c, quiet.set) == QUIET
 
 
 def test_status_bytes():
@@ -235,6 +309,31 @@ def test_printer_on_the_network(monkeypatch):
     assert received == [protocol.PAPER + b'job']
 
 
+def test_printer_on_the_network_that_keeps_sending(monkeypatch):
+    # A connection that never runs dry, as one over loopback may between sends
+    class Printer:
+        quiet = False
+
+        def recv(self, size):
+            return b'' if self.quiet else bytes([QUIET]) * size
+
+        def sendall(self, data):
+            pass
+
+        def setblocking(self, flag):
+            pass
+
+        def settimeout(self, timeout):
+            pass
+
+        def close(self):
+            pass
+    printer = Printer()
+    monkeypatch.setattr(protocol.socket, 'create_connection', lambda to, timeout: printer)
+    with protocol.connect('tcp://192.0.2.1') as c:
+        assert asked_while_sending(c, lambda: setattr(printer, 'quiet', True)) == QUIET
+
+
 def test_printer_with_a_180_dpi_head(monkeypatch):
     from app.labeldesigner.drivers import devices
     from app.labeldesigner.label_names import label_dpi, label_fits
@@ -360,3 +459,76 @@ def test_label_for_the_paper_of_the_other_model(tmp_path, monkeypatch, through, 
     response = client.post('/labeldesigner/api/print', data={
         'printer': 'simulation', 'model': model, 'label_size': '62', 'print_type': 'text', 'text': TEXT})
     assert response.get_json()['success'] is False
+
+
+@pytest.mark.parametrize('set_by_hand', ['escpos80-180', 'escpos80'], ids=['its own', 'kept for the other model'])
+@pytest.mark.parametrize('through', ['print', 'repository', 'webhook'])
+def test_label_for_the_paper_set_by_hand_on_the_other_model(tmp_path, monkeypatch, through, set_by_hand):
+    import base64
+    import io
+    from PIL import Image
+    from app.labeldesigner import printer_settings
+    # 80 mm paper set by hand on a 180 dpi printer: a label for the 80 mm
+    # paper of the other model prints on it as it is, without a note
+    printed_on = []
+    original = escpos.Escpos.render
+
+    def render(self, queue, entries, keep=None):
+        job = original(self, queue, entries, keep)
+        printed_on.append((queue.label_size, job[0][2]))
+        return job
+    monkeypatch.setattr(escpos.Escpos, 'render', render)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config['PRINTERS'] = [('Epson/ESC-POS-180', 'simulation', 'Till')]
+    # escpos80 as kept from before the printer was known to have a 180 dpi head
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_text(json.dumps({'printers': {'simulation': {'label_size': set_by_hand}}}))
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['tape']
+    assert (shown['id'], shown['known'], shown['manual']) == ('escpos80-180', True, True)
+    assert 'escpos80' in shown['fits']
+    assert shown['place']['escpos80|rotated'] == {'label_size': 'escpos80-180', 'orientation': 'rotated'}
+    if through == 'print':
+        response = client.post('/labeldesigner/api/print', data={
+            'printer': 'Till', 'label_size': 'escpos80', 'print_type': 'text', 'text': TEXT})
+    elif through == 'repository':
+        (tmp_path / 'label_repo' / 'receipt.json').write_text(json.dumps(
+            {'label_size': 'escpos80', 'print_type': 'text', 'text': json.loads(TEXT)}))
+        response = client.post('/labeldesigner/api/repository/print', json={'name': 'receipt.json', 'printer': 'Till'})
+    else:
+        client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+        image = io.BytesIO()
+        Image.new('RGB', (300, 100), 'black').save(image, 'PNG')
+        response = client.post('/labeldesigner/api/webhook/print', json={
+            'password': 'secret', 'printer': 'Till', 'label_size': 'escpos80',
+            'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on == [('escpos80-180', 64)]
+    # Without a label size on the paper set by hand
+    response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on[1:] == [('escpos80-180', 64)]
+
+
+@pytest.mark.parametrize('default, size, dots', [('escpos80', 'escpos80-180', 512), ('escpos58', 'escpos58-180', 360)])
+def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, dots):
+    import io
+    from PIL import Image
+    # No paper set on a 180 dpi printer, LABEL_DEFAULT_SIZE for the other
+    # model: assumed, previewed and printed on the printer's size of it
+    printed_on = []
+    original = escpos.Escpos.render
+
+    def render(self, queue, entries, keep=None):
+        job = original(self, queue, entries, keep)
+        printed_on.append((queue.label_size, job[0][2]))
+        return job
+    monkeypatch.setattr(escpos.Escpos, 'render', render)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config.update(PRINTERS=[('Epson/ESC-POS-180', 'simulation', 'Till')], LABEL_DEFAULT_SIZE=default)
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['tape']
+    assert (shown['id'], shown['assumed']) == (size, True)
+    response = client.post('/labeldesigner/api/preview', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.status_code == 200
+    assert Image.open(io.BytesIO(response.data)).width == dots
+    response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on == [(size, dots // 8)]

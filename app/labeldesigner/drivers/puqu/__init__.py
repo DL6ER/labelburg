@@ -67,6 +67,7 @@ class Puqu(Driver):
     # bt://<MAC>[/<RFCOMM channel>]
     device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),)
     errors = (OSError, protocol.PuquError)
+    reports_tape = False
 
     def fits(self, label, model):
         return label in LABELS

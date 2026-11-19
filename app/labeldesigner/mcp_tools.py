@@ -16,9 +16,9 @@ from urllib.parse import urlsplit
 from werkzeug.sansio.utils import host_is_trusted
 from werkzeug.wrappers import Response
 
-from . import drivers
+from . import tape
 from .label import BLANK_TEMPLATE, DATE_OFFSET, _iso_date
-from .label_names import LABELS, labels_taken
+from .label_names import LABELS
 from .refusals import BARCODE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -68,20 +68,25 @@ def _origin_host(origin: str) -> str:
 
 
 def loaded_label_sizes(printer: dict) -> list[str]:
-    """The label sizes a printer may have loaded as its status tells, as the
-    label designer finds them: both 62 and 62red where a QL printer does not
-    tell whether its roll is black and red, all widths of the length a ZPL
-    printer measured. Empty if it tells none."""
-    width, length = printer.get('media_width'), printer.get('media_length') or 0
-    if not width and not length:
-        return []
-    # As the label designer: red_roll tells a black and red roll, the text
-    # color of TZe tape does not
-    red = printer.get('red_roll') is True or bool(re.search('red', printer.get('media_type') or '', re.IGNORECASE))
-    unknown = not red and printer.get('red_roll') is None
-    return [label.identifier for label in labels_taken(printer.get('model'))
-            if label.tape_size[1] == length and (not width or label.tape_size[0] == width)
-            and (unknown or (label.color == 1) == red)]
+    """The label sizes a printer may have loaded as its status tells, see
+    tape.loaded(): both 62 and 62red where it does not tell whether its roll
+    is black and red, every width of the length where it tells no width.
+    Empty if it tells none."""
+    return tape.loaded(printer, printer.get('model'))
+
+
+def loaded_sizes(printer: dict) -> list[str]:
+    """The label sizes a printer has loaded: where the status knows the tape
+    prints are placed on, e.g. one set by hand, those it takes that print
+    as they are on it, else those of loaded_label_sizes()."""
+    told = printer.get('tape') or {}
+    if told.get('known'):
+        takes, color = tape.takes(printer.get('model')), tape.SIZES[told['id']].color
+        # Of the sizes the tape only renames, one of another color prints in its colors,
+        # e.g. 62 as 62red on a black and red roll, one of its color as it is, e.g. 12+17 on 12
+        return [size for size in told.get('fits', []) if size in takes
+                and not (size in told.get('moves', []) and tape.SIZES[size].color != color)]
+    return loaded_label_sizes(printer)
 
 
 # The USB devices as the kernel tells them, with the maker, model and serial
@@ -162,19 +167,14 @@ class AskUser(Exception):
     """Nothing done yet: the user is to be asked, e.g. which label is loaded."""
 
 
-def same_paper(model: str | None, label_size: str | None) -> str | None:
-    """The label size of a printer of model for the same paper as
-    label_size, e.g. escpos80-180 for escpos80 on a 180 dpi ESC/POS printer."""
-    return drivers.for_model(model).label_for(label_size, model) if model and label_size else label_size
-
-
 def label_size_for(model: str | None, label_size: str) -> str:
     """The label size of a printer of model, of any printer without model,
     that label_size names, also without the prefix of its driver and written
-    as "100 x 30 mm", e.g. zpl100x30 for 100x30 on a ZPL printer."""
+    as "100 x 30 mm", e.g. zpl100x30 for 100x30 on a ZPL printer, or its size
+    of the same paper, see tape.same_paper()."""
     from mcp.server.mcpserver.exceptions import ToolError
-    label_size = same_paper(model, label_size)
-    takes = [label.identifier for label in (LABELS if model is None else labels_taken(model))]
+    label_size = tape.same_paper(label_size, model)
+    takes = [label.identifier for label in LABELS] if model is None else tape.takes(model)
     if not takes or label_size in takes:
         return label_size
     plain = re.sub(r'\s|mm', '', str(label_size).lower()).replace('×', 'x')
@@ -268,9 +268,9 @@ class Tools:
         if it has another one loaded. Without label_size the one loaded, else
         the user is to be asked."""
         from mcp.server.mcpserver.exceptions import ToolError
-        saved = same_paper(found.get('model'), saved)
+        saved = tape.same_paper(saved, found.get('model'))
         label_size = label_size_for(found.get('model'), label_size) if label_size else self._loaded(found, saved)
-        loaded = loaded_label_sizes(found)
+        loaded = loaded_sizes(found)
         if loaded and label_size not in loaded:
             on = loaded[0] if len(loaded) == 1 else 'the one loaded'
             raise ToolError(f'The printer has {" or ".join(loaded)} loaded, not {label_size}. Load {label_size} or print on {on}.')
@@ -280,9 +280,7 @@ class Tools:
     def _loaded(found: dict, saved: str | None = None) -> str:
         """The label size loaded in the printer found, saved where it is
         one of those it may have loaded, else the user is to be asked."""
-        # A printer that tells none has the one set in its printer settings
-        kept = (found.get('settings') or {}).get('label_size')
-        loaded = loaded_label_sizes(found) or ([kept] if kept else [])
+        loaded = loaded_sizes(found)
         black = [size for size in loaded if not size.endswith('red')]
         # A QL printer that cannot tell a black and red roll: black
         if len(black) == 1 and all(size in (black[0], black[0] + 'red') for size in loaded):
@@ -295,7 +293,7 @@ class Tools:
         name = found.get('name') or found.get('path')
         if saved:
             raise AskUser(f'Nothing printed yet. Ask the user whether {_named([saved])} is loaded in {name}, then call again with label_size.')
-        takes = loaded or [label.identifier for label in labels_taken(found.get('model'))]
+        takes = loaded or found.get('takes') or []
         told = 'may have one of these loaded' if loaded else 'does not tell which label is loaded, it takes'
         raise AskUser(f'Nothing done yet. {name} {told}: {_named(takes)}. Ask the user which one, then call again with label_size.')
 
@@ -318,7 +316,7 @@ class Tools:
 
     def list_printers(self) -> list[dict]:
         return [{**_describe(p), 'status': p.get('status_type'), 'errors': p.get('errors') or [],
-                 'loaded_label_sizes': loaded_label_sizes(p)}
+                 'loaded_label_sizes': loaded_sizes(p)}
                 for p in self._printers()]
 
     def list_labels(self) -> list[dict]:
@@ -374,7 +372,7 @@ class Tools:
         """Refused where the saved label is for another label size than size,
         the one given or loaded in the printer found."""
         from mcp.server.mcpserver.exceptions import ToolError
-        if size and size != same_paper((found or {}).get('model'), saved['label_size']):
+        if size and size != tape.same_paper(saved['label_size'], (found or {}).get('model')):
             where = (found.get('name') or found['path']) if found else 'The printer'
             raise ToolError(f'{where} has {size} loaded, {saved["name"]} is for {saved["label_size"]}. '
                             f'Ask the user to load {_named([saved["label_size"]])}.')
@@ -549,9 +547,10 @@ def _server(app):
     def list_printers() -> list[dict]:
         """The printers: alias, device, driver, and on USB the maker, model
         and serial number they report, with their status, errors and the
-        label sizes they may have loaded: empty if the printer does not
-        tell, ask which one; both 62 and 62red where a QL printer cannot
-        tell; all widths of the length a ZPL printer measured."""
+        label sizes they may have loaded, as the printer tells, else as set
+        in its printer settings: empty if neither does, ask which one; both
+        62 and 62red where a QL printer cannot tell; all widths of the
+        length a ZPL printer measured where none of them is set."""
         return tools.list_printers()
 
     @server.tool(annotations=reading)

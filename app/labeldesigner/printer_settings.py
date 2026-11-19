@@ -62,7 +62,7 @@ def parsed(content: str) -> dict:
 
 
 def _key(data: dict, device: str) -> str:
-    """key(device), of a USB printer switched off, which tells no device ID,
+    """key(device), of a USB printer switched off that tells no device ID,
     the one last seen on its device. Its device ID is read once, over
     USB/IP each read is a connection."""
     device_id = usb_device_id(device)
@@ -126,11 +126,10 @@ def changed(data: dict, device: str, changes: dict) -> dict:
     return data
 
 
-def for_printing(data: dict, device: str, model: str, values: dict) -> dict:
-    """values of a print request, what it leaves out as set for the printer:
-    600 dpi and fast printing only where the model prints them."""
-    kept = of_printer(data, device)
-
+def for_printing(kept: dict, model: str, values: dict) -> dict:
+    """values of a print request, what it leaves out as set for the printer
+    in kept, its settings as of_printer() gives them: 600 dpi and fast
+    printing only where the model prints them."""
     def named(name):
         return any(values.get(k) not in (None, '') for k in NAMED_BY.get(name, (name,)))
     taken = {name: kept[name] for name in OWN if name in kept and not named(name)}
