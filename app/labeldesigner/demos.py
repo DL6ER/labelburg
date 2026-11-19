@@ -3,6 +3,7 @@ start from. They are saved labels like those of the repository, read-only,
 in categories: each category is a folder in demos/, categories.json lists
 them in the order they are shown. The images they use are in demos/images,
 SOURCES.md there says where they come from."""
+import functools
 import json
 import os
 
@@ -20,8 +21,10 @@ REPLACED = {
 }
 
 
+@functools.cache
 def categories() -> list[dict]:
-    """The categories with their id (the folder) and name."""
+    """The categories with their id (the folder) and name. They ship with
+    the app, read once."""
     with open(os.path.join(DEMO_DIR, 'categories.json'), encoding='utf-8') as fh:
         return json.load(fh)
 

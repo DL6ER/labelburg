@@ -10,6 +10,7 @@ import secrets
 import threading
 import contextlib
 import datetime
+import functools
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
@@ -1174,13 +1175,18 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
 # --- Demo labels --------------------------------------------------------------------------
 @bp.route('/api/demos/list', methods=['GET'])
 def demo_list():
-    categories = []
-    for category in demos.categories():
-        labels = [{'id': label_id, 'title': data.get('title') or label_id, 'language': data.get('language'),
-                   'label_size_id': data.get('label_size'), 'label_size': _label_size_name(data.get('label_size'))}
-                  for label_id, data in demos.labels(category['id'])]
-        categories.append({'id': category['id'], 'name': category['name'], 'labels': labels})
-    return {'categories': categories}
+    return {'categories': _demo_categories()}
+
+
+@functools.cache
+def _demo_categories() -> list[dict]:
+    """The demo labels by category as /api/demos/list lists them. They ship
+    with the app, read once."""
+    return [{'id': category['id'], 'name': category['name'],
+             'labels': [{'id': label_id, 'title': data.get('title') or label_id, 'language': data.get('language'),
+                         'label_size_id': data.get('label_size'), 'label_size': _label_size_name(data.get('label_size'))}
+                        for label_id, data in demos.labels(category['id'])]}
+            for category in demos.categories()]
 
 
 def _demo_response(label_id: str | None, respond, text_as_json: bool = True):
