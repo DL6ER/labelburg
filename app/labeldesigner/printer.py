@@ -277,7 +277,8 @@ def status_of_printer(config: Config, path: str) -> dict | None:
         return None
     model, name = listed[path]
     try:
-        state = _query_configured(model, path)
+        driver, known = drivers.resolve(path, model)
+        state = driver.followed_status(path, known)
     except Exception as e:
         logger.info('Status query of %s failed: %s', path, e)
         state = devices.failed_printer_state(path, e, model)

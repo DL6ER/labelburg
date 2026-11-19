@@ -14,7 +14,7 @@ from app.labeldesigner.drivers.niimbot import calibration, protocol
 from tests.helpers import make_client
 
 DEVICE = 'bt://00:F4:BA:17:12:06'
-# A B1 on USB, shared over USB/IP: on Bluetooth it speaks LE only
+# A B1 on USB, shared over USB/IP
 B1_DEVICE = 'usbip://192.0.2.7/1-4.1.3'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '30'}])
 # The RFID tag of a 12 x 40 mm roll
@@ -79,7 +79,7 @@ def answered(monkeypatch):
 def fake(monkeypatch):
     printer = FakePrinter()
 
-    def connect(device):
+    def connect(device, le=False):
         # The real connection, its socket the fake printer
         c = protocol.Connection.__new__(protocol.Connection)
         c.s, c.received = printer, b''
@@ -473,7 +473,7 @@ def test_print_updates_the_status(client, fake, monkeypatch):
 def test_print_that_could_not_reach_the_printer_asks_it_again(client, fake, monkeypatch):
     client.get('/labeldesigner/api/printer_status')
 
-    def unreachable(device):
+    def unreachable(device, le=False):
         raise OSError(112, 'Host is down')
     monkeypatch.setattr(protocol, 'connect', unreachable)
     client.post('/labeldesigner/api/print', data={'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
@@ -484,7 +484,7 @@ def test_print_that_could_not_reach_the_printer_asks_it_again(client, fake, monk
 def test_printer_that_is_off_is_not_looked_for_at_every_status_query(client, monkeypatch):
     calls = []
 
-    def unreachable(device):
+    def unreachable(device, le=False):
         calls.append(device)
         raise OSError(112, 'Host is down')
     monkeypatch.setattr(protocol, 'connect', unreachable)
@@ -688,7 +688,7 @@ def test_b1_gone_is_told_at_the_next_status_query(b1, fake, monkeypatch):
     assert b1.get(status).get_json()['printers'][0]['errors'] == []
 
     # As a host that stopped sharing the B1 over USB/IP
-    def gone(device):
+    def gone(device, le=False):
         raise OSError(errno.ENODEV, '192.0.2.7 shares no device at 1-4.1.3')
     monkeypatch.setattr(protocol, 'connect', gone)
     errors = b1.get(status).get_json()['printers'][0]['errors']
@@ -787,13 +787,3 @@ def test_b1_that_stays_silent_does_not_answer(b1, fake, monkeypatch):
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['errors'] == ['The printer does not answer']
 
-
-def test_b1_on_bluetooth_says_it_works_over_usb_only(client, fake):
-    # It speaks Bluetooth LE only, which the driver does not speak yet
-    client.application.config['PRINTER_MODEL'] = 'Niimbot/B1'
-    printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert printer_['errors'] == [niimbot.B1_USB_ONLY]
-    response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == niimbot.B1_USB_ONLY
-    assert fake.commands == []

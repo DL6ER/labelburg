@@ -42,7 +42,7 @@ def _until(designer, condition):
 
 
 def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None):
-    where = f", path: '{path}'" if path else ''
+    where = f", path: '{path}', follow: true" if path else ''
     designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ model: '{model}', status_type: 'Reply to status request',
         roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }}, media_width: 50, media_length: 30,
         label_size: 'niimbot50x30', label_size_assumed: false{where} }})]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }}""")

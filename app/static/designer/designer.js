@@ -929,14 +929,13 @@ async function refreshPrinters(look = false) {
     showPrinters();
 }
 
-// A printer on USB is asked on its own every 2 s, another roll or a lost
-// connection shows at once. Asking one on the network or on Bluetooth that
-// often costs, they are asked with the others every 20 s.
-const onUsb = p => /^(usb|usbip|file):\/\//.test((p && p.path) || '');
+// A printer the server says costs nothing to ask, e.g. one on USB, is asked
+// on its own every 2 s, another roll or a lost connection shows at once. The
+// others are asked with all printers every 20 s.
 let following = false;
 async function followPrinter() {
     const p = S.printer;
-    if (document.hidden || following || !onUsb(p)) return;
+    if (document.hidden || following || !(p && p.follow)) return;
     following = true;
     try {
         const answered = settingsAnswered;
