@@ -310,28 +310,28 @@ def test_printer_on_the_network(monkeypatch):
 
 
 def test_printer_on_the_network_that_keeps_sending(monkeypatch):
-    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
-    server = socket.create_server(('127.0.0.1', 0))
-    server.settimeout(5)
-    quiet = threading.Event()
+    # A connection that never runs dry, as one over loopback may between sends
+    class Printer:
+        quiet = False
 
-    def printer():
-        with server.accept()[0] as conn:
-            conn.settimeout(0.1)
-            while not quiet.is_set():
-                try:
-                    conn.sendall(bytes([QUIET]) * 65536)
-                except TimeoutError:
-                    pass
-                except OSError:
-                    return
-    sender = threading.Thread(target=printer, daemon=True)
-    sender.start()
-    with protocol.connect(f'tcp://127.0.0.1:{server.getsockname()[1]}') as c:
-        select.select([c.socket], [], [], 5)
-        assert asked_while_sending(c, quiet.set) == QUIET
-    sender.join(5)
-    server.close()
+        def recv(self, size):
+            return b'' if self.quiet else bytes([QUIET]) * size
+
+        def sendall(self, data):
+            pass
+
+        def setblocking(self, flag):
+            pass
+
+        def settimeout(self, timeout):
+            pass
+
+        def close(self):
+            pass
+    printer = Printer()
+    monkeypatch.setattr(protocol.socket, 'create_connection', lambda to, timeout: printer)
+    with protocol.connect('tcp://192.0.2.1') as c:
+        assert asked_while_sending(c, lambda: setattr(printer, 'quiet', True)) == QUIET
 
 
 def test_printer_with_a_180_dpi_head(monkeypatch):
