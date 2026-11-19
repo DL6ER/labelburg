@@ -13,6 +13,9 @@ from .. import backends, usbip
 BAND = 256
 # How long the printer may take to answer a status request, in s
 ANSWER_WAIT = 2
+# Reads of what came before a status request at most, one per late answer
+# over USB/IP: a printer that keeps sending must not hold the query and lock
+DISCARD_READS = 100
 # A job goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s, a long receipt takes longer to print
 WRITE_CHUNK = 16384
@@ -64,6 +67,14 @@ def errors(offline: int, paper: int) -> list[str]:
     return found
 
 
+def _discard(read):
+    """Drop what the printer sent before a status request, read() returning
+    nothing when there is nothing left."""
+    for _ in range(DISCARD_READS):
+        if not read():
+            return
+
+
 class Connection:
     """The printer through the printer interface of the kernel (usblp)."""
 
@@ -83,8 +94,7 @@ class Connection:
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
         # A TM-T20II kept an answer from before, which was taken for this one
-        while select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64):
-            pass
+        _discard(lambda: select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64))
         self.write(request)
         # usblp also tells empty USB packets, read until an answer comes
         deadline = time.monotonic() + ANSWER_WAIT
@@ -110,8 +120,7 @@ class UsbConnection(Connection):
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
-        while self.printer.read(64):
-            pass
+        _discard(lambda: self.printer.read(64))
         self.write(request)
         deadline = time.monotonic() + ANSWER_WAIT
         while time.monotonic() < deadline:
@@ -146,8 +155,7 @@ class TcpConnection(Connection):
         """The status byte the printer answers a DLE EOT request with."""
         self.socket.setblocking(False)
         try:
-            while self.socket.recv(64):
-                pass
+            _discard(lambda: self.socket.recv(64))
         except BlockingIOError:
             pass
         self.write(request)
