@@ -2469,6 +2469,7 @@ def webhook_print():
         device, model = _resolved_printer(_param('printer', None), _param('model', None))
         settings = _settings_of(device)
         requested = {key: _requested(key) for key in ('label_size', 'high_res', 'fast_printing', 'leaves_first')}
+        requested['label_size'] = stored_label_size(requested['label_size'])
         # Validate label_size, before the printer is asked for its tape
         if requested['label_size'] is not None and not any(label.identifier == requested['label_size'] for label in LABELS):
             return make_response(jsonify({'success': False, 'message': f"Unknown label_size: {requested['label_size']}"}), 400)
