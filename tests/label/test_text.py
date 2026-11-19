@@ -257,6 +257,14 @@ def test_icon_and_text_in_one_line(tmp_path, align):
         assert abs(with_icon[3] - with_icon[1] - (text_only[3] - text_only[1])) < 10
 
 
+@pytest.mark.parametrize('align', ['diagonal', ['left'], {'left': 1}, 1])
+def test_unknown_alignment_is_refused(tmp_path, align):
+    data = dict(EXAMPLE_FORMDATA, text=json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'x', 'size': '40', 'align': align}]))
+    response = make_client(tmp_path).post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 400
+    assert response.get_json()['message'] == 'Unsupported alignment'
+
+
 def test_random_template_length_is_limited(tmp_path):
     client = make_client(tmp_path)
     data = EXAMPLE_FORMDATA.copy()

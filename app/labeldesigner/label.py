@@ -58,7 +58,8 @@ MAX_BLANK_CHOICE_LENGTH = 200
 # The characters of random texts, each line but the last is as high as they
 # are in its font
 PRINTABLE = string.ascii_letters + string.digits + string.punctuation
-DEFAULT_FONT_SIZE = 12
+# A line of text is drawn from the top of its start, middle or end
+TEXT_ANCHORS = {'left': 'lt', 'center': 'mt', 'right': 'rt'}
 
 # Pillow refuses to open images with more than twice this number of pixels,
 # so uploaded images above MAX_LABEL_PIXELS are rejected right when decoding
@@ -892,7 +893,7 @@ class SimpleLabel:
         # What is placed next to the text, by name
         boxes = [(name, (x, y, x + item.width, y + item.height))
                  for name, item, (x, y) in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
-        if self.want_text(img) and bboxes:
+        if bboxes:
             x, y = text_offset
             text_box = (x + textsize[0], y + textsize[1], x + textsize[2], y + textsize[3])
             overlapped = next((name for name, box in boxes if self._overlaps(text_box, box)), None)
@@ -912,9 +913,9 @@ class SimpleLabel:
             if length > LONG_CODE_LABEL:
                 self.warnings.append(long_code_warning(length))
 
-        logger.debug(f"Image resolution: {int(width)} x {int(height)} px")
+        logger.debug(f"Image resolution: {width} x {height} px")
         check_image_size(width, height)
-        imgResult = Image.new('RGB', (int(width), int(height)), 'white')
+        imgResult = Image.new('RGB', (width, height), 'white')
 
         if img is not None:
             imgResult.paste(img, image_offset)
@@ -973,11 +974,11 @@ class SimpleLabel:
             # Calculate the maximum allowed dimensions
             max_width = max(width - margin_left - margin_right, 1)
             max_height = max(height - margin_top - margin_bottom, 1)
+            grows_wide, grows_high = self._grows()
             # Next to text, along a side of the label that does not grow
             # with the text, the image takes its part of it, the text the
             # rest: half of it, a third with a code on the other side
             if parts > 1:
-                grows_wide, grows_high = self._grows()
                 if self._image_side(True) in ('left', 'right'):
                     if not grows_wide:
                         max_width = max(max_width // parts, 1)
@@ -994,7 +995,6 @@ class SimpleLabel:
             # Resize the image to fit within the maximum dimensions. A
             # label that grows with its content, endless tape, has only
             # the size across the tape to fit into.
-            grows_wide, grows_high = self._grows()
             if grows_high:
                 scale = max_width / img_width
             elif grows_wide:
@@ -1091,7 +1091,7 @@ class SimpleLabel:
         names = {color: name for name, color in COLORS.items()}
         return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size, names.get(self._fore_color, self._fore_color))
 
-    def _draw_text(self, img = None, bboxes = [], text_offset = (0, 0)):
+    def _draw_text(self, img, bboxes, text_offset=(0, 0)):
         """
         Returns a list of bounding boxes for each line, so each line can use a different font.
         """
@@ -1100,6 +1100,9 @@ class SimpleLabel:
             img = Image.new('L', (20, 20), 'white')
         draw = ImageDraw.Draw(img)
         y = 0
+        # Drawn, where the lines measured start and end across
+        left = min((entry[0][0] for entry in bboxes), default=0)
+        right = max((entry[0][2] for entry in bboxes), default=0)
 
         # Empty lines at the end leave the text as high as without them: the
         # last line that shows something is measured like the final line
@@ -1121,21 +1124,10 @@ class SimpleLabel:
             # Get font
             font = self._get_font(line['path'], self._line_size(line), measuring=not do_draw)
 
-            # Determine anchors
-            anchor = None
             align = line.get('align', 'center')
-
-            # Left aligned text
-            if align == "left":
-                anchor = "lt"
-            # Center aligned text
-            elif align == "center":
-                anchor = "mt"
-            # Right aligned text
-            elif align == "right":
-                anchor = "rt"
-            # else: error
-            else:
+            # A list or dict cannot be looked up, it is no alignment either
+            anchor = TEXT_ANCHORS.get(align) if isinstance(align, str) else None
+            if anchor is None:
                 raise ValueError(f"Unsupported alignment: {align}")
 
             color = parse_color(line.get('color') or 'black')
@@ -1153,9 +1145,7 @@ class SimpleLabel:
                     min_bbox_x = text_offset[0] + min(bbox[0][0] for bbox in bboxes)
                     max_bbox_x = text_offset[0] + bboxes[i][0][2] # max(bbox[0][2] for bbox in bboxes)
                 elif anchor == "mt":
-                    min_bbox_x = min(bbox[0][0] for bbox in bboxes)
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes)
-                    center_x = (min_bbox_x + max_bbox_x) // 2
+                    center_x = (left + right) // 2
                     min_bbox_x = text_offset[0] + center_x - (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                     max_bbox_x = text_offset[0] + center_x + (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                 elif anchor == "rt":
@@ -1220,16 +1210,13 @@ class SimpleLabel:
                     x = text_offset[0]
                 # Center aligned text
                 elif align == "center":
-                    min_bbox_x = min(bbox[0][0] for bbox in bboxes) if len(bboxes) > 0 else 0
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes) if len(bboxes) > 0 else 0
                     # In the middle with a letter reaching left, e.g. a "j",
                     # as its white on black box: the font puts the middle of
                     # its width there
-                    x = (max_bbox_x - min_bbox_x) // 2 + min_bbox_x + text_offset[0] - bbox[0] // 2
+                    x = (right - left) // 2 + left + text_offset[0] - bbox[0] // 2
                 # Right aligned text
                 elif align == "right":
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes) if len(bboxes) > 0 else 0
-                    x = max_bbox_x + text_offset[0]
+                    x = right + text_offset[0]
 
                 # Draw checkbox if needed, in the room left for it in front of
                 # the text
