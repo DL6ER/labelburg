@@ -18,10 +18,21 @@ logger = logging.getLogger(__name__)
 
 # The devices Linux shares over USB/IP, by their bus IDs
 USBIP_HOST = '/sys/bus/usb/drivers/usbip-host'
+# Reads of what came before a status request at most, one per late answer
+# over USB/IP: a printer that keeps sending must not hold the query and lock
+DISCARD_READS = 100
 
 
 class NoLibusb(OSError):
     """PyUSB finds no libusb to reach usb:// printers through."""
+
+
+def discard(read):
+    """Drop what the printer sent before a status request, read() returning
+    nothing when there is nothing left."""
+    for _ in range(DISCARD_READS):
+        if not read():
+            return
 
 
 class Printer:

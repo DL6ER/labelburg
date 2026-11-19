@@ -8,14 +8,12 @@ import socket
 import time
 
 from .. import backends, usbip
+from ..backends import discard as _discard
 
 # Rows per raster image, the printer takes them in pieces
 BAND = 256
 # How long the printer may take to answer a status request, in s
 ANSWER_WAIT = 2
-# Reads of what came before a status request at most, one per late answer
-# over USB/IP: a printer that keeps sending must not hold the query and lock
-DISCARD_READS = 100
 # A job goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s, a long receipt takes longer to print
 WRITE_CHUNK = 16384
@@ -65,14 +63,6 @@ def errors(offline: int, paper: int) -> list[str]:
     if offline & 0x40:
         found.append('The printer reports an error, remove paper stuck at its cutter or switch it off and on')
     return found
-
-
-def _discard(read):
-    """Drop what the printer sent before a status request, read() returning
-    nothing when there is nothing left."""
-    for _ in range(DISCARD_READS):
-        if not read():
-            return
 
 
 class Connection:

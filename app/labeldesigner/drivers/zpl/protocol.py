@@ -91,8 +91,7 @@ def host_status(device: str) -> bytes:
     if device.startswith('usb://'):
         printer = backends.UsbPrinter(device)
         try:
-            while printer.read(256):
-                pass
+            backends.discard(lambda: printer.read(256))
             printer.write(HOST_STATUS)
             return _read_answer(lambda left: printer.read(256))
         finally:
@@ -100,8 +99,7 @@ def host_status(device: str) -> bytes:
     fd = os.open(device.removeprefix('file://'), os.O_RDWR)
     try:
         # An answer from before is not taken for this one
-        while select.select([fd], [], [], 0)[0] and os.read(fd, 256):
-            pass
+        backends.discard(lambda: select.select([fd], [], [], 0)[0] and os.read(fd, 256))
         os.write(fd, HOST_STATUS)
 
         # usblp also tells empty USB packets
