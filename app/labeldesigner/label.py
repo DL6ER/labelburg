@@ -959,8 +959,8 @@ class SimpleLabel:
             check_image_size(img.width * cos + img.height * sin, img.width * sin + img.height * cos)
             img = img.rotate(-self._image_rotation, expand=True, fillcolor="white")
 
-        # Rotation with expand=True may add an empty border around content.
-        if own_look and self._image_crop:
+        # Rotation with expand=True adds white corners, except by quarter turns
+        if own_look and self._image_crop and self._image_rotation % 90:
             img = self._crop_image_to_content(img)
         # Transparent once it is cropped to its content, white from here
         img = on_white(img)

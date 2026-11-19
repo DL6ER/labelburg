@@ -8,7 +8,7 @@ import re
 from typing import Union
 
 import pytest
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageOps
 from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
@@ -503,3 +503,48 @@ def test_transparent_parts_print_white(tmp_path, image_mode, source, crop):
     assert response.status_code == 200
     label = Image.open(io.BytesIO(response.data)).convert('L')
     assert label.getextrema()[0] > 100
+
+
+def _letter_l() -> Image.Image:
+    """A black "L" on white, the top left corner of its box black."""
+    image = Image.new('L', (60, 80), 'white')
+    image.paste(0, (10, 10, 20, 70))
+    image.paste(0, (10, 60, 45, 70))
+    return image
+
+
+def _framed_logo() -> Image.Image:
+    """A black square in a black frame, white around the frame."""
+    image = Image.new('L', (100, 80), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 89, 69), outline=0, width=3)
+    image.paste(0, (40, 30, 60, 50))
+    return image
+
+
+def _cropped_label(tmp_path, image: Image.Image, rotation: int) -> tuple:
+    """The label of image alone, cropped and rotated at its size, and the
+    box of what is black on it."""
+    response = make_client(tmp_path).post('/labeldesigner/api/preview', data={
+        'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_fit': '0', 'image_crop': '1',
+        'image_rotation': str(rotation), 'margin_top': '0', 'margin_bottom': '0', 'image': _upload(image, 'image.png')})
+    assert response.status_code == 200
+    label = Image.open(io.BytesIO(response.data)).convert('L')
+    return label, ImageOps.invert(label).getbbox()
+
+
+@pytest.mark.parametrize('image', [_letter_l, _framed_logo])
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_cropped_image_keeps_what_is_in_its_corner(tmp_path, image, rotation):
+    # Black in the top left corner of the content is no background
+    source = image()
+    content = source.crop(ImageOps.invert(source).getbbox()).rotate(-rotation, expand=True)
+    label, ink = _cropped_label(tmp_path, source, rotation)
+    assert ink is not None
+    assert ImageChops.difference(label.crop(ink), content).getbbox() is None
+
+
+@pytest.mark.parametrize('rotation', [30, 135])
+def test_image_turned_by_another_angle_is_cropped_again(tmp_path, rotation):
+    # Without the white corners the rotation adds
+    label, ink = _cropped_label(tmp_path, _letter_l(), rotation)
+    assert ink[1] == 0 and ink[3] == label.height
