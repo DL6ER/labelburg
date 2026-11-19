@@ -174,9 +174,8 @@ def message(error: Exception, fallback: str) -> str:
     invalid input that has none INVALID_INPUT, any other error fallback."""
     text = str(error)
     limits, limit_patterns = _limits()
-    for known in MESSAGES + limits:
-        if text == known:
-            return known
+    if text in MESSAGES or text in limits:
+        return text
     for pattern, known in PATTERNS + limit_patterns:
         if pattern.fullmatch(text):
             return known
