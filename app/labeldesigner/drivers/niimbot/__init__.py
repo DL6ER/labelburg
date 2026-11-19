@@ -63,6 +63,15 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
+# One status question per printer is outstanding at most: the polls after one
+# went unanswered read whether its answer came, for OWED_WAIT seconds, and
+# tell the last state meanwhile. After STATUS_LOST seconds it counts as lost:
+# the printer does not answer, and the next poll asks anew. Over classic
+# Bluetooth no answer outlives its connection. By device: the question, when
+# it was asked, and whether the printer was told as not answering.
+STATUS_LOST = 20
+OWED_WAIT = 0.2
+_owed: dict[str, tuple[str, float, bool]] = {}
 
 
 def _b1_on_bluetooth(device: str, model: str) -> bool:
@@ -195,14 +204,7 @@ class Niimbot(Driver):
                 and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
         try:
-            try:
-                state = self._status(device, model)
-            except protocol.NoAnswer:
-                # A B1 on USB leaves a question unanswered every few minutes,
-                # asked again it answers. On Bluetooth that is a new connection.
-                if device.startswith('bt://'):
-                    raise
-                state = self._status(device, model)
+            state = self._status(device, model)
         except self.errors as e:
             devices.note_answer(device, e)
             raise
@@ -217,10 +219,38 @@ class Niimbot(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                beat = protocol.heartbeat(c)
-                roll = protocol.roll(c)
+                told = self._asked(c, device)
+                if told is None:
+                    return dict(devices.status_cache[devices.lock_key(device)])
                 serial = self._serial(c, device, model)
-        return self._keep(device, model, beat, roll, serial)
+        return self._keep(device, model, told['heartbeat'], told['roll'], serial)
+
+    def _asked(self, c, device) -> dict | None:
+        """The heartbeat and the roll the printer tells, None where a
+        question is left unanswered and the last state is told, see
+        STATUS_LOST. Raises NoAnswer where it does not answer."""
+        now = time.monotonic()
+        owed = _owed.pop(device, None)
+        silent = owed is not None and (owed[2] or now - owed[1] >= STATUS_LOST)
+        if owed is not None and now - owed[1] >= STATUS_LOST:
+            owed = None
+        steps = ['heartbeat', 'roll']
+        if owed is not None:
+            steps.remove(owed[0])
+            steps.insert(0, owed[0])
+        told = {}
+        for step in steps:
+            waiting = owed is not None and step == owed[0]
+            try:
+                told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None)
+            except protocol.NoAnswer:
+                if device.startswith('bt://'):
+                    raise
+                _owed[device] = (step, owed[1], silent) if waiting else (step, now, silent)
+                if silent or devices.lock_key(device) not in devices.status_cache:
+                    raise
+                return None
+        return told
 
     def _serial(self, c, device, model):
         """The serial number of a B1, asked once more after it told none."""
@@ -280,6 +310,8 @@ class Niimbot(Driver):
         """Print each label as a job of its own, the way the script this
         came from prints one, with the label type of the roll."""
         device, model = queue.device_specifier, queue.model
+        # It asks the printer itself, and may read the answer owed
+        _owed.pop(device, None)
         if _b1_on_bluetooth(device, model):
             return B1_USB_ONLY
         try:

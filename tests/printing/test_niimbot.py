@@ -5,6 +5,7 @@ import errno
 import json
 import os
 import struct
+import time
 
 import pytest
 
@@ -72,6 +73,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
+    monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
 
 
@@ -773,18 +775,65 @@ def test_d110_m_gets_each_row_on_its_own(client, fake):
     assert len(rows) > 1 and all(len(protocol.parse(w)[0]) == 1 for w in rows)
 
 
-def test_b1_leaving_one_question_unanswered_is_asked_again(b1, fake, monkeypatch):
-    # Every few minutes a B1 answered a status question not, the next one it did
-    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+def _silent_once(fake, monkeypatch, command):
+    """Leave the next question of command unanswered, as a B1 did now and
+    then. The questions left so."""
     take, missed = fake._take, []
 
     def once(data):
-        if data[2] == 0xdc and not missed:
+        if data[2] == command and not missed:
             return missed.append(data)
         take(data)
     monkeypatch.setattr(fake, '_take', once)
-    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert missed and printer_['errors'] == []
+    return missed
+
+
+def test_b1_with_a_status_question_unanswered_is_not_asked_again(b1, fake, monkeypatch):
+    # One status question per printer is outstanding at most: the polls after
+    # one went unanswered read whether its answer came, telling the last state
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    status = '/labeldesigner/api/printer_status'
+    assert b1.get(status).get_json()['printers'][0]['errors'] == []
+    missed = _silent_once(fake, monkeypatch, 0xdc)
+    for _ in range(3):
+        printer_ = b1.get(status).get_json()['printers'][0]
+        assert (printer_['errors'], printer_['roll']) == ([], 'PZ1G221322004205')
+    assert len(missed) == 1 and fake.commands.count(0xdc) == 1
+    # Its answer comes late: it is read and the status asked on from there
+    fake.pending += protocol.packet(0xdd, B1_CLOSED)
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, B1_TAG.replace(b'PZ1G221322004205', b'PZ1G221322004206')))
+    printer_ = b1.get(status).get_json()['printers'][0]
+    assert printer_['roll'] == 'PZ1G221322004206' and fake.commands.count(0xdc) == 1
+
+
+def test_b1_status_question_unanswered_for_20_s_is_lost(b1, fake, monkeypatch):
+    # Then it does not answer, and the next poll asks anew
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    monkeypatch.setattr(niimbot, 'STATUS_LOST', 0.2)
+    status = '/labeldesigner/api/printer_status'
+    assert b1.get(status).get_json()['printers'][0]['errors'] == []
+    # Switched off, it stays on USB
+    monkeypatch.delitem(REPLIES, 0xdc)
+    assert b1.get(status).get_json()['printers'][0]['errors'] == []
+    time.sleep(0.25)
+    asked = fake.commands.count(0xdc)
+    assert b1.get(status).get_json()['printers'][0]['errors'] == ['The printer does not answer']
+    assert fake.commands.count(0xdc) == asked + 1
+
+
+def test_b1_print_clears_an_unanswered_status_question(b1, fake, monkeypatch):
+    # The print asks the printer itself, and may read that answer
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    status = '/labeldesigner/api/printer_status'
+    b1.get(status)
+    _silent_once(fake, monkeypatch, 0xdc)
+    b1.get(status)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    asked = fake.commands.count(0xdc)
+    assert b1.get(status).get_json()['printers'][0]['errors'] == []
+    assert fake.commands.count(0xdc) == asked + 1
 
 
 def test_b1_that_stays_silent_does_not_answer(b1, fake, monkeypatch):

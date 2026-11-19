@@ -167,13 +167,15 @@ class Connection:
     def send(self, data: bytes):
         self.s.sendall(data)
 
-    def ask(self, command: int, data: bytes, replies) -> bytes:
+    def ask(self, command: int, data: bytes, replies, send: bool = True, wait: float | None = None) -> bytes:
         """Send a packet, the data of the first reply that is one of
-        replies. Raises NiimbotError if the printer reports an error or does
-        not answer."""
+        replies, waited for ANSWER_WAIT seconds or wait. Without send only
+        read, e.g. the late answer to one sent before. Raises NiimbotError if
+        the printer reports an error or does not answer."""
         replies = {replies} if isinstance(replies, int) else set(replies)
-        self.s.sendall(packet(command, data))
-        deadline = time.monotonic() + ANSWER_WAIT
+        if send:
+            self.s.sendall(packet(command, data))
+        deadline = time.monotonic() + (ANSWER_WAIT if wait is None else wait)
         while time.monotonic() < deadline:
             self.s.settimeout(max(0.05, deadline - time.monotonic()))
             try:
@@ -199,12 +201,13 @@ def connect(device: str) -> Connection:
     return Connection(device)
 
 
-def heartbeat(c: Connection) -> dict:
+def heartbeat(c: Connection, send: bool = True, wait: float | None = None) -> dict:
     """Whether the lid is open and the battery (0 to 4), from the 10 bytes
     a D110_M answers, e.g. 10 1f 00 69 00 69 32 46 01 04, or the 13 a B1
-    answers; the raw data if the length is another."""
+    answers; the raw data if the length is another. send and wait as for
+    Connection.ask()."""
     try:
-        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
+        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf}, send, wait)
     except NoAnswer:
         raise
     except NiimbotError:
@@ -251,10 +254,11 @@ def errors(beat: dict) -> list[str]:
     return ['The cover of the printer is open'] if beat.get('open') else []
 
 
-def roll(c: Connection) -> dict | None:
+def roll(c: Connection, send: bool = True, wait: float | None = None) -> dict | None:
     """The loaded roll from its RFID tag, None without a tag (the D110_M
-    answers 00 so), {} for a tag laid out otherwise."""
-    data = c.ask(0x1a, b'\x01', 0x1b)
+    answers 00 so), {} for a tag laid out otherwise. send and wait as for
+    Connection.ask()."""
+    data = c.ask(0x1a, b'\x01', 0x1b, send, wait)
     if len(data) <= 1:
         return None
     try:
