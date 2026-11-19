@@ -11,7 +11,7 @@ import pytest
 from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import devices, niimbot, progress
 from app.labeldesigner.drivers.niimbot import calibration, protocol
-from tests.helpers import make_client
+from tests.helpers import make_client, without_status
 
 DEVICE = 'bt://00:F4:BA:17:12:06'
 # A B1 on USB, shared over USB/IP: on Bluetooth it speaks LE only
@@ -122,7 +122,8 @@ def test_packets_as_the_script_sent_them():
     assert protocol.row_packets([row, row]) == [protocol.packet(0x85, bytes([0, 0, 1, 0, 0, 2, 0x80]) + bytes(11))]
 
 
-def test_label_is_printed_in_the_order_of_the_script(client, fake):
+def test_label_is_printed_in_the_order_of_the_script(client, fake, monkeypatch):
+    without_status(monkeypatch)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}
@@ -131,7 +132,8 @@ def test_label_is_printed_in_the_order_of_the_script(client, fake):
     assert rows and sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
 
 
-def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake):
+def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake, monkeypatch):
+    without_status(monkeypatch)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}
@@ -164,6 +166,7 @@ class UsbPrinter:
 
 
 def test_b1_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
+    without_status(monkeypatch)
     printer, opened = FakePrinter(), []
 
     def open_printer(device):
@@ -741,7 +744,10 @@ def test_b1_tells_a_round_roll(b1, fake, monkeypatch):
     assert (printer_['label_size'], printer_['label_size_assumed']) == ('niimbotd50', False)
 
 
-def test_round_label_prints_on_a_b1(b1, fake):
+def test_round_label_prints_on_a_b1(b1, fake, monkeypatch):
+    # With a T50*50ROUND roll in it
+    tag = bytes.fromhex('881d137bdf181080') + b'\x09080924002' + b'\x10PZ0G000000000001' + struct.pack('>HHB', 180, 0, 1)
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbotd50', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}

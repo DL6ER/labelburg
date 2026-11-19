@@ -5,8 +5,7 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from tests.browser.helpers import kept, preview_size, printed, save_as, set_tape, type_line, wait_for_preview
-from tests.browser.test_printing import fake_printer
+from tests.browser.helpers import fake_printer, kept, preview_size, printed, save_as, set_tape, type_line, wait_for_preview
 
 TAPE = 'Cable flags need continuous tape'
 
@@ -67,7 +66,7 @@ def test_die_cut_labels_show_a_cable_flag_without_it_and_its_own_tape_brings_it_
     kept(designer)
     set_tape(designer, '62x29')
     assert not designer.is_checked('#edFlag')
-    assert designer.inner_text('#edMade').endswith(f'{TAPE}.')
+    assert designer.is_visible('#edMade') and designer.inner_text('#edMade').endswith(f'{TAPE}.')
     set_tape(designer, '62')
     assert designer.evaluate('() => [S.edit.design.label_size, S.edit.design.cable_flag]') == ['62', '1']
     assert designer.is_checked('#edFlag')
@@ -97,7 +96,7 @@ def test_a_cable_flag_on_loaded_die_cut_labels_prints_without_it(designer):
         { text: [L('Router', 40)], cable_flag: '1' }) })""")
     wait_for_preview(designer)
     assert designer.evaluate('() => S.edit.design.label_size') == '29x90' and not designer.is_checked('#edFlag')
-    assert TAPE in designer.inner_text('#edMade')
+    assert designer.is_visible('#edMade') and TAPE in designer.inner_text('#edMade')
     sent = []
     designer.route('**/api/print', lambda route: (sent.append(route.request.post_data_buffer), route.continue_()))
     designer.click('#edPrint')

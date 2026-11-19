@@ -7,6 +7,8 @@ from urllib.parse import parse_qs
 
 import pytest
 
+from tests.browser.helpers import with_tape
+
 HINT = 'A new roll is in the printer. Calibrate the printer so the labels sit straight on it.'
 GLOWS = '() => document.querySelector("#calOpen").classList.contains("attention")'
 
@@ -41,11 +43,13 @@ def _until(designer, condition):
     raise AssertionError('not reached')
 
 
-def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None):
-    where = f", path: '{path}'" if path else ''
-    designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ model: '{model}', status_type: 'Reply to status request',
-        roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }}, media_width: 50, media_length: 30,
-        label_size: 'niimbot50x30', label_size_assumed: false{where} }})]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }}""")
+def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None, width=50, length=30):
+    """The printer panel of a printer as the server tells it, by default a
+    B1 with a 50 x 30 mm roll calibrated on another one."""
+    printer = with_tape({'model': model, 'status_type': 'Reply to status request', 'roll': roll,
+                         'calibration': {'across': 0, 'along': 0, 'roll': 'PZ1TEST00001'}, 'media_width': width, 'media_length': length,
+                         **({'path': path} if path else {})})
+    designer.evaluate("""p => { S.printers = [Object.assign({}, S.printer, p)]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }""", printer)
 
 
 def _dialog(designer, wide=False):
@@ -113,9 +117,7 @@ def test_a_round_roll_compares_the_white_ring(designer, calibration):
 
 def test_a_roll_the_designer_does_not_offer_is_not_pointed_out(designer, calibration):
     # No calibration label can be printed on it
-    designer.evaluate("""() => { S.printers = [Object.assign({}, S.printer, { model: 'Niimbot/B1', status_type: 'Reply to status request',
-        roll: 'PZ1TEST00002', calibration: { across: 0, along: 0, roll: 'PZ1TEST00001' }, media_width: 30, media_length: 15,
-        label_size: 'niimbot40x20', label_size_assumed: true })]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }""")
+    _panel(designer, width=30, length=15)
     assert 'The printer reports 30 x 15 mm tape, which is not offered here.' in designer.inner_text('.pp')
     assert HINT not in designer.inner_text('.pp')
 

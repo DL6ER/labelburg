@@ -405,14 +405,21 @@ def release(printer: SharedPrinter):
         printer.close()
 
 
+def unreachable(address: str) -> bool:
+    """Whether the printer could not be reached a moment ago and is not
+    imported meanwhile, see UNREACHABLE_FOR."""
+    name = key(address)
+    printer = _printers.get(name)
+    return (printer is None or printer.broken) and time.monotonic() < _unreachable.get(name, 0)
+
+
 def device_id(address: str) -> str:
     """The IEEE 1284 device ID of the printer, while it cannot be reached the
     one it told at its last import, empty if it was never reached."""
     name = key(address)
     # Held while it is tried, so that others wait for the answer instead of trying too
     with _lock(name):
-        printer = _printers.get(name)
-        if (printer is None or printer.broken) and time.monotonic() < _unreachable.get(name, 0):
+        if unreachable(address):
             return _device_ids.get(name, '')
         try:
             return connect(address).device_id

@@ -328,6 +328,9 @@ def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monke
     assert response.get_json()['message'] == 'The printer reports: Replace media error'
     status = client.get('/labeldesigner/api/printer_status').get_json()
     assert (status['errors'], status['media_width']) == (['Replace media error, clear it at the printer'], 62)
+    # The next job too, asked for its tape the printer answers with the error it holds
+    response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
+    assert response.get_json()['message'] == 'The printer reports: Replace media error'
     # Cleared
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
     assert client.get('/labeldesigner/api/printer_status').get_json()['errors'] == []

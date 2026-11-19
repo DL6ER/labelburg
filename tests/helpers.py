@@ -122,3 +122,9 @@ def sent_raster(monkeypatch) -> list:
         return job
     monkeypatch.setattr(BrotherRaster, 'render', capture)
     return sent
+
+
+def without_status(monkeypatch):
+    """Prints do not ask the printer for its tape, which a fake printer
+    counting its traffic would see."""
+    monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: {})
