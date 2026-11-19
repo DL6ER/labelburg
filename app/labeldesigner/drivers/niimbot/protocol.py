@@ -415,7 +415,7 @@ def heartbeat(c: Connection, send: bool = True, wait: float | None = None) -> di
     except NiimbotError:
         # An error answer left from a job the printer stopped, e.g. with its
         # cover opened, comes before the answer
-        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
+        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf}, send, wait)
     if len(data) == 13:
         return {'open': data[9] == B1_LID_OPEN, 'battery': data[10]}
     if len(data) != 10:
