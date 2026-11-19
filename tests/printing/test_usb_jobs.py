@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from app.labeldesigner.drivers import backends
+from app.labeldesigner.drivers import backends, devices
 from app.labeldesigner.drivers.brother import usb
 from tests.helpers import EXAMPLE_FORMDATA, make_client
 
@@ -14,11 +14,11 @@ REPLY, COMPLETED, PHASE_CHANGE, ERROR = 0x00, 0x01, 0x06, 0x02
 PRINTING, WAITING = 0x01, 0x00
 
 
-def status(kind, phase=WAITING, error=0):
-    """A status message of a QL-800 with 62 mm endless labels."""
+def status(kind, phase=WAITING, error=0, width=62):
+    """A status message of a QL-800 with endless labels, 62 mm by default."""
     packet = bytearray(32)
     packet[0:5] = b'\x80\x20\x42\x34\x38'
-    packet[9], packet[10], packet[11], packet[18], packet[19] = error, 62, 0x0A, kind, phase
+    packet[9], packet[10], packet[11], packet[18], packet[19] = error, width, 0x0A, kind, phase
     return bytes(packet)
 
 
@@ -220,6 +220,62 @@ def test_messages_left_from_before_do_not_confirm_a_job(clock, monkeypatch):
     info = send(monkeypatch, fake, [50])
     assert not info['did_print']
     assert usb.print_failure(info) == 'The printer did not answer after receiving the label, check whether it was printed'
+
+
+def test_replies_owed_are_not_taken_for_those_of_a_job(clock, monkeypatch):
+    # A QL-1100 answers the status requests it held an error through once it
+    # is cleared, each a round trip away, and they still tell the error
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 2)
+    fake = FakePrinter(clock, page())
+    owed = [b'', status(REPLY, error=0x01)] * 2
+    read = fake.read
+    fake.read = lambda length=32: owed.pop(0) if owed else read(length)
+    info = send(monkeypatch, fake, [50])
+    assert (info['did_print'], info['printer_state']['errors']) == (True, [])
+    assert usb._unanswered['/dev/usb/lp0'] == 0
+
+
+def test_a_printer_silent_during_a_job_still_owes_the_replies(clock, monkeypatch):
+    # Holding an error, it answers them once the error is cleared
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 2)
+    send(monkeypatch, FakePrinter(clock, []), [50])
+    assert usb._unanswered['/dev/usb/lp0'] == 2
+
+
+def test_a_job_behind_many_owed_replies(clock, monkeypatch):
+    # Printed right after an error held for hours was cleared: the replies
+    # owed come before the job's messages, each a round trip away
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 3000)
+    fake = FakePrinter(clock, page())
+    owed = [b'', status(REPLY)] * 3000
+    read = fake.read
+    fake.read = lambda length=32: owed.pop(0) if owed else read(length)
+    info = send(monkeypatch, fake, [50])
+    assert (info['did_print'], info['ready_for_next_job']) == (True, True)
+    assert owed == [] and usb._unanswered['/dev/usb/lp0'] == 0
+
+
+@pytest.mark.parametrize('stopped', [False, True], ids=['all came', 'stopped coming'])
+def test_owed_replies_end_with_the_job_s_first_message(clock, monkeypatch, stopped):
+    # Replies owed come no more once the job's messages began, and the job's
+    # own replies, one before each of its pages, count for the job
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 2)
+    messages = [(delay, bytes.fromhex(message)) for delay, message in QL800_TWO_LABELS]
+    fake = FakePrinter(clock, messages if stopped else [(0, status(REPLY))] * 2 + messages)
+    info = send(monkeypatch, fake, [30, 30])
+    assert (info['did_print'], info['confirmed']) == (True, 2)
+    assert usb._unanswered['/dev/usb/lp0'] == 0
+
+
+def test_a_job_printed_replaces_an_error_told_before(clock, monkeypatch):
+    # Told unasked before the job, "Replace media error" is gone once a job
+    # printed: a status query that times out does not tell it again
+    monkeypatch.setattr(devices, 'status_cache', {})
+    fake = FakePrinter(clock, page(), left_over=status(ERROR, error=0x01))
+    info = send(monkeypatch, fake, [50])
+    assert info['did_print']
+    assert usb._held_error('/dev/usb/lp0') is None
+    assert devices.status_cache['/dev/usb/lp0']['errors'] == []
 
 
 def test_messages_read_in_pieces_and_with_noise(clock, monkeypatch):

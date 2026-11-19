@@ -109,7 +109,7 @@ const printerCaps = () => capsOf(S.printer && S.printer.model);
 // The maker and the model of a printer, as the label designer names it
 // Models other than Brother ones are named with their maker, e.g. PUQU/Q00
 // A printer that has not told its model yet is named "Printer"
-const modelOnly = model => model === 'Unknown' ? '' : (model || '').split('/').pop();
+const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 
 function sizeName(id) {
@@ -871,8 +871,11 @@ const movesTo = sizeId => tapeKnown() && sizeId !== S.tape && !(S.tapeRedUnknown
 // Whether a label is placed on a tape of another size, which is said
 const placed = sizeId => tapeKnown() && !fitsTape(sizeId);
 const putOnTape = d => fitsTape(d.label_size) ? Object.assign(d, { label_size: S.tape }) : setSize(d, S.tape);
+// The printer's size of the same paper, also while the tape is not known
+const samePaper = id => ((SIZES[id] || {}).same_paper || {})[S.printer && S.printer.model];
 // Both only set these, a shallow copy keeps the images shared
-const onTape = d => movesTo(d.label_size) ? putOnTape(Object.assign({}, d)) : d;
+const onTape = d => movesTo(d.label_size) ? putOnTape(Object.assign({}, d))
+    : samePaper(d.label_size) ? Object.assign({}, d, { label_size: samePaper(d.label_size) }) : d;
 
 // The label in the editor is placed on the tape in the printer. E.made keeps
 // what placing it changed, a label saved without a change since keeps the

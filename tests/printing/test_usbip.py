@@ -2,6 +2,7 @@
 answers like Linux's usbip-host."""
 
 import errno
+import functools
 import json
 import socket
 import threading
@@ -9,7 +10,7 @@ import time
 
 import pytest
 
-from app.labeldesigner import routes
+from app.labeldesigner import printer_settings, routes
 from app.labeldesigner.drivers import BROTHER, backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
@@ -40,11 +41,40 @@ class FakeQL:
                     return
                 self.received += data
                 if data.endswith(b'\x1biS'):
-                    self._printer.sendall(status(REPLY))
+                    self._reply()
                 elif data.endswith(b'\x1a'):
                     self._printer.sendall(status(PHASE_CHANGE, PRINTING) + status(COMPLETED) + status(PHASE_CHANGE, WAITING))
             except OSError:
                 return
+
+    def _reply(self):
+        self._printer.sendall(status(REPLY))
+
+
+class HoldingQL(FakeQL):
+    """A FakeQL holding an error, as a QL-1100 does: it answers no status
+    request until the error is cleared, then every one it was asked. With
+    cleared_at, the error is cleared while that request waits."""
+
+    def __init__(self, device, width):
+        self.width, self.held, self.holding, self.cleared_at = width, 0, True, None
+        self._lock = threading.Lock()
+        super().__init__(device)
+
+    def _reply(self):
+        with self._lock:
+            replies = 1
+            if self.holding:
+                self.held += 1
+                if self.held != self.cleared_at:
+                    return
+                self.holding, replies = False, self.held
+            self._printer.sendall(status(REPLY, width=self.width) * replies)
+
+    def clear(self):
+        with self._lock:
+            self.holding = False
+            self._printer.sendall(status(REPLY, width=self.width) * self.held)
 
 
 class FakeTM:
@@ -287,6 +317,73 @@ def test_answer_between_queries_is_kept(host):
     assert shared.read(32, 1) == b'sked'
 
 
+@pytest.mark.parametrize('latency, read_latency, reply_size, after_import', [
+    pytest.param(0, 0, None, False, id='fast'),
+    # A slow link, a read ending with each reply as a printer's transfer does
+    pytest.param(0.02, 0, 32, False, id='20 ms'),
+    pytest.param(0.06, 0, 32, False, id='60 ms'),
+    # Only reads slow, e.g. a host slow on its USB side
+    pytest.param(0, 0.02, 32, False, id='reads 20 ms'),
+    pytest.param(0, 0.06, 32, False, id='reads 60 ms'),
+    # A link that slows down after the import, e.g. Wi-Fi saving power
+    pytest.param(0.06, 0, 32, True, id='60 ms after the import'),
+])
+def test_status_query_reads_the_reply_to_its_own_request(host, monkeypatch, latency, read_latency, reply_size,
+                                                         after_import):
+    if not after_import:
+        host.latency, host.read_latency = latency, read_latency
+    host.reply_size = reply_size
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1 + 5 * (latency + read_latency)))
+    ql = HoldingQL(host.devices[0], width=62)
+    with pytest.raises(TimeoutError):
+        usb.query_status(host.address())
+    host.latency, host.read_latency = latency, read_latency
+    # Cleared at the printer, it answers the request and its retry, which
+    # reach the server before the label designer asks again
+    ql.clear()
+    shared = usbip.connect(host.address())
+    deadline = time.monotonic() + 5
+    while not shared._answers and time.monotonic() < deadline:
+        time.sleep(0.01)
+    # Then the roll is swapped, and swapped again
+    for width in (29, 12, 38):
+        ql.width = width
+        assert usb.query_status(host.address())['media_width'] == width
+
+
+@pytest.mark.parametrize('cleared_at', [5, 6], ids=['request', 'retry'])
+def test_error_cleared_while_a_poll_waits(host, monkeypatch, cleared_at):
+    # Held through two polls, cleared while the third waits for its request
+    # or its retry: the reply that comes first is the oldest
+    host.latency, host.reply_size = 0.06, 32
+    # Waits shortened to several times the delay of the host
+    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.25))
+    ql = HoldingQL(host.devices[0], width=62)
+    for _ in range(2):
+        with pytest.raises(TimeoutError):
+            usb.query_status(host.address())
+    ql.cleared_at = cleared_at
+    usb.query_status(host.address())
+    for width in (29, 12, 38, 17):
+        ql.width = width
+        assert usb.query_status(host.address())['media_width'] == width
+
+
+def test_replies_held_over_several_polls_are_waited_for(host, monkeypatch):
+    host.latency, host.reply_size = 0.06, 32
+    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.25))
+    ql = HoldingQL(host.devices[0], width=62)
+    for _ in range(3):
+        with pytest.raises(TimeoutError):
+            usb.query_status(host.address())
+    assert ql.held == 6
+    ql.clear()
+    ql.width = 29
+    assert usb.query_status(host.address())['media_width'] == 29
+
+
 def test_answer_longer_than_asked_ends_the_connection(host):
     shared = usbip.connect(host.address())
     host.extra = bytes(usbip.READ_SIZE)
@@ -361,6 +458,42 @@ def test_shared_brother_printer_is_the_model_its_device_id_names(host, tmp_path)
     assert ql.received.endswith(b'\x1a')
 
 
+def test_shared_printer_switched_off_is_the_model_its_device_id_named(host, tmp_path):
+    device = host.devices[0]
+    FakeQL(device)
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
+    data = {'label_size': '103', 'print_type': 'text', 'text': TEXT}
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    device.unplug()
+    # Seen switched off, e.g. by the label designer, the host let it go
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert shown['errors'] == ['The printer is switched off or not connected']
+    off = client.post('/labeldesigner/api/print', data=data).get_json()
+    assert off['message'].endswith('The printer is switched off or not connected')
+    # Switched on again right away, the job is made for it
+    device.plug_in()
+    with client.application.test_request_context():
+        assert routes._printer(None, None) == (host.address(), 'QL-1100')
+    ql = FakeQL(device)
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert ql.received.endswith(b'\x1a')
+
+
+def test_shared_printer_switched_off_keeps_its_settings_key(tmp_path):
+    device = SharedDevice(device_id=QL1100_ID + 'SN:A1Z123456;')
+    host = FakeHost(device)
+    try:
+        FakeQL(device)
+        usb.query_status(host.address())
+        device.unplug()
+        with pytest.raises(OSError):
+            usb.query_status(host.address())
+        assert printer_settings.key(host.address()) == 'usb:QL-1100/A1Z123456'
+    finally:
+        host.close()
+
+
 def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):
     for name, value in (('POLL_INTERVAL', 0.01), ('DATA_DELAY', 0.05), ('FILL_WAIT', 0.05), ('START_TIMEOUT', 0.05)):
         monkeypatch.setattr(vc500w, name, value)
@@ -388,10 +521,10 @@ def test_shared_receipt_printer(tmp_path):
     try:
         tm = FakeTM(device)
         client = make_client(tmp_path)
-        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/TM-T20II')
+        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/ESC-POS')
         tm.replies[escpos.PAPER] = 0x12 | 0x60
         shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-        assert (shown['model'], shown['errors']) == ('Epson/TM-T20II', ['The printer has no paper'])
+        assert (shown['model'], shown['errors']) == ('Epson/ESC-POS', ['The printer has no paper'])
         tm.replies[escpos.PAPER] = 0x12
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
         assert response.get_json() == {'success': True}

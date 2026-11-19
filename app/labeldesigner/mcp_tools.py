@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from werkzeug.sansio.utils import host_is_trusted
 from werkzeug.wrappers import Response
 
+from . import drivers
 from .label import BLANK_TEMPLATE, DATE_OFFSET, _iso_date
 from .label_names import LABELS, labels_taken
 from .refusals import BARCODE_TYPES
@@ -161,11 +162,18 @@ class AskUser(Exception):
     """Nothing done yet: the user is to be asked, e.g. which label is loaded."""
 
 
+def same_paper(model: str | None, label_size: str | None) -> str | None:
+    """The label size of a printer of model for the same paper as
+    label_size, e.g. escpos80-180 for escpos80 on a 180 dpi ESC/POS printer."""
+    return drivers.for_model(model).label_for(label_size, model) if model and label_size else label_size
+
+
 def label_size_for(model: str | None, label_size: str) -> str:
     """The label size of a printer of model, of any printer without model,
     that label_size names, also without the prefix of its driver and written
     as "100 x 30 mm", e.g. zpl100x30 for 100x30 on a ZPL printer."""
     from mcp.server.mcpserver.exceptions import ToolError
+    label_size = same_paper(model, label_size)
     takes = [label.identifier for label in (LABELS if model is None else labels_taken(model))]
     if not takes or label_size in takes:
         return label_size
@@ -260,6 +268,7 @@ class Tools:
         if it has another one loaded. Without label_size the one loaded, else
         the user is to be asked."""
         from mcp.server.mcpserver.exceptions import ToolError
+        saved = same_paper(found.get('model'), saved)
         label_size = label_size_for(found.get('model'), label_size) if label_size else self._loaded(found, saved)
         loaded = loaded_label_sizes(found)
         if loaded and label_size not in loaded:
@@ -365,7 +374,7 @@ class Tools:
         """Refused where the saved label is for another label size than size,
         the one given or loaded in the printer found."""
         from mcp.server.mcpserver.exceptions import ToolError
-        if size and size != saved['label_size']:
+        if size and size != same_paper((found or {}).get('model'), saved['label_size']):
             where = (found.get('name') or found['path']) if found else 'The printer'
             raise ToolError(f'{where} has {size} loaded, {saved["name"]} is for {saved["label_size"]}. '
                             f'Ask the user to load {_named([saved["label_size"]])}.')

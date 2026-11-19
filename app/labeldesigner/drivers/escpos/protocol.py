@@ -4,18 +4,26 @@ and the status the printer tells at once (DLE EOT)."""
 
 import os
 import select
+import socket
 import time
 
 from .. import backends, usbip
 
-DPI = 203
 # Rows per raster image, the printer takes them in pieces
 BAND = 256
 # How long the printer may take to answer a status request, in s
 ANSWER_WAIT = 2
+# Reads of what came before a status request at most, one per late answer
+# over USB/IP: a printer that keeps sending must not hold the query and lock
+DISCARD_READS = 100
 # A job goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s, a long receipt takes longer to print
 WRITE_CHUNK = 16384
+# Port of raw printing on the network, and how long connecting may take
+PORT = 9100
+CONNECT_WAIT = 10
+# How long a piece of a job may take to reach a printer on the network
+WRITE_WAIT = 15
 
 INIT = b'\x1b@'
 # Feed to the cutter and cut. A TM-T20II leaves one corner uncut, as its
@@ -40,10 +48,10 @@ def raster(rows: list[bytes], width: int) -> bytes:
     return out
 
 
-def job(labels: list[tuple[bool, list[bytes], int]]) -> bytes:
-    """(cut after it, rows, bytes per row) of each label as one job."""
+def job(labels: list[tuple]) -> bytes:
+    """(cut after it, rows, bytes per row, ...) of each label as one job."""
     out = INIT
-    for cut, rows, width in labels:
+    for cut, rows, width, *_ in labels:
         out += raster(rows, width) + (CUT if cut else b'')
     return out
 
@@ -57,6 +65,14 @@ def errors(offline: int, paper: int) -> list[str]:
     if offline & 0x40:
         found.append('The printer reports an error, remove paper stuck at its cutter or switch it off and on')
     return found
+
+
+def _discard(read):
+    """Drop what the printer sent before a status request, read() returning
+    nothing when there is nothing left."""
+    for _ in range(DISCARD_READS):
+        if not read():
+            return
 
 
 class Connection:
@@ -78,8 +94,7 @@ class Connection:
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
         # A TM-T20II kept an answer from before, which was taken for this one
-        while select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64):
-            pass
+        _discard(lambda: select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64))
         self.write(request)
         # usblp also tells empty USB packets, read until an answer comes
         deadline = time.monotonic() + ANSWER_WAIT
@@ -105,8 +120,7 @@ class UsbConnection(Connection):
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
-        while self.printer.read(64):
-            pass
+        _discard(lambda: self.printer.read(64))
         self.write(request)
         deadline = time.monotonic() + ANSWER_WAIT
         while time.monotonic() < deadline:
@@ -115,8 +129,52 @@ class UsbConnection(Connection):
         raise EscposError('no answer to the status request')
 
 
+class TcpConnection(Connection):
+    """The printer on the network, tcp://<host>[:<port>], port 9100 if left
+    out, an IPv6 address in brackets."""
+
+    def __init__(self, device: str):
+        rest = device.removeprefix('tcp://')
+        if rest.startswith('['):
+            host, _, port = rest[1:].partition(']')
+            port = port.removeprefix(':')
+        else:
+            host, _, port = rest.partition(':')
+        self.socket = socket.create_connection((host, int(port or PORT)), timeout=CONNECT_WAIT)
+
+    def __exit__(self, *args):
+        self.socket.close()
+
+    def write(self, data: bytes):
+        # In pieces as on USB, the timeout counts for each
+        self.socket.settimeout(WRITE_WAIT)
+        for start in range(0, len(data), WRITE_CHUNK):
+            self.socket.sendall(data[start:start + WRITE_CHUNK])
+
+    def ask(self, request: bytes) -> int:
+        """The status byte the printer answers a DLE EOT request with."""
+        self.socket.setblocking(False)
+        try:
+            _discard(lambda: self.socket.recv(64))
+        except BlockingIOError:
+            pass
+        self.write(request)
+        self.socket.settimeout(ANSWER_WAIT)
+        try:
+            reply = self.socket.recv(64)
+        except TimeoutError:
+            reply = b''
+        if not reply:
+            raise EscposError('no answer to the status request')
+        return reply[-1]
+
+
 def connect(device: str) -> Connection:
-    return UsbConnection(device) if device.startswith('usb://') or usbip.is_address(device) else Connection(device)
+    if device.startswith('usb://') or usbip.is_address(device):
+        return UsbConnection(device)
+    if device.startswith('tcp://'):
+        return TcpConnection(device)
+    return Connection(device)
 
 
 def get_errors(c: Connection) -> list[str]:

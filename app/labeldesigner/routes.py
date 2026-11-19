@@ -210,6 +210,9 @@ def index():
          'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
          'palette': label_palette(label), 'models': label_printers(label),
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
+         # The size of the same paper on models that print it as another one
+         'same_paper': {model: size for model in MODELS
+                        if (size := drivers.for_model(model).label_for(label.identifier, model)) != label.identifier},
          # The shortest and longest endless label as cut, None without a length to set
          'length': list(limits[:2]) if (limits := length_limits(label)) else None}
         for label in LABELS
@@ -742,7 +745,7 @@ def repo_tags():
         return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     except LabelsBusy:
         return _busy()
-    return {'success': True, 'tags': tags}
+    return jsonify({'success': True, 'tags': tags})
 
 
 @bp.route('/api/repository/load', methods=['GET'])
@@ -1116,6 +1119,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data = {**data, **{key: value for key, value in kept.items() if value is not None}}
         label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
         printer = _queue(model, device, label_size)
+        data['label_size'] = printer.label_size
 
         # Determine printing options (print_count, cutting, high_res)
         print_count = _check_print_count(_whole(_option('print_count', data, 1)))
@@ -1583,6 +1587,7 @@ def print_label():
 
     status = ""
     try:
+        values['label_size'] = printer.label_size
         # Every uploaded image, not only the first
         files = request.files
         # Decode the image once, all labels of the job share it. Of a PDF
@@ -2380,6 +2385,7 @@ def webhook_print():
         high_res = _whole_or(given['high_res'], 0) != 0
         fast = _whole_or(given['fast_printing'], 0) != 0
         contrast = _image_contrast({'label_size': label_size, 'image_contrast': _requested('image_contrast')})
+        label_size = drivers.for_model(model).label_for(label_size, model)
 
         # Validate label_size
         kind = next((label.form_factor for label in LABELS if label.identifier == label_size), None)

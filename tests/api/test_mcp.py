@@ -530,3 +530,23 @@ def test_without_a_label_size_the_one_kept_for_a_printer_that_tells_none(client,
     result = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])
     assert not result.get('isError') and printed(tmp_path) == 1
     assert Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data']))).size == (696, 271)
+
+
+def test_label_for_the_paper_of_the_other_model(client, tmp_path):
+    # escpos80 and escpos80-180 are the same paper: a label saved on a 203 dpi
+    # receipt printer prints on a 180 dpi one, given or not
+    client.application.config['PRINTERS'] = [('Epson/ESC-POS-180', 'simulation', 'Till')]
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Receipt.json', 'label_size': 'escpos80', 'text': [{'text': 'Total', 'size': '40'}]}).status_code == 200
+    for label_size in (None, 'escpos80', 'escpos80-180'):
+        given = {'label_size': label_size} if label_size else {}
+        for tool_name, arguments in (('preview_label', {}), ('print_label', {'count': 1})):
+            result = tool(client, tool_name, name='Receipt.json', printer='Till', **given, **arguments)
+            assert not result.get('isError'), result
+    result = tool(client, 'print_text', printer='Till', count=1, lines=['x'], label_size='escpos80')
+    assert not result.get('isError'), result
+    assert Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data']))).width == 512
+    assert printed(tmp_path) == 4
+    # Other paper stays refused
+    assert tool(client, 'print_label', name='Receipt.json', printer='Till', count=1, label_size='62')['isError']

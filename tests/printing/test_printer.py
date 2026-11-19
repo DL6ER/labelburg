@@ -270,7 +270,7 @@ def test_printer_without_status_answer_stays_listed(client, monkeypatch):
     client.application.config['PRINTER_PRINTER'] = '?'
     devices.status_cache[devices.lock_key(DEVICE)] = {'model': 'QL-1100', 'media_width': 104, 'media_length': 164}
 
-    def no_answer(device):
+    def no_answer(device, key=None):
         raise TimeoutError('No complete status response within 2.0 s')
     monkeypatch.setattr(usb, 'get_status', no_answer)
 

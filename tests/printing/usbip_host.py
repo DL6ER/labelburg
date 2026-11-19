@@ -7,6 +7,7 @@ import select
 import socket
 import struct
 import threading
+import time
 
 from app.labeldesigner.drivers import usbip
 
@@ -68,12 +69,16 @@ class SharedDevice:
 class FakeHost:
     """Shares its devices on localhost. With 'silent', the printer takes no
     data and writes are never answered. 'extra' is sent after what the
-    printer sends, more than was asked for."""
+    printer sends, more than was asked for. 'latency' delays each answer, as
+    a host behind a slow link, 'read_latency' only those to reads of the
+    printer, as a host slow on its USB side, and 'reply_size' ends a read
+    after so many bytes, as a short packet of a printer ends its transfer."""
 
     def __init__(self, *shared):
         self.devices = list(shared)
         self.silent = False
         self.extra = b''
+        self.latency, self.read_latency, self.reply_size = 0.0, 0.0, None
         self.server = socket.create_server(('127.0.0.1', 0))
         self.port = self.server.getsockname()[1]
         self.connections = []
@@ -122,12 +127,12 @@ class FakeHost:
             watched = [connection] + ([device._host_end] if reading else [])
             ready, _, _ = select.select(watched, [], [])
             if device._host_end in ready:
-                data = device._host_end.recv(reading[1])
+                data = device._host_end.recv(min(reading[1], self.reply_size or reading[1]))
                 if not data:
                     # Switched off: the read fails, the host closes the connection
-                    connection.sendall(_answer(reading[0], -108))
+                    self._send(connection, _answer(reading[0], -108), self.read_latency)
                     return
-                connection.sendall(_answer(reading[0], 0, data + self.extra))
+                self._send(connection, _answer(reading[0], 0, data + self.extra), self.read_latency)
                 reading = None
             if connection not in ready:
                 continue
@@ -137,16 +142,20 @@ class FakeHost:
             _, length, _, _, _, setup = usbip.SUBMIT.unpack(rest)
             data = _receive(connection, length) if direction == usbip.OUT and length else b''
             if endpoint == 0:
-                connection.sendall(self._control(device, seqnum, setup))
+                self._send(connection, self._control(device, seqnum, setup))
             elif endpoint != (2 if direction == usbip.OUT else 1):
-                connection.sendall(_answer(seqnum, -32))
+                self._send(connection, _answer(seqnum, -32))
             elif direction == usbip.OUT:
                 if self.silent:
                     continue
                 device._host_end.sendall(data)
-                connection.sendall(_answer(seqnum, 0, length=len(data)))
+                self._send(connection, _answer(seqnum, 0, length=len(data)))
             else:
                 reading = (seqnum, length)
+
+    def _send(self, connection, answer, later=0.0):
+        time.sleep(self.latency + later)
+        connection.sendall(answer)
 
     def _control(self, device, seqnum, setup):
         request_type, request, value, index, length = struct.unpack('<BBHHH', setup)

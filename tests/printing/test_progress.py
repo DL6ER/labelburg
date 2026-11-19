@@ -226,6 +226,19 @@ def test_label_length_of_a_zpl_printer():
     assert driver.label_lengths(driver.render(queue, [{'label': label, 'cut': True}])) == [pytest.approx(150)]
 
 
+@pytest.mark.parametrize('model, label_size, dots, dpi', [
+    ('Epson/ESC-POS', 'escpos80', 576, 203),
+    ('Epson/ESC-POS-180', 'escpos80-180', 512, 180),
+])
+def test_label_length_of_a_receipt_printer_at_its_resolution(model, label_size, dots, dpi):
+    # 100 mm along the paper
+    label = SimpleNamespace(label_type=LabelType.ENDLESS_LABEL, label_orientation=LabelOrientation.STANDARD,
+                            label_content=LabelContent.IMAGE_BW, generate=lambda: Image.new('1', (dots, round(100 / 25.4 * dpi)), 1))
+    queue = SimpleNamespace(model=model, label_size=label_size, cut='each')
+    driver = drivers.for_model(model)
+    assert driver.label_lengths(driver.render(queue, [{'label': label, 'cut': True}])) == [pytest.approx(100, abs=0.1)]
+
+
 @pytest.mark.parametrize('model, device', [
     ('QL-800', DEVICE),
     ('Epson/TM-T20II', 'file:///dev/usb/lp1'),

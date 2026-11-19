@@ -1,5 +1,7 @@
-"""Epson receipt printers on ESC/POS (protocol.py), e.g. the TM-T20II on
-endless 58 or 80 mm paper, which it cuts. The label is sent as an image."""
+"""Receipt printers on ESC/POS (protocol.py), e.g. an Epson TM-T20II, on
+endless 58 or 80 mm paper, which they cut. ESC/POS is the same on any of
+them, so it is one model for each resolution of their heads, not one per
+printer. The label is sent as an image."""
 
 import logging
 import re
@@ -14,16 +16,23 @@ from . import protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('Epson/TM-T20II',)
-# Paper width in mm and the dots across it the TM-T20II prints, the first
-# one assumed, as the printer does not tell
-WIDTHS = {80: 576, 58: 420}
+MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
+# Most heads print 203 dpi, Epson's TM-T88, TM-T90, TM-T70, TM-T81 and
+# TM-T83(II) 180 dpi, by the model in the device ID; a TM-T81III prints 203
+HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
+DPI = {MODELS[0]: 203, MODELS[1]: 180}
+# Paper width in mm and the dots across it, the first one assumed, as the
+# printer does not tell. 384 on 58 mm paper as most printers print, a
+# TM-T20II would print 420.
+WIDTHS = {MODELS[0]: {80: 576, 58: 384}, MODELS[1]: {80: 512, 58: 360}}
 
-LABELS = tuple(Label(f'escpos{width}', (width, 0), FormFactor.ENDLESS, (dots, 0), (dots, 0), 0, models=MODELS)
-               for width, dots in WIDTHS.items())
+LABELS = tuple(Label(f'escpos{width}' + ('-180' if model == MODELS[1] else ''), (width, 0), FormFactor.ENDLESS,
+                     (dots, 0), (dots, 0), 0, models=(model,))
+               for model, widths in WIDTHS.items() for width, dots in widths.items())
 # Paper fed to the cutter after each label that is cut, blank before the
 # next one: on a TM-T20II a 15 mm label took 27 mm of paper, two of them
-# not cut between them 42 mm
+# not cut between them 42 mm. Other printers have their head nearer to or
+# further from the cutter.
 LEAD_MM = 12
 # mm/s after Epson's data sheet of the TM-T20II, and the seconds a label
 # takes besides, to feed and cut it
@@ -31,7 +40,7 @@ SPEED = 200
 BESIDES = 0.5
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
-NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper (Epson)' for label in LABELS}
+NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
@@ -59,34 +68,51 @@ class Escpos(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
+    # Both models are shown alike
+    shown_as = {MODELS[1]: MODELS[0]}
     # usblp's device, also a name a udev rule gives it, e.g. /dev/usb/lp_epson,
-    # on Linux only, or the printer through PyUSB, e.g. usb://0x04b8:0x0e15
+    # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, or
+    # on the network on the port of raw printing, as the other drivers
     device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
-                       re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
+                       re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
+                       re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
+                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
     errors = (OSError, protocol.EscposError)
 
     def model_of(self, device):
-        # By the device ID on USB: MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
+        # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
         fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
-        model = f"Epson/{fields.get('MDL', '')}"
-        return model if 'ESC/POS' in fields.get('CMD', '').split(',') and model in MODELS else None
+        commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
+        if 'ESC/POS' not in commands:
+            return None
+        return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
 
     def fits(self, label, model):
-        return label in LABELS
+        return label in LABELS and model in label.models
+
+    def label_for(self, label_size, model):
+        # escpos80 and escpos80-180 are the same paper
+        paper = next((label.tape_size for label in LABELS if label.identifier == label_size), None)
+        return next((label.identifier for label in LABELS if label.tape_size == paper and model in label.models), label_size)
 
     def dpi(self, high_res):
-        return protocol.DPI
+        return DPI[MODELS[0]]
+
+    def label_dpi(self, label):
+        return DPI[label.models[0]], DPI[label.models[0]]
 
     def resolution_problem(self, model, high_res):
-        return f'The {shown(model)} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
+        return f'The {shown(model)} printer cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
 
     def cut_problem(self, cut, model):
-        return f'The {shown(model)} cuts the paper at least after the last label' if cut == 'none' else ''
+        return f'The {shown(model)} printer cuts the paper at least after the last label' if cut == 'none' else ''
 
     def capabilities(self, model):
         return dict(super().capabilities(model), qualities=['quality'], never_cut=NEVER_WHY,
                     # The top of the label leaves it first
-                    leaves_turned=True, lead_mm=LEAD_MM)
+                    leaves_turned=True, lead_mm=LEAD_MM,
+                    # The model as shown, without its maker
+                    model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)
@@ -106,7 +132,7 @@ class Escpos(Driver):
         return SPEED, BESIDES
 
     def label_lengths(self, job):
-        return [len(rows) / protocol.DPI * 25.4 for _, rows, _ in job]
+        return [len(rows) / dpi * 25.4 for _, rows, _, dpi in job]
 
     def render(self, queue, entries, keep=None):
         job = []
@@ -114,7 +140,8 @@ class Escpos(Driver):
             img, rows, width = label_rows(entry['label'], queue.label_size)
             if keep:
                 keep(img, f'escpos_{i}')
-            job.append((entry['cut'], rows, width))
+            # The dpi of the paper, for the length of the label
+            job.append((entry['cut'], rows, width, DPI[next(label.models[0] for label in LABELS if label.identifier == queue.label_size)]))
         return job
 
     def send(self, queue, job) -> str:
