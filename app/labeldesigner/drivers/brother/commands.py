@@ -24,7 +24,7 @@ class Raster:
         self.model = model
         self.spec = MODELS[model]
         self.ptouch = model.startswith('PT-')
-        self.data = b''
+        self.data = bytearray()
         self.page_number = 0
         self.page_lengths = []
         self.compression = False
@@ -98,8 +98,8 @@ class Raster:
             if image.size != second_image.size:
                 raise RasterError(f"First and second image don't have the same dimensions: {image.size} vs {second_image.size}.")
             images.append(second_image)
-        frames = [bytes(im.transpose(Image.Transpose.FLIP_LEFT_RIGHT).convert('1').tobytes(encoder_name='raw'))
-                  for im in images]
+        flipped = [im.transpose(Image.Transpose.FLIP_LEFT_RIGHT) for im in images]
+        frames = [(im if im.mode == '1' else im.convert('1')).tobytes(encoder_name='raw') for im in flipped]
         row_len = image.size[0] // 8
         data = bytearray()
         for start in range(0, len(frames[0]) - row_len + 1, row_len):
@@ -113,7 +113,7 @@ class Raster:
                     data += (b'\x77\x01' if i == 0 else b'\x77\x02') if second_image else b'\x67\x00'
                     data += bytes([len(row)])
                 data += row
-        self.data += bytes(data)
+        self.data += data
 
     def add_print(self, last_page: bool = True):
         self.data += b'\x1a' if last_page else b'\x0c'

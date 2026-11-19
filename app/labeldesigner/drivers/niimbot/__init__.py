@@ -8,10 +8,9 @@ import time
 
 from PIL import Image
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
-from ...enums import LabelContent
 from . import calibration, protocol
 
 logger = logging.getLogger(__name__)
@@ -101,25 +100,24 @@ NAMES = {label.identifier: (f'{label.tape_size[0]} mm round die-cut (Niimbot)' i
                             else f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)') for label in LABELS}
 
 
-def centered(dots: list[int], head: int, shift: int = 0) -> list[int]:
+def centered(dots: bytes, head: int, shift: int = 0) -> bytes:
     """A row across the whole printhead with the dots in its middle, moved
     left by shift; dots beyond the printhead are left out."""
     left = (head - len(dots)) // 2 - shift
-    placed = [0] * left + dots if left >= 0 else dots[-left:]
-    return (placed + [0] * head)[:head]
+    placed = bytes(left) + dots if left >= 0 else dots[-left:]
+    return (placed + bytes(head))[:head]
 
 
-def placed(img: Image.Image, head: int, shift: int, feed: int) -> list[list[int]]:
+def placed(img: Image.Image, head: int, shift: int, feed: int) -> list[bytes]:
     """Rows across the printhead with the image in its middle, moved left by
     shift and down by feed dots (negative: right, up), as many as the image
     has; dots beyond the printhead or the page are left out."""
-    rows = [centered([int(img.getpixel((x, y)) == 0) for x in range(img.width)], head, shift)
-            for y in range(img.height)]
-    empty = [[0] * head for _ in range(abs(feed))]
+    rows = [centered(row, head, shift) for row in bitmap.dot_rows(img)]
+    empty = [bytes(head)] * abs(feed)
     return (empty + rows)[:len(rows)] if feed >= 0 else (rows + empty)[abs(feed):]
 
 
-def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0)) -> tuple[Image.Image, list[list[int]]]:
+def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0)) -> tuple[Image.Image, list[bytes]]:
     """A label as the printer prints it: rows across the printhead, as wide
     as the label, black is printed. offset: mm the printer's labels are
     moved right and down, a B1 only."""
@@ -131,13 +129,11 @@ def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0))
     across = size.dots_printable[0]
     if img.width != across:
         img = img.rotate(90, expand=True)
-    dither = label.label_content != LabelContent.IMAGE_BW
-    img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
+    img = bitmap.black_and_white(img, label)
     if size.models == ('Niimbot/B1',):
         return img, placed(img, protocol.B1_HEAD, B1_SHIFT - round(offset[0] * DOTS_PER_MM),
                            B1_FEED + round(offset[1] * DOTS_PER_MM))
-    rows = [[int(img.getpixel((x, y)) == 0) for x in range(min(img.width, protocol.HEAD))] for y in range(img.height)]
-    return img, rows
+    return img, [row[:protocol.HEAD] for row in bitmap.dot_rows(img)]
 
 
 class Niimbot(Driver):

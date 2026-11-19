@@ -7,10 +7,9 @@ import re
 
 from PIL import Image
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
-from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ LABELS = tuple(_label(width, length, offset) for (width, length), offset in SIZE
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (PUQU)' for label in LABELS}
 
 
-def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
+def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes]]:
     """A label as the printer prints it: rows across the printhead, the
     first one comes out first, black is printed."""
     img = label.generate()
@@ -51,12 +50,9 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[list[int]]]:
     across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
     if img.width != across:
         img = img.rotate(90, expand=True)
-    dither = label.label_content != LabelContent.IMAGE_BW
-    img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
+    img = bitmap.black_and_white(img, label)
     offset = OFFSETS[label_size] * DOTS_PER_MM
-    rows = [([0] * offset + [int(img.getpixel((x, y)) == 0) for x in range(img.width)] + [0] * protocol.HEAD)[:protocol.HEAD]
-            for y in range(img.height)]
-    return img, rows
+    return img, [(bytes(offset) + row + bytes(protocol.HEAD))[:protocol.HEAD] for row in bitmap.dot_rows(img)]
 
 
 class Puqu(Driver):

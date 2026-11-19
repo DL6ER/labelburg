@@ -39,19 +39,14 @@ class EscposError(Exception):
 def raster(rows: list[bytes], width: int) -> bytes:
     """Rows of packed dots, width bytes each, MSB left, as GS v 0 images of
     BAND rows each."""
-    out = b''
-    for y in range(0, len(rows), BAND):
-        band = rows[y:y + BAND]
-        out += b'\x1dv0\x00' + bytes([width & 0xff, width >> 8, len(band) & 0xff, len(band) >> 8]) + b''.join(band)
-    return out
+    bands = (rows[y:y + BAND] for y in range(0, len(rows), BAND))
+    return b''.join(b'\x1dv0\x00' + bytes([width & 0xff, width >> 8, len(band) & 0xff, len(band) >> 8]) + b''.join(band)
+                    for band in bands)
 
 
 def job(labels: list[tuple]) -> bytes:
     """(cut after it, rows, bytes per row, ...) of each label as one job."""
-    out = INIT
-    for cut, rows, width, *_ in labels:
-        out += raster(rows, width) + (CUT if cut else b'')
-    return out
+    return INIT + b''.join(raster(rows, width) + (CUT if cut else b'') for cut, rows, width, *_ in labels)
 
 
 def errors(offline: int, paper: int) -> list[str]:

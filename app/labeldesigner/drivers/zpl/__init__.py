@@ -12,10 +12,9 @@ import time
 
 from PIL import Image
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
-from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
@@ -97,16 +96,8 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     # are turned as by the other drivers, their end leaves first.
     across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
     img = img.rotate(-90 if img.width != across else 180, expand=True)
-    dither = label.label_content != LabelContent.IMAGE_BW
-    img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
-    # 1 bit images of PIL are packed MSB first with white 1, ZPL prints 1
-    width = (img.width + 7) // 8
-    data = bytes(255 - byte for byte in img.tobytes())
-    rows = [data[y * width:(y + 1) * width] for y in range(img.height)]
-    # The padding of the last byte of each row is white
-    if img.width % 8:
-        mask = (0xff << (8 - img.width % 8)) & 0xff
-        rows = [row[:-1] + bytes([row[-1] & mask]) for row in rows]
+    img = bitmap.black_and_white(img, label)
+    rows, width = bitmap.packed_rows(img)
     return img, rows, width
 
 

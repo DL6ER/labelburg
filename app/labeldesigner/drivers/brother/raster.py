@@ -49,6 +49,7 @@ def render(queue, entries, keep=None) -> Raster:
             job = {'settings': settings, 'images': [img], 'cuts': [entry['cut']]}
     if job:
         _add_job(queue, raster, job)
+    raster.data = bytes(raster.data)
     return raster
 
 
@@ -135,9 +136,10 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             raise ValueError(length_problem(raster.model))
 
         if red:
-            red_im = _layer(_filtered_hsv(im, lambda h: 255 if h < 40 or h > 210 else 0,
+            hsv = im.convert('HSV').split()
+            red_im = _layer(_filtered_hsv(im, hsv, lambda h: 255 if h < 40 or h > 210 else 0,
                                           lambda s: 255 if s > 100 else 0, lambda v: 255 if v > 80 else 0))
-            black_im = _layer(_filtered_hsv(im, None, None, lambda v: 255 if v < 80 else 0))
+            black_im = _layer(_filtered_hsv(im, hsv, None, None, lambda v: 255 if v < 80 else 0))
             black_im = ImageChops.subtract(black_im, red_im)
         else:
             im = ImageOps.invert(im.convert('L'))
@@ -170,10 +172,9 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         raster.add_print(last_page=i == len(images) - 1)
 
 
-def _filtered_hsv(im: Image.Image, filter_h, filter_s, filter_v) -> Image.Image:
-    """The pixels whose hue, saturation and value pass the filters, the others
-    white. A filter of None passes all."""
-    bands = im.convert('HSV').split()
+def _filtered_hsv(im: Image.Image, bands: tuple, filter_h, filter_s, filter_v) -> Image.Image:
+    """The pixels whose hue, saturation and value, bands of im in HSV, pass
+    the filters, the others white. A filter of None passes all."""
     masks = [band.point(f) for band, f in zip(bands, (filter_h, filter_s, filter_v)) if f]
     mask = masks[0]
     for other in masks[1:]:

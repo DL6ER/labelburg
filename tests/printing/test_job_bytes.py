@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from app.labeldesigner.drivers import escpos, niimbot, puqu, zpl
+from app.labeldesigner.drivers import bitmap, escpos, niimbot, puqu, zpl
 from app.labeldesigner.drivers.brother.commands import Raster
 from app.labeldesigner.drivers.brother.raster import convert
 from app.labeldesigner.drivers.escpos import protocol as escpos_protocol
@@ -133,3 +133,10 @@ def test_puqu_labels():
 @pytest.mark.parametrize('kind, digest', [('narrow', '1e49b92f01615e1d'), ('wide', '006aebd5884c28d5'), ('round', '86dc33b41ed4155b')])
 def test_calibration_example(kind, digest):
     assert _digest(Image.open(io.BytesIO(calibration.example(kind))).tobytes()) == digest
+
+
+def test_dots_are_packed_msb_first():
+    assert bitmap.pack([1, 0, 0, 0, 0, 0, 0, 1, 1]) == b'\x81\x80'
+    # Any dot but 0 is printed
+    assert bitmap.pack(bytes([0, 2, 0, 0, 0, 0, 0, 255])) == b'\x41'
+    assert bitmap.pack(b'') == b''

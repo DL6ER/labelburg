@@ -6,7 +6,7 @@ compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
 import socket
 import time
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 
 # 8 dots per mm, the printhead is 48 mm wide
 DPI = 203
@@ -51,7 +51,7 @@ def address(device: str) -> tuple[str, int]:
     return mac.upper(), int(channel or CHANNEL)
 
 
-def compress(rows: list[list[int]]) -> bytes:
+def compress(rows: list[bytes]) -> bytes:
     """Rows of dots, 1 printed, as the printer takes them: equal rows that
     follow each other once with their count, and without the empty bytes at
     both ends."""
@@ -60,10 +60,7 @@ def compress(rows: list[list[int]]) -> bytes:
         n = 1
         while y + n < len(rows) and n < 0xffff and rows[y + n] == rows[y]:
             n += 1
-        packed = bytearray((len(rows[y]) + 7) // 8)
-        for x, dot in enumerate(rows[y]):
-            if dot:
-                packed[x // 8] |= 0x80 >> (x % 8)
+        packed = bitmap.pack(rows[y])
         left = len(packed) - len(packed.lstrip(b'\0'))
         right = len(packed) - len(packed.rstrip(b'\0'))
         if left + right >= len(packed):
@@ -73,7 +70,7 @@ def compress(rows: list[list[int]]) -> bytes:
     return bytes(out)
 
 
-def label_data(rows: list[list[int]]) -> bytes:
+def label_data(rows: list[bytes]) -> bytes:
     """A label: the header with its size, then its rows."""
     body = compress(rows)
     width, height = len(rows[0]), len(rows)
@@ -137,13 +134,13 @@ def get_state(device: str) -> bytes:
         raise PuquError('no state reply')
 
 
-def label_parts(rows: list[list[int]]) -> tuple[bytes, bytes]:
+def label_parts(rows: list[bytes]) -> tuple[bytes, bytes]:
     """A label: the header with its size, and its rows."""
     data = label_data(rows)
     return data[:8], data[8:]
 
 
-def print_labels(device: str, labels: list[list[list[int]]], mm_per_label: list[float]) -> str:
+def print_labels(device: str, labels: list[list[bytes]], mm_per_label: list[float]) -> str:
     """Print the labels, rows of dots each, one after the other, each once
     the printer has printed the one before. An empty string when all were
     printed, else the error the printer reports.
