@@ -123,3 +123,11 @@ def test_changing_the_tags_without_tags_is_refused(tmp_path):
     assert _tags_listed(client, 'Shelf.json') == ['Kitchen']
     assert client.post(tags_url, json={'name': 'Shelf.json', 'tags': []}).status_code == 200
     assert _tags_listed(client, 'Shelf.json') == []
+
+
+def test_changed_tags_come_back_as_json(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(SAVE_URL, json={'name': 'Shelf', 'label_size': '62', 'text': TEXT})
+    response = client.post('/labeldesigner/api/repository/tags', json={'name': 'Shelf.json', 'tags': '<b>Kitchen</b>'})
+    assert response.mimetype == 'application/json'
+    assert response.get_json() == {'success': True, 'tags': ['<b>Kitchen</b>']}
