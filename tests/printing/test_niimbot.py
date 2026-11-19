@@ -629,4 +629,4 @@ def test_usb_read_waits_no_longer_than_its_time(monkeypatch):
     finally:
         os.close(write_end)
         thread.join(2)
-        os.close(read_end)
+        usb.close()

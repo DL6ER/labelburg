@@ -39,6 +39,11 @@ class Printer:
         return data
 
     def dispose(self):
+        # Once, also when let go after it: a file opened since may have the
+        # number of the closed one
+        if getattr(self, '_disposed', False):
+            return
+        self._disposed = True
         try:
             self._dispose()
         except Exception:

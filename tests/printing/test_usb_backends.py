@@ -180,6 +180,23 @@ def test_printer_through_the_kernel(tmp_path):
         os.fstat(printer.dev)
 
 
+def test_printer_through_the_kernel_closes_its_device_once(tmp_path):
+    # A file opened after it gets the number of the device file back, the
+    # printer let go must not close that one
+    (tmp_path / 'lp0').write_bytes(b'')
+    printer = backends.KernelPrinter(f'file://{tmp_path / "lp0"}')
+    number = printer.dev
+    printer.dispose()
+    other = os.open(tmp_path / 'lock', os.O_RDWR | os.O_CREAT)
+    try:
+        assert other == number
+        printer.dispose()
+        del printer
+        os.fstat(other)
+    finally:
+        os.close(other)
+
+
 @pytest.mark.parametrize('answer', [b'', b'\x80\x20\x42' + bytes(10), bytes(32),
                                     # Media type 0x55, status type 0x99
                                     b'\x80\x20\x42' + bytes(8) + b'\x55' + bytes(20),
