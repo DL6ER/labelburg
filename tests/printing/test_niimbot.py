@@ -7,7 +7,7 @@ import pytest
 
 from app.labeldesigner.drivers import devices, niimbot, progress
 from app.labeldesigner.drivers.niimbot import protocol
-from tests.helpers import make_client
+from tests.helpers import make_client, without_status
 
 DEVICE = 'bt://00:F4:BA:17:12:06'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '30'}])
@@ -79,7 +79,8 @@ def test_packets_as_the_script_sent_them():
     assert protocol.row_packets([row, row]) == [protocol.packet(0x85, bytes([0, 0, 1, 0, 0, 2, 0x80]) + bytes(11))]
 
 
-def test_label_is_printed_in_the_order_of_the_script(client, fake):
+def test_label_is_printed_in_the_order_of_the_script(client, fake, monkeypatch):
+    without_status(monkeypatch)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}

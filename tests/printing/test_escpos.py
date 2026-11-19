@@ -459,3 +459,76 @@ def test_label_for_the_paper_of_the_other_model(tmp_path, monkeypatch, through, 
     response = client.post('/labeldesigner/api/print', data={
         'printer': 'simulation', 'model': model, 'label_size': '62', 'print_type': 'text', 'text': TEXT})
     assert response.get_json()['success'] is False
+
+
+@pytest.mark.parametrize('set_by_hand', ['escpos80-180', 'escpos80'], ids=['its own', 'kept for the other model'])
+@pytest.mark.parametrize('through', ['print', 'repository', 'webhook'])
+def test_label_for_the_paper_set_by_hand_on_the_other_model(tmp_path, monkeypatch, through, set_by_hand):
+    import base64
+    import io
+    from PIL import Image
+    from app.labeldesigner import printer_settings
+    # 80 mm paper set by hand on a 180 dpi printer: a label for the 80 mm
+    # paper of the other model prints on it as it is, without a note
+    printed_on = []
+    original = escpos.Escpos.render
+
+    def render(self, queue, entries, keep=None):
+        job = original(self, queue, entries, keep)
+        printed_on.append((queue.label_size, job[0][2]))
+        return job
+    monkeypatch.setattr(escpos.Escpos, 'render', render)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config['PRINTERS'] = [('Epson/ESC-POS-180', 'simulation', 'Till')]
+    # escpos80 as kept from before the printer was known to have a 180 dpi head
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_text(json.dumps({'printers': {'simulation': {'label_size': set_by_hand}}}))
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['tape']
+    assert (shown['id'], shown['known'], shown['manual']) == ('escpos80-180', True, True)
+    assert 'escpos80' in shown['fits']
+    assert shown['place']['escpos80|rotated'] == {'label_size': 'escpos80-180', 'orientation': 'rotated'}
+    if through == 'print':
+        response = client.post('/labeldesigner/api/print', data={
+            'printer': 'Till', 'label_size': 'escpos80', 'print_type': 'text', 'text': TEXT})
+    elif through == 'repository':
+        (tmp_path / 'label_repo' / 'receipt.json').write_text(json.dumps(
+            {'label_size': 'escpos80', 'print_type': 'text', 'text': json.loads(TEXT)}))
+        response = client.post('/labeldesigner/api/repository/print', json={'name': 'receipt.json', 'printer': 'Till'})
+    else:
+        client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+        image = io.BytesIO()
+        Image.new('RGB', (300, 100), 'black').save(image, 'PNG')
+        response = client.post('/labeldesigner/api/webhook/print', json={
+            'password': 'secret', 'printer': 'Till', 'label_size': 'escpos80',
+            'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on == [('escpos80-180', 64)]
+    # Without a label size on the paper set by hand
+    response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on[1:] == [('escpos80-180', 64)]
+
+
+@pytest.mark.parametrize('default, size, dots', [('escpos80', 'escpos80-180', 512), ('escpos58', 'escpos58-180', 360)])
+def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, dots):
+    import io
+    from PIL import Image
+    # No paper set on a 180 dpi printer, LABEL_DEFAULT_SIZE for the other
+    # model: assumed, previewed and printed on the printer's size of it
+    printed_on = []
+    original = escpos.Escpos.render
+
+    def render(self, queue, entries, keep=None):
+        job = original(self, queue, entries, keep)
+        printed_on.append((queue.label_size, job[0][2]))
+        return job
+    monkeypatch.setattr(escpos.Escpos, 'render', render)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config.update(PRINTERS=[('Epson/ESC-POS-180', 'simulation', 'Till')], LABEL_DEFAULT_SIZE=default)
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['tape']
+    assert (shown['id'], shown['assumed']) == (size, True)
+    response = client.post('/labeldesigner/api/preview', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.status_code == 200
+    assert Image.open(io.BytesIO(response.data)).width == dots
+    response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['success'] is True, response.get_json()
+    assert printed_on == [(size, dots // 8)]

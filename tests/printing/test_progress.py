@@ -14,7 +14,7 @@ from app.labeldesigner.drivers.brother import raster, usb
 from app.labeldesigner.drivers.brother.models import MODELS
 from app.labeldesigner.label import LabelContent, LabelOrientation, LabelType
 from tests.helpers import EXAMPLE_FORMDATA, make_client
-from tests.printing.test_usb_jobs import Clock, FakePrinter, page
+from tests.printing.test_usb_jobs import REPLY, Clock, FakePrinter, page, status
 
 DEVICE = 'file:///dev/usb/lp0'
 
@@ -174,13 +174,16 @@ def usb_printer(monkeypatch, clock):
 
         def write(self, data):
             super().write(data)
-            if self.written.endswith(b'\x1a'):
+            if data.endswith(b'\x1biS'):
+                # Asked before the job, it answers as a QL does
+                self.messages = [(0, status(REPLY))]
+            elif self.written.endswith(b'\x1a'):
                 self.messages = page(2) * self.written.count(b'\x1biz')
 
         def read(self, length=32):
             data = super().read(length)
-            if data:
-                seen.append(progress.state(DEVICE))
+            if data and (state := progress.state(DEVICE)):
+                seen.append(state)
             return data
     monkeypatch.setattr(usb, 'time', clock)
     monkeypatch.setattr(backends, 'KernelPrinter', UsbPrinter)

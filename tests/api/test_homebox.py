@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import printer, routes
+from app.labeldesigner.enums import LabelOrientation
 from tests.helpers import make_client, pixels
 from tests.repository.helpers import SAVE_URL
 
@@ -22,11 +23,17 @@ HOMEBOX_QUERY = {
     'DynamicLength': 'true', 'AdditionalInformation': 'Property of Ada',
 }
 HOMEBOX_HEADERS = {'User-Agent': 'Homebox-LabelMaker/1.0', 'Accept': 'image/*'}
+NETWORK = 'tcp://192.0.2.10'
 
 
-def _status(model='QL-800', path='simulation', **status):
+def _status(model='QL-800', path=NETWORK, **status):
     state = {'errors': [], 'path': path, 'model': model, 'media_width': None, 'media_length': 0, **status}
     return {**state, 'printers': [state], 'selected': path}
+
+
+def _reports(monkeypatch, status):
+    """The printer of the status is the one of the label designer."""
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: status)
 
 
 @pytest.fixture
@@ -70,7 +77,7 @@ def test_label_for_homebox(client):
     (_status('Niimbot/D110_M', media_width=12, media_length=40), (320, 96)),
 ])
 def test_label_for_homebox_on_the_tape_in_the_printer(client, monkeypatch, status, size):
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: status)
+    _reports(monkeypatch, status)
     response = client.get(URL, query_string=HOMEBOX_QUERY, headers=HOMEBOX_HEADERS)
     assert response.status_code == 200
     if size:
@@ -119,7 +126,7 @@ def test_homebox_prints_the_label_it_got(client, queued):
 
 
 def test_homebox_prints_on_the_tape_in_the_printer(client, queued, monkeypatch):
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=29, media_length=90))
+    _reports(monkeypatch, _status(media_width=29, media_length=90))
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
     [(label_size, label)] = queued
@@ -127,6 +134,18 @@ def test_homebox_prints_on_the_tape_in_the_printer(client, queued, monkeypatch):
     printed = io.BytesIO()
     label.generate().save(printed, 'PNG')
     assert pixels(printed.getvalue()) == pixels(image)
+
+
+def test_homebox_asks_the_printer_once_per_request(client, queued, monkeypatch):
+    # Its status tells the tape as well
+    status, asked = _status(media_width=29, media_length=90), []
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: asked.append('status') or status)
+    monkeypatch.setattr(routes, 'device_state', lambda device, model: asked.append(device) or dict(status['printers'][0]))
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert _size(image) == (991, 306) and asked == ['status']
+    asked.clear()
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    assert asked == ['status'] and queued[0][0] == '29x90'
 
 
 def test_homebox_prints_a_saved_label_on_its_size(client, queued):
@@ -193,9 +212,21 @@ def _printed(label) -> bytes:
     return printed.getvalue()
 
 
-def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, queued, monkeypatch):
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=62))
+def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
+    # The simulator reports no tape, the one set in the printer settings counts
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(path='simulation'))
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert _size(image) == (991, 306)
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, label)] = queued
+    assert label_size == '29x90'
+    assert pixels(_printed(label)) == pixels(image)
+
+
+def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, queued, monkeypatch):
+    _reports(monkeypatch, _status(media_width=62))
+    assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '29x90'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
     [(label_size, label)] = queued
@@ -204,8 +235,8 @@ def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(cli
 
 
 def test_homebox_makes_a_saved_label_without_a_size_for_the_tape_the_printer_reports(client, queued, monkeypatch):
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(media_width=62))
-    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
+    _reports(monkeypatch, _status(media_width=62))
+    assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '29x90'}).status_code == 200
     label = {'name': 'Shelf', 'print_type': 'text', 'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     image = client.get(URL + '/Shelf', query_string=HOMEBOX_QUERY).data
@@ -215,17 +246,35 @@ def test_homebox_makes_a_saved_label_without_a_size_for_the_tape_the_printer_rep
     assert pixels(_printed(label)) == pixels(image)
 
 
-def test_homebox_prints_on_the_tape_set_by_hand_where_the_printer_reports_none(client, queued, monkeypatch):
-    # As in the label designer, a tape set in the printer settings where the
-    # printer does not report its tape
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status())
-    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
-    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+def test_homebox_places_a_saved_label_on_the_tape_in_the_printer(client, queued, monkeypatch):
+    _reports(monkeypatch, _status(media_width=29, media_length=90))
+    label = {'name': 'Bin', 'label_size': '62', 'print_type': 'text',
+             'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
+    assert client.post(SAVE_URL, json=label).status_code == 200
+    image = client.get(f'{URL}/Bin', query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306)
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert client.post(f'{URL}/Bin', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, printed)] = queued
     assert label_size == '29x90'
-    assert pixels(_printed(label)) == pixels(image)
+    assert pixels(_printed(printed)) == pixels(image)
+
+
+def test_homebox_label_size_set_by_hand_gives_way_to_the_tape_the_printer_reports(client, queued, monkeypatch):
+    _reports(monkeypatch, _status(media_width=29, media_length=90))
+    assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '62'}).status_code == 200
+    assert _size(client.get(URL, query_string=HOMEBOX_QUERY).data) == (991, 306)
+    # A label that leaves out its size is made for the tape the printer
+    # reports, as it is saved: one for 62 is placed on it
+    text = [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]
+    label = {'print_type': 'text', 'orientation': 'rotated', 'text': text}
+    assert client.post(SAVE_URL, json={'name': 'Sized', 'label_size': '62', **label}).status_code == 200
+    assert client.post(SAVE_URL, json={'name': 'Unsized', **label}).status_code == 200
+    sized, unsized = (client.get(f'{URL}/{name}', query_string=HOMEBOX_QUERY).data for name in ('Sized', 'Unsized'))
+    assert (_size(sized), _size(unsized)) == ((991, 306), (306, 991))
+    assert client.post(f'{URL}/Unsized', data=unsized, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, printed)] = queued
+    assert (label_size, printed.label_orientation) == ('29x90', LabelOrientation.ROTATED)
+    assert pixels(_printed(printed)) == pixels(unsized)
 
 
 @pytest.mark.parametrize('quality, high_res, fast', [('high', True, False), ('fast', False, True), ('quality', False, False)])

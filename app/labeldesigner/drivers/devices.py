@@ -39,6 +39,8 @@ BUSY_STATUS_TYPE = 'Printing'
 # A network printer that is stopped without telling why, e.g. a QL-810W
 # briefly at the end of every job
 STOPPED_STATUS_TYPE = 'Stopped'
+# A printer that did not answer the status query, see failed_printer_state()
+FAILED_STATUS_TYPE = 'Error'
 
 _fallback_locks = {}
 _fallback_locks_guard = threading.Lock()
@@ -125,6 +127,25 @@ def _usb_key(device_specifier: str) -> str:
     either case, the serial number with or without leading zeros."""
     vendor_product, _, serial = device_specifier.removeprefix('usb://').partition('/')
     return f"{vendor_product.lower()}/{serial.lstrip('0')}"
+
+
+# Until when a printer whose status query failed is not asked for its tape
+# again, by lock key, for as long as a USB/IP printer that was not reached
+_unreached: dict[str, float] = {}
+
+
+def note_unreached(device_specifier: str):
+    """Note that the status query of a printer failed, see unreachable()."""
+    _unreached[lock_key(device_specifier)] = time.monotonic() + usbip.UNREACHABLE_FOR
+
+
+def unreachable(device_specifier: str) -> bool:
+    """Whether a printer could not be reached a moment ago: its status query
+    failed, see note_unreached(), or a USB/IP printer was not reached, see
+    usbip.unreachable()."""
+    if time.monotonic() < _unreached.get(lock_key(device_specifier), 0):
+        return True
+    return usbip.is_address(device_specifier) and usbip.unreachable(device_specifier)
 
 
 def usb_device_id(device_specifier: str) -> str:
@@ -335,6 +356,6 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_type': known.get('media_type'),
         'red_roll': known.get('red_roll'),
         'errors': [unanswered(error)],
-        'status_type': 'Error',
+        'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',
     }
