@@ -2,7 +2,6 @@
 the saved labels and to print. The tools call the API of the app, so that
 they share its checks and its messages. It needs the mcp package, see
 requirements-mcp.txt and docs/mcp.md."""
-import asyncio
 import base64
 import ipaddress
 import json
@@ -606,6 +605,7 @@ class Endpoint:
         self._lock = threading.Lock()
 
     def _start(self):
+        import asyncio
         from a2wsgi import ASGIMiddleware
         from mcp.server.transport_security import TransportSecuritySettings
         # Host and Origin are checked before, also behind a reverse proxy

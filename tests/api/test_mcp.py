@@ -524,8 +524,9 @@ def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monke
 def test_the_mcp_package_is_loaded_with_the_first_call_only():
     import subprocess
     import sys
-    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules)'
-    assert subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout.split()[-1] == 'False'
+    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)'
+    output = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout
+    assert output.split()[-2:] == ['False', 'False']
 
 
 def test_list_labels_with_the_tags_the_label_designer_shows(client, tmp_path):
