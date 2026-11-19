@@ -787,7 +787,7 @@ class SimpleLabel:
         # when fitted, next to the text and a code on the other side of it
         parts = 1 + self.has_lines() + (code is not None)
         if img is not None:
-            img, self._image_scale = self._sized(img, width, height, parts)
+            img, self._image_scale = self._sized_image(img, width, height, parts)
             img_width, img_height = img.size
         else:
             img_width, img_height = (0, 0)
@@ -1007,6 +1007,20 @@ class SimpleLabel:
         logger.debug(f"Resized image size: {new_size} px")
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale
+
+    def _sized_image(self, img: Image.Image, width: int, height: int, parts: int) -> tuple[Image.Image, float]:
+        """_sized() of the image, made once for the copies of a print job:
+        the layouts they share keep the last image sized, a job of many
+        pages one of them."""
+        if self._shared_layouts is None:
+            return self._sized(img, width, height, parts)
+        key = (id(img), width, height, parts, self._label_margin, self._image_crop, self._image_rotation,
+               self._image_fit, self._image_scaling_factor, self._grows(), self._image_side(True))
+        kept = self._shared_layouts.get('image')
+        if kept is None or kept[0] != key:
+            # img is kept along, so that no other image gets its id
+            kept = self._shared_layouts['image'] = (key, img, self._sized(img, width, height, parts))
+        return kept[2]
 
     @staticmethod
     def _crop_image_to_content(img: Image.Image) -> Image.Image:

@@ -548,3 +548,56 @@ def test_image_turned_by_another_angle_is_cropped_again(tmp_path, rotation):
     # Without the white corners the rotation adds
     label, ink = _cropped_label(tmp_path, _letter_l(), rotation)
     assert ink[1] == 0 and ink[3] == label.height
+
+
+def _simulated_labels(printer) -> list:
+    """The labels printed on the simulator, removed from it."""
+    names = sorted(os.listdir(printer.SIMULATED_LABELS_DIR))
+    labels = []
+    for name in names:
+        path = os.path.join(printer.SIMULATED_LABELS_DIR, name)
+        with Image.open(path) as image:
+            labels.append(image.tobytes())
+        os.remove(path)
+    return labels
+
+
+def test_copies_of_a_job_size_the_image_once(tmp_path, monkeypatch):
+    # Cropped, rotated and scaled once for all copies
+    from app.labeldesigner import printer
+    from app.labeldesigner.label import SimpleLabel
+    crops, sized = [], []
+    crop, size = SimpleLabel._crop_image_to_content, SimpleLabel._sized
+    monkeypatch.setattr(SimpleLabel, '_crop_image_to_content', staticmethod(lambda img: crops.append(1) or crop(img)))
+    monkeypatch.setattr(SimpleLabel, '_sized', lambda self, *args, **kwargs: sized.append(1) or size(self, *args, **kwargs))
+    data = {'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_crop': '1', 'image_rotation': '30',
+            'print_count': '4', 'printer': 'simulation'}
+    client = make_client(tmp_path)
+    response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(_letter_l(), 'l.png')))
+    assert response.get_json() == {'success': True}
+    assert len(sized) == 1 and len(crops) == 2
+    labels = _simulated_labels(printer)
+    assert len(labels) == 4 and len(set(labels)) == 1
+    # As printed alone
+    response = client.post('/labeldesigner/api/print', data=dict(data, print_count='1', image=_upload(_letter_l(), 'l.png')))
+    assert response.get_json() == {'success': True}
+    assert _simulated_labels(printer) == labels[:1]
+
+
+def test_each_image_of_a_job_is_sized_on_its_own(tmp_path):
+    # Two images, each copy as the image printed alone
+    from app.labeldesigner import printer
+    data = {'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_crop': '1', 'image_rotation': '90',
+            'printer': 'simulation'}
+    client = make_client(tmp_path)
+    files = [_upload(_letter_l(), 'l.png'), _upload(_framed_logo(), 'logo.png')]
+    response = client.post('/labeldesigner/api/print', data=dict(data, print_count='2', image=files))
+    assert response.get_json() == {'success': True}
+    labels = _simulated_labels(printer)
+    alone = []
+    for image in (_letter_l(), _framed_logo()):
+        response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(image, 'image.png')))
+        assert response.get_json() == {'success': True}
+        alone += _simulated_labels(printer)
+    assert alone[0] != alone[1]
+    assert labels == alone * 2
