@@ -644,7 +644,7 @@ def test_labels_can_leave_the_printer_bottom_first(designer):
 
 def test_receipt_shows_the_blank_paper_before_it(designer):
     # A TM-T20II feeds 12 mm to its cutter after a label, blank before the next
-    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/TM-T20II' }); S.tape = 'escpos80';
+    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/ESC-POS' }); S.tape = 'escpos80';
         openEditor({ title: 'R', design: Object.assign(baseDesign('escpos80'), { text: [L('R', 40)] }) }); }""")
     wait_for_preview(designer)
     assert 'turned' in designer.get_attribute('#edStage', 'class').split()
@@ -965,6 +965,16 @@ def test_test_label_button_says_why_it_is_disabled(designer):
     designer.evaluate("() => { S.printer = null; openPrinterPanel(); }")
     button = designer.locator('.pp #setLfTest')
     assert button.is_disabled() and button.get_attribute('title') == 'No printer answered'
+
+
+def test_receipt_printers_are_named_alike(designer):
+    assert designer.evaluate("() => printerName({ model: 'Epson/ESC-POS-180' })") == 'Epson ESC-POS'
+
+
+def test_label_for_the_other_receipt_paper_is_shown_on_the_printers(designer):
+    # The paper in the printer is not set: shown and printed on its size of the same paper
+    assert designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/ESC-POS-180' }); S.tapeAssumed = true;
+        return ['escpos80', 'escpos58', '62'].map(id => onTape(baseDesign(id)).label_size); }""") == ['escpos80-180', 'escpos58-180', '62']
 
 
 def print_held(page, job, large=False):

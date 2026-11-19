@@ -388,10 +388,10 @@ def test_shared_receipt_printer(tmp_path):
     try:
         tm = FakeTM(device)
         client = make_client(tmp_path)
-        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/TM-T20II')
+        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/ESC-POS')
         tm.replies[escpos.PAPER] = 0x12 | 0x60
         shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-        assert (shown['model'], shown['errors']) == ('Epson/TM-T20II', ['The printer has no paper'])
+        assert (shown['model'], shown['errors']) == ('Epson/ESC-POS', ['The printer has no paper'])
         tm.replies[escpos.PAPER] = 0x12
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
         assert response.get_json() == {'success': True}
