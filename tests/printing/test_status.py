@@ -1,10 +1,13 @@
 """The status of a printer that answers late or only after a reset."""
 
+import functools
+
 import pytest
 
 
 class FakeSlowPrinter:
-    """Printer that returns empty reads before answering, like the QL-1100."""
+    """Printer that returns empty reads before answering a status request,
+    like the QL-1100."""
 
     def __init__(self, empty_reads: int, response: bytes):
         self.empty_reads = empty_reads
@@ -15,6 +18,8 @@ class FakeSlowPrinter:
         self.written += data
 
     def read(self, length: int) -> bytes:
+        if b'\x1b\x69\x53' not in self.written:
+            return b''
         if self.empty_reads > 0:
             self.empty_reads -= 1
             return b''
@@ -30,18 +35,55 @@ class FakeResetPrinter(FakeSlowPrinter):
         super().__init__(empty_reads=0, response=response)
 
     def read(self, length: int) -> bytes:
-        if b'\x1b\x40' not in self.written:
+        if b'\x1b\x40\x1b\x69\x53' not in self.written:
             return b''
         return super().read(length)
 
 
-def make_status_packet() -> bytes:
+class FakeHoldingPrinter:
+    """Printer that holds an error, like the QL-1100: it answers no status
+    request until the error is cleared, then every one it was asked."""
+
+    def __init__(self, width: int):
+        self.width, self.held, self.unread = width, 0, b''
+        self.holding = True
+        # With gaps each reply is a round trip away: the read before it is empty
+        self.gaps, self.gap = False, False
+        # With cleared_at, the error is cleared while that request waits
+        self.cleared_at = None
+
+    def write(self, data: bytes):
+        if data.endswith(b'\x1b\x69\x53'):
+            if self.holding:
+                self.held += 1
+                if self.held == self.cleared_at:
+                    self.clear()
+            else:
+                self.unread += make_status_packet(self.width)
+
+    def clear(self):
+        self.holding = False
+        self.unread += make_status_packet(self.width) * self.held
+
+    def read(self, length: int) -> bytes:
+        self.gap = self.gaps and not self.gap
+        if self.gap:
+            return b''
+        data, self.unread = self.unread[:length], self.unread[length:]
+        return data
+
+    def dispose(self):
+        pass
+
+
+def make_status_packet(width: int = 62, kind: int = 0x00) -> bytes:
     packet = bytearray(32)
     packet[0:3] = b'\x80\x20\x42'  # header
     packet[3] = 0x34  # series code
     packet[4] = 0x38  # model code
-    packet[10] = 62  # media width
+    packet[10] = width  # media width
     packet[11] = 0x0A  # continuous length tape
+    packet[18] = kind  # status type, 00h a reply to a status request
     return bytes(packet)
 
 
@@ -66,6 +108,184 @@ class TestPrinterStatus:
         printer = FakeSlowPrinter(empty_reads=10**6, response=b'')
         with pytest.raises(TimeoutError):
             get_status(printer, timeout=0.1)
+
+    def test_get_status_reads_the_reply_to_its_own_request(self):
+        from app.labeldesigner.drivers.brother.usb import get_status
+        printer = FakeHoldingPrinter(width=62)
+        with pytest.raises(TimeoutError):
+            get_status(printer, timeout=0.1)
+        assert printer.held == 2
+        # Cleared at the printer, it answers the request and its retry, then
+        # the roll is swapped
+        printer.clear()
+        printer.width = 29
+        assert get_status(printer, timeout=0.1)['media_width'] == 29
+
+    def test_get_status_drops_the_replies_of_many_polls(self):
+        from app.labeldesigner.drivers.brother.usb import get_status
+        printer = FakeHoldingPrinter(width=62)
+        # Held for 15 polls of the label designer, a request and its retry each
+        printer.held = 30
+        printer.clear()
+        printer.width = 29
+        assert get_status(printer, timeout=0.1)['media_width'] == 29
+
+    def test_get_status_takes_only_a_reply_as_the_answer(self):
+        from app.labeldesigner.drivers.brother.usb import get_status
+        # A notification the printer sent unasked comes first
+        printer = FakeSlowPrinter(empty_reads=0, response=make_status_packet(62, kind=0x05) + make_status_packet(29))
+        status = get_status(printer)
+        assert (status['status_type'], status['media_width']) == ('Reply to status request', 29)
+
+    def test_get_status_of_a_printer_that_keeps_sending(self):
+        from app.labeldesigner.drivers.brother.usb import get_status
+        printer = FakeSlowPrinter(empty_reads=0, response=b'')
+        reads = []
+
+        def read(length):
+            # Reading on and on fails the test instead of hanging it
+            assert len(reads) < 1000
+            reads.append(length)
+            return make_status_packet()[:length]
+        printer.read = read
+        assert get_status(printer)['media_width'] == 62
+
+
+@pytest.fixture
+def held(monkeypatch):
+    """A FakeHoldingPrinter at /dev/usb/lp0, each reply a round trip away."""
+    from app.labeldesigner.drivers.brother import usb
+    printer = FakeHoldingPrinter(width=62)
+    printer.gaps = True
+    monkeypatch.setattr(usb, 'get_printer', lambda device: printer)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
+    return printer
+
+
+@pytest.mark.parametrize('cleared_at', [5, 6], ids=['request', 'retry'])
+def test_error_cleared_while_a_poll_waits(held, cleared_at):
+    # Held through two polls, cleared while the third waits for its request
+    # or its retry: the reply that comes first is the oldest
+    from app.labeldesigner.drivers.brother import usb
+    for _ in range(2):
+        with pytest.raises(TimeoutError):
+            usb.query_status('file:///dev/usb/lp0')
+    held.cleared_at = cleared_at
+    usb.query_status('file:///dev/usb/lp0')
+    for width in (29, 12, 38, 17):
+        held.width = width
+        assert usb.query_status('file:///dev/usb/lp0')['media_width'] == width
+
+
+def test_messages_sent_unasked_are_no_replies(held):
+    # A phase change before the replies owed does not count as one of them
+    from app.labeldesigner.drivers.brother import usb
+    with pytest.raises(TimeoutError):
+        usb.query_status('file:///dev/usb/lp0')
+    held.unread = make_status_packet(62, kind=0x06)
+    held.clear()
+    held.width = 29
+    assert usb.query_status('file:///dev/usb/lp0')['media_width'] == 29
+
+
+def test_requests_of_many_polls_are_counted(held, monkeypatch):
+    # E.g. a QL-1100 holding an error for an hour of polls
+    from app.labeldesigner.drivers.brother import usb
+    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.05)
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 150)
+    with pytest.raises(TimeoutError):
+        usb.query_status('file:///dev/usb/lp0')
+    assert usb._unanswered['/dev/usb/lp0'] == 152
+
+
+@pytest.mark.parametrize('told', ['before', 'while the request waits'])
+def test_error_told_unasked_is_held(held, told):
+    # A QL-1100 tells e.g. "Replace media error" by itself, then answers no
+    # status request until the error is cleared
+    from app.labeldesigner.drivers.brother import usb
+    error = bytearray(make_status_packet(62, kind=0x02))
+    error[9] = 0x01
+    if told == 'before':
+        # Read before the request
+        held.gaps, held.unread = False, bytes(error)
+    else:
+        write, sent = held.write, []
+
+        def writing(data):
+            write(data)
+            if held.held and not sent:
+                sent.append(error)
+                held.unread = bytes(error)
+        held.write = writing
+    assert usb.query_status('file:///dev/usb/lp0')['errors'] == ['Replace media error, clear it at the printer']
+
+
+@pytest.mark.parametrize('cleared', ['before', 'while the request waits'])
+def test_a_query_reads_owed_replies_for_a_while_only(held, monkeypatch, cleared):
+    # After an error held for hours, so as not to keep the printer locked;
+    # the latest reply read is the answer, the next queries read the rest
+    from app.labeldesigner.drivers.brother import usb
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(usb, 'time', clock)
+    monkeypatch.setattr(usb, 'OWED_WAIT', 0.2)
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 40)
+    held.held = 40
+    if cleared == 'before':
+        held.clear()
+    else:
+        held.cleared_at = 41
+    start = clock.now
+    assert usb.query_status('file:///dev/usb/lp0')['media_width'] == 62
+    assert clock.now - start < 0.2 + usb.REPLY_WAIT + 0.1
+    assert 0 < usb._unanswered['/dev/usb/lp0'] <= 40
+    held.width = 29
+    for _ in range(10):
+        state = usb.query_status('file:///dev/usb/lp0')
+        if not usb._unanswered['/dev/usb/lp0']:
+            break
+    assert state['media_width'] == 29 and held.unread == b''
+
+
+def test_wait_for_a_reply_follows_the_monotonic_clock(monkeypatch):
+    # The wall clock set back meanwhile, e.g. on a Pi without a battery-backed
+    # clock, does not stretch it
+    from app.labeldesigner.drivers.brother import usb
+
+    class Clock:
+        now, wall = 1000.0, 1000.0
+
+        def monotonic(self):
+            return self.now
+
+        def time(self):
+            self.wall, wall = self.now - 3600, self.wall
+            return wall
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+    class Silent:
+        reads = 0
+
+        def read(self, length):
+            # Reading on and on fails the test instead of hanging it
+            assert self.reads < 1000
+            self.reads += 1
+            return b''
+    clock = Clock()
+    monkeypatch.setattr(usb, 'time', clock)
+    assert usb._read_reply(Silent(), 0.5) == b''
+    assert clock.now - 1000 == pytest.approx(0.5, abs=0.05)
+
+
+def test_status_query_waits_for_the_replies_it_is_owed(held):
+    from app.labeldesigner.drivers.brother import usb
+    with pytest.raises(TimeoutError):
+        usb.query_status('file:///dev/usb/lp0')
+    held.clear()
+    held.width = 29
+    assert usb.query_status('file:///dev/usb/lp0')['media_width'] == 29
 
 
 @pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W')])

@@ -62,7 +62,7 @@ def parsed(content: str) -> dict:
 
 
 def _key(data: dict, device: str) -> str:
-    """key(device), of a USB printer switched off, which tells no device ID,
+    """key(device), of a USB printer switched off that tells no device ID,
     the one last seen on its device. Its device ID is read once, over
     USB/IP each read is a connection."""
     device_id = usb_device_id(device)

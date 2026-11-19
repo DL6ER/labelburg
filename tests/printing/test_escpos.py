@@ -2,7 +2,10 @@
 printer in place of /dev/usb/lp<N>, and printing and status through the
 label designer."""
 import json
+import os
 import select
+import socket
+import threading
 
 import pytest
 
@@ -106,6 +109,77 @@ def test_printer_through_pyusb(monkeypatch):
         assert c.ask(protocol.PAPER) == QUIET
         c.write(b'0123456789')
     assert c.printer.written == [protocol.PAPER, b'0123', b'4567', b'89'] and c.printer.disposed
+
+
+def test_answers_of_many_polls_are_not_taken_for_the_status(monkeypatch):
+    # Over USB/IP each late answer comes in a transfer, and a read, of its own
+    class Printer:
+        def __init__(self, device):
+            self.unread = [bytes([QUIET | 0x20])] * 30
+
+        def read(self, length):
+            return self.unread.pop(0) if self.unread else b''
+
+        def write(self, data):
+            self.unread.append(bytes([QUIET]))
+
+        def dispose(self):
+            pass
+    monkeypatch.setattr(protocol.backends, 'UsbipPrinter', Printer)
+    with protocol.connect('usbip://192.0.2.1') as c:
+        assert c.ask(protocol.PAPER) == QUIET
+
+
+def asked_while_sending(c, quiet):
+    """c.ask(PAPER) of a printer that keeps sending, run aside so that a hang
+    fails the test; then quiet() silences the printer and the thread ends."""
+    outcome = []
+
+    def ask():
+        try:
+            outcome.append(c.ask(protocol.PAPER))
+        except protocol.EscposError as e:
+            outcome.append(e)
+    thread = threading.Thread(target=ask, daemon=True)
+    thread.start()
+    thread.join(5)
+    hung = thread.is_alive()
+    quiet()
+    thread.join(5)
+    assert not hung
+    return outcome[0]
+
+
+def test_printer_that_keeps_sending_through_usblp(monkeypatch):
+    # /dev/zero has always something to read, /dev/null nothing
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    with protocol.Connection('/dev/zero') as c:
+        null = os.open(os.devnull, os.O_RDWR)
+        try:
+            assert asked_while_sending(c, lambda: os.dup2(null, c.dev)) == 0
+        finally:
+            os.close(null)
+
+
+def test_printer_that_keeps_sending_through_pyusb(monkeypatch):
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    quiet = threading.Event()
+
+    class Printer:
+        def __init__(self, device):
+            pass
+
+        def read(self, length):
+            return b'' if quiet.is_set() else bytes([QUIET])
+
+        def write(self, data):
+            pass
+
+        def dispose(self):
+            pass
+    monkeypatch.setattr(protocol.backends, 'UsbPrinter', Printer)
+    with protocol.connect('usb://0x04b8:0x0e15/TM1') as c:
+        assert asked_while_sending(c, quiet.set) == QUIET
 
 
 def test_status_bytes():
@@ -233,6 +307,31 @@ def test_printer_on_the_network(monkeypatch):
     thread.join(5)
     server.close()
     assert received == [protocol.PAPER + b'job']
+
+
+def test_printer_on_the_network_that_keeps_sending(monkeypatch):
+    # A connection that never runs dry, as one over loopback may between sends
+    class Printer:
+        quiet = False
+
+        def recv(self, size):
+            return b'' if self.quiet else bytes([QUIET]) * size
+
+        def sendall(self, data):
+            pass
+
+        def setblocking(self, flag):
+            pass
+
+        def settimeout(self, timeout):
+            pass
+
+        def close(self):
+            pass
+    printer = Printer()
+    monkeypatch.setattr(protocol.socket, 'create_connection', lambda to, timeout: printer)
+    with protocol.connect('tcp://192.0.2.1') as c:
+        assert asked_while_sending(c, lambda: setattr(printer, 'quiet', True)) == QUIET
 
 
 def test_printer_with_a_180_dpi_head(monkeypatch):

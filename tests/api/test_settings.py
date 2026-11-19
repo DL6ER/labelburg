@@ -128,8 +128,8 @@ def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, devi
 
 
 def test_a_printer_last_seen_that_is_no_printer_key_is_left_out(monkeypatch):
-    # The file may be edited by hand, a USB/IP printer switched off tells
-    # no device ID
+    # The file may be edited by hand, a USB/IP printer not reached since the
+    # server started tells no device ID
     device = 'usbip://192.0.2.1/1-1'
     data = {'printers': {}, 'quality': 'fast', 'seen': {lock_key(device): ['not', 'a', 'printer']}}
     monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
