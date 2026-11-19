@@ -38,7 +38,7 @@ def test_label_as_a_graphic_field():
 @pytest.mark.parametrize('device, address', [('tcp://zebra.lan', ('zebra.lan', 9100)), ('tcp://192.0.2.1:6101', ('192.0.2.1', 6101)),
                                              ('tcp://[2001:db8::1]', ('2001:db8::1', 9100)), ('tcp://[2001:db8::1]:9100', ('2001:db8::1', 9100))])
 def test_network_address(device, address):
-    assert protocol.address(device) == address
+    assert devices.tcp_address(device, protocol.PORT) == address
 
 
 def test_label_is_printed_as_large_as_it_is(client, sent):

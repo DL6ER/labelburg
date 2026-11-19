@@ -149,9 +149,11 @@ class Niimbot(Driver):
     errors = (OSError, protocol.NiimbotError)
     refusals = (calibration.KIND_MESSAGE,)
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # By the device ID on USB: MFG:NIIMBOT;CMD:ESC;MDL: B1;
-        fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
+        if device_id is None:
+            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        fields = devices.device_id_fields(device_id)
         model = f"Niimbot/{fields.get('MDL', '').strip()}"
         return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
 
@@ -200,10 +202,9 @@ class Niimbot(Driver):
         return self.status(device, model, fresh=True)
 
     def status(self, device, model, unconfirmed=False, fresh=False):
-        # One that did not answer is not looked for at every status query
-        error = devices.unanswered_before(device)
-        if error:
-            raise error.with_traceback(None)
+        return self.noted_status(device, lambda: self._status(device, model, fresh))
+
+    def _status(self, device, model, fresh):
         cached = devices.status_cache.get(devices.lock_key(device))
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
@@ -211,21 +212,9 @@ class Niimbot(Driver):
         if (device.startswith('bt://') and not (fresh and _over_le(model)) and cached and not cached.get('errors')
                 and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
-        try:
-            state = self._status(device, model)
-        except self.errors as e:
-            devices.note_answer(device, e)
-            raise
-        devices.note_answer(device)
-        return state
-
-    def _status(self, device, model):
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
-                state = network_status(device, model)
-                state.update(devices.status_cache.get(devices.lock_key(device), {}))
-                state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
-                return state
+                return devices.busy_state(device, network_status(device, model))
             with protocol.connect(device, _over_le(model)) as c:
                 told = self._asked(c, device, model)
                 if told is None:
@@ -278,7 +267,7 @@ class Niimbot(Driver):
         # A D110_M neither parks nor prints a roll without its tag
         if roll is None and not state['errors']:
             state['errors'] = ['No Niimbot roll with its RFID tag is in the printer']
-        state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
+        state['status_type'] = devices.status_type(state['errors'])
         # It tells 0 to 4, shown as a percentage, low at 1 of 4 or less
         battery = beat.get('battery')
         state['battery_low'] = battery in (0, 1)

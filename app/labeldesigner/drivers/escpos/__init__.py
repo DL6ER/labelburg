@@ -71,9 +71,11 @@ class Escpos(Driver):
     errors = (OSError, protocol.EscposError)
     reports_tape = False
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
-        fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
+        if device_id is None:
+            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        fields = devices.device_id_fields(device_id)
         commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
         if 'ESC/POS' not in commands:
             return None

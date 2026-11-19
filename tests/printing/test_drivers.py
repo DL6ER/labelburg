@@ -1,6 +1,7 @@
 """The printer drivers behind the interface of drivers/base.py, and which
 one drives a printer."""
 
+import contextlib
 import socket
 import threading
 
@@ -41,6 +42,30 @@ def test_driver_of_a_printer():
     # Unknown models are left to the Brother driver
     assert drivers.resolve('file:///dev/usb/lp0', 'QL-9999') == (drivers.BROTHER, 'QL-9999')
     assert drivers.for_label('99x99') is None
+
+
+@pytest.mark.parametrize('device', ['usb://0x04b8:0x0e15', 'usbip://192.0.2.1', 'file:///dev/usb/lp0'])
+def test_device_id_is_read_once_for_all_drivers(monkeypatch, device):
+    # On usb:// one that tells none is asked again each time
+    read = []
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: read.append(device) or '')
+    assert drivers.resolve(device, 'QL-800') == (drivers.BROTHER, 'QL-800')
+    assert read == [device]
+
+
+@pytest.mark.parametrize('driver, device, model', [
+    (drivers.BROTHER, 'file:///dev/usb/lp0', 'QL-800'), (drivers.VC500W, 'vc500w://192.0.2.1', 'VC-500W'),
+    (drivers.PUQU, 'bt://CD:AC:BB:E0:46:4C', 'PUQU/Q00'), (drivers.NIIMBOT, 'bt://CD:AC:BB:E0:46:4C', 'Niimbot/B1')])
+def test_printer_a_job_holds_is_told_as_printing(monkeypatch, driver, device, model):
+    monkeypatch.setattr(devices, 'device_lock', lambda device, timeout=None: contextlib.nullcontext(False))
+    busy = {'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'}
+    # Never asked before: the model as configured
+    state = driver.status(device, model)
+    assert {key: state[key] for key in busy} == busy and state['model'] == model
+    # Else as it was last, without its errors
+    told = dict(state, media_width=50, errors=['The cover is open'], status_type='Error occurred', phase_type='Waiting to receive')
+    devices.status_cache[devices.lock_key(device)] = told
+    assert driver.status(device, model) == dict(told, **busy)
 
 
 def test_a_driver_states_what_it_does_not_do():

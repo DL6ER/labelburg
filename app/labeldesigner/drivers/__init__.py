@@ -1,5 +1,6 @@
 """The printer drivers, see base.py, and which one drives a printer."""
 
+from . import devices
 from .base import Driver
 from .brother import DRIVER as BROTHER
 from .vc500w import DRIVER as VC500W
@@ -50,8 +51,10 @@ def resolution_problem(model: str, high_res: bool) -> str:
 def resolve(device: str, model: str) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
     ID tells, else the configured or requested model."""
+    # Read once for all drivers, it may ask the printer
+    device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
     for driver in DRIVERS:
-        known = driver.model_of(device)
+        known = driver.model_of(device, device_id)
         if known:
             return driver, known
     return for_model(model), model

@@ -105,12 +105,13 @@ class UsbPrinter(Printer):
         import usb.util
         self._usb = usb
         self.dev = _find(usb, device_specifier)
+        self.was_kernel_driver_active = False
         try:
-            assert self.dev.is_kernel_driver_active(0)
-            self.dev.detach_kernel_driver(0)
-            self.was_kernel_driver_active = True
-        except (NotImplementedError, AssertionError):
-            self.was_kernel_driver_active = False
+            if self.dev.is_kernel_driver_active(0):
+                self.dev.detach_kernel_driver(0)
+                self.was_kernel_driver_active = True
+        except NotImplementedError:
+            pass
         self.dev.set_configuration()
         interface = usb.util.find_descriptor(self.dev.get_active_configuration(), bInterfaceClass=7)
         if interface is None:

@@ -63,6 +63,19 @@ _unanswered = {}
 looked = 0.0
 
 
+def status_type(errors: list) -> str:
+    """The status type of a printer that answered, with errors or without."""
+    return 'Error occurred' if errors else 'Reply to status request'
+
+
+def busy_state(device_specifier: str, base: dict) -> dict:
+    """Status of a printer a job holds: its last status, else base, in the
+    state of the job. Errors from before the job no longer apply."""
+    state = dict(status_cache.get(lock_key(device_specifier), base))
+    state.update({'errors': [], 'status_type': BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
+    return state
+
+
 def unanswered_before(device_specifier: str) -> Exception | None:
     """Why the printer did not answer last time, if it did not."""
     return _unanswered.get(lock_key(device_specifier))
@@ -111,6 +124,18 @@ def lock_key(device_specifier: str) -> str:
         if ':' not in (address.rpartition(']')[2] if address.startswith('[') else address):
             key += ':9100'
     return key
+
+
+def tcp_address(device_specifier: str, port: int) -> tuple[str, int]:
+    """Host and port of tcp://<host>[:<port>], an IPv6 address in brackets,
+    port where it names none."""
+    rest = device_specifier[len('tcp://'):]
+    if rest.startswith('['):
+        host, _, named = rest[1:].partition(']')
+        named = named.removeprefix(':')
+    else:
+        host, _, named = rest.partition(':')
+    return host, int(named or port)
 
 
 # The IEEE 1284 device ID of a printer on USB, which usblp read when it was

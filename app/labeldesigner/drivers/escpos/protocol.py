@@ -7,7 +7,7 @@ import select
 import socket
 import time
 
-from .. import backends, usbip
+from .. import backends, devices, usbip
 from ..backends import discard as _discard
 
 # Rows per raster image, the printer takes them in pieces
@@ -119,13 +119,7 @@ class TcpConnection(Connection):
     out, an IPv6 address in brackets."""
 
     def __init__(self, device: str):
-        rest = device.removeprefix('tcp://')
-        if rest.startswith('['):
-            host, _, port = rest[1:].partition(']')
-            port = port.removeprefix(':')
-        else:
-            host, _, port = rest.partition(':')
-        self.socket = socket.create_connection((host, int(port or PORT)), timeout=CONNECT_WAIT)
+        self.socket = socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT)
 
     def __exit__(self, *args):
         self.socket.close()

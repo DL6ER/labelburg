@@ -28,11 +28,13 @@ class VC500W(Driver):
     )
     errors = (OSError, protocol.VC500WError)
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # It must never get the commands of a QL printer
         if not isinstance(device, str) or device == 'simulation':
             return None
-        if device.startswith('vc500w://') or protocol.device_id_is_vc500w(devices.usb_device_id(device)):
+        if device_id is None:
+            device_id = devices.usb_device_id(device)
+        if device.startswith('vc500w://') or protocol.device_id_is_vc500w(device_id):
             return tapes.MODEL
         return None
 

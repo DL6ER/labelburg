@@ -79,30 +79,17 @@ class Puqu(Driver):
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True)
 
     def status(self, device, model, unconfirmed=False):
-        # One that did not answer is not looked for at every status query
-        error = devices.unanswered_before(device)
-        if error:
-            # The traceback of the last time only, it grew at every query
-            raise error.with_traceback(None)
-        try:
-            state = self._status(device, model)
-        except self.errors as e:
-            devices.note_answer(device, e)
-            raise
-        devices.note_answer(device)
-        return state
+        return self.noted_status(device, lambda: self._status(device, model))
 
     def _status(self, device, model):
         state = network_status(device, model)
         state.update({'media_type': 'Die-cut labels', 'phase_type': 'Waiting to receive'})
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
-                state.update(devices.status_cache.get(devices.lock_key(device), {}))
-                state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
-                return state
+                return devices.busy_state(device, state)
             reply = protocol.get_state(device)
         state['errors'] = protocol.errors(reply)
-        state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
+        state['status_type'] = devices.status_type(state['errors'])
         devices.status_cache[devices.lock_key(device)] = state
         return state
 

@@ -58,8 +58,7 @@ def query_status(device_specifier: str) -> dict:
                 state['job'] = {'stage': protocol.stage_name(status['stage'])}
             devices.status_cache[key] = state
             return dict(state, **_link(device_specifier, where))
-    state = dict(devices.status_cache.get(key, network_status(device_specifier, MODEL)))
-    state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
+    state = devices.busy_state(device_specifier, network_status(device_specifier, MODEL))
     state.update(_link(device_specifier, where))
     return state
 

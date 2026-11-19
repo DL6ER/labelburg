@@ -339,6 +339,4 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
     logger.debug('Printer %s is busy, returning last known status', device_specifier)
     # Model and media from the last query, but the state of a running job:
     # errors or the idle state from before the job no longer apply
-    state = dict(devices.status_cache.get(key, {'model': default_model, 'media_width': None, 'media_length': 0}))
-    state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
-    return state
+    return devices.busy_state(device_specifier, {'model': default_model, 'media_width': None, 'media_length': 0})

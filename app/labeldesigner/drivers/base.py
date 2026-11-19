@@ -7,6 +7,8 @@ detection use printers only through this interface."""
 
 import re
 
+from . import devices
+
 # Printers on USB, also shared over USB/IP, and through usblp
 _USB = re.compile(r'(usb|usbip|file)://|/dev/')
 
@@ -72,10 +74,11 @@ class Driver:
     # Whether its status tells the tape or roll in the printer
     reports_tape: bool = True
 
-    def model_of(self, device: str) -> str | None:
+    def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
         e.g. vc500w://<host>, whatever model is configured. None if the
-        address does not tell."""
+        address does not tell. device_id: its device ID as
+        devices.usb_device_id() tells it, read if None."""
         return None
 
     def fits(self, label, model: str) -> bool:
@@ -167,6 +170,22 @@ class Driver:
         printer of this driver. Raises one of self.errors if it does not
         answer."""
         raise NotImplementedError
+
+    def noted_status(self, device: str, query) -> dict:
+        """The status query() tells, noted whether the printer answered, see
+        devices.note_answer(). One that did not answer is not looked for at
+        every status query."""
+        error = devices.unanswered_before(device)
+        if error:
+            # The traceback of the last time only, it grew at every query
+            raise error.with_traceback(None)
+        try:
+            state = query()
+        except self.errors as e:
+            devices.note_answer(device, e)
+            raise
+        devices.note_answer(device)
+        return state
 
     def followed_status(self, device: str, model: str) -> dict | None:
         """Status of a printer the label designer follows, see followed():

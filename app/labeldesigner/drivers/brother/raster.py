@@ -114,10 +114,6 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
                 logger.warning('Resizing the image to the width of the label')
                 im = im.resize((dots_printable[0], int((dots_printable[0] / im.size[0]) * im.size[1])),
                                Image.Resampling.LANCZOS)
-            if im.size[0] < width:
-                padded = Image.new(im.mode, (width, im.size[1]), (255,) * len(im.mode))
-                padded.paste(im, (width - im.size[0] - right_margin, 0))
-                im = padded
         else:
             if rotate == 'auto':
                 if im.size[0] == dots_expected[1] and im.size[1] == dots_expected[0]:
@@ -128,7 +124,9 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
                 raise ValueError(f'Bad image dimensions: {im.size}. Expecting: {dots_expected}.')
             if dpi_600:
                 im = im.resize((im.size[0] // 2, im.size[1]))
-            padded = Image.new(im.mode, (width, dots_expected[1]), (255,) * len(im.mode))
+        # Die-cut labels are narrower than the printhead of every printer taking them
+        if im.size[0] < width:
+            padded = Image.new(im.mode, (width, im.size[1]), (255,) * len(im.mode))
             padded.paste(im, (width - im.size[0] - right_margin, 0))
             im = padded
         # At 600 dpi a label has twice the lines
