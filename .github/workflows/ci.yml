@@ -12,9 +12,7 @@ jobs:
       - name: run tests
         uses: devcontainers/ci@v0.3
         with:
-          runCmd: |
-            pip install -r requirements-dev.txt
-            pytest -n auto
+          runCmd: pytest -n auto
 
   # The label designer in a browser, see tests/browser. Not in the devcontainer:
   # Playwright's Chromium does not run on Alpine.
