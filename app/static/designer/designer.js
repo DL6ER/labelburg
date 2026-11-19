@@ -929,6 +929,12 @@ async function refreshPrinters(look = false) {
     showPrinters();
 }
 
+// Every 20 s from a tab that is shown: one left in the background keeps no
+// printer busy, e.g. a B1 its Bluetooth connection. Shown again it asks at once.
+function pollPrinters() {
+    if (!document.hidden) refreshPrinters();
+}
+
 // A printer the server says costs nothing to ask, e.g. one on USB, is asked
 // on its own every 2 s, another roll or a lost connection shows at once. The
 // others are asked with all printers every 20 s.
@@ -3993,7 +3999,7 @@ addEventListener('pagehide', () => { if (S.edit) storeEdit(); });
     // Printing state from a page that was closed while printing is unknown
     S.history.forEach(h => { if (h.state === 'printing') { h.state = 'failed'; h.message = 'The page was closed while printing'; } });
     route();
-    setInterval(refreshPrinters, 20000);
+    setInterval(pollPrinters, 20000);
     setInterval(followPrinter, 2000);
     // Settings changed in another browser show when coming back
     addEventListener('visibilitychange', () => { if (!document.hidden) refreshPrinters(); });

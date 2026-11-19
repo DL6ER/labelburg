@@ -564,6 +564,17 @@ def test_look_for_printers_looks_also_for_those_that_did_not_answer(designer):
     assert 'look=1' in request.value.url
 
 
+@pytest.mark.parametrize('hidden', [True, False])
+def test_printers_are_asked_only_from_a_tab_that_is_shown(designer, hidden):
+    # A tab left in the background keeps no printer busy, e.g. a B1 its
+    # Bluetooth connection; shown again it asks at once
+    asked = []
+    designer.on('request', lambda request: '/api/printer_status' in request.url and asked.append(request.url))
+    designer.evaluate(f"() => {{ Object.defineProperty(document, 'hidden', {{ value: {str(hidden).lower()}, configurable: true }}); pollPrinters(); }}")
+    designer.wait_for_timeout(300)
+    assert bool(asked) is not hidden
+
+
 @pytest.mark.parametrize('follow', [True, False])
 def test_only_a_printer_the_server_says_to_follow_is_asked_on_its_own(designer, follow):
     # Asking one on the network or on Bluetooth with a beep that often costs,
