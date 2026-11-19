@@ -17,7 +17,7 @@ from werkzeug.sansio.utils import host_is_trusted
 from werkzeug.wrappers import Response
 
 from . import tape
-from .label import BLANK_TEMPLATE, DATE_OFFSET, _iso_date
+from .label import DATE_OFFSET, _iso_date
 from .label_names import LABELS
 from .refusals import BARCODE_TYPES
 
@@ -205,17 +205,6 @@ def _decoded(encoded: str) -> dict:
     return spec
 
 
-def _blank_names(data: dict) -> list[str]:
-    texts = [line.get('text', '') for line in data.get('text', []) if isinstance(line, dict)]
-    texts.append(str(data.get('code_text') or ''))
-    names = []
-    for text in texts:
-        for name in BLANK_TEMPLATE.findall(str(text)):
-            if name not in names:
-                names.append(name)
-    return names
-
-
 def _labels(count: int) -> str:
     return f'{count} label' if count == 1 else f'{count} labels'
 
@@ -320,7 +309,7 @@ class Tools:
                 for p in self._printers()]
 
     def list_labels(self) -> list[dict]:
-        from .routes import _get_repo_dir
+        from .routes import _blank_names, _get_repo_dir
         labels = []
         with self.app.app_context():
             repo = _get_repo_dir()
@@ -332,15 +321,18 @@ class Tools:
                 continue
             fields = data.get('fields') if isinstance(data.get('fields'), dict) else {}
             defaults = data.get('blanks') if isinstance(data.get('blanks'), dict) else {}
+            # The API reads text saved as anything but a list as no lines
+            text = data.get('text') if isinstance(data.get('text'), list) else []
             blanks = []
-            for name in _blank_names(data):
-                blank = {'name': name, **{k: v for k, v in (fields.get(name) or {}).items() if k in ('type', 'format', 'default', 'choices')}}
+            for name in _blank_names(dict(data, text=text)):
+                field = fields.get(name) if isinstance(fields.get(name), dict) else {}
+                blank = {'name': name, **{k: v for k, v in field.items() if k in ('type', 'format', 'default', 'choices')}}
                 if name in defaults:
                     blank['default'] = defaults[name]
                 blanks.append(blank)
             labels.append({'name': entry['name'], 'title': entry.get('title') or entry['name'],
                            'label_size': entry.get('label_size_id'), 'tags': entry['tags'], 'blanks': blanks,
-                           'text': [line.get('text', '') for line in data.get('text', []) if isinstance(line, dict)],
+                           'text': [line.get('text', '') for line in text if isinstance(line, dict)],
                            'code': (data.get('code_text') or None) if 'qrcode' in str(data.get('print_type')) else None})
         return labels
 
