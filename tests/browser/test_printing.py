@@ -12,6 +12,10 @@ from app.labeldesigner import printer_settings
 from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
 
 
+# Too large for 29 x 90 mm labels, the text is cut off there
+TOO_BIG = "Object.assign(baseDesign('62'), { text_fit: 'none', text: [L('A rather long shelf label', 150)] })"
+
+
 def fake_printer(page, **status):
     """Answer the status queries with a QL-800 that reports the given
     status, e.g. the loaded labels, and load the page again."""
@@ -166,7 +170,8 @@ def test_label_is_placed_on_the_loaded_tape(designer):
     assert designer.evaluate('() => S.edit.design.label_size') == '29x90'
     assert designer.inner_text('.tape-line .grow') == '29 x 90 mm'
     assert designer.inner_text('.tape-note').strip() == 'In the printer'
-    assert designer.inner_text('#edMade').strip() == 'Made for 62 mm endless, shown as it prints on the 29 x 90 mm in the Brother QL-800.'
+    # It fits as it is, which tape it was made for is not said
+    assert not designer.is_visible('#edMade')
     assert designer.inner_text('#edStage .dim-x') == '90 mm'
     # Printed as shown without a question, the history keeps it as made
     sent = []
@@ -182,6 +187,26 @@ def test_label_is_placed_on_the_loaded_tape(designer):
     assert designer.locator('#edMade').count() == 0
 
 
+def test_a_label_that_does_not_fit_on_the_loaded_tape_says_what_it_was_made_for(designer):
+    fake_printer(designer, media_width=29, media_length=90)
+    designer.evaluate(f"() => openEditor({{ title: 'Shelf', design: {TOO_BIG} }})")
+    wait_for_preview(designer)
+    assert 'does not fit' in fits_note(designer)
+    assert designer.inner_text('#edMade').strip() == 'Made for 62 mm endless, shown as it prints on the 29 x 90 mm in the Brother QL-800.'
+
+
+def test_an_empty_label_takes_the_loaded_tape(designer):
+    # Started while other labels were in the printer, nothing on it was made for them
+    designer.evaluate("() => openEditor({ title: 'New label', design: Object.assign(baseDesign('62'), { text: [L('', 40)] }) })")
+    wait_for_preview(designer)
+    kept(designer)
+    fake_printer(designer, media_width=29, media_length=90)
+    assert designer.evaluate('() => [S.edit.design.label_size, S.edit.made]') == ['29x90', None]
+    assert designer.locator('#edMade').count() == 0
+    type_line(designer, 0, 'Shelf')
+    assert designer.locator('#edMade').count() == 0
+
+
 def test_label_saved_as_made_unless_changed_on_the_loaded_tape(designer):
     fake_printer(designer, media_width=29, media_length=90)
     designer.evaluate("() => openEditor({ title: 'Placed shelf', design: Object.assign(baseDesign('62'), { text: [L('Shelf', 40)] }) })")
@@ -194,7 +219,7 @@ def test_label_saved_as_made_unless_changed_on_the_loaded_tape(designer):
     designer.press('#saveName', 'Enter')
     designer.wait_for_selector('#toast:has-text("Saved \\"Placed shelf\\" to your labels as 62 mm endless label")')
     assert designer.evaluate(saved_size) == '62'
-    assert designer.is_visible('#edMade')
+    assert designer.evaluate('() => S.edit.made.as.label_size') == '62'
     # Changed on the tape in the printer: saved for it, made for it now
     type_line(designer, 0, 'Shelf 2')
     designer.click('#edSave')
@@ -250,7 +275,7 @@ def test_sentences_call_a_printer_by_its_name(designer, name, called):
     fake_printer(designer, name=name)
     assert designer.inner_text('.tape-note') == f'{called[0].upper()}{called[1:]} does not say which tape it has.'
     fake_printer(designer, name=name, media_width=29, media_length=90)
-    designer.evaluate("() => openEditor({ title: 'Box', design: Object.assign(baseDesign('62'), { text: [L('Box', 40)] }) })")
+    designer.evaluate(f"() => openEditor({{ title: 'Box', design: {TOO_BIG} }})")
     wait_for_preview(designer)
     assert designer.inner_text('#edMade').endswith(f'on the 29 x 90 mm in {called}.')
 
@@ -816,7 +841,7 @@ def test_editor_follows_the_tape_the_printer_reports(designer):
     designer.evaluate("() => refreshPrinters()")
     wait_for_preview(designer)
     assert designer.inner_text('.tape-line .grow') == '29 x 90 mm'
-    assert designer.inner_text('#edMade').startswith('Made for 62 mm endless')
+    assert designer.evaluate('() => S.edit.made.as.label_size') == '62'
     # The same roll leaves the editor as it is
     designer.evaluate("() => { window.row = $('[data-row=\"0\"] .tx'); window.row.focus(); }")
     designer.evaluate("() => refreshPrinters()")

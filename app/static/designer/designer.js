@@ -885,6 +885,12 @@ const designSig = d => snapshot({ title: '', design: d });
 const unchangedSincePlaced = E => !!E.made && designSig(E.design) === E.made.sig;
 function placeEdit(E) {
     const d = E.design;
+    // An empty label is made for no tape, it takes the one in the printer
+    if (isEmptyDesign(d)) {
+        E.made = null;
+        if (movesTo(d.label_size)) putOnTape(d);
+        return;
+    }
     if (tapeKnown() ? !movesTo(d.label_size) : !E.made) return;
     if (unchangedSincePlaced(E)) Object.assign(d, E.made.as);
     E.made = null;
@@ -895,6 +901,8 @@ function placeEdit(E) {
 }
 // The label to save from the editor: as made, unless changed on this tape
 const madeDesign = E => unchangedSincePlaced(E) ? Object.assign({}, E.design, E.made.as) : E.design;
+// A cable flag is left out on the tape in the printer
+const flagLost = E => !!E.made && flagOn(E.made.as) && !flagOn(E.design);
 
 // --- Printer status ----------------------------------------------------------
 
@@ -2664,7 +2672,7 @@ function renderEditor() {
                     <button class="btn-print" type="button" id="edPrint"><i class="fa-solid fa-print"></i>Print</button>
                 </div>
             </div>
-            ${E.made && placed(E.made.as.label_size) ? `<div class="fits made" id="edMade"><i class="fa-solid fa-ruler-combined"></i> Made for ${esc(sizeName(E.made.as.label_size))}, shown as it prints on the ${esc(sizeName(d.label_size))} in ${esc(thePrinter(S.printer))}.${flagOn(E.made.as) && !flagOn(d) ? ' Cable flags need continuous tape.' : ''}</div>` : ''}
+            ${E.made && placed(E.made.as.label_size) ? `<div class="fits made" id="edMade"${flagLost(E) ? '' : ' hidden'}><i class="fa-solid fa-ruler-combined"></i> Made for ${esc(sizeName(E.made.as.label_size))}, shown as it prints on the ${esc(sizeName(d.label_size))} in ${esc(thePrinter(S.printer))}.${flagOn(E.made.as) && !flagOn(d) ? ' Cable flags need continuous tape.' : ''}</div>` : ''}
             <div class="fill-in" id="edFields"></div>
             <div class="file-step" id="edFileStep" hidden>
                 <button class="btn quiet icon" type="button" data-file="-1" title="Previous file" aria-label="Previous file"><i class="fa-solid fa-chevron-left"></i></button>
@@ -3138,6 +3146,9 @@ const drawStage = latest(async () => {
             const missing = choicesMissing(editItem(E));
             fitsNote($('#edFits'), missing.length ? `Type the choices of [${missing[0]}] in Blank settings.` : w, err, E.design, () => renderEditor());
         }
+        // Which tape it was made for is said where it does not fit as it is
+        const made = $('#edMade');
+        if (made && E.made && !flagLost(E)) made.hidden = empty || !(w || err || layoutProblem(onTape(E.design)));
         editorFailed = !!refused;
         printable(empty);
     }, empty);
