@@ -97,6 +97,21 @@ def test_repository_save_list_load_delete_and_preview(tmp_path, label: str):
     assert f'repo_test_{label}.json' not in names
 
 
+def test_first_line_fields_of_a_loaded_label(tmp_path):
+    # The settings of the first line, without lines the defaults
+    from app import get_fonts
+    config = make_client(tmp_path).application.config
+    defaults = {'font_size': str(config['LABEL_DEFAULT_FONT_SIZE']), 'font_inverted': False, 'font': get_fonts().get_default_font()[0],
+                'font_align': 'left', 'font_checkbox': False, 'font_color': 'black',
+                'line_spacing': str(config['LABEL_DEFAULT_LINE_SPACING'])}
+    assert fill_first_line_fields([], {'name': 'x'}) == dict(defaults, name='x')
+    assert fill_first_line_fields([{'text': 'x'}], {}) == defaults
+    first = {'size': 30, 'inverted': 1, 'font': 'DejaVu Sans,Bold', 'align': 'right', 'checkbox': True, 'color': 'red', 'line_spacing': 150}
+    assert fill_first_line_fields([first, {'size': 10, 'inverted': 0}], {}) == {
+        'font_size': '30', 'font_inverted': True, 'font': 'DejaVu Sans,Bold', 'font_align': 'right', 'font_checkbox': True,
+        'font_color': 'red', 'line_spacing': '150'}
+
+
 def test_save_image_restore_other_and_print(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
 

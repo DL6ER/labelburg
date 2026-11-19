@@ -168,20 +168,12 @@ def image_to_png_bytes(im: Image.Image, gray: bool = False) -> bytes:
 def fill_first_line_fields(text, data: dict):
     fonts = get_fonts()
     # Restore zeroth line font settings or use defaults
-    if len(text) > 0:
-        data['font_size'] = str(text[0].get('size', current_app.config['LABEL_DEFAULT_FONT_SIZE']))
-        data['font_inverted'] = True if text[0].get('inverted', 0) else False
-        data['font'] = text[0].get('font', fonts.get_default_font()[0])
-        data['font_align'] = text[0].get('align', 'left')
-        data['font_checkbox'] = True if text[0].get('checkbox', 0) else False
-        data['font_color'] = text[0].get('color', 'black')
-        data['line_spacing'] = str(text[0].get('line_spacing', current_app.config['LABEL_DEFAULT_LINE_SPACING']))
-    else:
-        data['font_size'] = str(current_app.config['LABEL_DEFAULT_FONT_SIZE'])
-        data['font_inverted'] = False
-        data['font'] = fonts.get_default_font()[0]
-        data['font_align'] = 'left'
-        data['font_checkbox'] = False
-        data['font_color'] = 'black'
-        data['line_spacing'] = str(current_app.config['LABEL_DEFAULT_LINE_SPACING'])
+    first = text[0] if len(text) > 0 else {}
+    data['font_size'] = str(first.get('size', current_app.config['LABEL_DEFAULT_FONT_SIZE']))
+    data['font_inverted'] = bool(first.get('inverted', 0))
+    data['font'] = first.get('font', fonts.get_default_font()[0])
+    data['font_align'] = first.get('align', 'left')
+    data['font_checkbox'] = bool(first.get('checkbox', 0))
+    data['font_color'] = first.get('color', 'black')
+    data['line_spacing'] = str(first.get('line_spacing', current_app.config['LABEL_DEFAULT_LINE_SPACING']))
     return data
