@@ -745,12 +745,33 @@ def test_look_for_printers_looks_also_for_those_that_did_not_answer(designer):
     assert 'look=1' in request.value.url
 
 
+@pytest.mark.parametrize('path, followed', [('usbip://192.0.2.7/1-4.1.3', True), ('usb://0x3513:0x0002', True),
+                                             ('file:///dev/usb/lp0', True), ('bt://00:00:5E:00:53:01', False),
+                                             ('tcp://192.0.2.7', False), ('simulation', False)])
+def test_only_a_printer_on_usb_is_asked_on_its_own(designer, path, followed):
+    # Asking a printer on the network or on Bluetooth that often costs, they
+    # are asked with the others every 20 s
+    asked = []
+    designer.route('**/api/printer_status?printer=*', lambda route: (asked.append(route.request.url), route.fulfill(status=404, body='{}')))
+    designer.evaluate(f"() => {{ S.printer = Object.assign({{}}, S.printer, {{ path: '{path}' }}); S.printers = [S.printer]; return followPrinter(); }}")
+    assert len(asked) == followed
+
+
 def test_printer_with_a_low_battery_asks_to_charge_it(designer):
     hint = 'The battery is low, charge the printer.'
     for low in (True, False):
         designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ status_type: 'Reply to status request', battery_low: {str(low).lower()} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
         assert (hint in designer.inner_text('.plist')) is low
         assert designer.evaluate('() => printerState(S.printer).text') == 'Ready'
+        designer.evaluate('() => closeLayer(true)')
+
+
+def test_printer_tells_its_battery_in_percent(designer):
+    for battery, shown in ((75, 'Battery 75%'), (None, None)):
+        value = 'null' if battery is None else battery
+        designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ status_type: 'Reply to status request', battery: {value} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
+        text = designer.inner_text('.plist')
+        assert (shown in text) if shown else 'Battery' not in text
         designer.evaluate('() => closeLayer(true)')
 
 

@@ -96,6 +96,8 @@ class PrinterQueue:
         # The end of the labels that leaves the printer first, top or bottom,
         # None as the driver prints them
         self.leaves_first = None
+        # mm its labels are moved right and down, as calibrated for the printer
+        self.offset = (0.0, 0.0)
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):
@@ -145,15 +147,31 @@ class PrinterQueue:
             fast = all(entry['fast'] for entry in entries)
             red = 'red' in str(self.label_size)
             mode = (fast, any(entry['high_res'] for entry in entries), red)
-            lengths = self.driver.label_lengths(job) or [0.0] * len(entries)
-            progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
-            printed = False
-            try:
-                message = self.driver.send(self, job)
-                printed = not message
-                return message
-            finally:
-                progress.finish(self.device_specifier, printed)
+            return self._send(job, len(entries), mode)
+
+    def _send(self, job, labels: int, mode: tuple[bool, bool, bool]) -> str:
+        """Send the job of the locked printer, its progress counted."""
+        fast, _, red = mode
+        lengths = self.driver.label_lengths(job) or [0.0] * labels
+        progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
+        printed = False
+        try:
+            message = self.driver.send(self, job)
+            printed = not message
+            return message
+        finally:
+            progress.finish(self.device_specifier, printed)
+
+    def print_calibration(self) -> str:
+        """Print the calibration label of the printer, see
+        Driver.calibration_job()."""
+        if is_simulation(self.device_specifier):
+            return ''
+        with devices.device_lock(self.device_specifier) as acquired:
+            if not acquired:
+                logger.warning('Printer %s is busy with another job', self.device_specifier)
+                return "Printer is busy with another print job, please try again"
+            return self._send(self.driver.calibration_job(self), 1, (False, False, False))
 
 
 def _discovered_label_printers() -> list[tuple[str, str]]:
@@ -244,6 +262,30 @@ def _configured_states(printers) -> list[dict]:
             asking = devices.failed_printer_state(device, TimeoutError(), model)
             states.append(dict(asking, errors=[], status_type=ASKING))
     return states
+
+
+def status_of_printer(config: Config, path: str) -> dict | None:
+    """The status of one printer the label designer lists, asked again, e.g.
+    one on USB it follows closely; None for a printer it does not list."""
+    if config.get('PRINTERS'):
+        listed = {device: (model, name) for model, device, name in configured_printers(config)}
+    elif config['PRINTER_PRINTER'] == '?':
+        listed = {p['path']: (p.get('model', 'Unknown'), '') for p in _cached_printers}
+    else:
+        listed = {config['PRINTER_PRINTER']: (drivers.canonical(config['PRINTER_MODEL']), '')}
+    if path not in listed or is_simulation(path):
+        return None
+    model, name = listed[path]
+    try:
+        state = _query_configured(model, path)
+    except Exception as e:
+        logger.info('Status query of %s failed: %s', path, e)
+        state = devices.failed_printer_state(path, e, model)
+    state.setdefault('path', path)
+    if name:
+        state['name'] = name
+    state.setdefault('red_support', _red_support(state.get('model', model)))
+    return state
 
 
 def device_state(device: str, model: str) -> dict:

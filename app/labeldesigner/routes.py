@@ -24,7 +24,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, resolution_problem
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, PrinterQueue, configured_printers, device_state, get_ptr_status, is_simulation
+from .printer import BUSY, PrinterQueue, configured_printers, device_state, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -1131,7 +1131,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data['blanks'] = _requested_blanks(data)
         device, model = _resolved_printer(requested_printer, _requested('model'))
         data, kept = _stored_as_printed(data, device, model)
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=data['label_size'], resolved=True)
+        printer = _queue(model, device, data['label_size'])
 
         # Determine printing options (print_count, cutting, high_res)
         print_count = _check_print_count(_whole(_option('print_count', data, 1)))
@@ -1362,13 +1362,24 @@ def get_printer_status():
     # when asked, see devices.note_answer()
     if request.args.get('look') == '1':
         look_again()
-    status = get_ptr_status(current_app.config)
+    # One printer, e.g. on USB, which the label designer asks every 2 s
+    if 'printer' in request.args:
+        one = status_of_printer(current_app.config, request.args['printer'])
+        if one is None:
+            return {'message': 'No such printer'}, 404
+        status = {'printers': [one]}
+        told = [one]
+    else:
+        status = get_ptr_status(current_app.config)
+        told = [status] + status.get('printers', [])
     kept = _kept_settings()
     # The VC-500W prints in color, the label designer then offers colors
-    for printer in [status] + status.get('printers', []):
+    for printer in told:
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
+            printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
         # Labels are shown and printed on the tape in the printer
         printed_on = _tape_of(printer, model, printer['settings'])
         printer['tape'] = tape.describe(printed_on)
@@ -1380,6 +1391,15 @@ def get_printer_status():
         if job:
             printer['job'] = dict(printer.get('job') or {}, **job)
     return status
+
+
+def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
+    """A print queue for the printer, resolved before, its labels moved as
+    it is calibrated."""
+    queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
+    calibration = printer_settings.calibration_of(_kept_settings(), device)
+    queue.offset = (calibration['across'], calibration['along'])
+    return queue
 
 
 def _kept_settings(changing: bool = False) -> dict:
@@ -1488,6 +1508,113 @@ def printer_settings_route():
     return jsonify({'success': True, 'settings': settings, 'tape': tape.describe(loaded)})
 
 
+def _millimeters(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(printer_settings.CALIBRATION_MESSAGE) from None
+
+
+@bp.route('/api/calibration', methods=['GET', 'POST'])
+def calibration_route():
+    """The calibration of the print position of a printer. POST sets it from
+    the numbers read left and right on a calibration label printed with
+    across and along (as kept if left out), or moves it to across and along,
+    or notes the roll it holds for. With save=0 it only answers what that
+    gives, e.g. for the label designer before the user saves."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model, driver = _calibrating(values)
+        if request.method == 'GET':
+            kept = _kept_settings()
+            label_size = values.get('label_size') or printer_settings.of_printer(kept, device).get('label_size', '')
+            return jsonify({**printer_settings.calibration_of(kept, device), 'kind': driver.calibration_kind(model, label_size)})
+        # Numbers read on the label are given on both sides, none left empty
+        if any(name in values and values[name] in (None, '') for name in ('left', 'right')):
+            raise ValueError(printer_settings.CALIBRATION_MESSAGE)
+        given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along')
+                 if values.get(name) not in (None, '')}
+        roll, shift = values.get('roll') or None, None
+
+        def worked_out(kept: dict) -> tuple[float, float, str | None]:
+            nonlocal shift
+            across, along = given.get('across', kept['across']), given.get('along', kept['along'])
+            if 'left' in given or 'right' in given:
+                if 'left' not in given or 'right' not in given:
+                    raise ValueError(printer_settings.CALIBRATION_MESSAGE)
+                shift = printer_settings.from_readings(given['left'], given['right'])
+                across = round((across - shift) * 4) / 4
+            elif not given and not roll:
+                raise ValueError(printer_settings.CALIBRATION_MESSAGE)
+            return across, along, roll or kept['roll']
+        if str(values.get('save', '1')).lower() in ('0', 'false'):
+            across, along, roll = worked_out(printer_settings.calibration_of(_kept_settings(), device))
+            printer_settings.checked_offsets(across, along, roll)
+            return jsonify({'success': True, 'calibration': {'across': across, 'along': along, 'roll': roll}, 'shift': shift})
+        repo = _get_repo_dir()
+        with _saving(repo):
+            data = _kept_settings(changing=True)
+            data = printer_settings.calibrated(data, device, *worked_out(printer_settings.calibration_of(data, device)))
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except LabelsBusy:
+        return _busy()
+    except OSError as e:
+        current_app.logger.warning('Cannot save the calibration of the printer: %s', e)
+        return make_response(jsonify({'success': False, 'message': refusals.SETTINGS_NOT_SAVED}), 500)
+    except ValueError as e:
+        _log_refused_request('Calibrating', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+    return jsonify({'success': True, 'calibration': printer_settings.calibration_of(data, device), 'shift': shift})
+
+
+def _calibrating(values: dict) -> tuple[str, str, object]:
+    """The device, model and driver of the printer a request names, which
+    has to offer calibration."""
+    device, model = _resolved_printer(values.pop('printer', None), values.pop('model', None))
+    driver = drivers.for_model(model)
+    if not driver.capabilities(model)['calibration']:
+        raise ValueError(printer_settings.NO_CALIBRATION)
+    return device, model, driver
+
+
+@bp.route('/api/calibration/print', methods=['POST'])
+def print_calibration():
+    """Print the calibration label for the roll in the printer, moved as
+    kept for it or by across and along not saved yet."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model, _ = _calibrating(values)
+        label_size = values.get('label_size') or printer_settings.of_printer(_kept_settings(), device).get('label_size', '')
+        queue = _queue(model, device, label_size)
+        offsets = {name: _millimeters(values[name]) for name in ('across', 'along') if values.get(name) not in (None, '')}
+        if offsets:
+            queue.offset = (offsets.get('across', queue.offset[0]), offsets.get('along', queue.offset[1]))
+            printer_settings.checked_offsets(*queue.offset)
+        message = queue.print_calibration()
+    except Exception as e:
+        _log_refused_request('Printing the calibration label', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+    if message:
+        return make_response(jsonify({'success': False, 'message': message}), PRINTER_FAILED)
+    return jsonify({'success': True})
+
+
+@bp.route('/api/calibration/example.png', methods=['GET'])
+def calibration_example():
+    """A calibration label printed off-center, which shows where to read it."""
+    values = request.args.to_dict()
+    try:
+        _, _, driver = _calibrating(values)
+        image = driver.calibration_example(values.get('kind', ''))
+    except ValueError as e:
+        _log_refused_request('The example of a calibration label', e)
+        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+    response = make_response(image)
+    response.headers.set('Content-type', 'image/png')
+    return response
+
+
 @bp.route('/api/print', methods=['POST'])
 def print_label():
     """
@@ -1503,7 +1630,7 @@ def print_label():
         loaded = _loaded_tape(device, model, settings)
         values = printer_settings.for_printing(settings, model, _sized(request.values.to_dict(flat=True), loaded))
         values = tape.on_tape(values, loaded)
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=values['label_size'], resolved=True)
+        printer = _queue(model, device, values['label_size'])
         print_count = _check_print_count(_whole_or(values.get('print_count'), 1))
         printer.cut, printer.half_cut, printer.chain = _cutting(values.get)
         check_cut(printer.cut, printer.model)
@@ -2397,7 +2524,7 @@ def webhook_print():
 
     # Process and queue each image
     try:
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
+        printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
@@ -2505,7 +2632,7 @@ def homebox(name: str | None = None):
         return make_response(jsonify({'success': False, 'message': HOMEBOX_NO_IMAGE}), 400)
     try:
         device, model = _printer(device, model)
-        printer = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
+        printer = _queue(model, device, label_size)
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
         printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))

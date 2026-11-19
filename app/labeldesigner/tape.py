@@ -71,9 +71,13 @@ def _reported(state: dict) -> list[str]:
     if not width and not length:
         return []
     red = _red(state)
-    return [s for s, label in SIZES.items()
-            if _takes(s, state.get('model')) and label.tape_size[1] == length
-            and (not width or label.tape_size[0] == width) and red in (None, label.color == 1)]
+    found = [s for s, label in SIZES.items()
+             if _takes(s, state.get('model')) and label.tape_size[1] == length
+             and (not width or label.tape_size[0] == width) and red in (None, label.color == 1)]
+    # Round and square labels of the same size, e.g. of a B1, by what the
+    # printer tells
+    round_ = 'round' in (state.get('media_type') or '').lower()
+    return sorted(found, key=lambda s: (SIZES[s].form_factor == FormFactor.ROUND_DIE_CUT) != round_)
 
 
 def detect(state: dict, manual: str, default_size: str) -> Tape:

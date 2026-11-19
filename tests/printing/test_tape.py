@@ -136,6 +136,10 @@ def test_no_label_size_is_placed_on_a_tape():
     (reported('PT-P750W', 12), 'pt12'),
     (reported('VC-500W', 12), 'vc12'),
     (reported('Niimbot/D110_M', 12, 40), 'niimbot12x40'),
+    # Round and square labels of the same size, told apart by the printer
+    (reported('Niimbot/B1', 50, 50, media_type='Round die-cut labels'), 'niimbotd50'),
+    (reported('Niimbot/B1', 50, 50, media_type='Die-cut labels'), 'niimbot50x50'),
+    (reported('QL-800', 24, 24, media_type='Die-cut labels'), 'd24'),
     # A printer of no known model takes every label size
     (reported('Unknown', 29, 90), '29x90'),
 ])
