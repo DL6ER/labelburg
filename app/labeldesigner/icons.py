@@ -6,12 +6,15 @@ tools/update_fonts.py and tools/symbols_font.py."""
 import functools
 import json
 import os
+import re
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static')
 MDI_DIR = os.path.join(STATIC_DIR, 'mdi')
 FONT_PATH = os.path.join(MDI_DIR, 'materialdesignicons-webfont.ttf')
 SYMBOLS_DIR = os.path.join(STATIC_DIR, 'symbols')
 SYMBOLS_FONT_PATH = os.path.join(SYMBOLS_DIR, 'symbols.ttf')
+# The characters of the icons and symbols, see font_of()
+_ICON_CHARS = re.compile('[\U000F0000-\U000FFFFD\U00100000-\U0010FFFD]')
 
 
 @functools.cache
@@ -46,3 +49,8 @@ def font_of(char: str) -> str | None:
 def is_icon(char: str) -> bool:
     """Whether the character is drawn with an icon or symbol font."""
     return font_of(char) is not None
+
+
+def has_icon(text: str) -> bool:
+    """Whether text has a character drawn with an icon or symbol font."""
+    return _ICON_CHARS.search(text) is not None

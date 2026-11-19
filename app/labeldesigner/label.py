@@ -1322,23 +1322,24 @@ class SimpleLabel:
         """The bounding box of a line of text at xy, also drawn in fill if
         given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
         on the same baseline as the text around them."""
-        if not any(icons.is_icon(char) for char in text):
+        if not icons.has_icon(text):
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
         runs = [(''.join(chars), self._get_font(path, font.size, measuring=measuring) if path else font)
                 for path, chars in itertools.groupby(text, icons.font_of)]
-        width = sum(run_font.getlength(run) for run, run_font in runs)
+        lengths = [run_font.getlength(run) for run, run_font in runs]
+        width = sum(lengths)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]
         # The runs share the baseline below the top of an "H"
-        baseline = xy[1] + self._baseline(draw, text, font)
+        baseline = xy[1] + self._baseline(draw, 'H', font)
         boxes = []
-        for run, run_font in runs:
+        for (run, run_font), length in zip(runs, lengths):
             if fill is not None:
                 draw.text((x, baseline), run, fill, font=run_font, anchor='ls')
             boxes.append(draw.textbbox((x, baseline), run, font=run_font, anchor='ls'))
-            x += run_font.getlength(run)
+            x += length
         return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
 
     @staticmethod
