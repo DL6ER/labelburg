@@ -9,6 +9,15 @@ from . import drivers
 from .drivers import LABELS, MODELS
 from .drivers.base import shown
 
+# The label sizes by their id
+SIZES = {label.identifier: label for label in LABELS}
+
+
+def label_of(label_size) -> Label | None:
+    """The label size of the id, None for an unknown one, also for an id that
+    is no text, e.g. a list in a label edited by hand."""
+    return SIZES.get(label_size) if isinstance(label_size, str) else None
+
 
 def label_name(label: Label) -> str:
     """Name of a label size, made of its size where its driver does not name
@@ -33,7 +42,7 @@ def label_palette(label: Label) -> str:
 def label_dpi(label_size: str, high_res: bool) -> int:
     """The resolution labels of a size are made with."""
     driver = drivers.for_label(label_size) or drivers.BROTHER
-    label = next((label for label in LABELS if label.identifier == label_size), None)
+    label = label_of(label_size)
     if label is None:
         return driver.dpi(high_res)
     return driver.label_dpi(label)[1 if high_res else 0]
@@ -49,7 +58,7 @@ def label_printers(label: Label) -> list:
 def label_size_problem(label_size: str, model: str) -> str:
     """Why the printer model cannot print the label size, or an empty string
     if it can. Unknown models are left to the Brother driver."""
-    label = next((label for label in LABELS if label.identifier == label_size), None)
+    label = label_of(label_size)
     if label is None:
         return f'Unknown label size: {label_size}'
     if model in MODELS and not label_fits(label, model):

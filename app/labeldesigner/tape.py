@@ -4,10 +4,11 @@ from dataclasses import dataclass, field
 
 from . import drivers
 from .drivers.labels import FormFactor
-from .label_names import LABELS, label_printers, label_size_problem
+from .label_names import LABELS, SIZES, label_printers, label_size_problem
 
-SIZES = {label.identifier: label for label in LABELS}
 TAKEN_BY = {label.identifier: label_printers(label) for label in LABELS}
+# The models some label size names
+_LISTED = set().union(*TAKEN_BY.values())
 ENDLESS = (FormFactor.ENDLESS, FormFactor.PTOUCH_ENDLESS)
 
 
@@ -34,7 +35,7 @@ class Tape:
 def _takes(size_id: str, model) -> bool:
     """Whether a printer takes a label size, any size that has printers if
     no label lists its model."""
-    known = bool(model) and any(model in models for models in TAKEN_BY.values())
+    known = bool(model) and model in _LISTED
     return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id])
 
 
