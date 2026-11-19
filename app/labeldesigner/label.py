@@ -55,6 +55,9 @@ MAX_DATE_FORMAT_LENGTH = 100
 # this long
 MAX_BLANK_CHOICES = 50
 MAX_BLANK_CHOICE_LENGTH = 200
+# The characters of random texts, each line but the last is as high as they
+# are in its font
+PRINTABLE = string.ascii_letters + string.digits + string.punctuation
 DEFAULT_FONT_SIZE = 12
 
 # Pillow refuses to open images with more than twice this number of pixels,
@@ -625,7 +628,7 @@ class SimpleLabel:
                 raise TextTooLong("Text is too long")
             if match.group(2):
                 line['shift'] = True
-            return ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=length))
+            return ''.join(random.choices(PRINTABLE, k=length))
         substitute(r"\{\{random(?:\:(\d+))?(?:\:(s(hift)?))?\}\}", random_replacer)
         text = ''.join(piece + value for piece, value in zip(pieces, values + ['']))
         if not marks:
@@ -1197,8 +1200,8 @@ class SimpleLabel:
                     bbox = (bbox[0], y, bbox[2], y + bottom - top)
                 elif not IS_LAST_LINE:
                     # Some characters may need special height
-                    all_characters = ''.join(string.ascii_letters + string.digits + string.punctuation)
-                    Ag = draw.textbbox((0, y), all_characters, font, anchor="lt")
+                    top, bottom = _printable_extent(font)
+                    Ag = (0, y + top, 0, y + bottom)
                     # Get bbox with width of text and dummy height
                     bbox = (bbox[0], Ag[1], bbox[2], Ag[3])
                 # The box is drawn from the top of the line, its lower edge
@@ -1706,3 +1709,12 @@ def _open_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
 # The sizes tried while text is fitted to the label, so that they do not
 # push out those of the labels drawn
 _load_measured_font = functools.lru_cache(maxsize=128)(_open_font)
+
+
+# By font object, as many as there are fonts measured
+@functools.lru_cache(maxsize=128)
+def _printable_extent(font) -> tuple[int, int]:
+    """Top and bottom of PRINTABLE in font, drawn from the top of its
+    letters at 0."""
+    box = ImageDraw.Draw(Image.new('L', (1, 1))).textbbox((0, 0), PRINTABLE, font, anchor='lt')
+    return box[1], box[3]
