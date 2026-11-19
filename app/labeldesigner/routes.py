@@ -29,7 +29,8 @@ from .printer import BUSY, PrinterQueue, configured_printers, device_state, get_
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
-from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_palette, label_printers, label_size_problem, length_limits
+from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
+from .printer_settings import CUTS
 from flask import current_app, g, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
@@ -89,11 +90,14 @@ def reject_cross_origin_requests():
     if urlparse(origin).netloc == request.host:
         return None
     current_app.logger.warning(f"Rejected cross-origin {request.method} {request.path} from {origin}")
-    return make_response(jsonify({'success': False, 'message': 'Cross-origin request rejected'}), 403)
+    return _fail('Cross-origin request rejected', 403)
 
 
 def open_image(file: FileStorage | BinaryIO, filename: str, dpi: int) -> Image.Image:
     """Open an uploaded or stored image, of a PDF the first page."""
+    # Without a page selection the page count is not needed
+    if _is_pdf(file, filename):
+        return pdffile_to_image(file, dpi, 1)
     return open_images(file, filename, dpi, first_only=True)[0][0]
 
 
@@ -105,15 +109,16 @@ def _is_pdf(file: FileStorage | BinaryIO, filename: str) -> bool:
 
 
 def open_images(file: FileStorage | BinaryIO, filename: str, dpi: int, pdf_pages: str = '',
-                first_only: bool = False, copies: int = 1) -> tuple[list[Image.Image], int | None]:
+                first_only: bool = False, copies: int = 1, page_count: int | None = None) -> tuple[list[Image.Image], int | None]:
     """Open an uploaded or stored image. PDFs are rendered with the given
     resolution, one image for each page pdf_pages selects (only the first of
     them with first_only). The second value is the page count of a PDF,
-    None for other files. Files without extension are left to Pillow to
-    identify."""
+    None for other files; page_count where it was read before. Files without
+    extension are left to Pillow to identify."""
     ext = os.path.splitext(filename or '')[1].lower()
-    if _is_pdf(file, filename):
-        page_count = pdf_page_count(file)
+    if page_count is not None or _is_pdf(file, filename):
+        if page_count is None:
+            page_count = pdf_page_count(file)
         pages = selected_pdf_pages(pdf_pages, page_count)
         if first_only:
             pages = pages[:1]
@@ -209,7 +214,7 @@ def index():
     label_sizes = [
         {'id': label.identifier, 'name': label_name(label), 'form': label.form_factor.name.lower(),
          'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
-         'palette': label_palette(label), 'models': label_printers(label),
+         'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set
          'length': list(limits[:2]) if (limits := length_limits(label)) else None}
@@ -323,8 +328,13 @@ class LabelsBusy(Exception):
     SAVE_LOCK_TIMEOUT."""
 
 
+def _fail(message: str, status: int):
+    """The answer to a request that was refused or failed."""
+    return make_response(jsonify({'success': False, 'message': message}), status)
+
+
 def _busy():
-    return make_response(jsonify({'success': False, 'message': 'Another label is being saved, try again'}), 503)
+    return _fail('Another label is being saved, try again', 503)
 
 
 # Told once where the folder of the labels cannot be locked
@@ -567,7 +577,8 @@ def _label_size_name(label_size: str | None) -> str | None:
     """The readable name of a label size, e.g. "62 mm endless (DK-22205 / DK-2205)"."""
     if not label_size:
         return None
-    return next((label_name(label) for label in LABELS if label.identifier == label_size), str(label_size))
+    label = label_of(label_size)
+    return label_name(label) if label is not None else str(label_size)
 
 
 @bp.route('/api/repository/save', methods=['POST'])
@@ -576,12 +587,12 @@ def repo_save():
     # written, e.g. 2.50
     data = dict(_json_body())
     if not request.environ.get('labeldesigner.json_object'):
-        return make_response(jsonify({'success': False, 'message': 'No JSON payload provided'}), 400)
+        return _fail('No JSON payload provided', 400)
     # The name as for printing, previewing and removing: of the address,
     # else of the body
     name = _requested_name()
     if not name:
-        return make_response(jsonify({'success': False, 'message': 'No name provided'}), 400)
+        return _fail('No name provided', 400)
     # Checked as when the label is printed, which would refuse them. Blanks
     # and their settings sent as JSON text are saved as objects.
     try:
@@ -604,17 +615,16 @@ def repo_save():
         _image_text_gap(data.get('image_text_gap'))
         _text_fit(data)
         cut = _cutting(data.get)[0]
-        _text_wrap(data)
-        _mirror(data)
+        _flag(data, 'text_wrap')
+        _flag(data, 'mirror')
         check_image_position(data.get('image_position'))
         check_vertical_align(data.get('vertical_align'))
         check_image_mode(data.get('image_mode'))
         if 'label_size' in data:
             data['label_size'] = stored_label_size(data['label_size'])
-            label = next((label for label in LABELS if label.identifier == data['label_size']), None)
-            if label is None:
+            if label_of(data['label_size']) is None:
                 raise ValueError('Unknown label_size')
-            for model in label_printers(label):
+            for model in tape.TAKEN_BY[data['label_size']]:
                 check_cut(cut, model)
         # Without one it prints on the loaded tape, unknown here, or on
         # LABEL_DEFAULT_SIZE; checked as on 62 where that names no label size
@@ -623,11 +633,10 @@ def repo_save():
         _printed_length(_label_length(data.get('label_length')), size, _cable_flag(data, size.form_factor))
         check_code_correction(check_code_type(data.get('barcode_type')), data.get('qrcode_correction'))
     except ValueError as e:
-        _log_refused_request('Saving the label', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+        return _refused('Saving the label', e, refusals.INVALID_INPUT)
     filename = secure_filename(name)
     if not filename:
-        return make_response(jsonify({'success': False, 'message': 'Invalid name'}), 400)
+        return _fail('Invalid name', 400)
     if not filename.lower().endswith('.json'):
         filename = filename + '.json'
     # The name kept with it is the one it is saved under
@@ -644,7 +653,7 @@ def repo_save():
     except (TypeError, ValueError):
         replace = None
     if replace not in (0, 1):
-        return make_response(jsonify({'success': False, 'message': 'replace must be true or false'}), 400)
+        return _fail('replace must be true or false', 400)
     replace = replace == 1
 
     # Accept JSON image payloads that include raw base64 image data in
@@ -658,7 +667,7 @@ def repo_save():
         try:
             image_bytes = base64.b64decode(img_b64)
         except ValueError:
-            return make_response(jsonify({'success': False, 'message': 'Invalid image data'}), 400)
+            return _fail('Invalid image data', 400)
 
     try:
         # Extract text properties. The label designer sends them as JSON string
@@ -680,15 +689,12 @@ def repo_save():
         elif not isinstance(data.get('image'), str) or data['image'] not in own_images:
             data.pop('image', None)
 
-        # Remove raw image data from JSON before saving
-        if 'image_data' in data:
-            del data['image_data']
-
-        # Remove redundant information about zeroth line font settings
-        # and marks of blanks, which are for previews only
-        for key in ['font_size', 'font_inverted', 'font', 'font_align', 'font_checkbox', 'font_color', 'line_spacing', 'fontSettingsPerLine', 'mark_blanks']:
-            if key in data:
-                del data[key]
+        # Remove raw image data from JSON before saving, redundant information
+        # about zeroth line font settings and marks of blanks, which are for
+        # previews only
+        for key in ('image_data', 'font_size', 'font_inverted', 'font', 'font_align', 'font_checkbox', 'font_color',
+                    'line_spacing', 'fontSettingsPerLine', 'mark_blanks'):
+            data.pop(key, None)
 
         # Finally, save the JSON file. The new image is written beforehand but
         # only put in place once the label was saved, and images stored with
@@ -712,12 +718,12 @@ def repo_save():
             if staged_image is not None:
                 os.remove(staged_image)
     except FileExistsError:
-        return make_response(jsonify({'success': False, 'message': 'A label is saved under this name already'}), 409)
+        return _fail('A label is saved under this name already', 409)
     except LabelsBusy:
         return _busy()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to save file'}), 500)
+        return _fail('Failed to save file', 500)
     return {'success': True, 'name': filename}
 
 
@@ -726,14 +732,13 @@ def repo_tags():
     """Change the tags of a saved label, the rest stays as saved."""
     filename = secure_filename(_requested_name() or '')
     if not filename:
-        return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
+        return _fail('No name specified', 400)
     try:
         if 'tags' not in _json_body() and 'tags' not in _address_or_form():
             raise ValueError(refusals.TAGS_MISSING)
         tags = _tags(_requested('tags'))
     except ValueError as e:
-        _log_refused_request('Changing the tags', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+        return _refused('Changing the tags', e, refusals.INVALID_INPUT)
     repo = _get_repo_dir()
     path = _repo_path(repo, filename)
     try:
@@ -745,7 +750,7 @@ def repo_tags():
                 data['tags'] = tags
             _write_atomically(path, json.dumps(data, ensure_ascii=False, indent=2, default=str).encode('utf-8'))
     except FileNotFoundError:
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
     return jsonify({'success': True, 'tags': tags})
@@ -755,27 +760,30 @@ def repo_tags():
 def repo_load():
     name = _requested_name()
     if not name:
-        return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
-    filename = secure_filename(name)
+        return _fail('No name specified', 400)
     repo = _get_repo_dir()
-    path = os.path.join(repo, filename)
-    # A name made safe may leave no file name, e.g. '..'
-    if not filename or not os.path.exists(path):
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     try:
         # Not while one is put in place, its image may not be there yet
         with _reading(repo):
-            with open(path, 'r', encoding='utf-8') as fh:
+            with open(_saved_path(repo, name), 'r', encoding='utf-8') as fh:
                 data = json.load(fh)
             return _label_for_designer(data, repo)
     except FileNotFoundError:
-        # Removed by another request since it was looked for
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to load file'}), 500)
+        return _fail('Failed to load file', 500)
+
+
+def _saved_path(repo: str, name: str) -> str:
+    """The file of the saved label name in repo, FileNotFoundError for a
+    name that leaves no file name, e.g. '..'."""
+    filename = secure_filename(name)
+    if not filename:
+        raise FileNotFoundError(name)
+    return os.path.join(repo, filename)
 
 
 def _label_for_designer(data: dict, image_dir: str) -> dict:
@@ -837,27 +845,22 @@ def _code_with_text(data: dict, text) -> list:
 def repo_delete():
     name = _requested_name()
     if not name:
-        return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
-    filename = secure_filename(name)
+        return _fail('No name specified', 400)
     repo = _get_repo_dir()
-    path = os.path.join(repo, filename)
-    # A name made safe may leave no file name, e.g. '..'
-    if not filename or not os.path.exists(path):
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     try:
+        path = _saved_path(repo, name)
         with _saving(repo):
             os.remove(path)
             # Also remove the image file stored alongside the JSON
-            _remove_repo_images(repo, os.path.splitext(filename)[0])
+            _remove_repo_images(repo, os.path.splitext(os.path.basename(path))[0])
         return {'success': True}
     except FileNotFoundError:
-        # Removed by another request since it was looked for
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to delete file'}), 500)
+        return _fail('Failed to delete file', 500)
 
 
 def _requested(key: str):
@@ -894,9 +897,6 @@ def _option(key: str, stored: dict, default):
     0, else as stored with it, else default."""
     value = _requested(key)
     return value if value is not None else stored.get(key) or default
-
-
-CUTS = ('each', 'last', 'none')
 
 
 def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
@@ -1019,40 +1019,44 @@ def _load_repo_json(name: str) -> tuple[dict, bytes | None]:
     """A saved label and the content of the image saved with it, None
     without one. Read while no label is put in place: one saved meanwhile
     may not have its image in place yet."""
-    filename = secure_filename(name)
     repo = _get_repo_dir()
-    path = os.path.join(repo, filename)
+    path = _saved_path(repo, name)
     with _reading(repo):
-        if not filename or not os.path.exists(path):
-            raise FileNotFoundError(name)
         with open(path, 'r', encoding='utf-8') as fh:
             data = json.load(fh)
         if 'label_size' in data:
             data['label_size'] = stored_label_size(data['label_size'])
         image, image_bytes = data.get('image'), None
-        if isinstance(image, str) and image and os.path.exists(os.path.join(repo, secure_filename(image))):
-            with open(os.path.join(repo, secure_filename(image)), 'rb') as fh:
+        if isinstance(image, str) and image and os.path.exists(image_path := os.path.join(repo, secure_filename(image))):
+            with open(image_path, 'rb') as fh:
                 image_bytes = fh.read()
     data['text'] = json.dumps(data.get('text', []))
     return data, image_bytes
 
 
-@bp.route('/api/repository/preview', methods=['GET', 'POST'])
-def repo_preview():
+def _saved_response(respond, failure: str):
+    """respond(data, image_bytes) for the saved label the request names and
+    the content of its image, else why there is none: failure where it
+    cannot be read."""
     name = _requested_name()
     if not name:
-        return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
+        return _fail('No name specified', 400)
     try:
         data, image_bytes = _load_repo_json(name)
     except FileNotFoundError:
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to preview file'}), 500)
+        return _fail(failure, 500)
+    return respond(data, image_bytes)
 
-    return _preview_response(data, _get_repo_dir(), image_bytes, on_tape=True)
+
+@bp.route('/api/repository/preview', methods=['GET', 'POST'])
+def repo_preview():
+    return _saved_response(lambda data, image_bytes: _preview_response(data, _get_repo_dir(), image_bytes, on_tape=True),
+                           'Failed to preview file')
 
 
 def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None, mark_blanks: bool = False,
@@ -1061,20 +1065,15 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
     image_bytes where it was read with the label, as PNG or base64
     (return_format). With mark_blanks, blanks without a value show their
     name. With on_tape, it is made as _print_stored_label() prints it."""
-    # allow override printer, in a JSON body or the form or query
-    printer = _requested('printer')
-    if printer:
-        data['printer'] = printer
     try:
         data['blanks'] = _requested_blanks(data)
         if on_tape:
-            data, _ = _stored_as_printed(data, *_resolved_printer(printer, _requested('model')))
+            data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
         images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
         label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data))
         im = label.generate()
     except Exception as e:
-        _log_refused_request('Preview', e)
-        return make_response(jsonify({'message': refusals.message(e, refusals.PREVIEW_FAILED)}), 413 if isinstance(e, TextTooLong) else 400)
+        return _preview_refused(e)
 
     response = _preview_of(label, im, _requested('return_format') or 'png')
     # Of a PDF each selected page prints as a label of its own
@@ -1087,19 +1086,8 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
 def repo_print():
     # Print a saved repository template by name. The server will load the JSON
     # and perform the same printing logic as the /api/print endpoint.
-    name = _requested_name()
-    if not name:
-        return make_response(jsonify({'success': False, 'message': 'No name specified'}), 400)
-    try:
-        data, image_bytes = _load_repo_json(name)
-    except FileNotFoundError:
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
-    except LabelsBusy:
-        return _busy()
-    except Exception as e:
-        current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to load file'}), 500)
-    return _print_stored_label(data, _get_repo_dir(), image_bytes)
+    return _saved_response(lambda data, image_bytes: _print_stored_label(data, _get_repo_dir(), image_bytes),
+                           'Failed to load file')
 
 
 def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]:
@@ -1111,7 +1099,7 @@ def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]
     requested = {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')}
     # A quality the request names leaves out the label's own, e.g. one
     # saved by the previous label designer
-    if any(requested[key] not in (None, '') for key in ('high_res', 'fast_printing')):
+    if requested['high_res'] is not None or requested['fast_printing'] is not None:
         data = {key: value for key, value in data.items() if key not in ('high_res', 'fast_printing')}
     settings = _settings_of(device)
     loaded = _loaded_tape(device, model, settings)
@@ -1124,15 +1112,10 @@ def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]
 def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None):
     """Print a stored label whose image is in image_dir, or image_bytes where
     it was read with the label, like /api/print."""
-    # Allow overriding printer or other request-like parameters, in a JSON
-    # body or the form or query
-    requested_printer = _requested('printer')
-    if requested_printer:
-        data['printer'] = requested_printer
     # Prepare printer queue using requested or default device/model and label_size from data
     try:
         data['blanks'] = _requested_blanks(data)
-        device, model = _resolved_printer(requested_printer, _requested('model'))
+        device, model = _resolved_printer(_requested('printer'), _requested('model'))
         data, kept = _stored_as_printed(data, device, model)
         printer = _queue(model, device, data['label_size'])
 
@@ -1146,30 +1129,32 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         collate = _requested('collate')
         collate = _whole_or(collate if collate is not None else data.get('collate'), 1) != 0
         # Of the request, else as set for the printer, never of the label
-        printer.leaves_first = _leaves_first(_requested('leaves_first') or kept.get('leaves_first'))
+        printer.leaves_first = _leaves_first(kept.get('leaves_first'))
         # The label and its image have to be generated with the resolution
         # it is printed with
         data['high_res'] = high_res
     except Exception as e:
-        _log_refused_request('Print job', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+        return _refused('Print job', e, refusals.PRINT_FAILED)
+    return _print_job(printer, data, {}, print_count, collate, high_res, fast, _requested('return_format'),
+                      image_dir=image_dir, image_bytes=image_bytes)
 
-    status = ""
+
+def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, collate: bool, high_res: bool, fast: bool,
+               return_format, **stored):
+    """Print print_count copies of the label, of each of its images, see
+    _copies(), and answer how it went. stored tells where the image of a
+    stored label is, see load_label_images()."""
     try:
-        # Of a PDF each selected page is a label of its own
-        images, _ = load_label_images(data, {}, copies=print_count, image_dir=image_dir, image_bytes=image_bytes)
-        labels = _copies(images, print_count, collate)
-        queued = _queue_labels(printer, labels, data, {}, high_res, fast)
+        # Decode the image once, all labels of the job share it. Of a PDF
+        # each selected page is a label of its own.
+        images, _ = load_label_images(data, files, copies=print_count, **stored)
+        queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
         status = printer.process_queue()
     except Exception as e:
-        _log_refused_request('Print job', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
-
-    result = {'success': len(status) == 0}
-    if len(status) > 0:
-        result['message'] = status
-        return make_response(jsonify(result), PRINTER_FAILED)
-    return _printed_image(result, queued, _requested('return_format'))
+        return _refused('Print job', e, refusals.PRINT_FAILED)
+    if status:
+        return _fail(status, PRINTER_FAILED)
+    return _printed_image({'success': True}, queued, return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -1193,14 +1178,14 @@ def _demo_response(label_id: str | None, respond, text_as_json: bool = True):
     """respond(label) for the demo label with the id, or why there is none.
     Only fixed messages are returned, never those of exceptions."""
     if not label_id:
-        return make_response(jsonify({'success': False, 'message': 'No demo label specified'}), 400)
+        return _fail('No demo label specified', 400)
     try:
         data = demos.load(label_id)
     except FileNotFoundError:
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to load the demo label'}), 500)
+        return _fail('Failed to load the demo label', 500)
     if text_as_json:
         data['text'] = json.dumps(data.get('text', []))
     return respond(data)
@@ -1213,7 +1198,7 @@ def demo_load():
             return _label_for_designer(data, demos.IMAGE_DIR)
         except OSError as e:
             current_app.logger.exception(e)
-            return make_response(jsonify({'success': False, 'message': 'Failed to load the demo label'}), 500)
+            return _fail('Failed to load the demo label', 500)
     return _demo_response(_requested_name('id'), respond, text_as_json=False)
 
 
@@ -1286,10 +1271,7 @@ def preview_from_image():
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
     except Exception as e:
-        _log_refused_request('Preview', e)
-        error = 413 if isinstance(e, TextTooLong) else 400
-        # A fixed message, the details are in the log
-        return make_response(jsonify({'message': refusals.message(e, refusals.PREVIEW_FAILED)}), error)
+        return _preview_refused(e)
 
     response = _preview_of(label, im, request.values.get('return_format', 'png'))
     # The label designer offers to choose pages of a PDF with several
@@ -1318,6 +1300,14 @@ def _length_problem(values: dict, im, model: str | None = None) -> str:
     across = _get_label_dimensions(label_size, high_res)[0]
     along = im.height if im.width == across else im.width
     return drivers.for_model(model).length_problem(model, along, high_res)
+
+
+def _preview_refused(error: Exception):
+    """The answer to a preview that cannot be made: a fixed message, the
+    details are in the log."""
+    _log_refused_request('Preview', error)
+    return make_response(jsonify({'message': refusals.message(error, refusals.PREVIEW_FAILED)}),
+                         413 if isinstance(error, TextTooLong) else 400)
 
 
 def _preview_of(label: SimpleLabel, im, return_format: str):
@@ -1506,10 +1496,9 @@ def printer_settings_route():
         return _busy()
     except OSError as e:
         current_app.logger.warning('Cannot save the settings of the printers: %s', e)
-        return make_response(jsonify({'success': False, 'message': refusals.SETTINGS_NOT_SAVED}), 500)
+        return _fail(refusals.SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
-        _log_refused_request('Saving the settings', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+        return _refused('Saving the settings', e, refusals.INVALID_INPUT)
     settings = printer_settings.of_printer(data, device)
     # Shown at once, from the last answer of the printer: asking it may take
     # long, the next status asks it
@@ -1571,10 +1560,9 @@ def calibration_route():
         return _busy()
     except OSError as e:
         current_app.logger.warning('Cannot save the calibration of the printer: %s', e)
-        return make_response(jsonify({'success': False, 'message': refusals.SETTINGS_NOT_SAVED}), 500)
+        return _fail(refusals.SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
-        _log_refused_request('Calibrating', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+        return _refused('Calibrating', e, refusals.INVALID_INPUT)
     return jsonify({'success': True, 'calibration': printer_settings.calibration_of(data, device), 'shift': shift})
 
 
@@ -1603,10 +1591,9 @@ def print_calibration():
             printer_settings.checked_offsets(*queue.offset)
         message = queue.print_calibration()
     except Exception as e:
-        _log_refused_request('Printing the calibration label', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+        return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
     if message:
-        return make_response(jsonify({'success': False, 'message': message}), PRINTER_FAILED)
+        return _fail(message, PRINTER_FAILED)
     return jsonify({'success': True})
 
 
@@ -1618,8 +1605,7 @@ def calibration_example():
         _, _, driver = _calibrating(values)
         image = driver.calibration_example(values.get('kind', ''))
     except ValueError as e:
-        _log_refused_request('The example of a calibration label', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+        return _refused('The example of a calibration label', e, refusals.INVALID_INPUT)
     response = make_response(image)
     response.headers.set('Content-type', 'image/png')
     return response
@@ -1631,7 +1617,6 @@ def print_label():
     API to print a label
     returns: JSON
     """
-    return_dict = {'success': False}
     try:
         device, model = _resolved_printer(request.values.get('printer'), request.values.get('model'), ask=True)
         # What the request leaves out as set in the printer settings, then
@@ -1651,33 +1636,11 @@ def print_label():
     except HTTPException:
         raise
     except PrinterUnreachable as e:
-        return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)
-        return make_response(jsonify(return_dict), PRINTER_FAILED)
+        return _fail(refusals.message(e, refusals.PRINT_FAILED), PRINTER_FAILED)
     except Exception as e:
-        return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)
-        _log_refused_request('Print job', e)
-        return make_response(jsonify(return_dict), 400)
-
-    status = ""
-    try:
-        # Every uploaded image, not only the first
-        files = request.files
-        # Decode the image once, all labels of the job share it. Of a PDF
-        # each selected page is a label of its own.
-        images, _ = load_label_images(values, files, copies=print_count)
-        labels = _copies(images, print_count, collate)
-        queued = _queue_labels(printer, labels, values, files, high_res, fast)
-        status = printer.process_queue()
-    except Exception as e:
-        return_dict['message'] = refusals.message(e, refusals.PRINT_FAILED)
-        _log_refused_request('Print job', e)
-        return make_response(jsonify(return_dict), 400)
-
-    return_dict['success'] = len(status) == 0
-    if len(status) > 0:
-        return_dict['message'] = status
-        return make_response(jsonify(return_dict), PRINTER_FAILED)
-    return _printed_image(return_dict, queued, request.values.get('return_format'))
+        return _refused('Print job', e, refusals.PRINT_FAILED)
+    # Every uploaded image, not only the first
+    return _print_job(printer, values, request.files, print_count, collate, high_res, fast, request.values.get('return_format'))
 
 
 def _log_refused_request(what: str, error: Exception):
@@ -1692,7 +1655,11 @@ def _log_refused_request(what: str, error: Exception):
         current_app.logger.exception(error)
 
 
-PRINTER_MODELS = list(MODELS)
+def _refused(what: str, error: Exception, fallback: str, status: int = 400):
+    """Log why a request was refused and answer with its fixed message, see
+    refusals.message()."""
+    _log_refused_request(what, error)
+    return _fail(refusals.message(error, fallback), status)
 
 
 class PrinterUnreachable(Exception):
@@ -1742,7 +1709,7 @@ def _printer(requested_device, requested_model, ask: bool = False) -> tuple[str,
         model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
-    if model not in PRINTER_MODELS:
+    if model not in MODELS:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
@@ -1778,6 +1745,14 @@ def _flag_wrap(label_size: str, diameter: float | None, high_res: bool) -> dict:
     return {'flag_wrap': wrap_dots(diameter, dpi), 'flag_dpi': dpi}
 
 
+# What a label of an image shows, by image mode, and of a code or text, by
+# print type
+IMAGE_CONTENT = {'grayscale': LabelContent.IMAGE_GRAYSCALE, 'black_and_white': LabelContent.IMAGE_BW,
+                 'red_and_black': LabelContent.IMAGE_RED_BLACK, 'colored': LabelContent.IMAGE_COLORED}
+CODE_AND_TEXT_CONTENT = {'text': LabelContent.TEXT_ONLY, 'qrcode': LabelContent.QRCODE_ONLY,
+                         'qrcode_text': LabelContent.TEXT_QRCODE}
+
+
 def _label_type(kind: FormFactor) -> LabelType:
     """The label type of a form factor. P-touch tapes are endless,
     they were taken for round die-cut labels and came out 1 dot long."""
@@ -1789,7 +1764,7 @@ def _label_type(kind: FormFactor) -> LabelType:
 
 
 def _palette(label_size: str) -> str:
-    label = next((label for label in LABELS if label.identifier == label_size), None)
+    label = label_of(label_size)
     return label_palette(label) if label is not None else 'black'
 
 
@@ -1820,11 +1795,12 @@ def _image_contrast(d: dict) -> bool:
 def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
                               asn: int | None = None):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
-    size = next((label for label in LABELS if label.identifier == label_size), None)
+    size = label_of(label_size)
     if size is None:
         raise LookupError("Unknown label_size")
     kind = size.form_factor
     diameter = _cable_flag(d, kind)
+    barcode_type = check_code_type(d.get('barcode_type'))
     context = {
         'label_size': label_size,
         'print_type': d.get('print_type', 'text'),
@@ -1841,9 +1817,9 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'border_distanceY': int(d.get('border_distance_y', 0)),
         'border_color': d.get('border_color', 'black'),
         'text': json.loads(d.get('text', '[]')),
-        'barcode_type': check_code_type(d.get('barcode_type')),
+        'barcode_type': barcode_type,
         'qrcode_size': int(d.get('qrcode_size', 10)),
-        'qrcode_correction': check_code_correction(check_code_type(d.get('barcode_type')), d.get('qrcode_correction')),
+        'qrcode_correction': check_code_correction(barcode_type, d.get('qrcode_correction')),
         'image_mode': _image_mode(d),
         'image_bw_threshold': int(d.get('image_bw_threshold', 70)),
         'image_fit': _whole_or(d.get('image_fit'), 1) > 0,
@@ -1858,8 +1834,8 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'text_fit': _text_fit(d),
         # Empty: an endless label grows with its content
         'label_length': _label_length(d.get('label_length')),
-        'text_wrap': _text_wrap(d),
-        'mirror': _mirror(d),
+        'text_wrap': _flag(d, 'text_wrap'),
+        'mirror': _flag(d, 'mirror'),
         'image_text_gap': _image_text_gap(d.get('image_text_gap')),
         # Left out or empty: above the text across the tape, left of it along
         'image_position': check_image_position(d.get('image_position')),
@@ -1873,32 +1849,16 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
     }
 
     print_type = context['print_type']
-    image_mode = context['image_mode']
-    if print_type == 'text':
-        label_content = LabelContent.TEXT_ONLY
-    elif print_type == 'qrcode':
-        label_content = LabelContent.QRCODE_ONLY
-    elif print_type == 'qrcode_text':
-        label_content = LabelContent.TEXT_QRCODE
-    elif image_mode == 'grayscale':
-        label_content = LabelContent.IMAGE_GRAYSCALE
-    elif image_mode == 'red_and_black':
-        label_content = LabelContent.IMAGE_RED_BLACK
-    elif image_mode == 'colored':
-        label_content = LabelContent.IMAGE_COLORED
-    else:
-        label_content = LabelContent.IMAGE_BW
+    # Labels of an image, also with text and a code
+    image_label = print_type not in ('text', 'qrcode', 'qrcode_text')
+    label_content = IMAGE_CONTENT[context['image_mode']] if image_label else CODE_AND_TEXT_CONTENT[print_type]
     # An image with a code as well, on the other side of the text
     with_code = print_type == 'image_qrcode_text'
 
     label_orientation = LabelOrientation.ROTATED if context['label_orientation'] == 'rotated' else LabelOrientation.STANDARD
     label_type = _label_type(context['kind'])
 
-    width, height = _get_label_dimensions(context['label_size'], context['high_res'])
-    if height > width:
-        width, height = height, width
-    if label_orientation == LabelOrientation.ROTATED:
-        height, width = width, height
+    width, height = _canvas(label_size, context['high_res'], label_orientation)
     # A length given for an endless label is its size along the tape
     length = _printed_length(context['label_length'], size, diameter, context['high_res'])
     if length is not None:
@@ -1941,24 +1901,14 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
     if image is _LOAD_IMAGE:
         image = load_label_image(d, files)
 
-    # In "standard" orientation die-cut labels are landscape, so a portrait
-    # image (e.g. a shipping label on a 103 x 164 mm label) came out small and
-    # sideways. With auto-fit, an image without text or code is placed in the
-    # orientation that makes it largest. Without auto-fit the chosen
-    # orientation is kept.
-    image_label = label_content in (LabelContent.IMAGE_BW, LabelContent.IMAGE_GRAYSCALE, LabelContent.IMAGE_RED_BLACK, LabelContent.IMAGE_COLORED)
+    margins = (context['margin_left'], context['margin_right'], context['margin_top'], context['margin_bottom'])
     label = SimpleLabel(
         width=width,
         height=height,
         label_content=label_content,
         label_orientation=label_orientation,
         label_type=label_type,
-        label_margin=(
-            int(context['margin_left']),
-            int(context['margin_right']),
-            int(context['margin_top']),
-            int(context['margin_bottom'])
-        ),
+        label_margin=margins,
         fore_color=fore_color,
         text=context['text'],
         barcode_type=context['barcode_type'],
@@ -1995,9 +1945,13 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
     )
+    # In "standard" orientation die-cut labels are landscape, so a portrait
+    # image (e.g. a shipping label on a 103 x 164 mm label) came out small and
+    # sideways. With auto-fit, an image without text or code is placed in the
+    # orientation that makes it largest. Without auto-fit the chosen
+    # orientation is kept.
     if (label_type == LabelType.DIE_CUT_LABEL and image_label and image is not None
             and context['image_fit'] and not label.has_lines() and not with_code):
-        margins = (context['margin_left'], context['margin_right'], context['margin_top'], context['margin_bottom'])
         label.turn_to_fit(*_fitting_orientation(
             image, width, height, label_orientation, margins, context['image_crop'], context['image_rotation']))
     return label
@@ -2009,10 +1963,7 @@ def _text_fit(d: dict) -> str:
     shrink or none."""
     value = d.get('text_fit')
     if value is None or value == '':
-        try:
-            return 'shrink' if _whole_or(d.get('shrink_text'), 0) != 0 else 'none'
-        except (TypeError, ValueError):
-            raise ValueError("shrink_text must be 0 or 1") from None
+        return 'shrink' if _flag(d, 'shrink_text') else 'none'
     if value not in ('none', 'shrink', 'fill'):
         raise ValueError("text_fit must be none, shrink or fill")
     return value
@@ -2055,22 +2006,14 @@ def _high_res(d: dict) -> bool:
     return _whole_or(d.get('high_res'), 0) != 0 and _palette(d.get('label_size', DEFAULT_LABEL_SIZE)) != 'color'
 
 
-def _text_wrap(d: dict) -> bool:
-    """Whether lines wider than the label wrap into several lines: text_wrap
-    1, also true. Left out or empty they do not."""
+def _flag(d: dict, key: str) -> bool:
+    """Whether the flag key of a request is set: 1, also true. Left out or
+    empty it is not. text_wrap wraps lines wider than the label into
+    several lines, mirror prints the label mirror-inverted."""
     try:
-        return _whole_or(d.get('text_wrap'), 0) != 0
+        return _whole_or(d.get(key), 0) != 0
     except (TypeError, ValueError):
-        raise ValueError("text_wrap must be 0 or 1") from None
-
-
-def _mirror(d: dict) -> bool:
-    """Whether the label is printed mirror-inverted: mirror 1, also true.
-    Left out or empty it is not."""
-    try:
-        return _whole_or(d.get('mirror'), 0) != 0
-    except (TypeError, ValueError):
-        raise ValueError("mirror must be 0 or 1") from None
+        raise ValueError(f"{key} must be 0 or 1") from None
 
 
 def _image_text_gap(value) -> int | None:
@@ -2212,11 +2155,11 @@ def _font_name(font: str) -> str:
     return f'{family} ({style})'
 
 
-def load_label_image(d: dict, files: dict, image_dir: str | None = None, image_bytes: bytes | None = None) -> Image.Image | None:
+def load_label_image(d: dict, files: dict) -> Image.Image | None:
     """Return the uploaded image, or the image stored with a repository label,
     converted to the image mode of the request. Of a PDF the first selected
     page."""
-    return load_label_images(d, files, first_only=True, image_dir=image_dir, image_bytes=image_bytes)[0][0]
+    return load_label_images(d, files, first_only=True)[0][0]
 
 
 def load_label_images(d: dict, files: dict, first_only: bool = False, copies: int = 1,
@@ -2240,19 +2183,21 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
     # own (of a PDF the selected pages). The page count is that of the first.
     uploads = files.getlist('image') if hasattr(files, 'getlist') else [files['image']] if files.get('image') is not None else []
     if uploads:
+        # The page counts of PDFs, where they are read before
+        counts = [None] * len(uploads)
         if first_only:
             uploads = uploads[:1]
         elif len(uploads) > 1:
             # Checked before any file is rendered
-            labels = sum(len(selected_pdf_pages(pdf_pages, pdf_page_count(upload))) if _is_pdf(upload, upload.filename) else 1
-                         for upload in uploads)
+            counts = [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
+            labels = sum(len(selected_pdf_pages(pdf_pages, count)) if count is not None else 1 for count in counts)
             max_count = current_app.config['PRINT_MAX_COUNT']
             if labels * copies > max_count:
                 raise PageSelectionError(f"A print job must not have more than {max_count} labels, {len(uploads)} files "
                                          f"with {labels} labels and {copies} copies would be {labels * copies}")
         images, page_count = [], None
-        for i, upload in enumerate(uploads):
-            opened, count = open_images(upload, upload.filename, dpi, pdf_pages, first_only, copies)
+        for i, (upload, count) in enumerate(zip(uploads, counts)):
+            opened, count = open_images(upload, upload.filename, dpi, pdf_pages, first_only, copies, count)
             images += [_convert_image(image, image_mode, bw_threshold, contrast) for image in opened]
             if i == 0:
                 page_count = count
@@ -2311,12 +2256,20 @@ def _template_env_vars() -> frozenset:
 
 
 def _get_label_dimensions(label_size: str, high_res: bool = False):
-    dimensions = next((label.dots_printable for label in LABELS if label.identifier == label_size), None)
-    if dimensions is None:
+    label = label_of(label_size)
+    if label is None:
         raise LookupError("Unknown label_size")
+    dimensions = label.dots_printable
     if high_res:
         return (2 * dimensions[0], 2 * dimensions[1])
     return dimensions
+
+
+def _canvas(label_size: str, high_res: bool, orientation: LabelOrientation) -> tuple[int, int]:
+    """Width and height of the canvas of a label: its longer side across the
+    canvas, rotated along it."""
+    short, long = sorted(_get_label_dimensions(label_size, high_res))
+    return (short, long) if orientation == LabelOrientation.ROTATED else (long, short)
 
 
 def _convert_image(img: Image.Image, image_mode: str, bw_threshold: int = 70, contrast: bool = False) -> Image.Image:
@@ -2335,39 +2288,23 @@ def _image_label(img: Image.Image, label_size: str, label_orientation: LabelOrie
     """A label of img alone, converted to image_mode and scaled to the
     label size. On die-cut labels the image is turned like with auto-fit in
     the label designer."""
-    kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
-    width, height = _get_label_dimensions(label_size, high_res)
-    if height > width:
-        width, height = height, width
-    if label_orientation == LabelOrientation.ROTATED:
-        height, width = width, height
+    label_type = _label_type(label_of(label_size).form_factor)
+    width, height = _canvas(label_size, high_res, label_orientation)
     img = _convert_image(img, image_mode, bw_threshold, contrast)
-    if _label_type(kind) == LabelType.DIE_CUT_LABEL:
+    if label_type == LabelType.DIE_CUT_LABEL:
         width, height, label_orientation = _fitting_orientation(img, width, height, label_orientation)
-    orientation = 'rotated' if label_orientation == LabelOrientation.ROTATED else 'standard'
-    content = {'grayscale': LabelContent.IMAGE_GRAYSCALE, 'red_and_black': LabelContent.IMAGE_RED_BLACK,
-               'colored': LabelContent.IMAGE_COLORED}.get(image_mode, LabelContent.IMAGE_BW)
-    return SimpleLabel(width=width, height=height, label_content=content, label_orientation=label_orientation,
-                       label_type=_label_type(kind), image=_scale_image_to_label(img, label_size, orientation, high_res),
-                       image_fit=True, text=[])
+    image = _scale_image_to_label(img, width, height, label_type == LabelType.ENDLESS_LABEL,
+                                  label_orientation == LabelOrientation.ROTATED)
+    return SimpleLabel(width=width, height=height, label_content=IMAGE_CONTENT.get(image_mode, LabelContent.IMAGE_BW),
+                       label_orientation=label_orientation, label_type=label_type, image=image, image_fit=True, text=[])
 
 
-def _scale_image_to_label(img: Image.Image, label_size: str, orientation: str,
-                          high_res: bool = False) -> Image.Image:
-    width, height = _get_label_dimensions(label_size, high_res)
-    # Normalize: width = printable width, height = printable height
-    if height > width:
-        width, height = height, width
-    if orientation == 'rotated':
-        height, width = width, height
-
-    kind = next((label.form_factor for label in LABELS if label.identifier == label_size), None)
-    is_endless = _label_type(kind) == LabelType.ENDLESS_LABEL
-
+def _scale_image_to_label(img: Image.Image, width: int, height: int, endless: bool, rotated: bool) -> Image.Image:
+    """img scaled to a canvas of width and height."""
     img_width, img_height = img.size
-    if is_endless:
+    if endless:
         # For endless labels, scale to fill the fixed dimension and let length vary
-        if orientation == 'rotated':
+        if rotated:
             scale = height / img_height
         else:
             scale = width / img_width
@@ -2441,7 +2378,7 @@ def webhook_print():
     # Webhook is disabled unless WEBHOOK_PASSWORD is configured
     webhook_password = current_app.config.get('WEBHOOK_PASSWORD', '')
     if not webhook_password:
-        return make_response(jsonify({'success': False, 'message': 'Webhook is not enabled'}), 403)
+        return _fail('Webhook is not enabled', 403)
 
     # The JSON body, read once, none for a multipart upload
     jdata = _json_body()
@@ -2451,7 +2388,7 @@ def webhook_print():
                 or request.form.get('password', '')
                 or jdata.get('password', ''))
     if not provided or not hmac.compare_digest(str(provided).encode(), webhook_password.encode()):
-        return make_response(jsonify({'success': False, 'message': 'Unauthorized'}), 401)
+        return _fail('Unauthorized', 401)
 
     # Collect images from request: multipart file uploads first, otherwise
     # a JSON payload with base64 images. Checked before the printer is asked
@@ -2460,12 +2397,12 @@ def webhook_print():
     json_images = jdata.get('images') if isinstance(jdata.get('images'), list) else []
     max_count = current_app.config['PRINT_MAX_COUNT']
     if len(uploaded_files or json_images) > max_count:
-        return make_response(jsonify({'success': False, 'message': f'Too many images, at most {max_count} per request'}), 400)
+        return _fail(f'Too many images, at most {max_count} per request', 400)
     # Plain base64 strings or objects with them as data
     encoded = [entry if isinstance(entry, str) else entry['data'] for entry in json_images
                if isinstance(entry, str) or isinstance(entry, dict) and 'data' in entry]
     if not uploaded_files and not encoded:
-        return make_response(jsonify({'success': False, 'message': 'No images provided'}), 400)
+        return _fail('No images provided', 400)
 
     try:
         # Merge parameters from query/form and JSON body (query/form takes precedence)
@@ -2477,8 +2414,8 @@ def webhook_print():
         requested = {key: _requested(key) for key in ('label_size', 'high_res', 'fast_printing', 'leaves_first')}
         requested['label_size'] = stored_label_size(requested['label_size'])
         # Validate label_size, before the printer is asked for its tape
-        if requested['label_size'] is not None and not any(label.identifier == requested['label_size'] for label in LABELS):
-            return make_response(jsonify({'success': False, 'message': f"Unknown label_size: {requested['label_size']}"}), 400)
+        if requested['label_size'] is not None and label_of(requested['label_size']) is None:
+            return _fail(f"Unknown label_size: {requested['label_size']}", 400)
         loaded = _loaded_tape(device, model, settings)
         # The quality and which end leaves first the request leaves out as set in the printer settings
         given = printer_settings.for_printing(settings, model, _sized(requested, loaded))
@@ -2494,11 +2431,11 @@ def webhook_print():
         try:
             image_mode = check_image_mode(image_mode, current_app.config['IMAGE_DEFAULT_MODE'])
         except ValueError:
-            return make_response(jsonify({'success': False, 'message': IMAGE_MODE_REFUSED}), 400)
+            return _fail(IMAGE_MODE_REFUSED, 400)
         try:
             leaves_first = _leaves_first(given['leaves_first'])
         except ValueError as e:
-            return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.INVALID_INPUT)}), 400)
+            return _fail(refusals.message(e, refusals.INVALID_INPUT), 400)
         # Images stay in color on the tapes of the VC-500W, printed at its resolution
         color = _palette(label_size) == 'color'
         if color:
@@ -2507,13 +2444,13 @@ def webhook_print():
         # details that should not reach the client
         problem = label_size_problem(label_size, model) or resolution_problem(model, high_res)
         if problem:
-            return make_response(jsonify({'success': False, 'message': problem}), 400)
+            return _fail(problem, 400)
 
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
 
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Invalid request parameters'}), 400)
+        return _fail('Invalid request parameters', 400)
 
     def prepare(img: Image.Image) -> SimpleLabel:
         # Converted and scaled right away, so only label sized images are kept
@@ -2531,7 +2468,7 @@ def webhook_print():
 
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to read images'}), 400)
+        return _fail('Failed to read images', 400)
 
     # Process and queue each image
     try:
@@ -2542,7 +2479,7 @@ def webhook_print():
         status = printer.process_queue()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to print labels'}), 400)
+        return _fail('Failed to print labels', 400)
 
     result = {
         'success': len(status) == 0,
@@ -2591,8 +2528,7 @@ def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes 
     of its image and the image read with it."""
     if name is None:
         data = demos.load(HOMEBOX_DEMO)
-        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
-        endless = _label_type(kind) == LabelType.ENDLESS_LABEL
+        endless = _label_type(label_of(label_size).form_factor) == LabelType.ENDLESS_LABEL
         data.update(label_size=label_size, orientation='rotated' if endless else 'standard', text=json.dumps(data['text']))
         return data, demos.IMAGE_DIR, None
     data, image_bytes = _load_repo_json(name if name.endswith('.json') else f'{name}.json')
@@ -2625,12 +2561,12 @@ def homebox(name: str | None = None):
         # tape loaded in the printer
         data = tape.on_tape(_as_set_for_printer(_sized(data, loaded), settings, model), loaded)
     except FileNotFoundError:
-        return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
+        return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
     except Exception as e:
         current_app.logger.exception(e)
-        return make_response(jsonify({'success': False, 'message': 'Failed to load file'}), 500)
+        return _fail('Failed to load file', 500)
     if request.method == 'GET':
         return _preview_response(data, image_dir, image_bytes)
 
@@ -2640,15 +2576,14 @@ def homebox(name: str | None = None):
         img = open_image(BytesIO(request.get_data()), '', label_dpi(label_size, high_res))
     except Exception as e:
         _log_refused_request('Homebox label', e)
-        return make_response(jsonify({'success': False, 'message': HOMEBOX_NO_IMAGE}), 400)
+        return _fail(HOMEBOX_NO_IMAGE, 400)
     try:
         device, model = _printer(device, model)
         printer = _queue(model, device, label_size)
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
         printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))
-        kind = next(label.form_factor for label in LABELS if label.identifier == label_size)
-        if _label_type(kind) == LabelType.ENDLESS_LABEL:
+        if _label_type(label_of(label_size).form_factor) == LabelType.ENDLESS_LABEL:
             orientation = _along_endless_tape(img, label_size, high_res)
         else:
             orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
@@ -2658,8 +2593,7 @@ def homebox(name: str | None = None):
                                    high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
         status = printer.process_queue()
     except Exception as e:
-        _log_refused_request('Print job', e)
-        return make_response(jsonify({'success': False, 'message': refusals.message(e, refusals.PRINT_FAILED)}), 400)
+        return _refused('Print job', e, refusals.PRINT_FAILED)
     if status:
-        return make_response(jsonify({'success': False, 'message': status}), PRINTER_FAILED)
+        return _fail(status, PRINTER_FAILED)
     return {'success': True}
