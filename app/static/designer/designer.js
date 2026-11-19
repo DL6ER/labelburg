@@ -923,6 +923,36 @@ async function refreshPrinters(look = false) {
         // A single failed poll keeps what is known, the next one corrects it
         if (!S.printers.length) S.printer = null;
     }
+    showPrinters();
+}
+
+// A printer on USB is asked on its own every 2 s, another roll or a lost
+// connection shows at once. Asking one on the network or on Bluetooth that
+// often costs, they are asked with the others every 20 s.
+const onUsb = p => /^(usb|usbip|file):\/\//.test((p && p.path) || '');
+let following = false;
+async function followPrinter() {
+    const p = S.printer;
+    if (document.hidden || following || !onUsb(p)) return;
+    following = true;
+    try {
+        const answered = settingsAnswered;
+        const r = await fetch(API + '/printer_status?printer=' + encodeURIComponent(p.path));
+        const fresh = r.ok && ((await r.json()).printers || [])[0];
+        // Chosen anew or asked for all meanwhile, that answer stays
+        if (!fresh || S.printer !== p) return;
+        if (settingsPending || answered !== settingsAnswered) fresh.settings = p.settings;
+        S.printers = S.printers.map(o => o.path === fresh.path ? fresh : o);
+        S.printer = fresh;
+        showPrinters();
+    } catch (e) {
+        // The next one corrects it
+    } finally {
+        following = false;
+    }
+}
+
+function showPrinters() {
     const tapeBefore = tapeState();
     detectTape();
     renderPrinterChip();
@@ -3963,6 +3993,7 @@ addEventListener('pagehide', () => { if (S.edit) storeEdit(); });
     S.history.forEach(h => { if (h.state === 'printing') { h.state = 'failed'; h.message = 'The page was closed while printing'; } });
     route();
     setInterval(refreshPrinters, 20000);
+    setInterval(followPrinter, 2000);
     // Settings changed in another browser show when coming back
     addEventListener('visibilitychange', () => { if (!document.hidden) refreshPrinters(); });
 })();

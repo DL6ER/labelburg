@@ -1,13 +1,14 @@
 """The Niimbot D110_M and B1: their protocol against a fake printer in place
 of the RFCOMM socket or the USB printer, and printing and status through the
 label designer."""
+import errno
 import json
 import os
 import struct
 
 import pytest
 
-from app.labeldesigner import printer_settings
+from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import devices, niimbot, progress
 from app.labeldesigner.drivers.niimbot import calibration, protocol
 from tests.helpers import make_client
@@ -33,7 +34,7 @@ B1_REPLIES = {0x40: (0x48, struct.pack('>H', 4096)), (0x40, 0x0b): (0x4b, b'TEST
 
 class FakePrinter:
     def __init__(self):
-        self.commands, self.packets, self.pending = [], [], b''
+        self.commands, self.packets, self.writes, self.pending = [], [], [], b''
 
     def close(self):
         pass
@@ -42,6 +43,13 @@ class FakePrinter:
         pass
 
     def sendall(self, data):
+        # Several packets may come in one write
+        self.writes.append(data)
+        while data:
+            self._take(data[:data[3] + 7])
+            data = data[data[3] + 7:]
+
+    def _take(self, data):
         command = data[2]
         self.commands.append(command)
         self.packets.append(data)
@@ -630,3 +638,119 @@ def test_usb_read_waits_no_longer_than_its_time(monkeypatch):
         os.close(write_end)
         thread.join(2)
         usb.close()
+
+
+@pytest.mark.parametrize('code, message', [(0x01, 'The cover of the printer is open'),
+                                           (0x02, 'The printer has no labels'),
+                                           (0x03, 'The battery of the printer is low'),
+                                           (0x07, 'The printhead is too hot')])
+def test_error_answer_while_printing_tells_why(b1, fake, monkeypatch, code, message):
+    # As a B1 answered at the end of the page with its cover opened
+    monkeypatch.setitem(REPLIES, 0xe3, (protocol.ERROR, bytes([code])))
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.status_code == 503 and response.get_json()['message'] == message
+
+
+def test_error_answer_left_from_a_stopped_job_is_not_the_status(b1, fake):
+    # A B1 answered the first heartbeat after a job stopped by its opened
+    # cover with error 6, the next one as usual
+    fake.pending = protocol.packet(protocol.ERROR, b'\x06')
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert printer_['errors'] == [] and printer_['battery'] == 100
+
+
+def test_printer_that_stays_silent_does_not_answer(b1, fake, monkeypatch):
+    # A B1 switched off on USB stays on the bus, charged by the cable
+    monkeypatch.delitem(REPLIES, 0xdc)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert printer_['errors'] == ['The printer does not answer']
+
+
+@pytest.fixture
+def b1_on_usb(b1, monkeypatch):
+    b1.application.config['PRINTER_PRINTER'] = 'usbip://192.0.2.7/1-4.1.3'
+    # Not asked over the network for a device ID
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: '')
+    return b1
+
+
+def test_b1_on_usb_tells_another_roll_at_the_next_status_query(b1_on_usb, fake, monkeypatch):
+    # It does not beep when asked, the label designer asks every 20 s
+    status = '/labeldesigner/api/printer_status'
+    assert b1_on_usb.get(status).get_json()['printers'][0]['roll'] == 'PZ1G221322004205'
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, B1_TAG.replace(b'PZ1G221322004205', b'PZ1G221322004206')))
+    assert b1_on_usb.get(status).get_json()['printers'][0]['roll'] == 'PZ1G221322004206'
+
+
+def test_b1_on_usb_gone_is_told_at_the_next_status_query(b1_on_usb, fake, monkeypatch):
+    status = '/labeldesigner/api/printer_status'
+    assert b1_on_usb.get(status).get_json()['printers'][0]['errors'] == []
+
+    # As a host that stopped sharing the B1 over USB/IP
+    def gone(device):
+        raise OSError(errno.ENODEV, '192.0.2.7 shares no device at 1-4.1.3')
+    monkeypatch.setattr(protocol, 'connect', gone)
+    errors = b1_on_usb.get(status).get_json()['printers'][0]['errors']
+    assert errors == ['The printer is switched off or not connected']
+
+
+@pytest.mark.parametrize('listed', ['configured', 'found', 'only'])
+def test_status_of_one_printer_asks_only_that_one(b1_on_usb, fake, monkeypatch, listed):
+    # The label designer follows a printer on USB closely, the others less
+    usb = b1_on_usb.application.config['PRINTER_PRINTER']
+    if listed == 'configured':
+        b1_on_usb.application.config['PRINTERS'] = [('Niimbot/D110_M', DEVICE), ('Niimbot/B1', usb)]
+    elif listed == 'found':
+        b1_on_usb.application.config['PRINTER_PRINTER'] = '?'
+        monkeypatch.setattr(printer, '_cached_printers', [{'path': DEVICE, 'model': 'Niimbot/D110_M'},
+                                                          {'path': usb, 'model': 'Niimbot/B1'}])
+    response = b1_on_usb.get('/labeldesigner/api/printer_status', query_string={'printer': usb})
+    printers = response.get_json()['printers']
+    assert [(p['path'], p['roll'], p['label_size']) for p in printers] == [(usb, 'PZ1G221322004205', 'niimbot50x30')]
+    assert fake.commands == [0xdc, 0x1a, 0x40]
+
+
+def test_status_of_a_printer_not_listed_is_refused(b1_on_usb, fake):
+    response = b1_on_usb.get('/labeldesigner/api/printer_status', query_string={'printer': 'usbip://192.0.2.8/1-1'})
+    assert response.status_code == 404 and fake.commands == []
+
+
+def test_b1_gets_the_rows_of_a_label_in_one_write(b1, fake):
+    # Over USB/IP each write waits for the host, row by row a label took seconds
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    rows = [w for w in fake.writes if w[2] in (0x84, 0x85)]
+    assert len(rows) == 1 and len(protocol.parse(rows[0])[0]) > 1
+
+
+def test_d110_m_gets_each_row_on_its_own(client, fake):
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    rows = [w for w in fake.writes if w[2] in (0x84, 0x85)]
+    assert len(rows) > 1 and all(len(protocol.parse(w)[0]) == 1 for w in rows)
+
+
+def test_b1_on_usb_leaving_one_question_unanswered_is_asked_again(b1_on_usb, fake, monkeypatch):
+    # Every few minutes a B1 answered a status question not, the next one it did
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    take, missed = fake._take, []
+
+    def once(data):
+        if data[2] == 0xdc and not missed:
+            return missed.append(data)
+        take(data)
+    monkeypatch.setattr(fake, '_take', once)
+    printer_ = b1_on_usb.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert missed and printer_['errors'] == []
+
+
+def test_b1_on_usb_that_stays_silent_does_not_answer(b1_on_usb, fake, monkeypatch):
+    monkeypatch.delitem(REPLIES, 0xdc)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    printer_ = b1_on_usb.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert printer_['errors'] == ['The printer does not answer']

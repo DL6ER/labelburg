@@ -40,9 +40,10 @@ def _until(designer, condition):
     raise AssertionError('not reached')
 
 
-def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002'):
+def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None):
+    where = f", path: '{path}'" if path else ''
     designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ model: '{model}', status_type: 'Reply to status request',
-        roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
+        roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }}{where} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
 
 
 def _dialog(designer, wide=False):
@@ -84,6 +85,16 @@ def test_a_new_roll_is_pointed_out_and_not_now_hides_it(designer, calibration):
 def test_the_same_roll_is_not_pointed_out(designer, calibration):
     _panel(designer, roll='PZ1TEST00001')
     assert HINT not in designer.inner_text('.pp')
+
+
+def test_a_roll_put_in_a_printer_on_usb_is_pointed_out_within_seconds(designer, calibration):
+    # Asked on its own every 2 s, without "Look for printers"
+    _panel(designer, roll='PZ1TEST00001', path='usbip://192.0.2.7/1-4.1.3')
+    assert HINT not in designer.inner_text('.pp')
+    swapped = dict(designer.evaluate('() => S.printer'), roll='PZ1TEST00002')
+    designer.route('**/api/printer_status?printer=*', lambda route: route.fulfill(
+        content_type='application/json', body=json.dumps({'printers': [swapped]})))
+    designer.wait_for_function(f'() => document.querySelector(".pp").innerText.includes({json.dumps(HINT)})', timeout=3000)
 
 
 def test_readings_are_applied_and_the_result_is_shown(designer, calibration):

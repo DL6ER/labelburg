@@ -49,8 +49,8 @@ class NiimbotError(Exception):
     pass
 
 
-class NoAnswer(NiimbotError):
-    pass
+class NoAnswer(NiimbotError, TimeoutError):
+    """Also of a B1 switched off on USB, which stays on the bus."""
 
 
 class NoTag(NiimbotError):
@@ -203,7 +203,14 @@ def heartbeat(c: Connection) -> dict:
     """Whether the lid is open and the battery (0 to 4), from the 10 bytes
     a D110_M answers, e.g. 10 1f 00 69 00 69 32 46 01 04, or the 13 a B1
     answers; the raw data if the length is another."""
-    data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
+    try:
+        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
+    except NoAnswer:
+        raise
+    except NiimbotError:
+        # An error answer left from a job the printer stopped, e.g. with its
+        # cover opened, comes before the answer
+        data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf})
     if len(data) == 13:
         return {'open': data[9] == B1_LID_OPEN, 'battery': data[10]}
     if len(data) != 10:
@@ -229,6 +236,14 @@ def printer_serial(c: Connection) -> str | None:
         return None
     text = data.decode('ascii', 'replace').strip('\x00 ')
     return text if text.isalnum() else None
+
+
+def reason(error: NiimbotError) -> str | None:
+    """Why the printer refused, by its error code as niimbluelib names them,
+    e.g. 1 for a cover opened during a job; None for other codes."""
+    code = error.args[1] if len(error.args) > 1 else None
+    return {0x01: 'The cover of the printer is open', 0x02: 'The printer has no labels',
+            0x03: 'The battery of the printer is low', 0x07: 'The printhead is too hot'}.get(code)
 
 
 def errors(beat: dict) -> list[str]:
@@ -278,8 +293,12 @@ def print_label(c: Connection, rows: list[list[int]], label_type: int, sequence:
     else:
         c.send(packet(0xdc, b'\x01'))
         c.ok(0x13, struct.pack('>HHHHB', height, width, 1, 0, 0), 0x14)
-    for data in row_packets(rows, B1_HEAD if sequence == B1 else HEAD):
-        c.send(data)
+    if sequence == B1:
+        # In one write, over USB/IP each write waits for the host
+        c.send(b''.join(row_packets(rows, B1_HEAD)))
+    else:
+        for data in row_packets(rows, HEAD):
+            c.send(data)
     c.ok(0xe3, b'\x01', 0xe4)
     deadline = time.monotonic() + PRINT_WAIT
     while True:

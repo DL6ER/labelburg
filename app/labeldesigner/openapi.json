@@ -739,6 +739,15 @@
               "type": "string",
               "enum": ["1"]
             }
+          },
+          {
+            "name": "printer",
+            "in": "query",
+            "required": false,
+            "description": "The `path` of one listed printer: only it is asked, `printers` holds only it and the top-level fields are left out. The label designer asks a printer on USB so every 2 s, it tells another roll at once.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -748,6 +757,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PrinterStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such printer is listed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }

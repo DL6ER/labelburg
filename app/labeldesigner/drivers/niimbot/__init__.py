@@ -44,9 +44,9 @@ B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80)
 # print.niimbot.com, the label designer stays offline.
 ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
          '10262260': (50, 30)}  # T50*30-230WHITE
-# It beeps at each connection: it is asked only when the label designer looks
-# for printers and when printing, the other status queries are answered from
-# the last state. When each was last asked:
+# On Bluetooth it beeps at each connection: it is asked only when the label
+# designer looks for printers and when printing, the other status queries are
+# answered from the last state. When each was last asked:
 _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
@@ -161,11 +161,20 @@ class Niimbot(Driver):
             raise error.with_traceback(None)
         cached = devices.status_cache.get(devices.lock_key(device))
         # Also asked while it cannot print, so that the error goes once the
-        # lid is closed; it beeps every status query only then
-        if cached and not cached.get('errors') and _asked.get(device, -1) >= devices.looked:
+        # lid is closed; it beeps every status query only then. On USB it is
+        # asked every time, it tells another roll or a lost connection so.
+        if (device.startswith('bt://') and cached and not cached.get('errors')
+                and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
         try:
-            state = self._status(device, model)
+            try:
+                state = self._status(device, model)
+            except protocol.NoAnswer:
+                # A B1 on USB leaves a question unanswered every few minutes,
+                # asked again it answers. On Bluetooth that is a new connection.
+                if device.startswith('bt://'):
+                    raise
+                state = self._status(device, model)
         except self.errors as e:
             devices.note_answer(device, e)
             raise
@@ -269,7 +278,7 @@ class Niimbot(Driver):
                 return 'The printer prints only on Niimbot rolls with their RFID tag'
             if isinstance(e, protocol.NotPrinted):
                 return 'The printer did not tell that it printed the label'
-            return 'The printer refused the label, the log of the server names the reason'
+            return protocol.reason(e) or 'The printer refused the label, the log of the server names the reason'
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             # Asked again at the next status query, which then tells why

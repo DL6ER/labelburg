@@ -263,6 +263,30 @@ def _configured_states(printers) -> list[dict]:
     return states
 
 
+def status_of_printer(config: Config, path: str) -> dict | None:
+    """The status of one printer the label designer lists, asked again, e.g.
+    one on USB it follows closely; None for a printer it does not list."""
+    if config.get('PRINTERS'):
+        listed = {device: (model, name) for model, device, name in configured_printers(config)}
+    elif config['PRINTER_PRINTER'] == '?':
+        listed = {p['path']: (p.get('model', 'Unknown'), '') for p in _cached_printers}
+    else:
+        listed = {config['PRINTER_PRINTER']: (drivers.canonical(config['PRINTER_MODEL']), '')}
+    if path not in listed or is_simulation(path):
+        return None
+    model, name = listed[path]
+    try:
+        state = _query_configured(model, path)
+    except Exception as e:
+        logger.info('Status query of %s failed: %s', path, e)
+        state = devices.failed_printer_state(path, e, model)
+    state.setdefault('path', path)
+    if name:
+        state['name'] = name
+    state.setdefault('red_support', _red_support(state.get('model', model)))
+    return state
+
+
 def get_ptr_status(config: Config):
     # Simple in-memory cache for detected printers
     global _last_scan_ts, _cached_printers, _cached_hints

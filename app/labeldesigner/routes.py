@@ -24,7 +24,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, resolution_problem
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, PrinterQueue, configured_printers, get_ptr_status, is_simulation
+from .printer import BUSY, PrinterQueue, configured_printers, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -1339,10 +1339,19 @@ def get_printer_status():
     # when asked, see devices.note_answer()
     if request.args.get('look') == '1':
         look_again()
-    status = get_ptr_status(current_app.config)
+    # One printer, e.g. on USB, which the label designer asks every 2 s
+    if 'printer' in request.args:
+        one = status_of_printer(current_app.config, request.args['printer'])
+        if one is None:
+            return {'message': 'No such printer'}, 404
+        status = {'printers': [one]}
+        told = [one]
+    else:
+        status = get_ptr_status(current_app.config)
+        told = [status] + status.get('printers', [])
     kept = _kept_settings()
     # The VC-500W prints in color, the label designer then offers colors
-    for printer in [status] + status.get('printers', []):
+    for printer in told:
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
