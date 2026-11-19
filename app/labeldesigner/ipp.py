@@ -83,6 +83,16 @@ def decode_response(data: bytes) -> dict:
     # attributes are not supported
     if status > 0x00FF:
         raise IPPError(f'The printer answers with status 0x{status:04x}')
+    try:
+        return _attributes(data)
+    except struct.error as e:
+        raise IPPError('The answer is cut off') from e
+    except IndexError as e:
+        raise IPPError('The answer has collection parts outside a collection') from e
+
+
+def _attributes(data: bytes) -> dict:
+    """The attributes of a response, see decode_response()."""
     attributes: dict = {}
     # Collections being decoded: the dictionary and the name of the member
     # whose value comes next
