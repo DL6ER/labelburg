@@ -11,7 +11,7 @@ import pytest
 from app.labeldesigner.drivers import devices, niimbot
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client
-from tests.printing.test_niimbot import B1_REPLIES, REPLIES, TEXT, FakePrinter
+from tests.printing.test_niimbot import B1_CLOSED, B1_REPLIES, REPLIES, TEXT, FakePrinter
 
 MAC = '00:00:5E:00:53:01'
 DEVICE = f'bt://{MAC}'
@@ -121,6 +121,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
+    monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
 
@@ -253,3 +254,23 @@ def test_printers_that_are_asked_without_cost_are_followed(model, device, follow
     # one on USB or kept on Bluetooth LE does not
     from app.labeldesigner import drivers
     assert drivers.for_model(model).followed(device, model) is follow
+
+
+def test_b1_on_bluetooth_le_with_a_status_question_unanswered_is_not_asked_again(b1, le, monkeypatch):
+    # The kept connection holds the late answer, the next poll reads it
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    followed = STATUS + '?printer=' + DEVICE
+    assert b1.get(followed).get_json()['printers'][0]['errors'] == []
+    take, missed = le.printer._take, []
+
+    def once(data):
+        if data[2] == 0xdc and not missed:
+            return missed.append(data)
+        take(data)
+    monkeypatch.setattr(le.printer, '_take', once)
+    for _ in range(2):
+        assert b1.get(followed).get_json()['printers'][0]['errors'] == []
+    assert missed and heartbeats(le) == 2
+    le.incoming.append(bytes([0x1b]) + struct.pack('<H', le.value) + protocol.packet(0xdd, B1_CLOSED))
+    assert b1.get(followed).get_json()['printers'][0]['errors'] == []
+    assert heartbeats(le) == 2 and len(le.addresses) == 1
