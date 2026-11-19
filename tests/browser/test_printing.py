@@ -303,7 +303,7 @@ def test_a_label_that_does_not_fit_on_the_loaded_tape_says_what_it_was_made_for(
     designer.evaluate(f"() => openEditor({{ title: 'Shelf', design: {TOO_BIG} }})")
     wait_for_preview(designer)
     assert 'does not fit' in fits_note(designer)
-    assert designer.inner_text('#edMade').strip() == 'Made for 62 mm endless, shown as it prints on the 29 x 90 mm in the Brother QL-800.'
+    assert designer.is_visible('#edMade') and designer.inner_text('#edMade').strip() == 'Made for 62 mm endless, shown as it prints on the 29 x 90 mm in the Brother QL-800.'
 
 
 def test_an_empty_label_takes_the_loaded_tape(designer):
