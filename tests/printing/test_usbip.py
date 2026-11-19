@@ -2,6 +2,7 @@
 answers like Linux's usbip-host."""
 
 import errno
+import functools
 import json
 import socket
 import threading
@@ -40,11 +41,40 @@ class FakeQL:
                     return
                 self.received += data
                 if data.endswith(b'\x1biS'):
-                    self._printer.sendall(status(REPLY))
+                    self._reply()
                 elif data.endswith(b'\x1a'):
                     self._printer.sendall(status(PHASE_CHANGE, PRINTING) + status(COMPLETED) + status(PHASE_CHANGE, WAITING))
             except OSError:
                 return
+
+    def _reply(self):
+        self._printer.sendall(status(REPLY))
+
+
+class HoldingQL(FakeQL):
+    """A FakeQL holding an error, as a QL-1100 does: it answers no status
+    request until the error is cleared, then every one it was asked. With
+    cleared_at, the error is cleared while that request waits."""
+
+    def __init__(self, device, width):
+        self.width, self.held, self.holding, self.cleared_at = width, 0, True, None
+        self._lock = threading.Lock()
+        super().__init__(device)
+
+    def _reply(self):
+        with self._lock:
+            replies = 1
+            if self.holding:
+                self.held += 1
+                if self.held != self.cleared_at:
+                    return
+                self.holding, replies = False, self.held
+            self._printer.sendall(status(REPLY, width=self.width) * replies)
+
+    def clear(self):
+        with self._lock:
+            self.holding = False
+            self._printer.sendall(status(REPLY, width=self.width) * self.held)
 
 
 class FakeTM:
@@ -285,6 +315,73 @@ def test_answer_between_queries_is_kept(host):
     host.devices[0].printer.sendall(b'unasked')
     assert shared.read(3, 1) == b'una'
     assert shared.read(32, 1) == b'sked'
+
+
+@pytest.mark.parametrize('latency, read_latency, reply_size, after_import', [
+    pytest.param(0, 0, None, False, id='fast'),
+    # A slow link, a read ending with each reply as a printer's transfer does
+    pytest.param(0.02, 0, 32, False, id='20 ms'),
+    pytest.param(0.06, 0, 32, False, id='60 ms'),
+    # Only reads slow, e.g. a host slow on its USB side
+    pytest.param(0, 0.02, 32, False, id='reads 20 ms'),
+    pytest.param(0, 0.06, 32, False, id='reads 60 ms'),
+    # A link that slows down after the import, e.g. Wi-Fi saving power
+    pytest.param(0.06, 0, 32, True, id='60 ms after the import'),
+])
+def test_status_query_reads_the_reply_to_its_own_request(host, monkeypatch, latency, read_latency, reply_size,
+                                                         after_import):
+    if not after_import:
+        host.latency, host.read_latency = latency, read_latency
+    host.reply_size = reply_size
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1 + 5 * (latency + read_latency)))
+    ql = HoldingQL(host.devices[0], width=62)
+    with pytest.raises(TimeoutError):
+        usb.query_status(host.address())
+    host.latency, host.read_latency = latency, read_latency
+    # Cleared at the printer, it answers the request and its retry, which
+    # reach the server before the label designer asks again
+    ql.clear()
+    shared = usbip.connect(host.address())
+    deadline = time.monotonic() + 5
+    while not shared._answers and time.monotonic() < deadline:
+        time.sleep(0.01)
+    # Then the roll is swapped, and swapped again
+    for width in (29, 12, 38):
+        ql.width = width
+        assert usb.query_status(host.address())['media_width'] == width
+
+
+@pytest.mark.parametrize('cleared_at', [5, 6], ids=['request', 'retry'])
+def test_error_cleared_while_a_poll_waits(host, monkeypatch, cleared_at):
+    # Held through two polls, cleared while the third waits for its request
+    # or its retry: the reply that comes first is the oldest
+    host.latency, host.reply_size = 0.06, 32
+    # Waits shortened to several times the delay of the host
+    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.25))
+    ql = HoldingQL(host.devices[0], width=62)
+    for _ in range(2):
+        with pytest.raises(TimeoutError):
+            usb.query_status(host.address())
+    ql.cleared_at = cleared_at
+    usb.query_status(host.address())
+    for width in (29, 12, 38, 17):
+        ql.width = width
+        assert usb.query_status(host.address())['media_width'] == width
+
+
+def test_replies_held_over_several_polls_are_waited_for(host, monkeypatch):
+    host.latency, host.reply_size = 0.06, 32
+    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.25))
+    ql = HoldingQL(host.devices[0], width=62)
+    for _ in range(3):
+        with pytest.raises(TimeoutError):
+            usb.query_status(host.address())
+    assert ql.held == 6
+    ql.clear()
+    ql.width = 29
+    assert usb.query_status(host.address())['media_width'] == 29
 
 
 def test_answer_longer_than_asked_ends_the_connection(host):
