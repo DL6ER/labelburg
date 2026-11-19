@@ -1,7 +1,6 @@
 """Label sizes in the label designer: their names and which printer models
 print them. Each driver (drivers/) has the label sizes of its printers."""
 
-import functools
 import math
 
 from .drivers.labels import Label
@@ -45,19 +44,6 @@ def label_printers(label: Label) -> list:
     if label.identifier in drivers.for_label(label.identifier).hidden_labels:
         return []
     return [model for model in MODELS if label_fits(label, model)]
-
-
-@functools.cache
-def _offered() -> dict[str, list]:
-    return {label.identifier: label_printers(label) for label in LABELS}
-
-
-def labels_taken(model) -> list[Label]:
-    """The label sizes a printer of model takes. A printer of no known model,
-    e.g. one that did not tell it, takes every label size offered."""
-    offered = _offered()
-    known = any(model in models for models in offered.values())
-    return [label for label in LABELS if (model in offered[label.identifier] if known else offered[label.identifier])]
 
 
 def label_size_problem(label_size: str, model: str) -> str:

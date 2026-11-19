@@ -3,13 +3,14 @@ only on the label size the call expects."""
 
 import base64
 import io
+import json
 import os
 import re
 
 import pytest
 from PIL import Image
 
-from app.labeldesigner import mcp_tools
+from app.labeldesigner import mcp_tools, printer_settings, tape
 from tests.helpers import make_client
 
 HEADERS = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'}
@@ -133,7 +134,9 @@ def test_the_code_types_are_those_of_the_api(client):
     ({'model': 'QL-800', 'media_width': 29, 'media_length': 90, 'text_color': ''}, ['29x90']),
     ({'model': 'QL-800', 'media_width': None}, []),
     ({'model': 'QL-800', 'media_width': None, 'media_length': 90}, ['29x90', '39x90']),
-    # As in the label designer a model no label size names takes every size
+    # Its driver does not tell the paper, whatever the status holds
+    ({'model': 'Epson/ESC-POS', 'media_width': 58, 'media_length': 0}, []),
+    # A model no label size names takes every size that has printers
     ({'model': 'Unknown', 'media_width': 62, 'media_length': 0}, ['62', '62red'])])
 def test_label_sizes_loaded(status, sizes):
     assert mcp_tools.loaded_label_sizes(status) == sizes
@@ -203,8 +206,7 @@ def test_label_sizes_as_written(label_size, size):
 
 
 def test_label_sizes_without_the_prefix_of_their_driver(monkeypatch):
-    sizes = [type('Label', (), {'identifier': i}) for i in ('zpl100x30', 'zpl50x30', 'zpl100x50')]
-    monkeypatch.setattr(mcp_tools, 'labels_taken', lambda model: sizes)
+    monkeypatch.setattr(tape, 'takes', lambda model: ['zpl100x30', 'zpl50x30', 'zpl100x50'])
     assert mcp_tools.label_size_for('Zebra/ZPL', '100x30') == 'zpl100x30'
     assert mcp_tools.label_size_for('Zebra/ZPL', '100x30mm') == 'zpl100x30'
     from mcp.server.mcpserver.exceptions import ToolError
@@ -302,31 +304,22 @@ def test_a_broken_preview_address_is_refused(client, spec):
     assert client.get(address.removeprefix('http://localhost')).status_code == 400
 
 
+def reports(monkeypatch, **state):
+    """Kitchen on the network with the status it reports, the server adds
+    its tape and the sizes it takes."""
+    state = {'errors': [], 'name': 'Kitchen', 'path': 'tcp://192.0.2.10', 'media_width': None, 'media_length': 0, **state}
+    monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status', lambda config: {**state, 'printers': [dict(state)]})
+
+
 def test_the_user_is_asked_with_the_names_of_the_label_sizes(client, tmp_path, monkeypatch):
     # A printer that tells no label size
-    monkeypatch.setattr(mcp_tools.Tools, '_printers', lambda self: [{'name': 'Kitchen', 'path': 'tcp://192.0.2.10', 'model': 'QL-800'}])
+    reports(monkeypatch, model='QL-800')
     text = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])['content'][0]['text']
     assert '; 62: 62 mm endless (DK-22205 / DK-2205); ' in text and 'd24: 24 mm round (DK-11218 / DK-1218)' in text
     # Some names have a comma
     assert '54: 54 mm endless, non-adhesive (DK-N55224 / DK-N5224); ' in text
     result = tool(client, 'print_text', printer='Kitchen', label_size='62mm endless', count=1, lines=['x'])
     assert '62: 62 mm endless (DK-22205 / DK-2205)' in result['content'][0]['text']
-
-
-def test_a_model_no_label_size_names_is_asked_with_every_size_offered(client, tmp_path, monkeypatch):
-    # A printer that did not tell its model, as the label designer offers them
-    monkeypatch.setattr(mcp_tools.Tools, '_printers', lambda self: [{'name': 'Kitchen', 'path': 'tcp://192.0.2.10', 'model': 'Unknown'}])
-    text = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])['content'][0]['text']
-    assert 'Kitchen does not tell which label is loaded, it takes: 12: ' in text and '; 62: 62 mm endless' in text
-    assert printed(tmp_path) == 0
-
-
-def test_a_label_size_as_written_for_a_model_no_label_size_names(client, monkeypatch):
-    assert mcp_tools.label_size_for('Unknown', '62 mm') == '62'
-    monkeypatch.setattr(mcp_tools.Tools, '_printers', lambda self: [
-        {'name': 'Kitchen', 'path': 'simulation', 'model': 'Unknown', 'media_width': 62, 'media_length': 0}])
-    result = tool(client, 'preview_label', printer='Kitchen', label_size='62 mm', lines=['x'])
-    assert not result.get('isError'), result['content'][0]['text']
 
 
 @pytest.mark.parametrize('device, printer', [('file:///dev/usb/lp9', 'QL-800'), ('simulation', 'simulation')])
@@ -530,6 +523,91 @@ def test_without_a_label_size_the_one_kept_for_a_printer_that_tells_none(client,
     result = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])
     assert not result.get('isError') and printed(tmp_path) == 1
     assert Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data']))).size == (696, 271)
+
+
+@pytest.mark.parametrize('model, kept', [('PT-P750W', '62'), ('QL-800', 62), ('QL-800', 'nope')],
+                         ids=['kept for another model', 'no text', 'no label size'])
+def test_without_a_label_size_none_kept_that_the_printer_cannot_print(client, tmp_path, model, kept):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    client.application.config['PRINTERS'] = [(model, 'simulation', 'Kitchen')]
+    # e.g. kept for the QL-800 that was there before, or the file edited by hand
+    (tmp_path / printer_settings.FILE).write_text(json.dumps({'printers': {'simulation': {'label_size': kept}}}))
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['settings']['label_size'] == kept
+    result = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])
+    text = result['content'][0]['text']
+    assert not result.get('isError') and 'Kitchen does not tell which label is loaded, it takes: ' in text
+    assert printed(tmp_path) == 0
+
+
+def test_a_label_size_as_written_for_a_model_no_label_size_names(client, monkeypatch):
+    assert mcp_tools.label_size_for('Unknown', '62 mm') == '62'
+    reports(monkeypatch, model='Unknown', media_width=62)
+    result = tool(client, 'preview_label', printer='Kitchen', label_size='62 mm', lines=['x'])
+    assert not result.get('isError'), result['content'][0]['text']
+
+
+def test_a_model_no_label_size_names_is_asked_with_every_size_that_has_printers(client, tmp_path, monkeypatch):
+    reports(monkeypatch, model='Unknown')
+    text = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])['content'][0]['text']
+    assert 'Kitchen does not tell which label is loaded, it takes: 12: ' in text and '; 62: 62 mm endless' in text
+    assert printed(tmp_path) == 0
+
+
+def test_a_tape_set_by_hand_is_the_one_loaded(client, tmp_path):
+    # The simulator tells no tape, the one set by hand is printed on
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    assert client.post('/labeldesigner/api/settings', data={'printer': 'simulation', 'label_size': '29'}).status_code == 200
+    assert tool(client, 'list_printers')['structuredContent']['result'][0]['loaded_label_sizes'] == ['29']
+    for name, more in (('preview_label', {}), ('print_text', {'count': 1})):
+        result = tool(client, name, printer='Kitchen', label_size='62', lines=['Pantry shelf'], **more)
+        assert result['isError'] and 'The printer has 29 loaded, not 62' in result['content'][0]['text'], name
+    assert printed(tmp_path) == 0
+
+
+@pytest.mark.parametrize('red_roll, loaded, picked', [(None, ['62', '62red'], '62'), (True, ['62red'], '62red'),
+                                                       (False, ['62'], '62')],
+                         ids=['color not told', 'black and red', 'black'])
+def test_the_sizes_loaded_on_a_roll_of_62_mm(client, tmp_path, monkeypatch, red_roll, loaded, picked):
+    # On a black and red roll 62 would only be printed as 62red, in black and red
+    reports(monkeypatch, model='QL-800', path='simulation', media_width=62, red_roll=red_roll)
+    assert tool(client, 'list_printers')['structuredContent']['result'][0]['loaded_label_sizes'] == loaded
+    status = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert mcp_tools.Tools._loaded(status) == picked
+    for name, more in (('preview_label', {}), ('print_text', {'count': 1})):
+        result = tool(client, name, printer='Kitchen', label_size='62', lines=['x'], **more)
+        text = result['content'][0]['text']
+        if '62' in loaded:
+            assert not result.get('isError'), text
+        else:
+            assert result['isError'] and 'The printer has 62red loaded, not 62' in text, name
+    assert printed(tmp_path) == (1 if '62' in loaded else 0)
+
+
+@pytest.mark.parametrize('set_by_hand', [False, True], ids=['reported', 'set by hand'])
+def test_a_size_of_the_same_tape_and_color_is_loaded_too(client, tmp_path, monkeypatch, set_by_hand):
+    # 12+17 prints as 12 on the same roll
+    if set_by_hand:
+        client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+        assert client.post('/labeldesigner/api/settings', data={'printer': 'simulation', 'label_size': '12'}).status_code == 200
+    else:
+        reports(monkeypatch, model='QL-800', path='simulation', media_width=12, red_roll=False)
+    assert tool(client, 'list_printers')['structuredContent']['result'][0]['loaded_label_sizes'] == ['12', '12+17']
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12+17', count=1, lines=['x'])
+    assert not result.get('isError'), result['content'][0]['text']
+    assert printed(tmp_path) == 1
+
+
+def test_a_printer_that_measures_only_the_length_has_the_labels_set_by_hand_of_it(client, tmp_path, monkeypatch):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    client.application.config['PRINTERS'] = [('Zebra/ZPL', 'tcp://192.0.2.10', 'Kitchen')]
+    reports(monkeypatch, model='Zebra/ZPL', media_length=50)
+    text = tool(client, 'print_text', printer='Kitchen', count=1, lines=['x'])['content'][0]['text']
+    assert 'Kitchen may have one of these loaded: zpl100x50: ' in text and '; zpl80x50: ' in text
+    settings = {'printer': 'tcp://192.0.2.10', 'model': 'Zebra/ZPL', 'label_size': 'zpl80x50'}
+    assert client.post('/labeldesigner/api/settings', data=settings).status_code == 200
+    assert tool(client, 'list_printers')['structuredContent']['result'][0]['loaded_label_sizes'] == ['zpl80x50']
+    result = tool(client, 'print_text', printer='Kitchen', label_size='zpl100x50', count=1, lines=['x'])
+    assert result['isError'] and 'The printer has zpl80x50 loaded, not zpl100x50' in result['content'][0]['text']
 
 
 def test_label_for_the_paper_of_the_other_model(client, tmp_path):
