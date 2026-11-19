@@ -1377,6 +1377,8 @@ def get_printer_status():
     for printer in told:
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
+        # Asked by the label designer every 2 s where that costs nothing
+        printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))

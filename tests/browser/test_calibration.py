@@ -45,10 +45,11 @@ def _until(designer, condition):
 
 def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None, width=50, length=30):
     """The printer panel of a printer as the server tells it, by default a
-    B1 with a 50 x 30 mm roll calibrated on another one."""
+    B1 with a 50 x 30 mm roll calibrated on another one. One with a path is
+    followed, as the server tells of one on USB."""
     printer = with_tape({'model': model, 'status_type': 'Reply to status request', 'roll': roll,
                          'calibration': {'across': 0, 'along': 0, 'roll': 'PZ1TEST00001'}, 'media_width': width, 'media_length': length,
-                         **({'path': path} if path else {})})
+                         **({'path': path, 'follow': True} if path else {})})
     designer.evaluate("""p => { S.printers = [Object.assign({}, S.printer, p)]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }""", printer)
 
 

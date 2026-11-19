@@ -5,6 +5,11 @@ for the QL and P-touch printers. Its __init__.py has a Driver as DRIVER, and
 drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
+import re
+
+# Printers on USB, also shared over USB/IP, and through usblp
+_USB = re.compile(r'(usb|usbip|file)://|/dev/')
+
 
 def network_status(device: str, model: str, red_support: bool = False) -> dict:
     """Status of a network printer that tells nothing about itself."""
@@ -141,6 +146,12 @@ class Driver:
         shows where to read it. ValueError for an unknown kind."""
         raise NotImplementedError
 
+    def followed(self, device: str, model: str) -> bool:
+        """Whether the label designer may ask the printer every few seconds:
+        one on USB costs nothing, one on the network or on Bluetooth takes
+        the network or the radio."""
+        return bool(_USB.match(device or ''))
+
     def resolution_problem(self, model: str, high_res: bool) -> str:
         """Why the model cannot print at the resolution, or an empty string."""
         return ''
@@ -156,6 +167,11 @@ class Driver:
         printer of this driver. Raises one of self.errors if it does not
         answer."""
         raise NotImplementedError
+
+    def followed_status(self, device: str, model: str) -> dict | None:
+        """Status of a printer the label designer follows, see followed():
+        asked of the printer itself where status() may tell its last state."""
+        return self.status(device, model)
 
     def announced(self, service: dict) -> tuple[str, str] | None:
         """(address, model) of a printer of this driver that announces itself

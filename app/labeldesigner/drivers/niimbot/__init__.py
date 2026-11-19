@@ -28,8 +28,6 @@ SEQUENCES = {'Niimbot/D110_M': protocol.V4, 'Niimbot/B1': protocol.B1}
 # The models by the model ID they tell, which the print sequence and the
 # printhead have to fit
 MODEL_IDS = {2320: 'Niimbot/D110_M', 4096: 'Niimbot/B1'}
-# The B1 speaks Bluetooth LE only, not the classic Bluetooth of the D110_M
-B1_USB_ONLY = 'The Niimbot B1 works over USB only so far, connect it with a cable'
 # A B1 prints 0.25 mm right of the middle of a tightly seated roll and starts
 # 0.1 to 0.5 mm before the top edge of a label, by roll: its rows are moved
 # left by 0.25 mm and down by 0.25 mm
@@ -58,7 +56,9 @@ ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
 ROUND = {'080924002'}
 # On Bluetooth it beeps at each connection: it is asked only when the label
 # designer looks for printers and when printing, the other status queries are
-# answered from the last state. When each was last asked:
+# answered from the last state. A B1 keeps its connection over Bluetooth LE
+# while used, see protocol.KEEP_LE, and is also asked by the label designer
+# that follows it, see followed_status(). When each was last asked:
 _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
@@ -67,15 +67,24 @@ _no_serial: set[str] = set()
 # went unanswered read whether its answer came, for OWED_WAIT seconds, and
 # tell the last state meanwhile. After STATUS_LOST seconds it counts as lost:
 # the printer does not answer, and the next poll asks anew. Over classic
-# Bluetooth no answer outlives its connection. By device: the question, when
+# Bluetooth no answer outlives its connection, the B1 keeps its connection
+# over Bluetooth LE. By device: the question, when
 # it was asked, and whether the printer was told as not answering.
 STATUS_LOST = 20
 OWED_WAIT = 0.2
 _owed: dict[str, tuple[str, float, bool]] = {}
 
 
-def _b1_on_bluetooth(device: str, model: str) -> bool:
-    return model == 'Niimbot/B1' and device.startswith('bt://')
+def _over_le(model: str) -> bool:
+    """Whether a printer on bt:// is reached over Bluetooth LE: the B1
+    speaks only that, the D110_M classic Bluetooth."""
+    return model == 'Niimbot/B1'
+
+
+def _beeps(device: str, model: str) -> bool:
+    """Whether each status query beeps, a new connection over classic
+    Bluetooth."""
+    return device.startswith('bt://') and not _over_le(model)
 
 
 def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
@@ -187,11 +196,14 @@ class Niimbot(Driver):
     def calibration_example(self, kind):
         return calibration.example(kind)
 
-    def status(self, device, model, unconfirmed=False):
-        if _b1_on_bluetooth(device, model):
-            state = network_status(device, model)
-            state.update({'errors': [B1_USB_ONLY], 'status_type': 'Error occurred'})
-            return state
+    def followed(self, device, model):
+        # Its kept connection over Bluetooth LE costs nothing either
+        return (device.startswith('bt://') and _over_le(model)) or super().followed(device, model)
+
+    def followed_status(self, device, model):
+        return self.status(device, model, fresh=True)
+
+    def status(self, device, model, unconfirmed=False, fresh=False):
         # One that did not answer is not looked for at every status query
         error = devices.unanswered_before(device)
         if error:
@@ -200,7 +212,7 @@ class Niimbot(Driver):
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
         # asked every time, it tells another roll or a lost connection so.
-        if (device.startswith('bt://') and cached and not cached.get('errors')
+        if (device.startswith('bt://') and not (fresh and _over_le(model)) and cached and not cached.get('errors')
                 and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
         try:
@@ -218,14 +230,14 @@ class Niimbot(Driver):
                 state.update(devices.status_cache.get(devices.lock_key(device), {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
-            with protocol.connect(device) as c:
-                told = self._asked(c, device)
+            with protocol.connect(device, _over_le(model)) as c:
+                told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])
                 serial = self._serial(c, device, model)
         return self._keep(device, model, told['heartbeat'], told['roll'], serial)
 
-    def _asked(self, c, device) -> dict | None:
+    def _asked(self, c, device, model) -> dict | None:
         """The heartbeat and the roll the printer tells, None where a
         question is left unanswered and the last state is told, see
         STATUS_LOST. Raises NoAnswer where it does not answer."""
@@ -244,7 +256,7 @@ class Niimbot(Driver):
             try:
                 told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None)
             except protocol.NoAnswer:
-                if device.startswith('bt://'):
+                if _beeps(device, model):
                     raise
                 _owed[device] = (step, owed[1], silent) if waiting else (step, now, silent)
                 if silent or devices.lock_key(device) not in devices.status_cache:
@@ -312,10 +324,8 @@ class Niimbot(Driver):
         device, model = queue.device_specifier, queue.model
         # It asks the printer itself, and may read the answer owed
         _owed.pop(device, None)
-        if _b1_on_bluetooth(device, model):
-            return B1_USB_ONLY
         try:
-            with protocol.connect(device) as c:
+            with protocol.connect(device, _over_le(model)) as c:
                 told = MODEL_IDS.get(protocol.model_id(c), model)
                 if told != model:
                     return f'This printer is a {shown(told)}, choose that model for it'
