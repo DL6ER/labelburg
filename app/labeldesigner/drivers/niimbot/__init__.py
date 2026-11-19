@@ -28,6 +28,8 @@ SEQUENCES = {'Niimbot/D110_M': protocol.V4, 'Niimbot/B1': protocol.B1}
 # The models by the model ID they tell, which the print sequence and the
 # printhead have to fit
 MODEL_IDS = {2320: 'Niimbot/D110_M', 4096: 'Niimbot/B1'}
+# The B1 speaks Bluetooth LE only, not the classic Bluetooth of the D110_M
+B1_USB_ONLY = 'The Niimbot B1 works over USB only so far, connect it with a cable'
 # A B1 prints 0.25 mm right of the middle of a tightly seated roll and starts
 # 0.1 to 0.5 mm before the top edge of a label, by roll: its rows are moved
 # left by 0.25 mm and down by 0.25 mm
@@ -61,6 +63,10 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
+
+
+def _b1_on_bluetooth(device: str, model: str) -> bool:
+    return model == 'Niimbot/B1' and device.startswith('bt://')
 
 
 def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
@@ -173,6 +179,10 @@ class Niimbot(Driver):
         return calibration.example(kind)
 
     def status(self, device, model, unconfirmed=False):
+        if _b1_on_bluetooth(device, model):
+            state = network_status(device, model)
+            state.update({'errors': [B1_USB_ONLY], 'status_type': 'Error occurred'})
+            return state
         # One that did not answer is not looked for at every status query
         error = devices.unanswered_before(device)
         if error:
@@ -270,6 +280,8 @@ class Niimbot(Driver):
         """Print each label as a job of its own, the way the script this
         came from prints one, with the label type of the roll."""
         device, model = queue.device_specifier, queue.model
+        if _b1_on_bluetooth(device, model):
+            return B1_USB_ONLY
         try:
             with protocol.connect(device) as c:
                 told = MODEL_IDS.get(protocol.model_id(c), model)
