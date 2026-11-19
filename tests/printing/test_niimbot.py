@@ -806,6 +806,20 @@ def test_b1_with_a_status_question_unanswered_is_not_asked_again(b1, fake, monke
     assert printer_['roll'] == 'PZ1G221322004206' and fake.commands.count(0xdc) == 1
 
 
+def test_b1_poll_reading_an_error_answer_asks_no_question(b1, fake, monkeypatch):
+    # An error answer left from a stopped job comes before the one owed: the
+    # poll that only reads goes on reading
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    status = '/labeldesigner/api/printer_status'
+    b1.get(status)
+    _silent_once(fake, monkeypatch, 0xdc)
+    b1.get(status)
+    fake.pending += protocol.packet(protocol.ERROR, b'\x06')
+    asked = fake.commands.count(0xdc)
+    assert b1.get(status).get_json()['printers'][0]['errors'] == []
+    assert fake.commands.count(0xdc) == asked
+
+
 def test_b1_status_question_unanswered_for_20_s_is_lost(b1, fake, monkeypatch):
     # Then it does not answer, and the next poll asks anew
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
