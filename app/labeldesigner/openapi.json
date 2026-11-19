@@ -237,8 +237,8 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["narrow", "wide", ""],
-                          "description": "narrow: the calibration label is read at triangles on both edges; wide: the roll is wider than the printhead, its white strips are compared."
+                          "enum": ["narrow", "wide", "round", ""],
+                          "description": "narrow: the calibration label is read at triangles on both edges; wide: the roll is wider than the printhead, its white strips are compared; round: round labels, the white ring around a circle is compared."
                         }
                       }
                     }
@@ -394,7 +394,7 @@
     "/labeldesigner/api/calibration/print": {
       "post": {
         "summary": "Print a calibration label",
-        "description": "Prints the calibration label for the roll in a printer that offers calibration, moved as the printer is calibrated: on a narrow roll a triangle at each edge to read the numbers at, on a wider one a frame to compare the white strips beside.",
+        "description": "Prints the calibration label for the roll in a printer that offers calibration, moved as the printer is calibrated: on a narrow roll a triangle at each edge to read the numbers at, on a wider one a frame to compare the white strips beside, on round labels a circle to compare the white ring around.",
         "operationId": "printCalibration",
         "requestBody": {
           "content": {
@@ -515,7 +515,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": ["narrow", "wide"]
+              "enum": ["narrow", "wide", "round"]
             }
           }
         ],

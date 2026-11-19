@@ -525,7 +525,8 @@ def _calibration_page(img):
 
 
 @pytest.mark.parametrize('label_size, page', [('niimbot40x30', lambda: calibration.narrow(40, 30)),
-                                              ('niimbot50x30', lambda: calibration.wide(50, 30))])
+                                              ('niimbot50x30', lambda: calibration.wide(50, 30)),
+                                              ('niimbotd50', lambda: calibration.circle(50))])
 def test_calibration_label_is_placed_as_the_printer_is_calibrated(label_size, page):
     from types import SimpleNamespace
     job = niimbot.DRIVER.calibration_job(SimpleNamespace(label_size=label_size, offset=(-0.5, 0.25)))
@@ -546,7 +547,7 @@ def test_d110_m_prints_no_calibration_label(client, fake):
     assert fake.commands == []
 
 
-@pytest.mark.parametrize('kind, status', [('narrow', 200), ('wide', 200), ('other', 400)])
+@pytest.mark.parametrize('kind, status', [('narrow', 200), ('wide', 200), ('round', 200), ('other', 400)])
 def test_example_of_the_calibration_label(b1, kind, status):
     r = b1.get('/labeldesigner/api/calibration/example.png', query_string={'kind': kind})
     assert r.status_code == status
@@ -716,6 +717,40 @@ def test_status_of_one_printer_asks_only_that_one(b1_on_usb, fake, monkeypatch, 
 def test_status_of_a_printer_not_listed_is_refused(b1_on_usb, fake):
     response = b1_on_usb.get('/labeldesigner/api/printer_status', query_string={'printer': 'usbip://192.0.2.8/1-1'})
     assert response.status_code == 404 and fake.commands == []
+
+
+@pytest.mark.parametrize('barcode, size', [(b'052325253', (15, 8)), (b'052325254', (13, 35)), (b'052325255', (30, 15))])
+def test_b1_tells_the_labels_of_a_roll_with_several_to_a_page(b1, fake, monkeypatch, barcode, size):
+    # The label designer does not offer them yet, it says which labels the roll has
+    tag = bytes.fromhex('881d137bdf181080') + bytes([len(barcode)]) + barcode + b'\x10PZ0G000000000001' + struct.pack('>HHB', 552, 5, 5)
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['media_width'], printer_['media_length'], printer_['label_size_assumed']) == (*size, True)
+
+
+@pytest.mark.parametrize('barcode, label_size', [(b'10262260', 'niimbot50x30'), (b'080924001', 'niimbot50x80')])
+def test_b1_tells_the_labels_of_its_roll_by_the_barcode(b1, fake, monkeypatch, barcode, label_size):
+    tag = bytes.fromhex('881d137bdf181080') + bytes([len(barcode)]) + barcode + b'\x10PZ0G000000000001' + struct.pack('>HHB', 114, 0, 1)
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['label_size'], printer_['label_size_assumed']) == (label_size, False)
+
+
+def test_b1_tells_a_round_roll(b1, fake, monkeypatch):
+    # T50*50ROUND, round labels 50 mm across
+    tag = bytes.fromhex('881d137bdf181080') + b'\x09080924002' + b'\x10PZ0G000000000001' + struct.pack('>HHB', 180, 0, 1)
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+    printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (printer_['label_size'], printer_['label_size_assumed']) == ('niimbotd50', False)
+
+
+def test_round_label_prints_on_a_b1(b1, fake):
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbotd50', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    # 50 mm across, as many rows along
+    size = struct.unpack('>HHH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:6])
+    assert size[:2] == (400, 384)
 
 
 def test_b1_gets_the_rows_of_a_label_in_one_write(b1, fake):

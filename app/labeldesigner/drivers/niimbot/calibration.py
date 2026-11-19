@@ -6,7 +6,9 @@ triangle at each side runs onto the label: its straight side lies outside
 the label and is never seen, its slanted side crosses the edge where the
 print sits. The number next to that point tells how far. On wider rolls a
 frame inside the printhead's edges shows the white strips beside it. Lines
-1 mm inside the top and bottom show the white strips there."""
+1 mm inside the top and bottom show the white strips there. On round labels
+a circle as far inside shows a white ring, even all around once the print
+sits in the middle."""
 
 import functools
 import io
@@ -16,7 +18,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from . import protocol
 
 MM = 8
-KIND_MESSAGE = 'kind must be narrow or wide'
+KIND_MESSAGE = 'kind must be narrow, wide or round'
 # Kept clear of the rounded ends of a label
 CORNER = 2
 # The printhead has to reach this far past each edge of a narrow roll
@@ -93,24 +95,41 @@ def wide(width_mm: float, length_mm: float, head: int = protocol.B1_HEAD) -> Ima
     return img
 
 
+def circle(diameter_mm: float, head: int = protocol.B1_HEAD) -> Image.Image:
+    """The calibration label of round labels: a circle in the middle, as far
+    inside the printhead's edges as the frame of wide rolls."""
+    height, side = round(diameter_mm * MM), round(1.5 * MM)
+    top = (height - (head - 2 * side)) // 2
+    img = Image.new('L', (head, height), 255)
+    ImageDraw.Draw(img).ellipse((side, top, head - 1 - side, height - 1 - top), outline=0, width=2)
+    _title(img, head // 2, top + CORNER * MM, height - top - CORNER * MM)
+    return img
+
+
 @functools.cache
 def example(kind: str) -> bytes:
     """A calibration label printed 1 mm too far right, as a PNG for the
-    label designer: on a 40 x 30 mm roll with the reading points marked, or
-    on a 50 x 30 mm roll with its uneven white strips."""
-    if kind not in ('narrow', 'wide'):
+    label designer: on a 40 x 30 mm roll with the reading points marked, on
+    a 50 x 30 mm roll with its uneven white strips, or on a round 50 mm label
+    with its uneven white ring."""
+    if kind not in ('narrow', 'wide', 'round'):
         raise ValueError(KIND_MESSAGE)
-    width_mm, length_mm, shift, zoom, pad = (40 if kind == 'narrow' else 50), 30, MM, 3, 5 * MM
-    page = narrow(width_mm, length_mm) if kind == 'narrow' else wide(width_mm, length_mm)
+    width_mm, length_mm, shift, zoom, pad = (40 if kind == 'narrow' else 50), (50 if kind == 'round' else 30), MM, 3, 5 * MM
+    page = circle(width_mm) if kind == 'round' else narrow(width_mm, length_mm) if kind == 'narrow' else wide(width_mm, length_mm)
     width, height = width_mm * MM, length_mm * MM
     left = (page.width - width) // 2
     # The backing around the label, which takes no print
+    label = (252, 252, 248)
     picture = Image.new('RGB', (width + 2 * pad, height + 2 * pad), (214, 214, 206))
-    picture.paste((252, 252, 248), (pad, pad, pad + width, pad + height))
+    if kind == 'round':
+        ImageDraw.Draw(picture).ellipse((pad, pad, pad + width - 1, pad + height - 1), fill=label)
+    else:
+        picture.paste(label, (pad, pad, pad + width, pad + height))
     for y in range(height):
         for x in range(width):
             printed = left + x - shift
-            if 0 <= printed < page.width and page.getpixel((printed, y)) < 128:
+            on_label = picture.getpixel((pad + x, pad + y)) == label
+            if on_label and 0 <= printed < page.width and page.getpixel((printed, y)) < 128:
                 picture.putpixel((pad + x, pad + y), (20, 20, 20))
     picture = picture.resize((picture.width * zoom, picture.height * zoom), Image.Resampling.NEAREST)
     if kind == 'narrow':

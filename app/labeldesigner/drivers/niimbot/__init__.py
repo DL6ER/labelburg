@@ -39,11 +39,21 @@ B1_FEED = 2
 SIZES = ((12, 22), (12, 40), (14, 22), (14, 40), (14, 60), (15, 30), (15, 50))
 # Those sold for the B1, which it prints on 48 mm of
 B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80))
+# Round labels, by their diameter in mm
+B1_ROUND = (50,)
 # Width x length of the rolls by the barcode in their RFID tag, the label
 # designer then picks them. Niimbot tells it only online, at
 # print.niimbot.com, the label designer stays offline.
 ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
-         '10262260': (50, 30)}  # T50*30-230WHITE
+         '10262260': (50, 30),  # T50*30-230WHITE
+         '080924001': (50, 80),  # T50*80-95WHITE
+         # Several labels to a page, told but not offered by the label designer
+         '052325253': (15, 8),  # T15*8/2L3R-1650White, 2 across, 3 along
+         '052325254': (13, 35),  # F13*35/2L-200 Luminous, 2 across
+         '052325255': (30, 15),  # TT30*15/2R-460 Transparent, 2 along
+         '080924002': (50, 50)}  # T50*50ROUND
+# Rolls of round labels, told apart from square ones of the same size
+ROUND = {'080924002'}
 # On Bluetooth it beeps at each connection: it is asked only when the label
 # designer looks for printers and when printing, the other status queries are
 # answered from the last state. When each was last asked:
@@ -53,15 +63,18 @@ _asked: dict[str, float] = {}
 _no_serial: set[str] = set()
 
 
-def _label(width: int, length: int, model: str) -> Label:
+def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
     dots = (width * DOTS_PER_MM, length * DOTS_PER_MM)
     printable = (min(dots[0], HEADS[model]), dots[1])
-    return Label(f'niimbot{width}x{length}', (width, length), FormFactor.DIE_CUT, dots, printable, 0, models=(model,))
+    identifier = f'niimbotd{width}' if form == FormFactor.ROUND_DIE_CUT else f'niimbot{width}x{length}'
+    return Label(identifier, (width, length), form, dots, printable, 0, models=(model,))
 
 
 LABELS = (tuple(_label(width, length, 'Niimbot/D110_M') for width, length in SIZES)
-          + tuple(_label(width, length, 'Niimbot/B1') for width, length in B1_SIZES))
-NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)' for label in LABELS}
+          + tuple(_label(width, length, 'Niimbot/B1') for width, length in B1_SIZES)
+          + tuple(_label(d, d, 'Niimbot/B1', FormFactor.ROUND_DIE_CUT) for d in B1_ROUND))
+NAMES = {label.identifier: (f'{label.tape_size[0]} mm round die-cut (Niimbot)' if label.form_factor == FormFactor.ROUND_DIE_CUT
+                            else f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)') for label in LABELS}
 
 
 def centered(dots: list[int], head: int, shift: int = 0) -> list[int]:
@@ -140,12 +153,17 @@ class Niimbot(Driver):
         size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
         if model != 'Niimbot/B1' or size is None:
             return ''
+        if size.form_factor == FormFactor.ROUND_DIE_CUT:
+            return 'round'
         return 'narrow' if calibration.is_narrow(size.tape_size[0]) else 'wide'
 
     def calibration_job(self, queue):
         size = next(label for label in LABELS if label.identifier == queue.label_size)
         width, length = size.tape_size
-        page = calibration.narrow(width, length) if calibration.is_narrow(width) else calibration.wide(width, length)
+        if size.form_factor == FormFactor.ROUND_DIE_CUT:
+            page = calibration.circle(width)
+        else:
+            page = calibration.narrow(width, length) if calibration.is_narrow(width) else calibration.wide(width, length)
         # Its title is drawn smooth, printed where at least half black
         page = page.point(lambda v: 0 if v < 128 else 255)
         return [placed(page, protocol.B1_HEAD, B1_SHIFT - round(queue.offset[0] * DOTS_PER_MM),
@@ -227,6 +245,8 @@ class Niimbot(Driver):
         # The label designer then picks the labels of the roll
         if roll and roll['barcode'] in ROLLS:
             state['media_width'], state['media_length'] = ROLLS[roll['barcode']]
+            if roll['barcode'] in ROUND:
+                state['media_type'] = 'Round die-cut labels'
         devices.status_cache[devices.lock_key(device)] = state
         _asked[device] = time.monotonic()
         return state

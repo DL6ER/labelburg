@@ -553,6 +553,8 @@ textarea.field.choices { field-sizing: content; min-height: 3.6em; max-height: 1
 .prow > i { color: var(--select); }
 .settings { display: flex; flex-direction: column; gap: 1rem; }
 .cal { display: flex; flex-direction: column; gap: .5rem; }
+/* Draws the eye to what the printer needs, e.g. a calibration for a new roll */
+.btn.attention { border-color: var(--warn); box-shadow: 0 0 0 2px var(--warn-soft), 0 0 4px var(--warn); }
 .cal-example { max-width: 100%; height: auto; border-radius: .4rem; }
 /* Buttons of the calibration share their row, unlike the full-width ones of other sheets */
 .sheet .cal-row { gap: .5rem; flex-wrap: nowrap; }

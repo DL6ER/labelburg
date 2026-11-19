@@ -3619,8 +3619,7 @@ function bindPrinterPanel() {
     $('a.link', box).onclick = () => closeLayer(true);
     if ($('#calOpen', box)) {
         $('#calOpen', box).onclick = () => openCalibration();
-        if ($('#calNotNow', box)) $('#calNotNow', box).onclick = () => postCalibration({}).then(r => { if (r) redraw(); });
-        if ($('#calPrintNew', box)) $('#calPrintNew', box).onclick = () => openCalibration(true);
+        if ($('#calDismiss', box)) $('#calDismiss', box).onclick = () => postCalibration({}).then(r => { if (r) redraw(); });
     }
 }
 
@@ -3631,11 +3630,11 @@ function bindPrinterPanel() {
 function calibrationCard() {
     const p = S.printer;
     if (!p || !capsOf(p.model).calibration) return '';
-    const fresh = p.roll && p.roll !== (p.calibration || {}).roll;
-    return `<div class="cal">${fresh ? `<p class="small hint">A new roll is in the printer. Print a calibration label so the labels sit straight on it.</p>
-            <div class="row" style="gap:.5rem"><button class="btn sm" type="button" id="calPrintNew"><i class="fa-solid fa-print"></i>Print calibration label</button>
-            <button class="btn sm quiet" type="button" id="calNotNow">Not now</button></div>` : ''}
-        <button class="btn sm" type="button" id="calOpen" style="align-self:flex-start"><i class="fa-solid fa-ruler-horizontal"></i>Calibrate printer</button></div>`;
+    // Not on a roll the label designer does not offer, nothing prints on it
+    const fresh = p.roll && p.roll !== (p.calibration || {}).roll && tapeKnown();
+    return `<div class="cal">${fresh ? '<p class="small hint">A new roll is in the printer. Calibrate the printer so the labels sit straight on it.</p>' : ''}
+        <div class="row" style="gap:.5rem"><button class="btn sm${fresh ? ' attention' : ''}" type="button" id="calOpen"><i class="fa-solid fa-ruler-horizontal"></i>Calibrate printer</button>
+            ${fresh ? '<button class="btn sm quiet" type="button" id="calDismiss">Dismiss</button>' : ''}</div></div>`;
 }
 
 function calibrationForm(extra, roll = true) {
@@ -3676,8 +3675,7 @@ async function printCalibration(shown = toast, working = {}) {
     return false;
 }
 
-// With print, it prints the calibration label as it opens
-async function openCalibration(print = false) {
+async function openCalibration() {
     const q = new URLSearchParams({ printer: printerKey(), model: S.printer.model, label_size: S.tape });
     let kept;
     try {
@@ -3687,7 +3685,8 @@ async function openCalibration(print = false) {
     } catch {
         return toast('The label designer could not be reached');
     }
-    const narrow = kept.kind !== 'wide', step = narrow ? 0.5 : 0.25;
+    // Round labels are read as wide ones, on a ring instead of strips
+    const round = kept.kind === 'round', narrow = kept.kind !== 'wide' && !round, step = narrow ? 0.5 : 0.25;
     // Changed here, kept for the printer only once saved. Read numbers count
     // from the correction the last calibration label was printed with.
     let working = { across: kept.across, along: kept.along }, printed = { ...working };
@@ -3697,16 +3696,17 @@ async function openCalibration(print = false) {
     sheet(`<h2>Calibrate printer</h2>
         <p>Print a calibration label, then look at it as the picture shows.</p>
         <img class="cal-example" alt="${narrow ? 'A calibration label printed 1 mm too far right: read where the black starts at each edge of the label'
-            : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it'}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : 'wide' })}">
+            : round ? 'A calibration label printed 1 mm too far right: the white ring is wider left of the circle than right of it'
+            : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it'}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: printerKey(), model: S.printer.model, kind: narrow ? 'narrow' : round ? 'round' : 'wide' })}">
         <button class="btn-print sm" type="button" data-cal-print style="align-self:flex-start"><i class="fa-solid fa-print"></i>Print calibration label</button>
         ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
         <div class="row cal-row"><label>Left <select class="field" id="calLeft">${readings}</select></label>
             <label>Right <select class="field" id="calRight">${readings}</select></label>
             <button class="btn sm" type="button" id="calApply">Apply</button></div>`
-        : '<p>Compare the white strips left and right of the frame.</p>'}
+        : round ? '<p>Compare the white ring left and right of the circle.</p>' : '<p>Compare the white strips left and right of the frame.</p>'}
         <p id="calResult" class="small" aria-live="polite"></p>
         <div class="row cal-row">${move('left', `${step} mm`)}${move('right', `${step} mm`)}</div>
-        <p class="muted small">Compare the white strip above the top line with the one below the bottom line.</p>
+        <p class="muted small">${round ? 'Compare the white ring above the circle with the one below it.' : 'Compare the white strip above the top line with the one below the bottom line.'}</p>
         <div class="row cal-row">${move('up', '0.25 mm')}${move('down', '0.25 mm')}</div>
         <div class="row cal-row"><span id="calNow" class="small"></span>
             <button class="btn sm quiet" type="button" id="calReset">No fine correction</button></div>
@@ -3746,7 +3746,6 @@ async function openCalibration(print = false) {
         }
         printButton.disabled = false;
     };
-    if (print) printButton.onclick();
     if (narrow) $('#calApply', box).onclick = async () => {
         const left = $('#calLeft', box), right = $('#calRight', box);
         if (!left.value || !right.value) return say('Choose the number on each side.', true);

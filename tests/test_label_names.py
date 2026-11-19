@@ -174,6 +174,10 @@ def _status(model, width=None, length=0, **status):
     (_status('PT-P750W', 12), 'pt12'),
     (_status('VC-500W', 12), 'vc12'),
     (_status('Niimbot/D110_M', 12, 40), 'niimbot12x40'),
+    # Round and square labels of the same size, told apart by the printer
+    (_status('Niimbot/B1', 50, 50, media_type='Round die-cut labels'), 'niimbotd50'),
+    (_status('Niimbot/B1', 50, 50, media_type='Die-cut labels'), 'niimbot50x50'),
+    (_status('QL-800', 24, 24, media_type='Die-cut labels'), 'd24'),
     # A printer of no known model, any label size of a printer
     (_status('Unknown', 29, 90), '29x90'),
 ])

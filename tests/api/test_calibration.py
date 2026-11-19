@@ -145,7 +145,7 @@ def test_printers_without_calibration_are_refused(tmp_path):
     assert niimbot.DRIVER.capabilities('Niimbot/D110_M')['calibration'] is False
 
 
-@pytest.mark.parametrize('label_size, kind', [('niimbot40x30', 'narrow'), ('niimbot50x30', 'wide')])
+@pytest.mark.parametrize('label_size, kind', [('niimbot40x30', 'narrow'), ('niimbot50x30', 'wide'), ('niimbotd50', 'round')])
 def test_the_calibration_label_follows_the_roll(b1, label_size, kind):
     assert b1.get(URL, query_string={**B1, 'label_size': label_size}).get_json()['kind'] == kind
 
@@ -279,7 +279,7 @@ def test_calibration_tried_with_save_false_is_not_kept(b1, save):
     assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
 
 
-@pytest.mark.parametrize('kind', ['narrow', 'wide'])
+@pytest.mark.parametrize('kind', ['narrow', 'wide', 'round'])
 def test_example_picture_is_served_for_each_kind(b1, kind):
     r = b1.get(f'{URL}/example.png', query_string={**B1, 'kind': kind})
     assert r.status_code == 200 and r.headers['Content-type'] == 'image/png'

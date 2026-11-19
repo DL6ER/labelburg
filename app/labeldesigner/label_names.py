@@ -4,7 +4,7 @@ print them. Each driver (drivers/) has the label sizes of its printers."""
 import functools
 import math
 
-from .drivers.labels import Color, Label
+from .drivers.labels import Color, FormFactor, Label
 
 from . import drivers
 from .drivers import LABELS, MODELS
@@ -70,9 +70,13 @@ def printer_label_size(printer: dict, default: str) -> tuple[str, bool]:
     if printer.get('media_width'):
         tape = (printer['media_width'], printer.get('media_length') or 0)
         red = printer.get('red_roll') is True or 'red' in str(printer.get('media_type') or '').lower()
-        found = next((label for label in takes if label.tape_size == tape and (label.color == Color.BLACK_RED_WHITE) == red), None)
+        found = [label for label in takes if label.tape_size == tape and (label.color == Color.BLACK_RED_WHITE) == red]
+        # Round and square labels of the same size, e.g. of a B1, by what the
+        # printer tells
+        round_ = 'round' in str(printer.get('media_type') or '').lower()
+        found.sort(key=lambda label: (label.form_factor == FormFactor.ROUND_DIE_CUT) != round_)
         if found:
-            return found.identifier, False
+            return found[0].identifier, False
     assumed = next((label for label in takes if label.identifier == default), None) or next(iter(takes), None)
     return (assumed.identifier if assumed else default), True
 

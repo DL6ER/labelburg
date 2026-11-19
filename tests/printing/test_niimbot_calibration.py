@@ -44,6 +44,19 @@ def test_wide_frame_is_1_5_mm_inside_the_printhead():
     assert img.getpixel((150, 8)) < 128 and img.getpixel((150, 231)) < 128
 
 
+def test_round_labels_get_a_circle_as_far_inside_as_the_wide_frame():
+    # The white ring around it shows how far the print sits off each way
+    img = calibration.circle(50)
+    assert img.size == (384, 400)
+    assert img.getpixel((12, 200)) < 128 and img.getpixel((371, 200)) < 128
+    assert all(img.getpixel((x, 200)) == 255 for x in range(12))
+    # 2.5 mm inside the top and the bottom of the label
+    assert img.getpixel((192, 20)) < 128 and img.getpixel((192, 379)) < 128
+    assert all(img.getpixel((192, y)) == 255 for y in range(20))
+    # Nothing in the corners, which are off the label
+    assert img.getpixel((14, 22)) == 255
+
+
 @pytest.mark.parametrize('width, narrow', [(40, True), (42, True), (43, False), (50, False)])
 def test_narrow_rolls(width, narrow):
     assert calibration.is_narrow(width) is narrow
@@ -52,6 +65,7 @@ def test_narrow_rolls(width, narrow):
 def test_example_images_are_pngs():
     assert calibration.example('narrow').startswith(b'\x89PNG')
     assert calibration.example('wide').startswith(b'\x89PNG')
+    assert calibration.example('round').startswith(b'\x89PNG')
     with pytest.raises(ValueError):
         calibration.example('other')
 

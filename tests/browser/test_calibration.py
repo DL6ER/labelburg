@@ -7,7 +7,8 @@ from urllib.parse import parse_qs
 
 import pytest
 
-HINT = 'A new roll is in the printer. Print a calibration label so the labels sit straight on it.'
+HINT = 'A new roll is in the printer. Calibrate the printer so the labels sit straight on it.'
+GLOWS = '() => document.querySelector("#calOpen").classList.contains("attention")'
 
 
 @pytest.fixture
@@ -43,7 +44,8 @@ def _until(designer, condition):
 def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None):
     where = f", path: '{path}'" if path else ''
     designer.evaluate(f"""() => {{ S.printers = [Object.assign({{}}, S.printer, {{ model: '{model}', status_type: 'Reply to status request',
-        roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }}{where} }})]; S.printer = S.printers[0]; openPrinterPanel(); }}""")
+        roll: '{roll}', calibration: {{ across: 0, along: 0, roll: 'PZ1TEST00001' }}, media_width: 50, media_length: 30,
+        label_size: 'niimbot50x30', label_size_assumed: false{where} }})]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }}""")
 
 
 def _dialog(designer, wide=False):
@@ -72,18 +74,49 @@ def test_calibrate_printer_is_named_so(designer, calibration):
     assert designer.inner_text('#layer h2') == 'Calibrate printer'
 
 
-def test_a_new_roll_is_pointed_out_and_not_now_hides_it(designer, calibration):
+def test_a_new_roll_is_pointed_out_and_dismiss_hides_it(designer, calibration):
     sent, _ = calibration
     _panel(designer)
-    assert HINT in designer.inner_text('.pp')
-    designer.click('#calNotNow')
-    designer.wait_for_function('() => !document.querySelector("#calNotNow")')
+    # One button to calibrate, which draws the eye
+    assert HINT in designer.inner_text('.pp') and designer.evaluate(GLOWS)
+    assert designer.locator('.pp .cal button').count() == 2
+    assert designer.inner_text('#calDismiss') == 'Dismiss'
+    designer.click('#calDismiss')
+    designer.wait_for_function('() => !document.querySelector("#calDismiss")')
     assert sent == [('/calibration', {'printer': designer.evaluate('() => S.printer.path'), 'model': 'Niimbot/B1', 'roll': 'PZ1TEST00002'})]
-    assert HINT not in designer.inner_text('.pp')
+    assert HINT not in designer.inner_text('.pp') and not designer.evaluate(GLOWS)
 
 
 def test_the_same_roll_is_not_pointed_out(designer, calibration):
     _panel(designer, roll='PZ1TEST00001')
+    assert HINT not in designer.inner_text('.pp') and not designer.evaluate(GLOWS)
+
+
+def test_calibrate_printer_glows_without_pulsing(designer, calibration):
+    _panel(designer)
+    assert designer.eval_on_selector('#calOpen', 'b => getComputedStyle(b).animationName') == 'none'
+    assert designer.eval_on_selector('#calOpen', 'b => getComputedStyle(b).boxShadow') != 'none'
+
+
+def test_a_round_roll_compares_the_white_ring(designer, calibration):
+    _, answers = calibration
+    answers['GET'] = dict(answers['GET'], kind='round')
+    _panel(designer)
+    with designer.expect_request('**/calibration/example.png*') as request:
+        designer.click('#calOpen')
+    assert 'kind=round' in request.value.url
+    text = designer.inner_text('#layer')
+    assert 'Compare the white ring left and right of the circle.' in text
+    assert 'Compare the white ring above the circle with the one below it.' in text
+    assert designer.locator('#calLeft').count() == 0 and designer.locator('[data-move="left"]').count() == 1
+
+
+def test_a_roll_the_designer_does_not_offer_is_not_pointed_out(designer, calibration):
+    # No calibration label can be printed on it
+    designer.evaluate("""() => { S.printers = [Object.assign({}, S.printer, { model: 'Niimbot/B1', status_type: 'Reply to status request',
+        roll: 'PZ1TEST00002', calibration: { across: 0, along: 0, roll: 'PZ1TEST00001' }, media_width: 30, media_length: 15,
+        label_size: 'niimbot40x20', label_size_assumed: true })]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }""")
+    assert 'The printer reports 30 x 15 mm tape, which is not offered here.' in designer.inner_text('.pp')
     assert HINT not in designer.inner_text('.pp')
 
 
@@ -265,13 +298,12 @@ def test_steps_wait_for_the_one_before(designer, calibration):
     assert designer.inner_text('#calNow') == 'Labels are moved 0.5 mm to the left.'
 
 
-def test_new_roll_prints_from_the_dialog_once(designer, calibration):
-    sent, _ = calibration
+def test_calibration_label_prints_once_at_a_time(designer, calibration):
     pending = []
     designer.route('**/api/calibration/print', lambda route: pending.append(route))
     _panel(designer)
-    designer.click('#calPrintNew')
-    designer.wait_for_selector('[data-cal-print]')
+    designer.click('#calOpen')
+    designer.click('[data-cal-print]')
     _until(designer, lambda: len(pending) == 1)
     assert designer.eval_on_selector('[data-cal-print]', 'b => b.disabled')
     assert designer.inner_text('#calResult') == 'Printing the calibration label.'
