@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import os
+import re
 
 import pytest
 from PIL import Image
@@ -282,6 +283,12 @@ def test_status_tells_the_label_sizes_each_printer_takes(client, monkeypatch):
     assert '62' in ql['takes'] and 'pt12' not in ql['takes']
     # A model no label size names takes every size that has printers
     assert unknown['takes'] == [s for s in tape.SIZES if tape.TAKEN_BY[s]]
+
+
+def test_label_designer_gets_the_sizes_taken_without_a_known_printer(client):
+    html = client.get('/labeldesigner/').get_data(as_text=True)
+    config = json.loads(re.search(r'const DESIGNER_CONFIG = (.*);</script>', html).group(1))
+    assert config['takes'] == tape.takes(None)
 
 
 def test_resolved_printer_is_the_model_its_address_tells(client):

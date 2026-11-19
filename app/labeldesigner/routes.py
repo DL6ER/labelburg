@@ -210,9 +210,6 @@ def index():
          'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
          'palette': label_palette(label), 'models': label_printers(label),
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
-         # The size of the same paper on models that print it as another one
-         'same_paper': {model: size for model in MODELS
-                        if (size := drivers.for_model(model).label_for(label.identifier, model)) != label.identifier},
          # The shortest and longest endless label as cut, None without a length to set
          'length': list(limits[:2]) if (limits := length_limits(label)) else None}
         for label in LABELS
@@ -229,6 +226,8 @@ def index():
             'default_font': ','.join(fonts.get_default_font()),
             'label_sizes': label_sizes,
             'default_label_size': current_app.config['LABEL_DEFAULT_SIZE'],
+            # The sizes taken without a known printer
+            'takes': tape.takes(None),
             # New labels start with them
             'defaults': {
                 'orientation': current_app.config['LABEL_DEFAULT_ORIENTATION'],

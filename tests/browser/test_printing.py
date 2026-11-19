@@ -3,23 +3,12 @@ copies."""
 
 import base64
 import json
-import time
 from urllib.parse import parse_qs
 
 import pytest
 
-from app.labeldesigner import printer_settings
-from tests.browser.helpers import fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_preview, with_tape
-
-
-def fake_printer(page, **status):
-    """Answer the status queries with a QL-800 that reports the given
-    status, e.g. the loaded labels, and load the page again."""
-    printer = with_tape({'errors': [], 'model': 'QL-800', 'path': 'simulation', 'media_width': None, 'media_length': 0, **status})
-    body = json.dumps({**printer, 'printers': [printer], 'selected': 'simulation'})
-    page.route('**/api/printer_status*', lambda route: route.fulfill(content_type='application/json', body=body))
-    page.reload()
-    wait_for_preview(page)
+from app.labeldesigner import printer_settings, tape
+from tests.browser.helpers import fake_printer, fits_note, kept, png, preview_size, printed, set_tape, type_line, wait_for_held, wait_for_preview, with_tape
 
 
 def test_ctrl_enter_prints(designer, monkeypatch, tmp_path):
@@ -119,43 +108,165 @@ def test_label_sizes_follow_the_printer_model(designer):
     assert designer.inner_text('#edTapeChange') == 'Set the tape'
 
 
+def test_offered_tapes_are_those_the_status_names(designer):
+    # The server tells them: every size that has printers for a model no
+    # label size names
+    fake_printer(designer, model='Unknown')
+    assert sorted(offered_tapes(designer)) == sorted(s for s in tape.SIZES if tape.TAKEN_BY[s])
+    printer = {**with_tape({'errors': [], 'model': 'QL-800', 'path': 'simulation'}), 'takes': ['29', '62']}
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={**printer, 'printers': [printer], 'selected': 'simulation'}))
+    designer.evaluate('() => refreshPrinters()')
+    assert sorted(offered_tapes(designer)) == ['29', '62']
+
+
+def test_without_a_printer_the_tapes_are_those_of_a_printer_that_is_not_known(designer):
+    designer.evaluate('() => { S.printer = null; S.printers = []; openPrinterPanel(); }')
+    offered = designer.eval_on_selector_all('#setTape option', 'options => options.map(o => o.value).filter(Boolean)')
+    assert '103' not in offered
+    assert sorted(offered) == sorted(s for s in tape.SIZES if tape.TAKEN_BY[s])
+
+
 def use_printer(page, printer):
     page.evaluate("p => { S.printer = p; detectTape(); }", with_tape(printer))
 
 
+def test_tape_follows_the_printer(designer):
+    # DK and TZe tape of 12 mm have the same size, the model tells them apart
+    fake_printer(designer, model='PT-P750W', media_width=12)
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['pt12', False]
+    # A tape set by hand counts only where the printer reports none
+    fake_printer(designer, manual='pt24', model='PT-P750W', media_width=12)
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt12', False]
+    fake_printer(designer, manual='pt24', model='PT-P750W', media_width=None)
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt24', True]
+    assert designer.inner_text('.tape-note').strip() == 'Set in the printer settings'
+    # A PUQU Q00 does not tell its tape, the server assumes the one it would
+    # print on
+    use_printer(designer, {'path': 'c', 'model': 'PUQU/Q00', 'media_width': 62, 'media_length': 0})
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed, S.tapeUnknown]') == ['puqu50x30', True, '']
+
+
+def test_tape_set_by_hand_belongs_to_its_printer(designer):
+    other = 'tcp://192.0.2.10'
+    printers = [with_tape({'errors': [], 'path': path, 'model': 'QL-800', 'media_width': None, 'media_length': 0, 'settings': settings})
+                for path, settings in (('simulation', {'label_size': '29'}), (other, {}))]
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={**printers[0], 'printers': printers, 'selected': 'simulation'}))
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['29', True]
+    designer.click('#printerChip')
+    designer.click(f'[data-printer="{other}"]')
+    assert designer.evaluate("() => [S.tape, S.tapeManual, $('#setTape').value]") == ['62', False, '']
+    designer.click('[data-printer="simulation"]')
+    assert designer.evaluate("() => [S.tape, S.tapeManual, $('#setTape').value]") == ['29', True, '29']
+
+
+def test_tape_is_the_one_the_server_tells(designer):
+    # The server tells the tape, the label designer does not match the tape
+    # itself
+    told = {**with_tape({'path': 'a', 'model': 'QL-800', 'media_width': 29, 'media_length': 90}), 'media_width': 62, 'media_length': 0}
+    designer.evaluate("p => { S.printer = p; detectTape(); }", told)
+    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['29x90', False]
+
+
 def test_tape_the_printer_reports_is_not_set_by_hand(designer):
-    use_printer(designer, {'path': 'simulation', 'model': 'QL-800', 'media_width': 29, 'media_length': 90, 'red_roll': False})
-    designer.evaluate('() => renderEditor()')
+    fake_printer(designer, media_width=29, media_length=90, red_roll=False)
     assert designer.inner_text('.tape-note').strip() == 'In the printer'
     assert designer.locator('#edTapeChange').count() == 0
-    designer.evaluate('() => openPrinterPanel()')
+    designer.click('#printerChip')
     assert designer.locator('#setTape').count() == 0
     assert designer.inner_text('#ppTape') == designer.evaluate("() => sizeName('29x90')")
     assert designer.inner_text('#ppTapeNote') == 'Read from the printer.'
 
 
-def test_tape_follows_the_printer(designer):
-    # DK and TZe tape of 12 mm have the same size, the model tells them apart
-    use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': 12, 'media_length': 0})
-    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['pt12', False]
-    # A tape set by hand counts only where the printer reports none
-    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: 'pt24' }); detectTape(); }")
-    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt12', False]
-    use_printer(designer, {'path': 'a', 'model': 'PT-P750W', 'media_width': None, 'media_length': 0, 'settings': {'label_size': 'pt24'}})
-    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['pt24', True]
-    use_printer(designer, {'path': 'b', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
-    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['62', False]
-    # A tape the printer does not take, the server assumes the one it would
-    # print on
-    use_printer(designer, {'path': 'c', 'model': 'PUQU/Q00', 'media_width': 62, 'media_length': 0})
-    assert designer.evaluate('() => [S.tape, S.tapeAssumed, S.tapeUnknown]') == ['puqu50x30', True, '62 mm']
+def test_tape_set_by_hand_is_kept_on_the_server(designer, browser):
+    set_tape(designer, '29')
+    status = designer.evaluate("async () => (await (await fetch(API + '/printer_status')).json())")
+    assert [(p['settings'].get('label_size'), p['tape']['id'], p['tape']['manual']) for p in status['printers'] if p['path'] == 'simulation'] == [('29', '29', True)]
+    # Another browser sees it: the tape is in the printer, not in one browser
+    other = browser.new_context(locale='en-US').new_page()
+    try:
+        other.goto(designer.url)
+        wait_for_preview(other)
+        assert other.evaluate('() => [S.tape, S.tapeManual]') == ['29', True]
+    finally:
+        other.context.close()
 
 
-def test_tape_is_the_one_the_server_tells(designer):
-    # The server tells the label size, the label designer does not match the
-    # tape itself
-    designer.evaluate("() => { S.printer = { path: 'a', model: 'QL-800', media_width: 62, media_length: 0, label_size: '29x90', label_size_assumed: false }; detectTape(); }")
-    assert designer.evaluate('() => [S.tape, S.tapeAssumed]') == ['29x90', False]
+def test_tape_set_by_hand_shows_before_the_status_answers(designer):
+    # Slow printers answer late. A status asked for before the tape was set
+    # does not undo it.
+    held = []
+    designer.route('**/api/printer_status*', lambda route: held.append(route))
+    designer.evaluate('() => { window.asked = refreshPrinters(); }')
+    wait_for_held(designer, held)
+    designer.click('#edTapeChange')
+    designer.select_option('#setTape', '29')
+    designer.wait_for_function("() => S.tape === '29' && S.tapeManual")
+    assert designer.inner_text('#printerChip .tape') == designer.evaluate("() => sizeName('29')")
+    old = with_tape({'errors': [], 'model': 'QL-800', 'path': 'simulation'})
+    held[0].fulfill(json={**old, 'printers': [old], 'selected': 'simulation'})
+    designer.evaluate('() => window.asked')
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['29', True]
+    # The status is asked for again, the server has the tape too
+    wait_for_held(designer, held, 2)
+    for route in held[1:]:
+        route.continue_()
+    designer.unroute('**/api/printer_status*')
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.evaluate('() => [S.tape, S.tapeManual]') == ['29', True]
+
+
+def test_tape_the_printer_does_not_take_is_refused_with_the_reason(designer):
+    designer.click('#printerChip')
+    # Offered before another printer took the place of this one
+    designer.evaluate("() => $('#setTape').add(new Option('12 mm', 'pt12'))")
+    designer.select_option('#setTape', 'pt12')
+    designer.wait_for_selector('#toast:has-text("cannot be printed on")')
+    designer.wait_for_function("() => $('#setTape').value === ''")
+    assert designer.evaluate('() => [S.tapeManual, kept().label_size]') == [False, None]
+
+
+def test_tape_set_for_another_model_is_not_selected(designer):
+    # Kept for the printer at this address before, the server does not use it
+    fake_printer(designer, manual='pt24')
+    designer.click('#printerChip')
+    assert designer.evaluate("() => [kept().label_size, S.tapeManual, $('#setTape').value]") == ['pt24', False, '']
+    assert designer.locator('#setTape option[value="pt24"]').count() == 0
+
+
+def test_tape_chosen_stays_selected_while_it_is_saved(designer):
+    # The server tells whether it uses the tape once it has it, the panel
+    # drawn anew meanwhile shows the tape chosen
+    held = []
+    designer.route('**/api/settings', lambda route: held.append(route))
+    designer.click('#printerChip')
+    designer.select_option('#setTape', '29')
+    wait_for_held(designer, held)
+    assert designer.evaluate("() => [$('#setTape').value, kept().label_size, S.tapeManual]") == ['29', '29', False]
+    designer.click('[data-q="fast"]')
+    wait_for_held(designer, held, 2)
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.evaluate("() => [$('#setTape').value, S.tapeManual]") == ['29', False]
+    for route in held:
+        route.continue_()
+    designer.wait_for_function("() => S.tapeManual && $('#setTape').value === '29'")
+
+
+def test_tape_refused_while_it_was_saved_shows_the_one_before(designer):
+    set_tape(designer, '29')
+    held = []
+    designer.route('**/api/settings', lambda route: held.append(route))
+    designer.click('#printerChip')
+    # Offered before another printer took the place of this one
+    designer.evaluate("() => $('#setTape').add(new Option('12 mm', 'pt12'))")
+    designer.select_option('#setTape', 'pt12')
+    wait_for_held(designer, held)
+    designer.evaluate('() => refreshPrinters()')
+    assert designer.evaluate("() => $('#setTape').value") == 'pt12'
+    held[0].continue_()
+    # Taken back on the printer the status brought meanwhile
+    designer.wait_for_selector('#toast:has-text("cannot be printed on")')
+    assert designer.evaluate("() => [$('#setTape').value, S.tapeManual, kept().label_size]") == ['29', True, '29']
 
 
 def test_label_is_placed_on_the_loaded_tape(designer):
@@ -201,6 +312,23 @@ def test_label_saved_as_made_unless_changed_on_the_loaded_tape(designer):
     designer.wait_for_selector('#toast:has-text("Saved \\"Placed shelf\\" as 29 x 90 mm label")')
     designer.wait_for_function(f'() => ({saved_size})() === "29x90"')
     assert designer.locator('#edMade').count() == 0
+
+
+def test_label_of_no_orientation_is_placed_on_the_loaded_tape(designer):
+    # Anything but rotated is standard, as the server renders it
+    box = "() => openEditor({ title: 'Box', design: Object.assign(baseDesign('62'), { orientation: '', text: [L('Box', 40)] }) })"
+    designer.evaluate(box)
+    wait_for_preview(designer)
+    assert designer.inner_text('[data-along].on') == 'Across the tape'
+    fake_printer(designer, media_width=29, media_length=90)
+    designer.evaluate(box)
+    wait_for_preview(designer)
+    assert designer.inner_text('#edStage .dim-x') == '90 mm'
+    designer.route('**/api/print', lambda route: route.fulfill(json={'success': True}))
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#edPrint')
+    form = parse_qs(request.value.post_data)
+    assert (form['label_size'], form['orientation']) == (['29x90'], ['standard'])
 
 
 def test_configured_printers_are_offered_and_the_choice_is_kept(designer, app, monkeypatch):
@@ -296,10 +424,10 @@ def test_dense_printing_is_named_without_dpi(designer):
 
 def test_ptouch_tape_is_shown_at_180_dpi(designer):
     # Offered to set by hand where the printer does not report its tape
-    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': None, 'media_length': 0})
+    fake_printer(designer, model='PT-E550W')
     offered = offered_tapes(designer)
     assert 'pt6' in offered and 'pt9' in offered and '62' not in offered
-    use_printer(designer, {'path': 'a', 'model': 'PT-E550W', 'media_width': 12, 'media_length': 0})
+    fake_printer(designer, model='PT-E550W', media_width=12)
     designer.evaluate("() => { S.edit.design.label_size = S.tape; renderEditor(); }")
     # 35 dots at 180 dpi
     assert designer.input_value('[data-margin="left"]') == '4.9'
@@ -472,6 +600,7 @@ def test_loaded_label_that_is_not_offered(designer):
     assert designer.evaluate("() => $('#setTape').selectedOptions[0].textContent") == 'Automatic'
     # Set by hand it is the tape in the printer
     designer.select_option('#setTape', '62')
+    designer.wait_for_function("() => S.tapeManual")
     designer.keyboard.press('Escape')
     wait_for_preview(designer)
     assert designer.inner_text('#printerChip .tape') == '62 mm endless'
@@ -479,16 +608,42 @@ def test_loaded_label_that_is_not_offered(designer):
     assert designer.evaluate('() => S.edit.design.label_size') == '62'
 
 
+def test_printer_that_measures_only_the_length_of_its_labels(designer):
+    # A ZPL printer measured 50 mm, the length of labels of two widths
+    fake_printer(designer, model='Zebra/ZPL', media_length=50)
+    who = designer.evaluate('() => thePrinter(S.printer, true)')
+    assert designer.inner_text('.tape-note') == f'{who} measures labels 50 mm long. Choose which ones in the printer settings.'
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp #setTape + .muted') == 'The printer measures labels 50 mm long, choose which ones. Labels keep their own size, new ones are ' + designer.evaluate('() => sizeName(S.tape)') + '.'
+    # Those of that length are offered first, once
+    groups = designer.evaluate("() => [...document.querySelectorAll('#setTape optgroup')].map(g => [g.label, [...g.children].map(o => o.value)])")
+    assert groups[0] == ['Of the measured length', ['zpl100x50', 'zpl80x50']]
+    assert not any(size in sizes for _, sizes in groups[1:] for size in ('zpl100x50', 'zpl80x50'))
+    designer.select_option('#setTape', 'zpl80x50')
+    designer.wait_for_function('() => S.tapeManual')
+    designer.keyboard.press('Escape')
+    wait_for_preview(designer)
+    assert designer.inner_text('.tape-note').strip() == 'Set in the printer settings'
+
+
 def test_tape_set_by_hand_is_known(designer):
     # A roll the designer does not offer says nothing about a tape set by
     # hand, nor does a printer that reports none about its color
-    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 40, 'media_length': 0})
-    assert designer.evaluate('() => S.tapeUnknown') == '40 mm'
-    designer.evaluate("() => { S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); detectTape(); }")
+    fake_printer(designer, media_width=40)
+    assert designer.inner_text('.tape-note') == 'The Brother QL-800 reports 40 mm tape, which is not offered here.'
+    fake_printer(designer, manual='62', media_width=40)
+    assert designer.inner_text('.tape-note').strip() == 'Set in the printer settings'
     assert designer.evaluate('() => [S.tapeUnknown, S.tapeManual]') == ['', True]
-    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': 62, 'media_length': 0})
+    red = "() => openEditor({ title: 'Red', design: Object.assign(baseDesign('62red'), { text: [L('Red', 40)] }) })"
+    fake_printer(designer, media_width=62)
+    designer.evaluate(red)
+    wait_for_preview(designer)
+    assert designer.locator('#edMade').count() == 0
     assert designer.evaluate("() => fitsTape('62red')")
-    use_printer(designer, {'path': 'a', 'model': 'QL-800', 'media_width': None, 'media_length': 0, 'settings': {'label_size': '62'}})
+    fake_printer(designer, manual='62')
+    designer.evaluate(red)
+    wait_for_preview(designer)
+    assert designer.inner_text('#edMade').startswith('Made for 62 mm endless, black and red')
     assert not designer.evaluate("() => fitsTape('62red')")
 
 
@@ -519,10 +674,10 @@ def test_cutting_per_printer_and_per_label(designer):
     designer.evaluate("() => openPrinterPanel()")
     # Only P-touch printers half cut and chain print, shown off
     assert designer.locator('[data-c="half_cut"][data-v="0"].on:disabled, [data-c="chain"][data-v="0"].on:disabled').count() == 2
-    # The 62 mm label is printed on it as set by hand: a PT-E550W does not
-    # report its tape over the network, and tape it takes would be assumed
-    designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'PT-E550W' });
-        S.printer.settings = Object.assign({}, S.printer.settings, { label_size: '62' }); closeLayer(true); openPrinterPanel(); }""")
+    # A PT-E550W does not report its tape over the network, the 62 mm label
+    # keeps its size
+    fake_printer(designer, model='PT-E550W')
+    designer.evaluate("() => openPrinterPanel()")
     # Not cut is chain printing on P-touch printers
     designer.click('[data-c="cut"][data-v="none"]')
     assert designer.locator('[data-c="chain"][data-v="1"].on:disabled').count() == 1
@@ -818,9 +973,9 @@ def test_editor_follows_the_tape_the_printer_reports(designer):
     assert designer.inner_text('.tape-line .grow') == '29 x 90 mm'
     assert designer.inner_text('#edMade').startswith('Made for 62 mm endless')
     # The same roll leaves the editor as it is
-    designer.evaluate("() => { window.row = $('[data-row=\"0\"] .tx'); window.row.focus(); }")
+    designer.focus('[data-row="0"] .tx')
     designer.evaluate("() => refreshPrinters()")
-    assert designer.evaluate("() => document.activeElement === window.row")
+    assert designer.evaluate("() => document.activeElement.matches('[data-row=\"0\"] .tx')")
     # Its own roll again, the label is as made
     printer.update(media_width=62, media_length=0)
     designer.evaluate("() => refreshPrinters()")
@@ -910,10 +1065,7 @@ def test_a_refused_change_is_taken_back_on_the_printers_a_status_brought(designe
     designer.route('**/api/settings', lambda route: held.append(route))
     designer.click('#printerChip')
     designer.click('[data-q="fast"]')
-    deadline = time.monotonic() + 30
-    while not held:
-        assert time.monotonic() < deadline, 'the change was not sent'
-        designer.wait_for_timeout(50)
+    wait_for_held(designer, held)
     designer.evaluate('() => refreshPrinters()')
     assert designer.inner_text('.pp [data-q].on') == 'Fast'
     held[0].fulfill(status=400, json={'success': False, 'message': printer_settings.TOO_MANY_PRINTERS})
@@ -972,9 +1124,22 @@ def test_receipt_printers_are_named_alike(designer):
 
 
 def test_label_for_the_other_receipt_paper_is_shown_on_the_printers(designer):
-    # The paper in the printer is not set: shown and printed on its size of the same paper
-    assert designer.evaluate("""() => { S.printer = Object.assign({}, S.printer, { model: 'Epson/ESC-POS-180' }); S.tapeAssumed = true;
-        return ['escpos80', 'escpos58', '62'].map(id => onTape(baseDesign(id)).label_size); }""") == ['escpos80-180', 'escpos58-180', '62']
+    # The paper in the printer is not set: shown and printed on its size of
+    # the same paper, as the server places it
+    fake_printer(designer, model='Epson/ESC-POS-180')
+    assert designer.evaluate('() => S.tapeAssumed')
+    assert designer.evaluate("() => ['escpos80', 'escpos58', '62'].map(id => onTape(baseDesign(id)).label_size)") == [
+        'escpos80-180', 'escpos58-180', '62']
+
+
+def test_receipt_paper_kept_for_the_other_model_is_shown_as_the_one_used(designer):
+    # escpos80 kept from before the printer was known to have a 180 dpi head:
+    # the panel selects the size the server prints on, offered once
+    fake_printer(designer, manual='escpos80', model='Epson/ESC-POS-180')
+    designer.click('#printerChip')
+    assert designer.evaluate("() => [S.tape, S.tapeManual, $('#setTape').value]") == ['escpos80-180', True, 'escpos80-180']
+    names = designer.eval_on_selector_all('#setTape option', 'options => options.map(o => o.textContent)')
+    assert names.count(designer.evaluate("() => sizeName('escpos80-180')")) == 1
 
 
 def print_held(page, job, large=False):
