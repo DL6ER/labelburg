@@ -745,7 +745,7 @@ def repo_tags():
         return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     except LabelsBusy:
         return _busy()
-    return {'success': True, 'tags': tags}
+    return jsonify({'success': True, 'tags': tags})
 
 
 @bp.route('/api/repository/load', methods=['GET'])
