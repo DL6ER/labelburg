@@ -69,6 +69,8 @@ class Driver:
     # MAC address prefixes of its network printers, for those found in the
     # ARP table that do not announce themselves
     mac_address_prefixes: tuple = ()
+    # Whether its status tells the tape or roll in the printer
+    reports_tape: bool = True
 
     def model_of(self, device: str) -> str | None:
         """The model of a printer known by its address or device ID alone,

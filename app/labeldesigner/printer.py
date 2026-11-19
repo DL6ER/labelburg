@@ -78,10 +78,10 @@ class _Simulator:
 
 
 class PrinterQueue:
-    def __init__(self, model, device_specifier, label_size):
-        # A printer known by its address or device ID is that model
-        self.driver, model = drivers.resolve(device_specifier, model)
-        label_size = self.driver.label_for(label_size, model)
+    def __init__(self, model, device_specifier, label_size, resolved=False):
+        # A printer known by its address or device ID is that model, a model
+        # resolved before is taken as it is: resolving may ask the printer
+        self.driver, model = (drivers.for_model(model), model) if resolved else drivers.resolve(device_specifier, model)
         # A clear message instead of "Wrong pixel width" from the raster commands
         check_label_size(label_size, model)
         self.model = model
@@ -289,6 +289,21 @@ def status_of_printer(config: Config, path: str) -> dict | None:
     return state
 
 
+def device_state(device: str, model: str) -> dict:
+    """The status of one printer by its device and its model as
+    drivers.resolve() finds it, from its last answer where it does not
+    answer."""
+    driver = drivers.for_model(model)
+    try:
+        state = driver.status(device, model)
+    except driver.errors as e:
+        logger.info('Status query of %s failed: %s', device, e)
+        state = devices.failed_printer_state(device, e, model)
+    state.setdefault('path', device)
+    state.setdefault('red_support', _red_support(state.get('model', model)))
+    return state
+
+
 def get_ptr_status(config: Config):
     # Simple in-memory cache for detected printers
     global _last_scan_ts, _cached_printers, _cached_hints
@@ -475,14 +490,7 @@ def get_ptr_status(config: Config):
             status['selected'] = device_specifier
             return status
         # The label designer offers only the printers of the list
-        driver, model = drivers.resolve(device_specifier, default_model)
-        try:
-            printer = driver.status(device_specifier, model)
-        except driver.errors as e:
-            logger.info('Status query of %s failed: %s', device_specifier, e)
-            printer = devices.failed_printer_state(device_specifier, e, model)
-        printer.setdefault('path', device_specifier)
-        printer.setdefault('red_support', _red_support(printer.get('model', model)))
+        printer = device_state(device_specifier, drivers.resolve(device_specifier, default_model)[1])
         status.update(printer)
         status['printers'] = [printer, SIMULATOR_PRINTER.copy()]
         status['selected'] = device_specifier

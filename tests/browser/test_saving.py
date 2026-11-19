@@ -8,7 +8,7 @@ import os
 
 from PIL import Image
 
-from tests.browser.helpers import save_as, type_line, wait_for_preview
+from tests.browser.helpers import save_as, type_line, wait_for_held, wait_for_preview
 
 
 def test_flags_of_a_saved_label_are_read_as_the_server_reads_them(designer, app):
@@ -52,8 +52,7 @@ def test_a_slow_save_closes_only_its_own_dialog(designer, server):
     designer.route('**/api/repository/save', lambda route: held.append(route))
     type_line(designer, 0, 'Spices')
     save_as(designer, 'Slow spices')
-    while not held:
-        designer.wait_for_timeout(50)
+    wait_for_held(designer, held)
     designer.keyboard.press('Escape')
     designer.click('#edSym')
     designer.wait_for_selector('#layer:not([hidden]) [data-sym]')
@@ -73,8 +72,7 @@ def test_a_save_ends_well_when_the_editor_is_gone(designer, server):
     designer.route('**/api/repository/save', lambda route: held.append(route))
     type_line(designer, 0, 'Oats')
     save_as(designer, 'Slow oats')
-    while not held:
-        designer.wait_for_timeout(50)
+    wait_for_held(designer, held)
     # e.g. back in the browser
     designer.evaluate("() => { location.hash = 'wizard'; }")
     designer.wait_for_selector('#libGrid')
@@ -138,8 +136,7 @@ def test_the_wizard_opened_while_a_label_is_saved_shows_it_as_saved(designer, se
         held = []
         designer.route('**/api/repository/save', lambda route: held.append(route))
         designer.click('#edSave')
-        while not held:
-            designer.wait_for_timeout(50)
+        wait_for_held(designer, held)
         designer.click('[data-tab="wizard"]')
         wait_for_preview(designer, '#libStage')
         held[0].continue_()

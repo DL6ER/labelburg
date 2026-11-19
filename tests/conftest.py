@@ -31,6 +31,18 @@ def printer_output(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_known_printers(monkeypatch):
+    # What one test found stays out of the next
+    monkeypatch.setattr(printer, '_cached_printers', [])
+    monkeypatch.setattr(printer, '_cached_hints', [])
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, '_last_states', {})
+    monkeypatch.setattr(printer, '_status_queries', {})
+    monkeypatch.setattr(devices, 'status_cache', {})
+    monkeypatch.setattr(devices, '_unreached', {})
+
+
+@pytest.fixture(autouse=True)
 def shared_printers(monkeypatch):
     # Printers shared over USB/IP stay imported, each test begins without any
     printers = {}

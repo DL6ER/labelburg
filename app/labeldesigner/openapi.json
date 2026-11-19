@@ -9,7 +9,7 @@
     "/labeldesigner/api/preview": {
       "post": {
         "summary": "Generate the label image without printing",
-        "description": "The label as it is printed: the label size and the quality the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
+        "description": "The label as it is printed: the quality the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label size the request names is shown as it is, not placed on the tape loaded in the printer.",
         "operationId": "preview",
         "parameters": [
           {
@@ -547,7 +547,7 @@
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
-        "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the label size set by hand, the cutting, which end leaves first and the quality. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
+        "description": "What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the cutting, which end leaves first and the quality. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label made for another tape is placed on the tape loaded in the printer, or on the one set by hand where the printer reports none.",
         "operationId": "print",
         "parameters": [
           {
@@ -777,7 +777,7 @@
     "/labeldesigner/api/settings": {
       "get": {
         "summary": "Settings of a printer",
-        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them, a label size only where the printer reported no tape in its last status. A setting not made is left out.",
+        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A setting not made is left out.",
         "operationId": "getSettings",
         "parameters": [
           {
@@ -823,7 +823,7 @@
       },
       "post": {
         "summary": "Change settings of a printer",
-        "description": "Changes only the settings named, so that two browsers changing different settings keep both. An empty value removes a setting. Each is checked as for printing, e.g. a label size the printer cannot take is refused.",
+        "description": "Changes only the settings named, so that two browsers changing different settings keep both. An empty value removes a setting. Each is checked as for printing, e.g. a label size the printer cannot take is refused. The answer also tells the tape in the printer after the change, from the last answer of the printer without asking it.",
         "operationId": "setSettings",
         "requestBody": {
           "content": {
@@ -841,7 +841,7 @@
         },
         "responses": {
           "200": {
-            "description": "Saved, with all settings of the printer.",
+            "description": "Saved, with all settings of the printer and the tape in it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -852,6 +852,9 @@
                     },
                     "settings": {
                       "$ref": "#/components/schemas/PrinterSettings"
+                    },
+                    "tape": {
+                      "$ref": "#/components/schemas/Tape"
                     }
                   }
                 }
@@ -1340,6 +1343,7 @@
     "/labeldesigner/api/repository/preview": {
       "get": {
         "summary": "Generate the image of a saved label",
+        "description": "The label as it prints: placed on the tape loaded in the printer like with `repository/print`.",
         "operationId": "repositoryPreview",
         "parameters": [
           {
@@ -1371,6 +1375,14 @@
               "type": "string"
             },
             "description": "Printer the label is generated for."
+          },
+          {
+            "name": "model",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Model of the printer, as for `repository/print`."
           },
           {
             "name": "blanks",
@@ -1581,7 +1593,7 @@
     "/labeldesigner/api/repository/print": {
       "post": {
         "summary": "Print a saved label",
-        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
+        "description": "The saved label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. Its blanks may also be filled from fields of the request named like them, see `blanks`, e.g., for the labels of Grocy (see docs/grocy.md). What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the cutting where the label has none of its own. A label without a label size of its own is made for the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label made for another tape is placed on the tape loaded in the printer, or on the one set by hand where the printer reports none.",
         "operationId": "repositoryPrint",
         "parameters": [
           {
@@ -1887,6 +1899,7 @@
     "/labeldesigner/api/demos/preview": {
       "get": {
         "summary": "Generate the image of a demo label",
+        "description": "The label as it is saved, not placed on the tape loaded in the printer.",
         "operationId": "demoPreview",
         "parameters": [
           {
@@ -1930,7 +1943,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The label as it is printed.",
+            "description": "The label as it is saved.",
             "headers": {
               "X-Label-Warning": {
                 "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
@@ -1990,7 +2003,7 @@
     "/labeldesigner/api/demos/print": {
       "post": {
         "summary": "Print a demo label",
-        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the label size set by hand and the cutting where the label has none of its own. A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
+        "description": "The label is cut as saved with it (`cut`, `half_cut`, `chain`), unless the request names `cut` or `cut_once`: then the request decides all three. What the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`): the quality and which end leaves first, and the cutting where the label has none of its own. A label without a label size of its own is made for the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label made for another tape is placed on the tape loaded in the printer, or on the one set by hand where the printer reports none.",
         "operationId": "demoPrint",
         "parameters": [
           {
@@ -2142,7 +2155,7 @@
     "/labeldesigner/api/webhook/print": {
       "post": {
         "summary": "Print images, for other services",
-        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL. The label size, the quality and which end leaves first the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`). A label size left out is the tape in the last status of the printer, the one set by hand only where it reported none.",
+        "description": "Prints one label per image, each image scaled to fit the label. On die-cut labels each image is turned to the orientation that shows it largest. The webhook is disabled unless `WEBHOOK_PASSWORD` is set. The password is sent as `Authorization: Bearer <password>`, as form field or as JSON field `password`, not in the URL. The quality and which end leaves first the request leaves out are taken from the printer settings (`/labeldesigner/api/settings`). A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. Labels for another tape are placed on the tape loaded in the printer, or on the one set by hand where the printer reports none.",
         "operationId": "webhookPrint",
         "security": [
           {
@@ -2408,7 +2421,7 @@
     "/labeldesigner/api/homebox/{name}": {
       "get": {
         "summary": "Label for Homebox, from a saved label",
-        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the saved label `name`, its blanks named like the fields filled with them, e.g. `{{blank:TitleText}}`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
+        "description": "The external label service of Homebox (`HBOX_LABEL_MAKER_LABEL_SERVICE_URL`): the saved label `name` placed on the tape loaded in the printer, its blanks named like the fields filled with them, e.g. `{{blank:TitleText}}`. A saved label without a label size of its own is made for the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. Homebox replaces the query of the address, so a saved label is named in the path. The label is made for the printer the label designer starts with, at the resolution of the quality set for it; the sizes in pixels that Homebox sends are not used. Nothing is printed.",
         "operationId": "homeboxLabelNamed",
         "parameters": [
           {
@@ -2488,7 +2501,7 @@
         }
       },
       "post": {
-        "summary": "Print a label of Homebox on the size of a saved label",
+        "summary": "Print a label of Homebox made from a saved label",
         "description": "The print command of Homebox (`HBOX_LABEL_MAKER_PRINT_COMMAND`) sends the image it got, e.g. `wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} <address>`. It is printed on the label the GET request makes, a label of its own templates is fitted to it. The quality, the cutting and which end leaves first are as set for the printer.",
         "operationId": "homeboxPrintNamed",
         "parameters": [
@@ -3113,6 +3126,76 @@
           }
         }
       },
+      "Tape": {
+        "type": "object",
+        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Label size of the tape."
+          },
+          "known": {
+            "type": "boolean",
+            "description": "The tape is reported or set by hand."
+          },
+          "assumed": {
+            "type": "boolean",
+            "description": "The printer reports none that matches, `id` is a guess."
+          },
+          "manual": {
+            "type": "boolean",
+            "description": "Set by hand."
+          },
+          "unknown": {
+            "type": "string",
+            "description": "What the printer reports where no label size matches, e.g. `40 mm`, or the length it measured where it tells no width and none of that length is set by hand, e.g. `50 mm long`."
+          },
+          "red_unknown": {
+            "type": "boolean",
+            "description": "The printer cannot tell whether the roll is a black and red one."
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label sizes of the length the printer measured where it tells no width, else empty."
+          },
+          "fits": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label sizes printed as they are on this tape."
+          },
+          "moves": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label sizes that are put on this tape. Where it is not known, those of the same paper of another model, which are put on the printer's size of it."
+          },
+          "place": {
+            "type": "object",
+            "description": "Where a label goes on this tape, by `<label size>|<orientation>`. An orientation other than `rotated` is `standard`.",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "label_size": {
+                  "type": "string"
+                },
+                "orientation": {
+                  "type": "string",
+                  "enum": ["standard", "rotated"]
+                },
+                "cable_flag": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "PrinterState": {
         "type": "object",
         "properties": {
@@ -3173,14 +3256,24 @@
           },
           "label_size": {
             "type": "string",
-            "description": "Label size of the loaded tape, as `label_size` takes it. Where the printer reports none it takes, the assumed one: `LABEL_DEFAULT_SIZE`, else the first one the printer takes."
+            "description": "Label size of the tape labels are placed on, as `label_size` takes it: the one the printer reports, else the one set in its printer settings, each only where the printer prints on it, else the assumed one: `LABEL_DEFAULT_SIZE`, else the first one the printer takes."
           },
           "label_size_assumed": {
             "type": "boolean",
-            "description": "`label_size` is assumed, the printer reports no tape it takes."
+            "description": "`label_size` is assumed: the printer reports no tape it takes and none it takes is set in its printer settings."
           },
           "settings": {
             "$ref": "#/components/schemas/PrinterSettings"
+          },
+          "tape": {
+            "$ref": "#/components/schemas/Tape"
+          },
+          "takes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label sizes the printer takes, every size that has printers for a model no label size names."
           },
           "tape_length_mm": {
             "type": ["integer", "null"],
@@ -3283,7 +3376,7 @@
           },
           "label_size": {
             "type": "string",
-            "description": "Default: the tape in the last status of the printer, else the label size set in the printer settings, else `LABEL_DEFAULT_SIZE`."
+            "description": "Default: that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`."
           },
           "orientation": {
             "type": "string",

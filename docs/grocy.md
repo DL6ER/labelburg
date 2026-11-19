@@ -15,6 +15,8 @@ Grocy sends every label to the same address, so one saved label serves products,
 
 A name with dots takes a value inside one of the objects Grocy sends, e.g., `[details.location.name]` for the location of the product. Values that are given in `blanks` go first, and the parameters of the request (`name`, `printer`, `model`, `print_count`, `cut`, `cut_once`, `half_cut`, `chain`, `high_res`, `fast_printing`, `collate`, `leaves_first`, `mirror`, `blanks`) are never taken for blanks.
 
+The label is printed on the tape in the printer, as in the label designer: one saved for another tape is placed on it.
+
 ## Grocy's settings
 
 In Grocy's `config.php`, with the name the label is saved under (the label designer adds `.json`):
