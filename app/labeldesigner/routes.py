@@ -758,7 +758,8 @@ def repo_load():
     filename = secure_filename(name)
     repo = _get_repo_dir()
     path = os.path.join(repo, filename)
-    if not os.path.exists(path):
+    # A name made safe may leave no file name, e.g. '..'
+    if not filename or not os.path.exists(path):
         return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     try:
         # Not while one is put in place, its image may not be there yet
@@ -839,7 +840,8 @@ def repo_delete():
     filename = secure_filename(name)
     repo = _get_repo_dir()
     path = os.path.join(repo, filename)
-    if not os.path.exists(path):
+    # A name made safe may leave no file name, e.g. '..'
+    if not filename or not os.path.exists(path):
         return make_response(jsonify({'success': False, 'message': 'Not found'}), 404)
     try:
         with _saving(repo):
@@ -1020,7 +1022,7 @@ def _load_repo_json(name: str) -> tuple[dict, bytes | None]:
     repo = _get_repo_dir()
     path = os.path.join(repo, filename)
     with _reading(repo):
-        if not os.path.exists(path):
+        if not filename or not os.path.exists(path):
             raise FileNotFoundError(name)
         with open(path, 'r', encoding='utf-8') as fh:
             data = json.load(fh)

@@ -206,6 +206,16 @@ def test_numbers_of_a_saved_label_stay_as_they_are_written(tmp_path):
     assert (saved['blanks']['Price'], saved['fields']['Price']['default']) == ('2.50', '1.10')
 
 
+@pytest.mark.parametrize('name', ['..', '???', '/'])
+def test_a_name_that_names_no_file_is_not_found(tmp_path, name):
+    # Made safe, the name leaves no file name, which named the folder
+    client = make_client(tmp_path, empty_repo=True)
+    for method, url in (('get', 'load'), ('post', 'delete'), ('get', 'preview'), ('post', 'print')):
+        response = getattr(client, method)(f'/labeldesigner/api/repository/{url}', query_string={'name': name})
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+    assert os.path.isdir(client.application.config['LABEL_REPOSITORY_DIR'])
+
+
 @pytest.mark.parametrize('body', [{'name': ['Shelf.json']}, {'name': {'a': 1}}])
 def test_a_name_that_is_no_text_is_refused(tmp_path, body):
     client = make_client(tmp_path)
