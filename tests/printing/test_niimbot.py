@@ -93,10 +93,7 @@ def fake(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'Niimbot/D110_M'
-    return client
+    return make_client(tmp_path, model='Niimbot/D110_M', printer=DEVICE)
 
 
 @pytest.fixture
