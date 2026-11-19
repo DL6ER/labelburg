@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from app.labeldesigner import routes
+from app.labeldesigner import printer_settings, routes
 from app.labeldesigner.drivers import BROTHER, backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
@@ -456,6 +456,42 @@ def test_shared_brother_printer_is_the_model_its_device_id_names(host, tmp_path)
     response = client.post('/labeldesigner/api/print', data={'label_size': '103', 'print_type': 'text', 'text': TEXT})
     assert response.get_json() == {'success': True}
     assert ql.received.endswith(b'\x1a')
+
+
+def test_shared_printer_switched_off_is_the_model_its_device_id_named(host, tmp_path):
+    device = host.devices[0]
+    FakeQL(device)
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
+    data = {'label_size': '103', 'print_type': 'text', 'text': TEXT}
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    device.unplug()
+    # Seen switched off, e.g. by the label designer, the host let it go
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert shown['errors'] == ['The printer is switched off or not connected']
+    off = client.post('/labeldesigner/api/print', data=data).get_json()
+    assert off['message'].endswith('The printer is switched off or not connected')
+    # Switched on again right away, the job is made for it
+    device.plug_in()
+    with client.application.test_request_context():
+        assert routes._printer(None, None) == (host.address(), 'QL-1100')
+    ql = FakeQL(device)
+    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert ql.received.endswith(b'\x1a')
+
+
+def test_shared_printer_switched_off_keeps_its_settings_key(tmp_path):
+    device = SharedDevice(device_id=QL1100_ID + 'SN:A1Z123456;')
+    host = FakeHost(device)
+    try:
+        FakeQL(device)
+        usb.query_status(host.address())
+        device.unplug()
+        with pytest.raises(OSError):
+            usb.query_status(host.address())
+        assert printer_settings.key(host.address()) == 'usb:QL-1100/A1Z123456'
+    finally:
+        host.close()
 
 
 def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):

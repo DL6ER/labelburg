@@ -36,6 +36,7 @@ def shared_printers(monkeypatch):
     printers = {}
     monkeypatch.setattr(usbip, '_printers', printers)
     monkeypatch.setattr(usbip, '_unreachable', {})
+    monkeypatch.setattr(usbip, '_device_ids', {})
     yield
     for shared in printers.values():
         shared.close()
