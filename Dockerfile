@@ -61,7 +61,6 @@ WORKDIR /app
 # Fonts for the labels, poppler-utils for PDF files and libusb for usb://
 # printers. They come first, so that new Python packages keep this layer.
 RUN apk add --no-cache \
-    ttf-dejavu \
     ttf-liberation \
     ttf-droid \
     ttf-freefont \
