@@ -124,7 +124,7 @@ class Escpos(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                state['errors'] = protocol.get_errors(c)
+                state['errors'] = protocol.get_errors(c, devices.lock_key(device))
         state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
         devices.status_cache[devices.lock_key(device)] = state
         return state
@@ -149,7 +149,7 @@ class Escpos(Driver):
         device = queue.device_specifier
         try:
             with protocol.connect(device) as c:
-                problems = protocol.get_errors(c)
+                problems = protocol.get_errors(c, devices.lock_key(device))
                 if problems:
                     return problems[0]
                 c.write(protocol.job(job))

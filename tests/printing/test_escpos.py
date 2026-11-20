@@ -182,6 +182,73 @@ def test_printer_that_keeps_sending_through_pyusb(monkeypatch):
         assert asked_while_sending(c, quiet.set) == QUIET
 
 
+class Silent:
+    """A receipt printer shared over USB/IP on a fake clock, on which a read
+    waits 10 ms: it takes the status requests and answers none, or each one
+    at once with answering."""
+
+    def __init__(self, clock):
+        self.clock, self.writes, self.unread, self.answering = clock, [], b'', False
+
+    def read(self, length):
+        self.clock.sleep(0.01)
+        data, self.unread = self.unread[:length], self.unread[length:]
+        return data
+
+    def write(self, data):
+        self.writes.append((self.clock.now, data))
+        if self.answering:
+            self.unread += bytes([QUIET])
+
+    def dispose(self):
+        pass
+
+
+@pytest.fixture
+def silent(monkeypatch):
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(protocol, 'time', clock)
+    printer = Silent(clock)
+    monkeypatch.setattr(protocol.backends, 'UsbipPrinter', lambda device: printer)
+    return printer
+
+
+SHARED = 'usbip://192.0.2.1'
+
+
+def test_printer_that_does_not_answer_polled_for_a_minute(silent):
+    # As the label designer asks every 2 s: a request at most every 20 s,
+    # the polls between neither write nor wait
+    clock = silent.clock
+    end = clock.now + 60
+    while clock.now < end:
+        start, written = clock.now, len(silent.writes)
+        with pytest.raises(protocol.EscposError):
+            escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
+        assert len(silent.writes) > written or clock.now - start < 0.1
+        clock.sleep(2)
+    asked = [at for at, _ in silent.writes]
+    assert len(asked) == 3 and all(later - at >= 20 for at, later in zip(asked, asked[1:]))
+
+
+def test_printer_whose_answer_came_late_is_asked_again(silent):
+    with pytest.raises(protocol.EscposError):
+        escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
+    silent.unread, silent.answering = bytes([QUIET]), True
+    assert escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')['errors'] == []
+    assert [data for _, data in silent.writes] == [protocol.OFFLINE, protocol.OFFLINE, protocol.PAPER]
+
+
+def test_job_does_not_wait_for_an_outstanding_request(silent):
+    with pytest.raises(protocol.EscposError):
+        escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
+    start, written = silent.clock.now, len(silent.writes)
+    queue = type('Queue', (), {'device_specifier': SHARED})()
+    assert escpos.DRIVER.send(queue, [(True, [b'\x80'], 1, 203)]) == 'The printer does not answer'
+    assert silent.clock.now - start < 0.1 and len(silent.writes) == written
+
+
 def test_status_bytes():
     assert protocol.errors(QUIET, QUIET) == []
     assert protocol.errors(QUIET | 0x04, QUIET | 0x60) == ['The cover of the printer is open', 'The printer has no paper']
