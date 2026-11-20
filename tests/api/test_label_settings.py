@@ -1,0 +1,239 @@
+"""The settings of labels kept on the server for every browser: how dates
+are written, the order of copies of several files and the font of new
+labels."""
+
+import base64
+import io
+import json
+import os
+import re
+
+import pytest
+from PIL import Image
+
+from app.labeldesigner import printer_settings, refusals
+from app.labeldesigner.routes import create_label_from_request
+
+from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client
+
+URL = '/labeldesigner/api/settings/labels'
+NONE_SET = {'date_format': '', 'collate': '', 'font_family': ''}
+
+
+def test_label_settings_are_kept_for_every_browser(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.get(URL).get_json() == NONE_SET
+    r = client.post(URL, data={'date_format': '%d.%m.%Y', 'font_family': 'DejaVu Sans'})
+    assert r.status_code == 200
+    assert r.get_json() == {'success': True, 'settings': {**NONE_SET, 'date_format': '%d.%m.%Y', 'font_family': 'DejaVu Sans'}}
+    # Only what is named changes, another browser's change stays
+    assert client.post(URL, json={'collate': 0}).get_json()['settings'] == {
+        'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
+    # Kept in the folder of the labels, also for the next start of the server
+    again = make_client(tmp_path, empty_repo=True)
+    assert again.get(URL).get_json() == {'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
+    # An empty value removes one
+    assert client.post(URL, data={'font_family': '', 'collate': ''}).get_json()['settings'] == {**NONE_SET, 'date_format': '%d.%m.%Y'}
+
+
+def test_label_settings_are_kept_with_the_printer_settings(tmp_path):
+    # In the same file, a change of the one keeps the other
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'collate': '0'})
+    client.post('/labeldesigner/api/settings', data={'printer': 'tcp://a', 'cut': 'last', 'quality': 'fast'})
+    client.post(URL, data={'date_format': '%m/%d/%Y'})
+    assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {
+        'printers': {'tcp://a:9100': {'cut': 'last'}}, 'quality': 'fast', 'labels': {'collate': '0', 'date_format': '%m/%d/%Y'}}
+    assert client.get('/labeldesigner/api/settings', query_string={'printer': 'tcp://a'}).get_json() == {'cut': 'last', 'quality': 'fast'}
+    # All of them removed, nothing of them is left
+    client.post(URL, data={'date_format': '', 'collate': ''})
+    assert 'labels' not in json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text())
+
+
+def test_label_settings_are_checked(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'},
+                  {'font_family': 'No Such Font'}, {'font_family': 'DejaVu Sans,Book'}, {'quality': 'fast'},
+                  {'date_format': '%d.%m.%Y', 'colour': 'red'}, {}):
+        r = client.post(URL, data=wrong)
+        assert r.status_code == 400, wrong
+        assert r.get_json() == {'success': False, 'message': printer_settings.LABEL_SETTINGS_MESSAGE}
+    for wrong in ({'collate': [0]}, {'date_format': {'x': 1}}, {'font_family': None}):
+        assert client.post(URL, json=wrong).status_code == 400, wrong
+    assert client.get(URL).get_json() == NONE_SET
+    assert not (tmp_path / 'label_repo' / printer_settings.FILE).exists()
+
+
+def test_label_settings_take_json_numbers_and_flags(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.post(URL, json={'collate': True}).get_json()['settings']['collate'] == '1'
+    assert client.post(URL, json={'collate': 0}).get_json()['settings']['collate'] == '0'
+    assert client.post(URL, json={'collate': 2}).status_code == 400
+
+
+def test_label_settings_written_by_hand_that_are_wrong_are_not_set(tmp_path):
+    # The file may be edited by hand, a font may be gone since
+    client = make_client(tmp_path, empty_repo=True)
+    path = tmp_path / 'label_repo' / printer_settings.FILE
+    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'collate': 0, 'font_family': 'Gone Sans'}}))
+    assert client.get(URL).get_json() == NONE_SET
+    path.write_text(json.dumps({'printers': {}, 'labels': ['collate', '0']}))
+    assert client.get(URL).get_json() == NONE_SET
+    assert client.post(URL, data={'collate': '0'}).get_json()['settings'] == {**NONE_SET, 'collate': '0'}
+    path.write_text('{"printers": [')
+    assert client.get(URL).get_json() == NONE_SET
+
+
+def test_label_settings_that_cannot_be_saved_are_told(tmp_path, monkeypatch):
+    # E.g. a file written by another user: it is kept as it is
+    from app.labeldesigner import routes
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(URL, data={'collate': '0'})
+    path = tmp_path / 'label_repo' / printer_settings.FILE
+    before = path.read_text()
+
+    def unreadable(file, *args, **kwargs):
+        if str(file) == str(path):
+            raise PermissionError(13, 'Permission denied')
+        return open(file, *args, **kwargs)
+    monkeypatch.setattr(routes, 'open', unreadable, raising=False)
+    r = client.post(URL, data={'date_format': '%d.%m.%Y'})
+    assert r.status_code == 500 and r.get_json() == {'success': False, 'message': refusals.LABEL_SETTINGS_NOT_SAVED}
+    assert path.read_text() == before
+
+
+def test_the_refusal_of_label_settings_is_sent_as_it_is():
+    text = printer_settings.LABEL_SETTINGS_MESSAGE
+    assert refusals.message(ValueError(text), '-') == text
+
+
+def _orders(client, tmp_path, **request):
+    """The pages of a PDF of two pages printed twice, 0 for the first page
+    and 1 for the second, in the order they were printed."""
+    from app.labeldesigner import printer
+    folder = tmp_path / 'simulated_labels'
+    for name in os.listdir(folder) if folder.exists() else []:
+        os.remove(folder / name)
+    r = client.post(**request)
+    assert r.status_code == 200, r.get_json()
+    names = sorted(os.listdir(printer.SIMULATED_LABELS_DIR))
+    heights = [Image.open(os.path.join(printer.SIMULATED_LABELS_DIR, name)).height for name in names]
+    return [0 if h == heights[0] else 1 for h in heights]
+
+
+def test_copies_are_ordered_as_set_where_the_request_leaves_it_out(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    data = {**EXAMPLE_FORMDATA, 'print_type': 'image', 'image_fit': '1', 'border_thickness': '0', 'text': '[]',
+            'printer': 'simulation', 'print_count': '2', 'pdf_pages': 'all'}
+
+    def printed(**given):
+        files = [(io.BytesIO(_pdf((300, 200), (200, 300))), 'two.pdf', 'application/pdf')]
+        return _orders(client, tmp_path, path='/labeldesigner/api/print', data={**data, **given, 'image': files})
+    # As sets, as before, where nothing is set
+    assert printed() == [0, 1, 0, 1]
+    client.post(URL, data={'collate': '0'})
+    assert printed() == printed(collate='') == [0, 0, 1, 1]
+    assert printed(collate='1') == [0, 1, 0, 1]
+    client.post(URL, data={'collate': '1'})
+    assert printed() == [0, 1, 0, 1]
+    assert printed(collate='0') == [0, 0, 1, 1]
+
+
+@pytest.mark.parametrize('saved, requested, order', [
+    (None, None, [0, 0, 1, 1]), (None, '1', [0, 1, 0, 1]), ('1', None, [0, 1, 0, 1]), ('1', '0', [0, 0, 1, 1]),
+])
+def test_saved_labels_are_ordered_as_set_where_they_and_the_request_leave_it_out(tmp_path, saved, requested, order):
+    # The order saved with a label comes first, as its cutting does
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(URL, data={'collate': '0'})
+    label = {'name': 'pages', 'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_fit': '1', 'text': [],
+             'pdf_pages': 'all', 'image_mime': 'application/pdf', 'image_data': base64.b64encode(_pdf((300, 200), (200, 300))).decode('ascii')}
+    if saved is not None:
+        label['collate'] = saved
+    assert client.post('/labeldesigner/api/repository/save', json=label).status_code == 200
+    body = {'name': 'pages.json', 'printer': 'simulation', 'print_count': 2}
+    if requested is not None:
+        body['collate'] = requested
+    assert _orders(client, tmp_path, path='/labeldesigner/api/repository/print', json=body) == order
+
+
+def _made(monkeypatch):
+    """The labels the requests make, as they are made."""
+    from app.labeldesigner import routes
+    made = []
+    make = routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: made.append(make(*args, **kwargs)) or made[-1])
+    return made
+
+
+def test_lines_without_a_font_are_in_the_font_of_new_labels(tmp_path, monkeypatch):
+    # E.g. those of API requests and of the MCP tools. Lines with a font keep
+    # it, one that is not installed is replaced by the default font as before.
+    made = _made(monkeypatch)
+    client = make_client(tmp_path, empty_repo=True)
+    default = ','.join(client.application.extensions['fonts'].get_default_font())
+    text = json.dumps([{'text': 'Flour', 'size': '40'}, {'text': 'Sugar', 'size': '40', 'font': 'DejaVu Sans,Bold'},
+                       {'text': 'Salt', 'size': '40', 'font': 'Gone Sans,Regular'}])
+
+    def fonts():
+        assert client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text}).status_code == 200
+        return [line['font'] for line in made[-1].text]
+    assert fonts() == [default, 'DejaVu Sans,Bold', default]
+    # A family of the font menu, e.g. the Mono of DejaVu Sans, as well
+    for family, font in (('Droid Sans', 'Droid Sans,Regular'), ('DejaVu Sans', 'DejaVu Sans,Book'),
+                         ('DejaVu Sans Mono', 'DejaVu Sans,Mono / Book')):
+        assert client.post(URL, data={'font_family': family}).status_code == 200
+        assert fonts() == [font, 'DejaVu Sans,Bold', default]
+    client.post(URL, data={'font_family': ''})
+    assert fonts() == [default, 'DejaVu Sans,Bold', default]
+
+
+def test_text_printed_by_the_mcp_tools_is_in_the_font_of_new_labels(tmp_path, monkeypatch):
+    made = _made(monkeypatch)
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config['PRINTERS'] = [('QL-800', 'simulation', 'Kitchen')]
+    client.post(URL, data={'font_family': 'Droid Sans'})
+    response = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {
+        'name': 'print_text', 'arguments': {'printer': 'Kitchen', 'label_size': '62', 'count': 1, 'lines': ['Flour']}}},
+        headers={'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'})
+    assert not response.get_json()['result'].get('isError')
+    assert made and all(label.text[0]['font'] == 'Droid Sans,Regular' for label in made)
+
+
+def test_date_blanks_without_a_format_are_written_as_set(tmp_path):
+    # A format of the blank comes first, e.g. one saved with the label
+    client = make_client(tmp_path, empty_repo=True)
+    fields = {'Due': {'type': 'date'}, 'Made on': {'type': 'date', 'format': '%d/%m/%Y'}}
+    data = {'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Due}}|{{blank:Made on}}'}]),
+            'fields': json.dumps(fields), 'blanks': json.dumps({'Due': '2026-11-01', 'Made on': '2026-11-02'})}
+
+    def written():
+        with client.application.test_request_context():
+            label = create_label_from_request(data)
+            label.process_templates()
+            return label.text[0]['text']
+    assert written() == '2026-11-01|02/11/2026'
+    client.post(URL, data={'date_format': '%d.%m.%Y'})
+    assert written() == '01.11.2026|02/11/2026'
+    client.post(URL, data={'date_format': '%m/%d/%Y'})
+    assert written() == '11/01/2026|02/11/2026'
+    client.post(URL, data={'date_format': ''})
+    assert written() == '2026-11-01|02/11/2026'
+
+
+def test_saved_labels_write_their_date_blanks_as_set(tmp_path, monkeypatch):
+    # E.g. printed by Grocy or the MCP tools: saved without a format, as the
+    # label designer saves them where the server keeps one
+    from app.labeldesigner import printer
+    queued = []
+    monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(URL, data={'date_format': '%d.%m.%Y'})
+    label = {'name': 'Jar', 'label_size': '62', 'text': [{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Filled {{blank:Filled on}}'}],
+             'fields': {'Filled on': {'type': 'date'}}}
+    assert client.post('/labeldesigner/api/repository/save', json=label).status_code == 200
+    r = client.post('/labeldesigner/api/repository/print', json={'name': 'Jar.json', 'blanks': {'Filled on': '2026-11-03'}})
+    assert r.get_json() == {'success': True}
+    queued[0].process_templates()
+    assert queued[0].text[0]['text'] == 'Filled 03.11.2026'

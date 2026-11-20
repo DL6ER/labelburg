@@ -3,8 +3,9 @@ label size set by hand, the cutting, which end of the labels leaves first
 and the quality. They are kept on the
 server, so that every browser, the API and the MCP tools use the same: a
 print request takes what it leaves out from them. The roll is in the
-printer, its settings belong to it rather than to a browser. The order of
-copies and the date format stay in each browser.
+printer, its settings belong to it rather than to a browser. The settings
+of labels, how dates are written, the order of copies of several files and
+the font of new labels, are kept for everyone as well.
 
 They are kept in one file in the folder of the labels, the folder a Docker
 setup keeps. A change names only the settings it changes, two browsers
@@ -173,6 +174,61 @@ def for_printing(kept: dict, model: str, values: dict) -> dict:
         taken['high_res'] = '1' if kept['quality'] == 'high' and caps['high_res'] else '0'
         taken['fast_printing'] = '1' if kept['quality'] == 'fast' and 'fast' in caps['qualities'] else '0'
     return {**values, **taken}
+
+
+# Of the labels, not of a printer
+LABEL_SETTINGS = ('date_format', 'collate', 'font_family')
+# Those the label designer offers, e.g. 2026-11-01 or 01.11.2026
+DATE_FORMATS = ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%m/%d/%Y')
+LABEL_SETTINGS_MESSAGE = ('label settings are date_format (%Y-%m-%d, %d.%m.%Y, %d/%m/%Y or %m/%d/%Y), '
+                          'collate (0 or 1) and font_family (a font family of the server or of the font menu of the label designer), '
+                          'an empty value removes one')
+
+
+def _label_setting(name: str, value, families) -> bool:
+    """Whether value can be kept for the label setting name."""
+    if not isinstance(value, str):
+        return False
+    if name == 'date_format':
+        return value in DATE_FORMATS
+    if name == 'collate':
+        return value in ('0', '1')
+    return value in families
+
+
+def label_settings(data: dict, families) -> dict:
+    """All label settings kept in data, empty where none is set. One that
+    cannot be kept, e.g. a font family no longer installed or a value
+    written wrong by hand, is empty too."""
+    kept = data.get('labels')
+    kept = kept if isinstance(kept, dict) else {}
+    return {name: kept[name] if _label_setting(name, kept.get(name), families) else '' for name in LABEL_SETTINGS}
+
+
+def checked_label_settings(changes: dict, families) -> dict:
+    """The changes as kept, ValueError for one that cannot be kept. families
+    are those font_family takes: of the server and of the font menu of the
+    label designer, see Fonts.family_names()."""
+    if not changes or any(name not in LABEL_SETTINGS or value != '' and not _label_setting(name, value, families)
+                          for name, value in changes.items()):
+        raise ValueError(LABEL_SETTINGS_MESSAGE)
+    return changes
+
+
+def changed_label_settings(data: dict, changes: dict) -> dict:
+    """data with the checked changes made, an empty value removes one."""
+    kept = data.get('labels')
+    kept = dict(kept) if isinstance(kept, dict) else {}
+    for name, value in changes.items():
+        if value:
+            kept[name] = value
+        else:
+            kept.pop(name, None)
+    if kept:
+        data['labels'] = kept
+    else:
+        data.pop('labels', None)
+    return data
 
 
 def _in_steps(value, limit: float) -> bool:

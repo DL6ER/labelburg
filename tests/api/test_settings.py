@@ -84,8 +84,8 @@ def test_a_usb_printer_is_kept_by_its_serial(monkeypatch):
     assert printer_settings.key('file:///dev/usb/lp1') == '/dev/usb/lp1'
 
 
-def test_collate_and_the_date_format_stay_in_the_browser(tmp_path):
-    # A choice per print job and one of each browser, not of the printer
+def test_collate_and_the_date_format_are_no_settings_of_a_printer(tmp_path):
+    # Settings of labels, see test_label_settings.py
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     for setting in ({'collate': '0'}, {'date_format': '%d.%m.%Y'}):
         r = client.post(URL, data={'printer': 'tcp://a', **setting})

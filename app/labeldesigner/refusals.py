@@ -21,9 +21,11 @@ from .label_names import cut_problems, label_length_problems, label_size_problem
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
 from .printer import BUSY as PRINTER_BUSY
-from .printer_settings import CALIBRATION_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_PRINTERS
+from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE,
+                               SETTINGS_MESSAGE, TOO_MANY_PRINTERS)
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
+LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
 # A detected printer whose status names no model this server knows
@@ -64,6 +66,7 @@ MESSAGES = (
     FIELDS_MESSAGE,
     SETTINGS_MESSAGE,
     TOO_MANY_PRINTERS,
+    LABEL_SETTINGS_MESSAGE,
     CALIBRATION_MESSAGE,
     READINGS_DISAGREE,
     NO_CALIBRATION,

@@ -176,7 +176,7 @@ The browser offers to install the label designer as an app only over HTTPS, e.g.
 Everything the label designer does is also available as a REST API. It is described in OpenAPI format in [`app/labeldesigner/openapi.json`](app/labeldesigner/openapi.json), which a running server also serves at `/labeldesigner/api/openapi.json` for tools like Swagger UI, Postman or code generators.
 
 ```bash
-# Print a text label (lines of text as JSON, without "font" the default font is used)
+# Print a text label (lines of text as JSON, without "font" the font of new labels is used)
 curl -X POST http://localhost:8013/labeldesigner/api/print \
   -F label_size=62 -F 'text=[{"text": "Hello", "size": "70"}]'
 
@@ -199,6 +199,7 @@ curl -X POST http://localhost:8013/labeldesigner/api/webhook/print \
 - A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses).
 - Labels are printed on the tape in the printer, as in the label designer: a label made for another tape is placed on it.
 - The printer settings of the label designer (the label size set by hand, cutting, which end of the labels leaves first and quality) are kept on the server in `.printers.json` in the folder of the labels, the same for every browser; `/labeldesigner/api/settings` reads and changes them, `printer_status` tells them with each printer, and print requests and previews of the API take what they leave out from them. A label size left out is that of the tape the printer reports, else the label size set by hand, else `LABEL_DEFAULT_SIZE`.
+- The label settings (how dates are written, the order of copies of several files and the font of new labels) are kept in the same file; `/labeldesigner/api/settings/labels` reads and changes them. Requests that leave out `collate`, lines without a font and date blanks without a format take them from there, else the order as sets, the default font and `%Y-%m-%d`.
 - Requests that print, save or delete labels must be `POST` requests and are refused when a browser sends them from another website, so that a malicious page cannot use your printer. Scripts and `curl` are not affected.
 - Text lines may have up to 10000 characters (100000 per label) after the templates are filled in, barcodes up to 1000. Labels and images may have up to 64 million pixels, enough for a 62 mm wide label of about 2 m at 600 dpi. Of PDFs the first page is printed, or the pages `pdf_pages` selects (e.g., `1-3, 5` or `all`), each as a label of its own. Several `image` fields in a print request are printed one after the other. Blanks are filled in from `blanks`, e.g., `{"Room": "Garage"}`, also in saved labels printed by name, or else with their default. A saved label printed by name also takes fields of the request named like its blanks, which is how [Grocy](docs/grocy.md) prints its labels.
 

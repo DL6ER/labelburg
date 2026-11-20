@@ -322,6 +322,7 @@ class SimpleLabel:
         fixed_length: bool = False,
         vertical_align: str = 'center',
         mirror: bool = False,
+        date_format: str = '%Y-%m-%d',
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -335,7 +336,8 @@ class SimpleLabel:
         the size given, it does not grow with its content. vertical_align
         places the content at the top, in the center or at the bottom of a
         label that does not grow with it in height. dpi tells the length of
-        the label in mm, which warnings name."""
+        the label in mm, which warnings name. date_format writes the dates of
+        blanks without a format of their own."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -434,6 +436,7 @@ class SimpleLabel:
         self._line_boxes: dict[int, tuple] = {}
         self._blanks = blanks or {}
         self._blank_fields = blank_fields or {}
+        self._date_format = date_format
         self._mark_blanks = mark_blanks
         self._shown_code = code_text
         # The value of each blank, made once for the label
@@ -743,7 +746,7 @@ class SimpleLabel:
             date = _iso_date(value)
         if date is None:
             return value
-        date_format = str(field.get('format') or '%Y-%m-%d')
+        date_format = str(field.get('format') or self._date_format)
         if len(date_format) > MAX_DATE_FORMAT_LENGTH:
             raise TextTooLong("The date format of a blank is too long")
         try:

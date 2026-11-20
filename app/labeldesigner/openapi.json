@@ -601,8 +601,7 @@
                       "collate": {
                         "type": "integer",
                         "enum": [0, 1],
-                        "default": 1,
-                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC)."
+                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Default: as set in the label settings (`/labeldesigner/api/settings/labels`), else 1."
                       },
                       "leaves_first": {
                         "type": "string",
@@ -666,8 +665,7 @@
                       "collate": {
                         "type": "integer",
                         "enum": [0, 1],
-                        "default": 1,
-                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC)."
+                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Default: as set in the label settings (`/labeldesigner/api/settings/labels`), else 1."
                       },
                       "leaves_first": {
                         "type": "string",
@@ -875,6 +873,94 @@
           },
           "400": {
             "description": "A setting is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Another label or setting is being saved, try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/settings/labels": {
+      "get": {
+        "summary": "Settings of labels",
+        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
+        "operationId": "getLabelSettings",
+        "responses": {
+          "200": {
+            "description": "The settings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Change settings of labels",
+        "description": "Changes only the settings named, so that two browsers changing different settings keep both. An empty value removes a setting.",
+        "operationId": "setLabelSettings",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelSettings"
+              }
+            },
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved, with all settings of labels.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "$ref": "#/components/schemas/LabelSettings"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A setting is refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Not saved: the file could not be written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1734,8 +1820,7 @@
                       "collate": {
                         "type": "integer",
                         "enum": [0, 1],
-                        "default": 1,
-                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC)."
+                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Default: as saved with the label, else as set in the label settings (`/labeldesigner/api/settings/labels`), else 1."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -2738,6 +2823,25 @@
           }
         ]
       },
+      "LabelSettings": {
+        "type": "object",
+        "properties": {
+          "date_format": {
+            "type": "string",
+            "enum": ["", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y"],
+            "description": "How dates are written: of date blanks without a format of their own, and of dates the label designer puts on labels. Empty: as the browser writes dates, `%Y-%m-%d` for date blanks of API requests."
+          },
+          "collate": {
+            "type": "string",
+            "enum": ["", "0", "1"],
+            "description": "Order of the copies of several files or PDF pages where the request and the saved label leave it out: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Empty: as sets."
+          },
+          "font_family": {
+            "type": "string",
+            "description": "A font family of the server or of the label designer's font menu, e.g. `DejaVu Sans` or `DejaVu Sans Mono`: new labels of the label designer start with it, lines of a request without a font are printed in its regular style. Empty: the configured default font."
+          }
+        }
+      },
       "Message": {
         "type": "object",
         "properties": {
@@ -2761,7 +2865,7 @@
           },
           "font": {
             "type": "string",
-            "description": "Font as `<family>,<style>`, e.g. `DejaVu Sans,Book`. Default: the configured default font, which also replaces fonts that are not installed."
+            "description": "Font as `<family>,<style>`, e.g. `DejaVu Sans,Book`. Default: the font of new labels in its regular style, as set in the label settings (`/labeldesigner/api/settings/labels`), else the configured default font, which also replaces fonts that are not installed."
           },
           "size": {
             "type": "string",
@@ -3512,7 +3616,7 @@
       "BlankSettings": {
         "type": "string",
         "contentMediaType": "application/json",
-        "description": "Settings of the blanks by name as JSON object, as the label designer saves them with a label: `type` (`text`, `number`, `date` or `choice`), `default` (for a date also one moved from today, e.g., `+5d`), for a date its `format` (strftime, e.g., `%d.%m.%Y`), and for a choice its `choices` (1 to 50 texts of at most 200 characters, none twice; the default is one of them, else the first one). Another type, a format that is no text, a default that is no text or number, a date moved by another offset, or choices that are no such list are refused.",
+        "description": "Settings of the blanks by name as JSON object, as the label designer saves them with a label: `type` (`text`, `number`, `date` or `choice`), `default` (for a date also one moved from today, e.g., `+5d`), for a date its `format` (strftime, e.g., `%d.%m.%Y`, without one as set in the label settings, else `%Y-%m-%d`), and for a choice its `choices` (1 to 50 texts of at most 200 characters, none twice; the default is one of them, else the first one). Another type, a format that is no text, a default that is no text or number, a date moved by another offset, or choices that are no such list are refused.",
         "examples": [
           "{\"Frozen on\": {\"type\": \"date\", \"format\": \"%d.%m.%Y\"}}",
           "{\"Room\": {\"type\": \"choice\", \"choices\": [\"Garage\", \"Kitchen\", \"Attic\"]}}"

@@ -31,7 +31,7 @@ from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
 from .printer_settings import CUTS
-from flask import current_app, g, json, jsonify, redirect, render_template, request, make_response, url_for
+from flask import current_app, g, has_request_context, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
 from werkzeug.utils import secure_filename
 from app.utils import (
@@ -1134,9 +1134,9 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         check_cut(printer.cut, printer.model)
         high_res = _whole(_option('high_res', data, 0)) != 0
         fast = _whole(_option('fast_printing', data, 0)) != 0
-        # Saved with the label, the request overrides it
+        # Saved with the label, the request overrides it, else as set for labels
         collate = _requested('collate')
-        collate = _whole_or(collate if collate is not None else data.get('collate'), 1) != 0
+        collate = _whole_or(collate if collate is not None else data.get('collate'), _label_settings()['collate'] or 1) != 0
         # Of the request, else as set for the printer, never of the label
         printer.leaves_first = _leaves_first(kept.get('leaves_first'))
         # The label and its image have to be generated with the resolution
@@ -1553,6 +1553,46 @@ def printer_settings_route():
     return jsonify({'success': True, 'settings': settings, 'tape': tape.describe(loaded)})
 
 
+def _label_settings() -> dict:
+    """The label settings kept on the server, see
+    printer_settings.label_settings(), read once per request: the copies of
+    a job are made alike."""
+    if not has_request_context():
+        return printer_settings.label_settings(_kept_settings(), get_fonts().family_names())
+    if 'labeldesigner.label_settings' not in request.environ:
+        request.environ['labeldesigner.label_settings'] = printer_settings.label_settings(_kept_settings(), get_fonts().family_names())
+    return request.environ['labeldesigner.label_settings']
+
+
+@bp.route('/api/settings/labels', methods=['GET', 'POST'])
+def label_settings_route():
+    """The settings of labels, the same for every browser and the API: how
+    dates are written, the order of copies of several files and the font of
+    new labels. POST changes only the ones named, an empty value removes
+    one, and answers all."""
+    if request.method == 'GET':
+        return jsonify(_label_settings())
+    # JSON numbers and true or false as for printing, e.g. 0
+    values = {name: str(int(value)) if isinstance(value, (bool, int)) else
+              value if value is None or isinstance(value, str) else str(value)
+              for name, value in {**request.values.to_dict(), **_json_body()}.items()}
+    try:
+        changes = printer_settings.checked_label_settings(values, get_fonts().family_names())
+        repo = _get_repo_dir()
+        with _saving(repo):
+            data = printer_settings.changed_label_settings(_kept_settings(changing=True), changes)
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except LabelsBusy:
+        return _busy()
+    except OSError as e:
+        current_app.logger.warning('Cannot save the label settings: %s', e)
+        return _fail(refusals.LABEL_SETTINGS_NOT_SAVED, 500)
+    except ValueError as e:
+        return _refused('Saving the label settings', e, refusals.INVALID_INPUT)
+    return jsonify({'success': True, 'settings': printer_settings.label_settings(data, get_fonts().family_names())})
+
+
 def _millimeters(value) -> float:
     try:
         return float(value)
@@ -1677,7 +1717,7 @@ def print_label():
         check_cut(printer.cut, printer.model)
         high_res = _whole_or(values.get('high_res'), 0) != 0
         fast = _whole_or(values.get('fast_printing'), 0) != 0
-        collate = _whole_or(values.get('collate'), 1) != 0
+        collate = _whole_or(values.get('collate'), _label_settings()['collate'] or 1) != 0
         printer.leaves_first = _leaves_first(values.get('leaves_first'))
     except HTTPException:
         raise
@@ -1916,15 +1956,18 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
     # For each line in text, we determine and add the font path
     fonts = get_fonts()
     default_font = ','.join(fonts.get_default_font())
+    settings = _label_settings()
+    family = settings['font_family']
+    new_font = fonts.family_font(family) if family else default_font
     warnings = []
     for line in context['text']:
         if 'size' not in line or not str(line['size']).isdigit():
             raise ValueError("Font size is required")
         if int(line['size']) < 1:
             raise ValueError("Font size must be at least 1")
-        # Lines without a font, e.g. from the API, use the default font
+        # Lines without a font, e.g. from the API, use the font of new labels
         if not line.get('font'):
-            line['font'] = default_font
+            line['font'] = new_font
         try:
             line['path'] = fonts.get_path(line['font'])
         except FontNotFound:
@@ -1998,6 +2041,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         dpi=label_dpi(label_size, context['high_res']),
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
+        date_format=settings['date_format'] or '%Y-%m-%d',
     )
     # In "standard" orientation die-cut labels are landscape, so a portrait
     # image (e.g. a shipping label on a 103 x 164 mm label) came out small and
