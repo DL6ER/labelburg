@@ -142,27 +142,17 @@ def test_label_sizes_loaded(status, sizes):
     assert mcp_tools.loaded_label_sizes(status) == sizes
 
 
-@pytest.mark.parametrize('host, allowed', [
-    ('localhost', True), ('printserver:8013', True), ('labels.local', True), ('x.lan', True),
-    ('x.home.arpa', True), ('192.168.1.5:8013', True), ('[fd00::1]:8013', True),
-    ('example.com', False), ('labels.local.example.com', False), ('', False)])
-def test_host_names_of_the_home_network(host, allowed):
-    assert mcp_tools.host_allowed(host, None) is allowed
-
-
-def test_further_names_with_mcp_hosts_and_only_trusted_ones():
-    assert mcp_tools.host_allowed('labels.example.com', ['labels.example.com'])
-    assert mcp_tools.host_allowed('a.example.com:8013', ['.example.com'])
-    assert not mcp_tools.host_allowed('example.org', ['.example.com'])
-    assert not mcp_tools.host_allowed('labels.local', None, ['labels.example.com'])
-    assert mcp_tools.host_allowed('labels.example.com', ['labels.example.com'], ['labels.example.com'])
-
-
 def test_other_hosts_and_origins_are_refused(client):
     assert call(client, 'tools/list', Origin='http://evil.example')[0] == 403
     assert call(client, 'tools/list', Origin='http://labels.local')[0] == 200
     response = client.post('/mcp', json={}, headers={**HEADERS, 'Host': 'evil.example'})
     assert response.status_code == 403
+    assert response.text == 'This host name is not allowed. Add it to HOSTS.'
+
+
+def test_names_of_hosts_are_answered(client):
+    client.application.config['HOSTS'] = ['labels.example.com']
+    assert call(client, 'tools/list', Host='labels.example.com', Origin='https://labels.example.com')[0] == 200
 
 
 def test_printers_with_what_they_report_on_usb(tmp_path, monkeypatch):

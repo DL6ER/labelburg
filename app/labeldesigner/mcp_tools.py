@@ -4,16 +4,13 @@ they share its checks and its messages. It needs the mcp package, see
 requirements-mcp.txt and docs/mcp.md."""
 import asyncio
 import base64
-import ipaddress
 import json
 import logging
 import os
 import re
 import threading
 from importlib.util import find_spec
-from urllib.parse import urlsplit
 
-from werkzeug.sansio.utils import host_is_trusted
 from werkzeug.wrappers import Response
 
 from . import tape
@@ -28,43 +25,6 @@ API = '/labeldesigner/api'
 # e.g. Home Assistant: the request of the preview is in its address
 PREVIEW = '/mcp/preview.png'
 PREVIEW_PATHS = ('/preview', '/repository/preview')
-# Host names of the home network, accepted without MCP_HOSTS
-LOCAL_SUFFIXES = ('.local', '.lan', '.home.arpa')
-
-
-def local_host(host: str) -> bool:
-    """Whether host (without port) is an IP address, a single-label name
-    or a name of the home network, e.g. labels.local."""
-    host = host.strip('[]').lower()
-    try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        return '.' not in host.rstrip('.') or host.rstrip('.').endswith(LOCAL_SUFFIXES)
-
-
-def _hostname(host: str) -> str:
-    """host without its port, an IPv6 address with its brackets."""
-    if host.startswith('['):
-        return host[:host.find(']') + 1]
-    return host.partition(':')[0]
-
-
-def host_allowed(host: str, extra: list[str] | None = None, trusted: list[str] | None = None) -> bool:
-    """Whether the endpoint answers requests for host, as Host or in Origin:
-    names of the home network and those of MCP_HOSTS (extra), with
-    TRUSTED_HOSTS set exactly its names, like the label designer. It
-    protects against DNS rebinding, which the MCP specification requires."""
-    name = _hostname(host)
-    if not name:
-        return False
-    if trusted:
-        return host_is_trusted(name, trusted)
-    return local_host(name) or bool(extra and host_is_trusted(name, extra))
-
-
-def _origin_host(origin: str) -> str:
-    return urlsplit(origin).netloc
 
 
 def loaded_label_sizes(printer: dict) -> list[str]:
@@ -614,7 +574,8 @@ class Endpoint:
     def _start(self):
         from a2wsgi import ASGIMiddleware
         from mcp.server.transport_security import TransportSecuritySettings
-        # Host and Origin are checked before, also behind a reverse proxy
+        # Host and Origin are checked before, by app.hosts, also behind a
+        # reverse proxy
         asgi = _server(self.app).streamable_http_app(
             stateless_http=True, json_response=True,
             transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))
@@ -636,10 +597,6 @@ class Endpoint:
     def __call__(self, environ, start_response):
         if environ.get('PATH_INFO') not in ('/mcp', PREVIEW):
             return self.wsgi_app(environ, start_response)
-        hosts = self.app.config.get('MCP_HOSTS'), self.app.config.get('TRUSTED_HOSTS')
-        origin = environ.get('HTTP_ORIGIN')
-        if not host_allowed(environ.get('HTTP_HOST', ''), *hosts) or (origin and not host_allowed(_origin_host(origin), *hosts)):
-            return Response('Host or Origin not allowed', 403)(environ, start_response)
         if environ['PATH_INFO'] == PREVIEW:
             return self._preview(environ, start_response)
         with self._lock:

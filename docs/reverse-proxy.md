@@ -1,6 +1,16 @@
 # Reverse proxy
 
-Behind a reverse proxy, set `PROXY_COUNT=1`. The label designer can then also be served below a path, e.g. with nginx:
+Behind a reverse proxy, set `PROXY_COUNT=1` and its public name in `HOSTS`, as Labelburg answers only the names of the home network otherwise (see [Host names](../README.md#host-names)):
+
+```yaml
+    environment:
+      - PROXY_COUNT=1
+      - HOSTS=labels.example.com
+```
+
+The name the proxy connects to Labelburg with has to be a name of the home network or be listed in `HOSTS` too, e.g., a service name with a dot like `app.docker` or `labelburg.default.svc`: `HOSTS=labels.example.com,labelburg.default.svc`.
+
+The label designer can then also be served below a path, e.g. with nginx:
 
 ```nginx
 location /labels/ {

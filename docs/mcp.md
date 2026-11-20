@@ -76,6 +76,6 @@ Their connectors connect from Anthropic's cloud, which cannot reach a server in 
 
 ## Host names
 
-The endpoint answers only requests for IP addresses, single-label names (e.g. `printserver`), names ending in `.local`, `.lan` or `.home.arpa`, and those of `MCP_HOSTS`, also in `Origin`. That protects against DNS rebinding: a website that points its own name at your server cannot use it. Add the names of your own domain to `MCP_HOSTS`, e.g. `MCP_HOSTS=labels.example.com`, or `.example.com` for all its subdomains. With `TRUSTED_HOSTS` set, it answers exactly its names, like the label designer.
+Like the label designer, the endpoint answers only requests for the names of the home network and those of `HOSTS`, also in `Origin`, see [Host names](../README.md#host-names). That protects against DNS rebinding: a website that points its own name at your server cannot use it. Other names go into `HOSTS`, e.g., `HOSTS=labels.example.com`, or `.example.com` for all its subdomains. `MCP_HOSTS`, its former name, still works. With `TRUSTED_HOSTS` set, it answers exactly its names.
 
 Behind a [reverse proxy](reverse-proxy.md) the endpoint is below the path of the label designer, e.g. `https://labels.example.com/labels/mcp`.

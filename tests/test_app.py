@@ -194,6 +194,7 @@ def test_label_designer_below_a_path_behind_a_proxy(monkeypatch):
     client = create_app().test_client()
     assert client.get('/', headers=headers).headers['Location'] == '/labeldesigner/'
     monkeypatch.setenv('PROXY_COUNT', '1')
+    monkeypatch.setenv('HOSTS', 'example.com')
     client = create_app().test_client()
     assert client.get('/', headers=headers).headers['Location'] == '/labels/labeldesigner/'
     html = client.get('/labeldesigner/', headers=headers).get_data(as_text=True)

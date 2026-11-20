@@ -129,13 +129,15 @@ class TestLabelDesignerAPI:
 def test_cross_origin_requests_are_rejected(tmp_path):
     client = make_client(tmp_path)
     url = '/labeldesigner/api/print'
-    # Form posted to the printer by another website
-    response = client.post(url, data=EXAMPLE_FORMDATA, headers={'Origin': 'http://evil.example'})
-    assert response.status_code == 403
+    # Form posted to the printer by another website, also one in the home network
+    for origin in ('http://evil.example', 'http://nas.local'):
+        response = client.post(url, data=EXAMPLE_FORMDATA, headers={'Origin': origin})
+        assert response.status_code == 403
     # The label designer itself
     response = client.post(url, data=EXAMPLE_FORMDATA, headers={'Origin': 'http://localhost'})
     assert response.status_code == 200
     # The label designer behind a reverse proxy that changes the Host header
+    client.application.config['HOSTS'] = ['labels.example']
     response = client.post(url, data=EXAMPLE_FORMDATA, headers={'Origin': 'https://labels.example', 'X-Requested-With': 'XMLHttpRequest'})
     assert response.status_code == 200
     # Scripts and other clients without Origin header
@@ -172,7 +174,7 @@ def test_trusted_hosts(tmp_path):
     client = make_client(tmp_path)
     client.application.config['TRUSTED_HOSTS'] = ['labels.local']
     # A page using DNS rebinding reaches the server under its own host name
-    assert client.get('/labeldesigner/', base_url='http://evil.example').status_code == 400
+    assert client.get('/labeldesigner/', base_url='http://evil.example').status_code == 403
     assert client.get('/labeldesigner/', base_url='http://labels.local:8013').status_code == 200
 
 

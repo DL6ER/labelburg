@@ -12,7 +12,7 @@ Add two environment variables to Homebox, e.g. in its `docker-compose.yml`, with
       - HBOX_LABEL_MAKER_PRINT_COMMAND=wget -q -O - --header=Content-Type:image/png --post-file={{.FileName}} http://<host>:8013/labeldesigner/api/homebox
 ```
 
-The first one lets Homebox get its labels from Labelburg, the second one sends a label back to be printed. Both use the same address. `wget` is part of Homebox's image. Write `--header=Content-Type:image/png` without a space, as Homebox splits the command at spaces.
+The first one lets Homebox get its labels from Labelburg, the second one sends a label back to be printed. Both use the same address. A name for `<host>` outside the home network, e.g., `labels.example.com`, has to be listed in [`HOSTS`](../README.md#host-names) of Labelburg. `wget` is part of Homebox's image. Write `--header=Content-Type:image/png` without a space, as Homebox splits the command at spaces.
 
 Labels of Homebox's own label templates go through the same print command, Labelburg fits them to the tape.
 

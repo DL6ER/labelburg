@@ -3,7 +3,7 @@
   "info": {
     "title": "Labelburg",
     "version": "1",
-    "description": "Everything the label designer does is available through this API. The label designer itself sends the same requests.\n\nRequests that print, save or delete labels are refused when a browser sends them from another website. Scripts and tools like `curl` are not affected. With `TRUSTED_HOSTS` set, requests for other host names are refused.\n\nErrors are returned with status 400 (or 404, 413, 500) and a JSON object with `message`."
+    "description": "Everything the label designer does is available through this API. The label designer itself sends the same requests.\n\nRequests that print, save or delete labels are refused when a browser sends them from another website. Scripts and tools like `curl` are not affected. Requests for other host names than those of the home network (see Host names in the README) and of `HOSTS`, also in `Origin`, are refused with status 403; with `TRUSTED_HOSTS` set, those for other names than its own.\n\nErrors are returned with status 400 (or 404, 413, 500) and a JSON object with `message`."
   },
   "paths": {
     "/labeldesigner/api/preview": {
