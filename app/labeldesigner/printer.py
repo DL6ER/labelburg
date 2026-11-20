@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from flask import Config
 
-from . import drivers, mdns
+from . import bluetooth, drivers, mdns
 from .drivers import devices, progress
 from .drivers.backends import NoLibusb
 from .label_names import check_label_size
@@ -42,6 +42,20 @@ DISCOVERY_INTERVAL = 60
 # first. The monotonic clock starts at boot, so a time of 0 would count as
 # recent in a container started less than a minute ago.
 _discovered = None
+# Printers on Bluetooth LE, e.g. a Niimbot B1. Searched for in the background
+# for BLUETOOTH_SEARCH seconds, first at the first detection, then when the
+# label designer looks for printers, at most every BLUETOOTH_INTERVAL
+# seconds: the search takes the radio. Kept while the server runs, by address
+# with their model, since a printer connected stops advertising.
+BLUETOOTH_DISCOVERY = True
+BLUETOOTH_SEARCH = 5.0
+BLUETOOTH_INTERVAL = 60
+_bluetooth: dict[str, str] = {}
+# time.monotonic() of the last search started, None before the first; the
+# search running
+_bluetooth_searched = None
+_bluetooth_thread = None
+_bluetooth_lock = threading.Lock()
 
 
 def configured_printers(config) -> list[tuple[str, str, str]]:
@@ -190,6 +204,39 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
             printers.append(found)
     _discovered = (time.monotonic(), printers)
     return printers
+
+
+def _search_bluetooth():
+    global _last_scan_ts
+    found = {}
+    for device in bluetooth.discover(BLUETOOTH_SEARCH):
+        printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
+        if printer:
+            found[printer[0]] = printer[1]
+    with _bluetooth_lock:
+        _bluetooth.update(found)
+        # Listed at the next status query
+        _last_scan_ts = 0
+
+
+def bluetooth_searching() -> bool:
+    return _bluetooth_thread is not None and _bluetooth_thread.is_alive()
+
+
+def _bluetooth_printers() -> list[tuple[str, str]]:
+    """The printers found on Bluetooth LE as (address, model), a search
+    started where one is due, see BLUETOOTH_INTERVAL."""
+    global _bluetooth_searched, _bluetooth_thread
+    if not BLUETOOTH_DISCOVERY:
+        return []
+    with _bluetooth_lock:
+        now = time.monotonic()
+        due = _bluetooth_searched is None or (devices.looked > _bluetooth_searched and now - _bluetooth_searched >= BLUETOOTH_INTERVAL)
+        if due and not bluetooth_searching():
+            _bluetooth_searched = now
+            _bluetooth_thread = threading.Thread(target=_search_bluetooth, daemon=True)
+            _bluetooth_thread.start()
+        return list(_bluetooth.items())
 
 
 def _red_support(model: str) -> bool:
@@ -370,6 +417,7 @@ def get_ptr_status(config: Config):
             }
         # If device_specifier is the default '?', try to auto-detect multiple printers
         if device_specifier == '?':
+            on_bluetooth = _bluetooth_printers()
             now = time.time()
             # Refresh cache every 10 seconds
             if now - _last_scan_ts > 10:
@@ -425,7 +473,7 @@ def get_ptr_status(config: Config):
                 # ARP table with a known MAC address prefix, e.g. where
                 # multicast does not reach. The latter are dropped if their
                 # IPP model is no label printer.
-                candidates = [(spec, model, False, drivers.resolve(spec, model)[0]) for spec, model in _discovered_label_printers()]
+                candidates = [(spec, model, False, drivers.resolve(spec, model)[0]) for spec, model in _discovered_label_printers() + on_bluetooth]
                 try:
                     with open(ARP_TABLE, 'r') as arp_file:
                         for line in arp_file.readlines()[1:]:  # skip header line
@@ -473,6 +521,8 @@ def get_ptr_status(config: Config):
                     'printers': printers,
                     'selected': status.get('path'),
                     'hints': list(_cached_hints),
+                    # The label designer asks again once it has ended
+                    'searching': bluetooth_searching(),
                     **status
                 }
             else:
@@ -482,6 +532,7 @@ def get_ptr_status(config: Config):
                     'printers': [sim],
                     'selected': None,
                     'hints': list(_cached_hints),
+                    'searching': bluetooth_searching(),
                     **status
                 }
         if device_specifier == 'simulation':

@@ -178,6 +178,11 @@ class Driver:
         on the network as mdns.discover() found it, None for other devices."""
         return None
 
+    def found_on_bluetooth(self, device: dict) -> tuple[str, str] | None:
+        """(address, model) of a printer of this driver on Bluetooth LE as
+        bluetooth.discover() found it, None for other devices."""
+        return None
+
     def network_device(self, address: str) -> str:
         """The address of a printer found by its MAC address."""
         raise NotImplementedError

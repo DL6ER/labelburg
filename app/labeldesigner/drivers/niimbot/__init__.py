@@ -196,6 +196,14 @@ class Niimbot(Driver):
     def calibration_example(self, kind):
         return calibration.example(kind)
 
+    def found_on_bluetooth(self, device):
+        # Over Bluetooth LE only the B1 prints. It tells its name, e.g.
+        # B1-<serial>, or Niimbot's service where it leaves the name out.
+        name = device.get('name', '').upper()
+        if device.get('le') and (name.startswith('B1') or (not name and protocol.NIIMBOT_SERVICE in device.get('services', []))):
+            return f"bt://{device['address']}", 'Niimbot/B1'
+        return None
+
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
         return (device.startswith('bt://') and _over_le(model)) or super().followed(device, model)

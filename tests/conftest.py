@@ -23,6 +23,7 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([], []))
     monkeypatch.setattr(backends, 'USBIP_HOST', str(tmp_path / 'no-usbip-host'))
     monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', False)
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', False)
     # Nor the printer settings of a server run from here, e.g. with
     # docker-compose.yml, which keeps them in labels/
     monkeypatch.setattr(printer_settings, 'FILE', '.printers-of-the-tests.json')

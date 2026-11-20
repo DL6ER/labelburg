@@ -151,6 +151,8 @@ class UsbSocket:
 ATT_CID = 4
 ATT_MTU = 247
 NIIMBOT_CHARACTERISTIC = bytes.fromhex('bef8d6c99c214c9eb632bd58c1009f9f')[::-1]
+# The service of that characteristic, as a printer may advertise it
+NIIMBOT_SERVICE = bytes.fromhex('e7810a7173ae499d8c15faa9aef0c3f2')[::-1]
 CLIENT_CONFIGURATION = 0x2902
 # The connection is kept: the B1 beeps when one opens and when it closes, not
 # at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
