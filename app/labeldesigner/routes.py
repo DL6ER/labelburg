@@ -1529,7 +1529,7 @@ def calibration_route():
         device, model, driver = _calibrating(values)
         if request.method == 'GET':
             kept = _kept_settings()
-            label_size = values.get('label_size') or printer_settings.of_printer(kept, device).get('label_size', '')
+            label_size = values.get('label_size') or _loaded_tape(device, model, printer_settings.of_printer(kept, device)).id
             return jsonify({**printer_settings.calibration_of(kept, device), 'kind': driver.calibration_kind(model, label_size)})
         # Numbers read on the label are given on both sides, none left empty
         if any(name in values and values[name] in (None, '') for name in ('left', 'right')):
@@ -1587,7 +1587,7 @@ def print_calibration():
     values = {**request.values.to_dict(), **_json_body()}
     try:
         device, model, _ = _calibrating(values)
-        label_size = values.get('label_size') or printer_settings.of_printer(_kept_settings(), device).get('label_size', '')
+        label_size = values.get('label_size') or _loaded_tape(device, model, _settings_of(device)).id
         queue = _queue(model, device, label_size)
         offsets = {name: _millimeters(values[name]) for name in ('across', 'along') if values.get(name) not in (None, '')}
         if offsets:
