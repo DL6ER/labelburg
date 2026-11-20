@@ -116,7 +116,7 @@ Other settings, e.g. the default font and margins, go into `instance/application
 | `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M or Niimbot B1 on Bluetooth, channel 2 on a PUQU and 1 on a D110_M if left out. A D110_M has to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`. |
 | `simulation` | The simulator, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them |
 
-The installation above gives the container all of USB and the network, so that it finds printers by itself, also Bluetooth ones. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
+The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
 
 To give it a single printer instead, map that one and name it:
 

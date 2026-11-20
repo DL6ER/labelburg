@@ -745,6 +745,23 @@ def test_look_for_printers_looks_also_for_those_that_did_not_answer(designer):
     assert 'look=1' in request.value.url
 
 
+def test_printers_are_asked_again_while_bluetooth_is_searched(designer):
+    # A printer found on Bluetooth shows without waiting for the next 20 s
+    searching, asked = [True], []
+
+    def answer(route):
+        asked.append(route.request.url)
+        route.fulfill(json={**route.fetch().json(), 'searching': searching.pop(0) if searching else False})
+    designer.route('**/api/printer_status*', answer)
+    designer.evaluate('() => refreshPrinters()')
+    for _ in range(50):
+        if len(asked) == 2:
+            break
+        designer.wait_for_timeout(100)
+    assert len(asked) == 2
+    designer.wait_for_function('() => !S.searchAgain')
+
+
 @pytest.mark.parametrize('hidden', [True, False])
 def test_printers_are_asked_only_from_a_tab_that_is_shown(designer, hidden):
     # A tab left in the background keeps no printer busy, e.g. a B1 its

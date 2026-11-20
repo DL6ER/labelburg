@@ -910,6 +910,10 @@ async function refreshPrinters(look = false) {
             });
         S.printers = printers;
         S.printerHints = Array.isArray(data.hints) ? data.hints : [];
+        // While the server looks for printers on Bluetooth, asked again soon:
+        // one it finds shows without waiting for the next 20 s
+        clearTimeout(S.searchAgain);
+        S.searchAgain = data.searching ? setTimeout(() => refreshPrinters(), 3000) : null;
         const chosen = load(own('designer_printer'), null);
         const kept = S.printers.find(p => p.path === chosen);
         S.printer = kept || S.printers.find(p => p.path === data.selected) || S.printers[0] || null;
