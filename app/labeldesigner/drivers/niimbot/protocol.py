@@ -29,6 +29,9 @@ ANSWER_WAIT = 5
 # meanwhile how many pages it printed, as the script this came from does
 PRINT_WAIT = 30
 PAGE_POLL = 0.5
+# A B1 refuses the next label for a moment after one ended, about 0.3 s on
+# USB: it is asked again every START_POLL seconds within ANSWER_WAIT
+START_POLL = 0.1
 # Density 1 to 5
 DENSITY = 3
 # Label type when the roll has no RFID tag: labels with gaps
@@ -489,7 +492,11 @@ def print_label(c: Connection, rows: list[list[int]], label_type: int, sequence:
     every PAGE_POLL seconds how many pages it printed. The B1 starts the
     page and is told its size and number in a shorter form."""
     height, width = len(rows), len(rows[0])
-    c.ok(0x21, bytes([DENSITY]), 0x31)
+    deadline = time.monotonic() + ANSWER_WAIT
+    while c.ask(0x21, bytes([DENSITY]), 0x31)[:1] != b'\x01':
+        if time.monotonic() > deadline:
+            raise NiimbotError('refused 0x21')
+        time.sleep(START_POLL)
     c.ok(0x23, bytes([label_type]), 0x33)
     try:
         if sequence == B1:
