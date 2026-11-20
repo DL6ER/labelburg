@@ -992,6 +992,50 @@
         }
       }
     },
+    "/labeldesigner/api/fonts/sample": {
+      "get": {
+        "summary": "The name of a font family drawn in its own font",
+        "description": "For the font menu of the label designer: the family drawn in its regular style, black on transparent.",
+        "operationId": "fontSample",
+        "parameters": [
+          {
+            "name": "family",
+            "in": "query",
+            "required": true,
+            "description": "A font family as the font menu names it, e.g. `DejaVu Sans Mono`.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The name of the family in its regular style.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "The family cannot draw its name, e.g. one of symbols."
+          },
+          "404": {
+            "description": "The family is not installed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/repository/list": {
       "get": {
         "summary": "List the saved labels",

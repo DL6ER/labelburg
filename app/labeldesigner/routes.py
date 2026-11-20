@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from . import bp, codes, demos, paperless, printer_settings, refusals, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
-from app.fonts import FontNotFound
+from app.fonts import FontNotFound, sample as font_sample
 from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
@@ -1250,6 +1250,27 @@ def _code_kinds() -> list:
 @bp.route('/api/barcodes', methods=['GET'])
 def get_barcodes():
     return {'barcodes': codes.TYPES, 'codes': _code_kinds()}
+
+
+@bp.route('/api/fonts/sample', methods=['GET'])
+def font_family_sample():
+    """The name of a font family drawn in its regular style, for the font
+    menu of the label designer. A family that cannot draw its name, e.g. one
+    of symbols, has none."""
+    name = request.args.get('family', '')
+    fonts = get_fonts()
+    try:
+        drawn = font_sample(fonts.get_path(fonts.family_font(name)), name)
+    except LookupError:
+        return _fail('Not found', 404)
+    if drawn is None:
+        return make_response('', 204)
+    response = make_response(drawn)
+    response.mimetype = 'image/png'
+    response.cache_control.public = True
+    response.cache_control.max_age = 86400
+    response.add_etag()
+    return response.make_conditional(request)
 
 
 @bp.route('/api/preview', methods=['POST'])
