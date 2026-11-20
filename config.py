@@ -13,10 +13,17 @@ class Config(object):
     DEBUG = False
     LOG_LEVEL = 'WARNING'
 
+    # Host names the server answers besides those of the home network (IP
+    # addresses, single-label names and LOCAL_SUFFIXES in app/hosts.py),
+    # e.g. the public name behind a reverse proxy (comma-separated,
+    # ".example.com" with its subdomains). Requests for other hosts are
+    # refused, which protects against DNS rebinding attacks. MCP_HOSTS, its
+    # former name, is still read.
+    HOSTS = None
+
     # Host names the label designer is reached by (comma-separated, e.g.
-    # "labels.local,192.168.0.10"). Requests for other hosts are refused,
-    # which protects against DNS rebinding attacks. All hosts are accepted
-    # when empty.
+    # "labels.local,192.168.0.10"). When set, only these are answered, not
+    # those of the home network and HOSTS.
     TRUSTED_HOSTS = None
 
     # Several printers for one label designer, as (model, device) pairs, e.g.
@@ -79,10 +86,6 @@ class Config(object):
 
     # Most labels an AI assistant may print with one call to the MCP endpoint
     MCP_MAX_COUNT = 10
-
-    # Host names the MCP endpoint answers besides IP addresses, single-label
-    # names and those ending in .local, .lan or .home.arpa
-    MCP_HOSTS = None
 
     # Maximum size of a request (uploaded images, JSON payloads) in bytes
     MAX_CONTENT_LENGTH = 32 * 1024 * 1024

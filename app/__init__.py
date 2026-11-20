@@ -16,11 +16,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import fonts
 from .build_info import get_build_info
+from .hosts import host_list
 from config import Config
-
-
-def _host_list(value: str) -> list[str] | None:
-    return [host.strip() for host in value.split(',') if host.strip()] or None
 
 
 def _positive_int(value: str) -> int:
@@ -118,12 +115,13 @@ ENV_OVERRIDES = {
     'LABEL_DEFAULT_SIZE': str,
     'LABEL_DEFAULT_ORIENTATION': str,
     'LOG_LEVEL': _log_level,
-    'TRUSTED_HOSTS': _host_list,
+    'HOSTS': host_list,
+    'TRUSTED_HOSTS': host_list,
     'LABEL_TEMPLATE_ENV_VARS': str,
     'PRINT_MAX_COUNT': _positive_int,
     'MCP_ENABLED': _bool,
     'MCP_MAX_COUNT': _positive_int,
-    'MCP_HOSTS': _host_list,
+    'MCP_HOSTS': host_list,
     'MAX_CONTENT_LENGTH': _positive_int,
     'WEBHOOK_PASSWORD': str,
     'PROXY_COUNT': _non_negative_int,
@@ -170,6 +168,11 @@ def create_app(config_class=Config) -> Flask:
     # proxy fix, which gives it the host names the clients asked for.
     from app.labeldesigner import mcp_tools
     mcp_tools.install(app)
+
+    # Only the host names of the home network and HOSTS, for every request
+    # including /mcp; behind the proxy fix as well
+    from app import hosts
+    hosts.install(app)
 
     # Behind reverse proxies, take the client address, scheme, host and path
     # prefix (e.g. /labels for https://example.com/labels/) from the
