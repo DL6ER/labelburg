@@ -339,22 +339,32 @@ def test_status_query_reads_the_reply_to_its_own_request(host, monkeypatch, late
         usb.query_status(host.address())
     host.latency, host.read_latency = latency, read_latency
     # Cleared at the printer, it answers the request and its retry, which
-    # reach the server before the label designer asks again
+    # reach the server before the label designer asks again: that poll
+    # takes them without asking
     ql.clear()
     shared = usbip.connect(host.address())
     deadline = time.monotonic() + 5
     while not shared._answers and time.monotonic() < deadline:
         time.sleep(0.01)
+    asked = len(ql.received)
+    assert usb.query_status(host.address())['errors'] == [] and len(ql.received) == asked
     # Then the roll is swapped, and swapped again
     for width in (29, 12, 38):
         ql.width = width
         assert usb.query_status(host.address())['media_width'] == width
 
 
+@pytest.fixture
+def lost_at_once(monkeypatch):
+    """Each query asks again, as one does once the request before counts as
+    lost."""
+    monkeypatch.setattr(usb, 'ASK_AGAIN', 0)
+
+
 @pytest.mark.parametrize('cleared_at', [5, 6], ids=['request', 'retry'])
-def test_error_cleared_while_a_poll_waits(host, monkeypatch, cleared_at):
-    # Held through two polls, cleared while the third waits for its request
-    # or its retry: the reply that comes first is the oldest
+def test_error_cleared_while_a_poll_waits(host, monkeypatch, lost_at_once, cleared_at):
+    # Held through two requests and their retries, cleared while the third
+    # request or its retry waits: the reply that comes first is the oldest
     host.latency, host.reply_size = 0.06, 32
     # Waits shortened to several times the delay of the host
     monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
@@ -370,7 +380,7 @@ def test_error_cleared_while_a_poll_waits(host, monkeypatch, cleared_at):
         assert usb.query_status(host.address())['media_width'] == width
 
 
-def test_replies_held_over_several_polls_are_waited_for(host, monkeypatch):
+def test_replies_held_over_several_polls_are_waited_for(host, monkeypatch, lost_at_once):
     host.latency, host.reply_size = 0.06, 32
     monkeypatch.setattr(usb, 'REPLY_WAIT', 0.25)
     monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.25))
@@ -382,6 +392,55 @@ def test_replies_held_over_several_polls_are_waited_for(host, monkeypatch):
     ql.clear()
     ql.width = 29
     assert usb.query_status(host.address())['media_width'] == 29
+
+
+def test_two_pollers_share_the_one_request(host, monkeypatch):
+    # E.g. two tabs of the label designer, each asking every 2 s
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
+    ql = HoldingQL(host.devices[0], width=62)
+    outcomes = []
+
+    def poll():
+        for _ in range(5):
+            try:
+                outcomes.append(usb.query_status(host.address()))
+            except TimeoutError as e:
+                outcomes.append(e)
+    pollers = [threading.Thread(target=poll) for _ in range(2)]
+    for poller in pollers:
+        poller.start()
+    for poller in pollers:
+        poller.join(10)
+    assert len(outcomes) == 10 and all(isinstance(outcome, TimeoutError) for outcome in outcomes)
+    # The request and its retry
+    assert ql.held == 2
+
+
+def test_poll_while_a_request_is_outstanding_returns_at_once(host, monkeypatch):
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.5))
+    ql = HoldingQL(host.devices[0], width=62)
+    with pytest.raises(TimeoutError):
+        usb.query_status(host.address())
+    start = time.monotonic()
+    with pytest.raises(TimeoutError):
+        usb.query_status(host.address())
+    assert time.monotonic() - start < 0.5 and ql.held == 2
+
+
+def test_printer_switched_off_with_a_request_outstanding(host, monkeypatch):
+    # Switched on again, it holds no request: it is asked at once
+    monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
+    device = host.devices[0]
+    HoldingQL(device, width=62)
+    with pytest.raises(TimeoutError):
+        usb.query_status(host.address())
+    device.unplug()
+    with pytest.raises(OSError) as error:
+        usb.query_status(host.address())
+    assert devices.unanswered_reason(error.value) == 'The printer is switched off or not connected'
+    device.plug_in()
+    FakeQL(device)
+    assert usb.query_status(host.address())['errors'] == []
 
 
 def test_answer_longer_than_asked_ends_the_connection(host):

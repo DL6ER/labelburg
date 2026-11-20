@@ -49,13 +49,17 @@ def _label(width: int, length: int) -> Label:
 # before: a printer is asked at most every ASK_EVERY seconds, told as it was
 # in between
 ASK_EVERY = 10
-_asked: dict[str, float] = {}
+# How long a ~HS left unanswered counts as outstanding, meanwhile no other
+# is sent
+ASK_AGAIN = 20
+# When each printer may be asked again, by devices.lock_key()
+_ask_after: dict[str, float] = {}
 NO_ANSWER = 'The printer does not answer, is its printhead open?'
 
 
-def _asked_lately(device: str) -> bool:
+def _asked_lately(key: str) -> bool:
     # The monotonic clock starts at boot, a printer never asked was not asked lately
-    return device in _asked and time.monotonic() - _asked[device] < ASK_EVERY
+    return time.monotonic() < _ask_after.get(key, 0)
 
 
 # The command set ZPL in a device ID
@@ -148,8 +152,9 @@ class Zpl(Driver):
         if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type='Die-cut labels')
-        cached = devices.status_cache.get(devices.lock_key(device))
-        if _asked_lately(device):
+        key = devices.lock_key(device)
+        cached = devices.status_cache.get(key)
+        if _asked_lately(key):
             return dict(cached) if cached else state
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
@@ -157,11 +162,11 @@ class Zpl(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             # A query that waited for the printer takes the answer of the one before
-            cached = devices.status_cache.get(devices.lock_key(device))
-            if _asked_lately(device):
+            cached = devices.status_cache.get(key)
+            if _asked_lately(key):
                 return dict(cached) if cached else state
             answer = protocol.parse_host_status(protocol.host_status(device))
-            _asked[device] = time.monotonic()
+            _ask_after[key] = time.monotonic() + (ASK_EVERY if answer is not None else ASK_AGAIN)
         if answer is None:
             # A printer that never answered ~HS is told as before, without
             # errors. A Datamax-O'Neil E-4204B with its printhead open does

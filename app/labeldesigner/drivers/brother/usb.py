@@ -28,12 +28,21 @@ REPLY_WAIT = 0.5
 # Status requests counted at most, also through an error held for hours: a
 # reply that does not come ends the wait for the others at once
 MOST_UNANSWERED = 1000
-# How long a query or job reads owed replies at most: it holds the device
+# How long a query reads owed replies at most: it holds the device
 # meanwhile, the others are read next time
 OWED_WAIT = 5
+# How long a status request left unanswered counts as outstanding: queries
+# meanwhile write nothing and only read whether its answer came
+ASK_AGAIN = 20
 
 # The status requests each printer has not answered yet, by devices.lock_key()
 _unanswered: dict[str, int] = {}
+# When each printer was asked the requests that are outstanding, by
+# devices.lock_key()
+_asked: dict[str, float] = {}
+# The printers whose outstanding request was answered only by the retry
+# after it, e.g. a QL-560: that answer is their status meanwhile
+_retry_answered: set[str] = set()
 
 
 def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
@@ -49,10 +58,11 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
     info = {'did_print': False, 'ready_for_next_job': False, 'printer_state': None,
             'pages': len(page_lengths), 'confirmed': 0}
     key = devices.lock_key(device_specifier)
-    unanswered = _unanswered.get(key, 0)
+    owed = unanswered = _unanswered.get(key, 0)
     printer = get_printer(device_specifier)
     progress.counting(device_specifier)
     try:
+        # Not waited for, a reply owed that came is read
         unanswered = _drain(printer, unanswered, key=key)
         received = _write_reading(printer, data)
         # A page may take as long as the longest one, the whole job as long
@@ -75,8 +85,10 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
                         unanswered -= 1
                         give_up = time.monotonic() + job_wait
                         continue
-                    # The job's messages began, the others will not come
-                    unanswered = 0
+                    if not state['errors']:
+                        # The job's messages began, the others will not come.
+                        # A printer holding an error answers them once cleared.
+                        unanswered = 0
                 info['printer_state'] = state
                 if state['errors']:
                     # The status the printer holds, see query_status()
@@ -103,6 +115,9 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
         return info
     finally:
         _unanswered[key] = unanswered
+        if unanswered < owed:
+            # Answered, or the replies will not come
+            _asked.pop(key, None)
         if info['did_print']:
             # In place of e.g. an error told before the job, which is gone
             devices.status_cache[key] = info['printer_state']
@@ -140,14 +155,11 @@ def _write_reading(printer, data: bytes) -> bytes:
     return b''.join(received)
 
 
-def _drain(printer, unanswered: int = 0, wait: bool = True, key: str | None = None) -> int:
+def _drain(printer, unanswered: int = 0, key: str | None = None) -> int:
     """Read what the printer still has to say, e.g. the status messages of an
     earlier job or late replies to status requests, so that they are not
-    taken for those of this one. With wait, the replies to the unanswered
-    requests are waited for first, see _read_ahead(). Returns how many of
-    them were not read."""
-    if wait:
-        _, unanswered, _ = _read_ahead(printer, unanswered, time.monotonic() + OWED_WAIT, key)
+    taken for those of this one. Returns how many of the replies to the
+    unanswered requests were not read."""
     for _ in range(DRAIN_READS):
         data = printer.read(32)
         if not data:
@@ -173,6 +185,17 @@ def _read_ahead(printer, owed: int, until: float, key: str | None = None) -> tup
             break
         last, owed = reply, owed - 1
     return last, owed, False
+
+
+def _arrived(printer, owed: int, until: float, key: str | None = None) -> tuple[bytes, int, bool]:
+    """The replies owed that came, the first read without waiting for it:
+    the last one read, how many are still owed and whether they were still
+    coming when the time until ran out, see _read_ahead()."""
+    first = _read_reply(printer, 0, key)
+    if not _is_reply(first):
+        return b'', owed, False
+    last, owed, more = _read_ahead(printer, owed - 1, until, key)
+    return last or first, owed if more else 0, more
 
 
 def _is_reply(message: bytes) -> bool:
@@ -238,16 +261,18 @@ def _read_reply(printer, timeout: float, key: str | None = None) -> bytes:
     error among them is kept, see _keep_error()."""
     data = b''
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    # Read once at least, also without a timeout
+    while True:
         data += printer.read(32 - len(data)) or b''
-        if len(data) < 32:
-            time.sleep(0.02)
-        elif data.startswith(HEADER) and not _is_reply(data):
+        if len(data) == 32 and data.startswith(HEADER) and not _is_reply(data):
             _keep_error(data, key)
             data = b''
-        else:
+        elif len(data) == 32:
             return data
-    return data
+        elif time.monotonic() < deadline:
+            time.sleep(0.02)
+        if time.monotonic() >= deadline:
+            return data
 
 
 def _read_status(printer, timeout: float, key: str | None = None) -> bytes:
@@ -260,38 +285,53 @@ def _read_status(printer, timeout: float, key: str | None = None) -> bytes:
 
 def get_status(printer, timeout: float = 2.0, key: str | None = None):
     """Request and parse the printer status. With key, the printer's lock key,
-    the requests it leaves unanswered are counted and their replies read
-    first next time: a QL-1100 holding an error answers them once the error
-    is cleared, and the answer read would be that of an older request."""
+    the requests it leaves unanswered are counted and count as outstanding
+    for ASK_AGAIN seconds, in which no other is sent: a QL-1100 holding an
+    error answers them all once the error is cleared, the latest reply read
+    is the answer."""
     until = time.monotonic() + OWED_WAIT
-    last, owed, more = _read_ahead(printer, _unanswered.get(key, 0), until, key)
-    if more and last:
-        # Too many to read now: the latest reply is the answer, the printer
-        # sent it after it held the requests, the others are read next time
-        if key is not None:
+    owed = _unanswered.get(key, 0)
+    asked = _outstanding(key)
+    if owed:
+        last, owed, more = _arrived(printer, owed, until, key)
+        if last and (more or asked):
+            # The answer, the others still coming are read next time
             _unanswered[key] = owed
-        return parse_status(last)
-    owed = _drain(printer, owed, wait=False, key=key)
+            _asked.pop(key, None)
+            return parse_status(last)
+        if asked:
+            raise TimeoutError('The status request sent before is not answered yet')
+    owed = _drain(printer, owed, key=key)
+    sent = time.monotonic()
     data = _read_status(printer, timeout, key)
     unanswered = int(len(data) < 32)
     if unanswered:
         # The QL-560 answers only the first request after power-on. Invalidate
-        # and initialize only then: "ESC @" also cancels printing. The QL-560
-        # sends no reply to the first request, it is not waited for here.
-        unanswered = _drain(printer, unanswered, wait=False, key=key)
+        # and initialize only then, at most once in ASK_AGAIN s: "ESC @" also
+        # cancels printing. The QL-560 sends no reply to the first request,
+        # it is not waited for here.
+        unanswered = _drain(printer, unanswered, key=key)
         printer.write(b"\x00" * 200 + b"\x1b\x40")
         data = _read_status(printer, timeout, key)
     if len(data) == 32:
         # It may be an owed reply, e.g. of an error cleared meanwhile: the last
-        # of those following is the answer, ones that do not come are forgotten
+        # of those following is the answer, ones that do not come are
+        # forgotten. A request of which only the retry was answered, e.g. by
+        # a QL-560, stays outstanding.
         last, ahead, more = _read_ahead(printer, owed + unanswered, until, key)
         data = last or data
-        owed, unanswered = (ahead if more else 0), 0
+        owed, unanswered = (ahead, 0) if more else (0, min(unanswered, ahead))
     else:
         # A printer holding an error answers them all once it is cleared
         unanswered += 1
     if key is not None:
         _unanswered[key] = min(MOST_UNANSWERED, owed + unanswered)
+        _asked.pop(key, None)
+        _retry_answered.discard(key)
+        if unanswered:
+            _asked[key] = sent
+            if len(data) == 32:
+                _retry_answered.add(key)
     if len(data) < 32:
         raise TimeoutError(f"No complete status response within {timeout} s")
     return parse_status(data)
@@ -317,20 +357,40 @@ def _held_error(key: str) -> dict | None:
     return dict(known, errors=[f"{', '.join(known['errors'])}, clear it at the printer"])
 
 
+def _outstanding(key: str | None) -> bool:
+    """Whether a status request of the printer is outstanding, see ASK_AGAIN."""
+    return key in _asked and time.monotonic() - _asked[key] < ASK_AGAIN
+
+
+def _switched_off(key: str):
+    """A printer that cannot be reached, e.g. switched off, holds no request
+    once it is back: it is asked at once then."""
+    _asked.pop(key, None)
+
+
 def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
     """Query the printer status without waiting for a running print job. While
     a job holds the device, the last known status is returned instead."""
     key = devices.lock_key(device_specifier)
     with devices.device_lock(device_specifier, timeout=progress.status_wait(device_specifier)) as acquired:
         if acquired:
-            printer = get_printer(device_specifier)
+            try:
+                printer = get_printer(device_specifier)
+            except OSError:
+                _switched_off(key)
+                raise
             try:
                 state = get_status(printer, key=key)
             except TimeoutError:
                 held = _held_error(key)
-                if held is None:
-                    raise
-                return held
+                if held is not None:
+                    return held
+                if key in _retry_answered and _outstanding(key) and key in devices.status_cache:
+                    return dict(devices.status_cache[key])
+                raise
+            except OSError:
+                _switched_off(key)
+                raise
             finally:
                 # Release the device before giving up the lock
                 _release(printer)

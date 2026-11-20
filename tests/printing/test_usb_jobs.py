@@ -2,6 +2,7 @@
 printers that do not answer. The clock is a fake one, a job of minutes
 takes no time."""
 
+import json
 import threading
 
 import pytest
@@ -12,6 +13,7 @@ from tests.helpers import EXAMPLE_FORMDATA, make_client, without_status
 
 REPLY, COMPLETED, PHASE_CHANGE, ERROR = 0x00, 0x01, 0x06, 0x02
 PRINTING, WAITING = 0x01, 0x00
+TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Shelf', 'size': '40'}])
 
 
 def status(kind, phase=WAITING, error=0, width=62):
@@ -265,6 +267,60 @@ def test_owed_replies_end_with_the_job_s_first_message(clock, monkeypatch, stopp
     info = send(monkeypatch, fake, [30, 30])
     assert (info['did_print'], info['confirmed']) == (True, 2)
     assert usb._unanswered['/dev/usb/lp0'] == 0
+
+
+@pytest.fixture
+def outstanding(clock, monkeypatch):
+    """A status request and its retry sent a moment ago, not answered yet."""
+    monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 2)
+    monkeypatch.setitem(usb._asked, '/dev/usb/lp0', clock.now - 5)
+
+
+def test_a_job_does_not_wait_for_an_outstanding_request(clock, monkeypatch, outstanding):
+    fake = FakePrinter(clock, page())
+    start = clock.now
+    info = send(monkeypatch, fake, [50])
+    assert info['did_print'] and clock.now - start < 0.1
+    # Its messages began, the replies will not come
+    assert usb._unanswered['/dev/usb/lp0'] == 0 and '/dev/usb/lp0' not in usb._asked
+
+
+def test_late_reply_during_a_job_answers_the_outstanding_request(clock, monkeypatch, outstanding):
+    fake = FakePrinter(clock, [(0.3, status(REPLY))] + page())
+    info = send(monkeypatch, fake, [50])
+    assert info['did_print'] and '/dev/usb/lp0' not in usb._asked
+
+
+def test_error_told_to_a_job_leaves_the_request_outstanding(clock, monkeypatch, outstanding):
+    # A QL-1100 holding an error tells it to the job, and answers the
+    # requests it holds once the error is cleared
+    fake = FakePrinter(clock, [(0, status(ERROR, error=0x01))])
+    info = send(monkeypatch, fake, [50])
+    assert info['printer_state']['errors'] and not info['did_print']
+    assert usb._unanswered['/dev/usb/lp0'] == 2 and '/dev/usb/lp0' in usb._asked
+
+
+def test_job_while_a_request_is_outstanding_is_made_for_the_last_tape(clock, monkeypatch, outstanding, tmp_path):
+    # Neither the query of the tape nor the job waits, the job is made for
+    # the 29 mm tape the printer told last
+    printers = []
+
+    class Backend(FakePrinter):
+        def __init__(self, device_specifier):
+            super().__init__(clock, page())
+            printers.append(self)
+    monkeypatch.setattr(backends, 'KernelPrinter', Backend)
+    monkeypatch.setitem(devices.status_cache, '/dev/usb/lp0', usb.parse_status(status(REPLY, width=29)))
+    client = make_client(tmp_path)
+    client.application.config.update(PRINTER_PRINTER='file:///dev/usb/lp0', PRINTER_MODEL='QL-800')
+    start = clock.now
+    data = {key: value for key, value in EXAMPLE_FORMDATA.items() if key != 'label_size'}
+    assert client.post('/labeldesigner/api/print', data=dict(data, text=TEXT)).get_json() == {'success': True}
+    assert clock.now - start < 0.1
+    query, job = printers
+    assert query.written == b''
+    media = job.written.index(b'\x1biz')
+    assert job.written[media + 5] == 29
 
 
 def test_a_job_printed_replaces_an_error_told_before(clock, monkeypatch):

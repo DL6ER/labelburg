@@ -24,6 +24,13 @@ PORT = 9100
 CONNECT_WAIT = 10
 # How long a piece of a job may take to reach a printer on the network
 WRITE_WAIT = 15
+# How long a status request left unanswered counts as outstanding: queries
+# meanwhile send none and wait for none, they only read whether it came
+ASK_AGAIN = 20
+
+# When each printer was asked the request it left unanswered, by the key
+# get_errors() is given
+_asked: dict[str, float] = {}
 
 INIT = b'\x1b@'
 # Feed to the cutter and cut. A TM-T20II leaves one corner uncut, as its
@@ -91,6 +98,10 @@ class Connection:
         while data:
             data = data[os.write(self.dev, data):]
 
+    def came(self) -> bool:
+        """Whether the printer sent anything, read without waiting."""
+        return bool(select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64))
+
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
         # A TM-T20II kept an answer from before, which was taken for this one
@@ -117,6 +128,9 @@ class UsbConnection(Connection):
     def write(self, data: bytes):
         for start in range(0, len(data), WRITE_CHUNK):
             self.printer.write(data[start:start + WRITE_CHUNK])
+
+    def came(self) -> bool:
+        return bool(self.printer.read(64))
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
@@ -151,6 +165,10 @@ class TcpConnection(Connection):
         for start in range(0, len(data), WRITE_CHUNK):
             self.socket.sendall(data[start:start + WRITE_CHUNK])
 
+    def came(self) -> bool:
+        # A late answer went to the connection it was asked on
+        return False
+
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
         self.socket.setblocking(False)
@@ -177,5 +195,18 @@ def connect(device: str) -> Connection:
     return Connection(device)
 
 
-def get_errors(c: Connection) -> list[str]:
-    return errors(c.ask(OFFLINE), c.ask(PAPER))
+def get_errors(c: Connection, key: str | None = None) -> list[str]:
+    """What the printer tells is wrong. With key, the printer's lock key, a
+    request it leaves unanswered counts as outstanding for ASK_AGAIN s, in
+    which it is asked again only once anything came from it."""
+    if key in _asked and time.monotonic() - _asked[key] < ASK_AGAIN and not c.came():
+        raise EscposError('no answer to the status request')
+    sent = time.monotonic()
+    try:
+        found = errors(c.ask(OFFLINE), c.ask(PAPER))
+    except EscposError:
+        if key is not None:
+            _asked[key] = sent
+        raise
+    _asked.pop(key, None)
+    return found

@@ -5,6 +5,7 @@ import pytest
 from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
+from app.labeldesigner.drivers.escpos import protocol as escpos
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +30,9 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(printer_settings, 'FILE', '.printers-of-the-tests.json')
     # Nor the status requests the printers of other tests left unanswered
     monkeypatch.setattr(usb, '_unanswered', {})
+    monkeypatch.setattr(usb, '_asked', {})
+    monkeypatch.setattr(usb, '_retry_answered', set())
+    monkeypatch.setattr(escpos, '_asked', {})
 
 
 @pytest.fixture(autouse=True)
