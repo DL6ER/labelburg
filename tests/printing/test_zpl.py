@@ -171,7 +171,7 @@ def _answering(monkeypatch, answer):
 @pytest.fixture(autouse=True)
 def asked_afresh(monkeypatch):
     from app.labeldesigner.drivers import devices
-    monkeypatch.setattr(zpl, '_asked', {})
+    monkeypatch.setattr(zpl, '_ask_after', {})
     monkeypatch.setattr(devices, 'status_cache', {})
 
 
@@ -211,7 +211,7 @@ def test_asked_at_most_every_10_s_then_silence_is_an_error(monkeypatch):
     # Not asked again within 10 s, told as it was
     assert zpl.DRIVER.status('tcp://127.0.0.1', 'Zebra/ZPL')['media_length'] == 152
     # A Datamax with its printhead open does not answer
-    monkeypatch.setitem(zpl._asked, 'tcp://127.0.0.1', 0)
+    monkeypatch.setitem(zpl._ask_after, 'tcp://127.0.0.1:9100', 0)
     thread, server = _answering(monkeypatch, b'')
     state = zpl.DRIVER.status('tcp://127.0.0.1', 'Zebra/ZPL')
     thread.join(5)
@@ -227,6 +227,36 @@ def test_a_printer_that_never_answered_is_asked_at_most_every_10_s(monkeypatch, 
     for _ in range(3):
         zpl.DRIVER.status(f'file://{device}', 'Zebra/ZPL')
     assert len(asked) == 1
+
+
+def test_two_spellings_of_a_printer_are_asked_at_most_every_10_s(monkeypatch, tmp_path):
+    # A Datamax leaves a ~HS within 5 s of the one before unanswered
+    device = tmp_path / 'lp0'
+    device.write_bytes(b'')
+    asked = []
+    monkeypatch.setattr(protocol, 'host_status', lambda device: asked.append(device) or DATAMAX_HS)
+    for spelling in (f'file://{device}', str(device)):
+        zpl.DRIVER.status(spelling, 'Zebra/ZPL')
+    assert len(asked) == 1
+
+
+@pytest.mark.parametrize('answer, asked', [(b'', [0, 20, 40]), (DATAMAX_HS, [0, 10, 20, 30, 40, 50])],
+                         ids=['silent', 'answering'])
+def test_asked_again_after_20_s_without_an_answer(monkeypatch, tmp_path, answer, asked):
+    # Polled every 2 s for a minute: a ~HS left unanswered is outstanding
+    # for 20 s, a printer that answers is asked every 10 s
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(zpl, 'time', clock)
+    device = tmp_path / 'lp0'
+    device.write_bytes(b'')
+    times = []
+    monkeypatch.setattr(protocol, 'host_status', lambda device: times.append(clock.now - 1000) or answer)
+    end = clock.now + 60
+    while clock.now < end:
+        zpl.DRIVER.status(f'file://{device}', 'Zebra/ZPL')
+        clock.sleep(2)
+    assert times == asked
 
 
 def test_printer_through_pyusb(monkeypatch):
@@ -293,7 +323,7 @@ def test_two_status_queries_at_once_ask_once(monkeypatch):
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.5)
     # Asked more than 10 s ago
     monkeypatch.setitem(devices.status_cache, 'tcp://127.0.0.1:9100', {'errors': [], 'media_width': 102, 'media_length': 152})
-    monkeypatch.setitem(zpl._asked, 'tcp://127.0.0.1', time.monotonic() - 60)
+    monkeypatch.setitem(zpl._ask_after, 'tcp://127.0.0.1:9100', time.monotonic() - 60)
     start = threading.Barrier(2)
     states = []
 
