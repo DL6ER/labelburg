@@ -29,6 +29,8 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(printer_settings, 'FILE', '.printers-of-the-tests.json')
     # Nor the status requests the printers of other tests left unanswered
     monkeypatch.setattr(usb, '_unanswered', {})
+    monkeypatch.setattr(usb, '_asked', {})
+    monkeypatch.setattr(usb, '_retry_answered', set())
 
 
 @pytest.fixture(autouse=True)

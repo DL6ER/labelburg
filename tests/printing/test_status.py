@@ -162,10 +162,18 @@ def held(monkeypatch):
     return printer
 
 
+@pytest.fixture
+def lost_at_once(monkeypatch):
+    """Each query asks again, as one does once the request before counts as
+    lost."""
+    from app.labeldesigner.drivers.brother import usb
+    monkeypatch.setattr(usb, 'ASK_AGAIN', 0)
+
+
 @pytest.mark.parametrize('cleared_at', [5, 6], ids=['request', 'retry'])
-def test_error_cleared_while_a_poll_waits(held, cleared_at):
-    # Held through two polls, cleared while the third waits for its request
-    # or its retry: the reply that comes first is the oldest
+def test_error_cleared_while_a_poll_waits(held, lost_at_once, cleared_at):
+    # Held through two requests and their retries, cleared while the third
+    # request or its retry waits: the reply that comes first is the oldest
     from app.labeldesigner.drivers.brother import usb
     for _ in range(2):
         with pytest.raises(TimeoutError):
@@ -177,7 +185,7 @@ def test_error_cleared_while_a_poll_waits(held, cleared_at):
         assert usb.query_status('file:///dev/usb/lp0')['media_width'] == width
 
 
-def test_messages_sent_unasked_are_no_replies(held):
+def test_messages_sent_unasked_are_no_replies(held, lost_at_once):
     # A phase change before the replies owed does not count as one of them
     from app.labeldesigner.drivers.brother import usb
     with pytest.raises(TimeoutError):
@@ -191,7 +199,6 @@ def test_messages_sent_unasked_are_no_replies(held):
 def test_requests_of_many_polls_are_counted(held, monkeypatch):
     # E.g. a QL-1100 holding an error for an hour of polls
     from app.labeldesigner.drivers.brother import usb
-    monkeypatch.setattr(usb, 'REPLY_WAIT', 0.05)
     monkeypatch.setitem(usb._unanswered, '/dev/usb/lp0', 150)
     with pytest.raises(TimeoutError):
         usb.query_status('file:///dev/usb/lp0')
@@ -279,13 +286,140 @@ def test_wait_for_a_reply_follows_the_monotonic_clock(monkeypatch):
     assert clock.now - 1000 == pytest.approx(0.5, abs=0.05)
 
 
-def test_status_query_waits_for_the_replies_it_is_owed(held):
+def test_status_query_waits_for_the_replies_it_is_owed(held, lost_at_once):
     from app.labeldesigner.drivers.brother import usb
     with pytest.raises(TimeoutError):
         usb.query_status('file:///dev/usb/lp0')
     held.clear()
     held.width = 29
     assert usb.query_status('file:///dev/usb/lp0')['media_width'] == 29
+
+
+DEVICE, KEY = 'file:///dev/usb/lp0', '/dev/usb/lp0'
+HELD = ['Replace media error, clear it at the printer']
+
+
+@pytest.fixture
+def polled(monkeypatch):
+    """A FakeHoldingPrinter at /dev/usb/lp0 on a fake clock, which told
+    "Replace media error" before, with what was written to it and when."""
+    from app.labeldesigner.drivers import devices
+    from app.labeldesigner.drivers.brother import usb
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(usb, 'time', clock)
+    printer = FakeHoldingPrinter(width=62)
+    printer.clock, printer.writes = clock, []
+    write = printer.write
+
+    def writing(data):
+        printer.writes.append((clock.now, data))
+        write(data)
+    printer.write = writing
+    printer.asked = lambda: [at for at, data in printer.writes if data.endswith(b'\x1b\x69\x53')]
+    monkeypatch.setattr(usb, 'get_printer', lambda device: printer)
+    error = bytearray(make_status_packet(62, kind=0x02))
+    error[9] = 0x01
+    devices.status_cache[KEY] = usb.parse_status(bytes(error))
+    return printer
+
+
+def test_printer_holding_an_error_polled_for_a_minute(polled):
+    # As the label designer asks it every 2 s: a request and its retry at
+    # most every 20 s, the polls between write nothing and tell the error
+    # at once
+    from app.labeldesigner.drivers.brother import usb
+    clock = polled.clock
+    end = clock.now + 60
+    while clock.now < end:
+        start, written = clock.now, len(polled.writes)
+        assert usb.query_status(DEVICE)['errors'] == HELD
+        assert len(polled.writes) > written or clock.now == start
+        clock.sleep(2)
+    asked = polled.asked()
+    assert len(asked) == 6
+    assert all(len([at for at in asked if first <= at < first + 20]) <= 2 for first in asked)
+
+
+def test_error_cleared_the_late_reply_then_a_fresh_one(polled):
+    # Held over requests that counted as lost, each reply a round trip away:
+    # once cleared, the poll after takes what it answered then without asking
+    # again, the next poll asks, after the roll was swapped
+    from app.labeldesigner.drivers.brother import usb
+    clock = polled.clock
+    while len(polled.asked()) < 6:
+        usb.query_status(DEVICE)
+        clock.sleep(2)
+    polled.gaps = True
+    polled.clear()
+    polled.width = 29
+    written = len(polled.writes)
+    state = usb.query_status(DEVICE)
+    if state['errors']:
+        # The read before the reply came empty
+        state = usb.query_status(DEVICE)
+    assert (state['errors'], state['media_width'], len(polled.writes)) == ([], 62, written)
+    assert usb.query_status(DEVICE)['media_width'] == 29
+    assert polled.unread == b''
+
+
+def test_printer_switched_off_and_on_meanwhile_is_asked_within_20_s(polled):
+    # Between two polls: it holds no request any more and answers the next
+    from app.labeldesigner.drivers.brother import usb
+    clock = polled.clock
+    usb.query_status(DEVICE)
+    polled.holding, polled.width = False, 29
+    for _ in range(15):
+        clock.sleep(2)
+        state = usb.query_status(DEVICE)
+    # Its request and the retry, then the next one
+    asked = polled.asked()
+    assert asked[2] - asked[0] <= 20 + 2
+    assert (state['errors'], state['media_width']) == ([], 29)
+
+
+class FakeQL560:
+    """Answers a status request only right after invalidate and "ESC @", as
+    the QL-560 does after its first one since power-on."""
+
+    def __init__(self, clock):
+        self.clock, self.writes, self.unread, self.reset = clock, [], b'', False
+
+    def write(self, data):
+        self.writes.append((self.clock.now, data))
+        if data.endswith(b'\x1b\x40'):
+            self.reset = True
+        elif data.endswith(b'\x1b\x69\x53'):
+            if self.reset:
+                self.unread += make_status_packet(29)
+            self.reset = False
+
+    def read(self, length):
+        data, self.unread = self.unread[:length], self.unread[length:]
+        return data
+
+    def dispose(self):
+        pass
+
+
+def test_printer_answering_only_after_esc_at_polled_for_a_minute(monkeypatch):
+    # The first query is answered after the retry, the request before it
+    # stays outstanding: the retry at most every 20 s, the polls between
+    # write nothing and tell its answer at once
+    from app.labeldesigner.drivers.brother import usb
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(usb, 'time', clock)
+    printer = FakeQL560(clock)
+    monkeypatch.setattr(usb, 'get_printer', lambda device: printer)
+    end = clock.now + 60
+    while clock.now < end:
+        start, written = clock.now, len(printer.writes)
+        state = usb.query_status(DEVICE)
+        assert (state['errors'], state['media_width']) == ([], 29)
+        assert len(printer.writes) > written or clock.now == start
+        clock.sleep(2)
+    assert len([at for at, data in printer.writes if data.endswith(b'\x1b\x40')]) == 3
 
 
 @pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W')])
