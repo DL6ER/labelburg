@@ -151,6 +151,34 @@ def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake, monkeypatch):
     assert packets[0x23] == b'\x01'
 
 
+def test_b1_starts_the_next_label_once_it_takes_it(b1, fake, monkeypatch):
+    without_status(monkeypatch)
+    # Right after a label ended, the B1 on USB refuses the start of the next one once
+    take = fake._take
+
+    def refusing(data):
+        if data[2] == 0x21 and fake.commands[-1:] == [0xf3]:
+            fake.commands.append(0x21)
+            fake.pending += protocol.packet(0x31, b'\x00')
+        else:
+            take(data)
+    monkeypatch.setattr(fake, '_take', refusing)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert response.get_json() == {'success': True}
+    assert fake.commands.count(0xf3) == 2 and fake.commands.count(0x21) == 3
+
+
+def test_b1_refusing_a_label_for_longer_is_not_waited_for(b1, fake, monkeypatch):
+    without_status(monkeypatch)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    monkeypatch.setitem(REPLIES, 0x21, (0x31, b'\x00'))
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert response.status_code == 503 and response.get_json()['success'] is False
+    assert fake.commands.count(0x21) > 1 and 0x23 not in fake.commands
+
+
 class UsbPrinter:
     """The fake printer behind the printer backend of USB and USB/IP."""
 
