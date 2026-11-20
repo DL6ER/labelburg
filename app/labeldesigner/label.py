@@ -1,6 +1,6 @@
 from .enums import LabelContent, LabelOrientation, LabelType
 from . import codes, icons
-from .cable_flag import flag_strip
+from .cable_flag import flag_box, flag_strip
 import os
 import uuid
 from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
@@ -427,6 +427,11 @@ class SimpleLabel:
         # Known once the label is generated as well: where the image or code
         # is next to the text, for labels with both
         self.image_side: str | None = None
+        # Where its lines, code and image are on it, see _parts()
+        self.parts: list[dict] = []
+        # The colors asked for that its tape prints otherwise, as printed
+        self.printed_as: dict[str, str] = {}
+        self._line_boxes: dict[int, tuple] = {}
         self._blanks = blanks or {}
         self._blank_fields = blank_fields or {}
         self._mark_blanks = mark_blanks
@@ -506,10 +511,13 @@ class SimpleLabel:
         lines with its settings."""
         self.text = []
         total_length = 0
-        for line in copy.deepcopy(self.input_text):
+        for index, line in enumerate(copy.deepcopy(self.input_text)):
             # Only the templates and wrapping set them, not the request
             line.pop('unmarked', None)
             line.pop('todo_continued', None)
+            # Which line given it is, also once wrapped or broken into
+            # several, see _place_lines()
+            line['line_index'] = index
             text_val = line.get('text', '')
             if len(text_val) > WARNING_TEXT_LENGTH:
                 logger.warning(
@@ -758,8 +766,12 @@ class SimpleLabel:
         img = self._generate_label()
         if self._flag_wrap:
             # Both halves from one render, so random texts and counters match
-            img = flag_strip(img, self._flag_wrap, self._flag_dpi, self._label_orientation == LabelOrientation.ROTATED)
+            along = self._label_orientation == LabelOrientation.ROTATED
+            half = img.size
+            img = flag_strip(img, self._flag_wrap, self._flag_dpi, along)
             check_image_size(*img.size)
+            # Its parts are on both labels
+            self.parts += [dict(part, box=flag_box(part['box'], half, self._flag_wrap, along)) for part in self.parts]
         return img.rotate(180) if self.turned else img
 
     def _generate_label(self):
@@ -891,8 +903,8 @@ class SimpleLabel:
             self.warnings.append('The code is empty until its blanks are filled in.')
         what = 'code' if self._label_content in (LabelContent.QRCODE_ONLY, LabelContent.TEXT_QRCODE) else 'image'
         # What is placed next to the text, by name
-        boxes = [(name, (x, y, x + item.width, y + item.height))
-                 for name, item, (x, y) in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
+        items = [(name, item, offset) for name, item, offset in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
+        boxes = [(name, (x, y, x + item.width, y + item.height)) for name, item, (x, y) in items]
         if bboxes:
             x, y = text_offset
             text_box = (x + textsize[0], y + textsize[1], x + textsize[2], y + textsize[3])
@@ -922,6 +934,7 @@ class SimpleLabel:
         if code is not None:
             imgResult.paste(code, code_offset)
 
+        self._line_boxes = {}
         if self.want_text(img):
             self._draw_text(imgResult, bboxes, text_offset)
 
@@ -944,7 +957,30 @@ class SimpleLabel:
         # Left and right swapped as the text reads, the preview shows it so
         if self._mirror:
             imgResult = ImageOps.mirror(imgResult)
+        self.parts = self._parts([(name, self._printed_box(item, offset)) for name, item, offset in items], imgResult.size)
         return imgResult
+
+    def _parts(self, boxes: list, size: tuple) -> list[dict]:
+        """Where the lines and the image or code (boxes, by name) are on the
+        label of size, for the label designer to pick one with a click on
+        the preview: boxes [x0, y0, x1, y1] in its dots, within it."""
+        width, height = size
+        parts = [({'part': 'line', 'index': index}, box) for index, box in self._line_boxes.items()]
+        placed = []
+        for part, (x0, y0, x1, y1) in parts + [({'part': name}, box) for name, box in boxes]:
+            x0, x1 = (min(max(x, 0), width) for x in (math.floor(x0), math.ceil(x1)))
+            y0, y1 = (min(max(y, 0), height) for y in (math.floor(y0), math.ceil(y1)))
+            if self._mirror:
+                x0, x1 = width - x1, width - x0
+            placed.append(dict(part, box=[x0, y0, x1, y1]))
+        return placed
+
+    @staticmethod
+    def _printed_box(item: Image.Image, xy: tuple) -> tuple:
+        """Where item placed at xy prints, without the white around it, e.g.
+        the room kept beside the bars of a code; all of it where it is white."""
+        ink = item.convert('L').point(lambda v: 255 if v < 255 else 0).getbbox() or (0, 0, item.width, item.height)
+        return xy[0] + ink[0], xy[1] + ink[1], xy[0] + ink[2], xy[1] + ink[3]
 
     def _sized(self, img: Image.Image, width: int, height: int, parts: int, own_look: bool = True) -> tuple[Image.Image, float]:
         """img as it is placed on the label and how much it was enlarged or
@@ -1115,6 +1151,8 @@ class SimpleLabel:
         last = len(lines) - 1
         last_shown = max((i for i, line in enumerate(lines) if self._shows_something(line)), default=last)
         spaced = last if lines and self._shows_something(lines[-1]) else last - 1
+        # Drawn, each line with the box of what it draws, see _place_lines()
+        placed = []
 
         # Iterate over lines of text
         for i, line in enumerate(lines):
@@ -1138,6 +1176,12 @@ class SimpleLabel:
             indented = checkbox or line.get('todo_continued', False)
 
             INVERT_LINE = 'inverted' in line and line['inverted']
+            # From where to where it is drawn across, its boxes and its text
+            extents = []
+            if do_draw:
+                # What the line draws is what changes around its room
+                region = self._line_region(img, bboxes, i, text_offset)
+                before = img.crop(region)
             if do_draw and INVERT_LINE:
                 # Draw a filled rectangle
                 center_x = 0
@@ -1155,6 +1199,7 @@ class SimpleLabel:
                 y_min = bboxes[i][0][1] + text_offset[1]
                 y_max = bboxes[i][0][3] + text_offset[1]
                 draw.rectangle((min_bbox_x, y_min, max_bbox_x, y_max), fill=color)
+                extents.append((min_bbox_x, max_bbox_x + 1))
                 # Overwrite font color with white on colored background
                 color = (255, 255, 255)
 
@@ -1198,6 +1243,9 @@ class SimpleLabel:
                 # included, also where the text is lower or there is none
                 if checkbox:
                     bbox = (bbox[0], bbox[1], bbox[2], max(bbox[3], text_y + 8 * self._line_size(line) // 10 + 1))
+                underline = self._underline(draw, line, font, text_y)
+                if underline:
+                    bbox = (bbox[0], bbox[1], bbox[2], max(bbox[3], underline[1]))
                 bboxes.append((bbox, text_y, line))
                 y += bbox[3] - bbox[1] + (spacing if i < spaced else 0)
             else:
@@ -1230,8 +1278,13 @@ class SimpleLabel:
                     bbox = self._draw_line(draw, (x - 1.2 * checkbox_box_dimensions, y), line['text'], font, anchor, align=align, measuring=not do_draw)
                     box_dimensions = bbox[0], y, bbox[0] + checkbox_box_dimensions, y + checkbox_box_dimensions
                     draw.rounded_rectangle(box_dimensions, radius=5, outline=color, width=max(1, checkbox_box_dimensions//10), fill=(255,255,255))
+                    extents.append((box_dimensions[0], box_dimensions[2] + 1))
 
-                self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing)
+                drawn = self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing)
+                extents.append((drawn[0], drawn[2]))
+                underline = self._underline(draw, line, font, y)
+                if underline:
+                    draw.rectangle((drawn[0], underline[0], drawn[2] - 1, underline[1] - 1), fill=color)
 
                 # Shift text around if requested
                 if "shift" in line:
@@ -1242,9 +1295,44 @@ class SimpleLabel:
                             new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
                             draw.text((x + x_shift, y + y_shift), new_random_text, color, font=font, anchor=anchor, align=align, spacing=spacing)
 
+                # Faint edges of letters left out, as they look on the preview
+                ink = ImageChops.difference(before, img.crop(region)).point(lambda v: 255 if v > 127 else 0).getbbox()
+                if ink:
+                    placed.append((line, (region[0] + ink[0], region[1] + ink[1], region[0] + ink[2], region[1] + ink[3]), True))
+                else:
+                    room = bboxes[i][0]
+                    placed.append((line, (min(start for start, _ in extents), room[1] + text_offset[1],
+                                          max(end for _, end in extents), room[3] + text_offset[1]), False))
+
+        if do_draw:
+            self._place_lines(placed)
         # Return total bbox
         # each in form (x0, y0, x1, y1)
         return bboxes
+
+    def _place_lines(self, placed: list) -> None:
+        """Keep where the lines drawn (placed, each with its box and whether
+        it drew anything) are, by their index in the lines given: the lines a
+        line wrapped or broke into share one box. A line that drew nothing
+        keeps its room, as wide as the text, so that a click on it picks it."""
+        shown = [box for line, box, inked in placed if inked]
+        for line, box, inked in placed:
+            if shown and not inked:
+                box = (min(b[0] for b in shown), box[1], max(b[2] for b in shown), box[3])
+            known = self._line_boxes.get(line['line_index'], box)
+            self._line_boxes[line['line_index']] = (min(known[0], box[0]), min(known[1], box[1]), max(known[2], box[2]), max(known[3], box[3]))
+
+    def _line_region(self, img, bboxes, i, text_offset) -> tuple:
+        """Where line i of the text placed at text_offset draws on img: its
+        room and the width of the text, a size around them for letters
+        reaching out and shifted text."""
+        size = self._line_size(bboxes[i][2])
+        room = bboxes[i][0]
+        x0 = text_offset[0] + min(bbox[0][0] for bbox in bboxes) - size
+        x1 = text_offset[0] + max(bbox[0][2] for bbox in bboxes) + size
+        y0, y1 = room[1] + text_offset[1] - size, room[3] + text_offset[1] + size
+        x0, y0 = min(max(0, math.floor(x0)), img.width), min(max(0, math.floor(y0)), img.height)
+        return x0, y0, max(x0, min(img.width, math.ceil(x1))), max(y0, min(img.height, math.ceil(y1)))
 
     def _wrapped(self, draw, lines) -> list:
         """The lines as laid out: where long lines wrap, each line wider than
@@ -1336,6 +1424,21 @@ class SimpleLabel:
         if any(icons.is_icon(char) for char in text):
             text = 'H'
         return -draw.textbbox((0, 0), text, font=font, anchor='ls')[1]
+
+    def _underline(self, draw, line, font, y) -> tuple | None:
+        """From where to where an underlined line's bar is drawn below its
+        text at y, None where it has none or no words. It scales with the
+        size of the line like the underline of a font does."""
+        if not line.get('underline') or not self._has_words(line):
+            return None
+        # Characters that take no room, e.g. a zero-width space, leave no
+        # width for a bar
+        box = self._draw_line(draw, (0, 0), line['text'], font, 'lt', measuring=True)
+        if box[2] <= box[0]:
+            return None
+        size = self._line_size(line)
+        top = y + self._baseline(draw, line['text'], font) + max(1, round(size * .1))
+        return top, top + max(1, round(size / 16))
 
     def _line_size(self, line) -> int:
         """Font size of a line, made smaller when the text is shrunk to fit."""

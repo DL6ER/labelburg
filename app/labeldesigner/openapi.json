@@ -149,6 +149,18 @@
                     "right"
                   ]
                 }
+              },
+              "X-Label-Colors": {
+                "description": "The colors asked for that the tape prints otherwise, as JSON, each with the color printed, e.g. `{\"#2563eb\": \"black\"}` on a tape without red. Left out where all print as asked.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Label-Parts": {
+                "description": "Where the lines, the code and the image are on the label, as JSON in pixels of the preview: `[{\"part\": \"line\", \"index\": 0, \"box\": [x0, y0, x1, y1]}, {\"part\": \"code\", \"box\": [...]}, {\"part\": \"image\", \"box\": [...]}]`. `index` is that of the line in `text`, a line that wraps has one box. A cable flag has each part twice. Left out for a label with many lines.",
+                "schema": {
+                  "type": "string"
+                }
               }
             },
             "content": {
@@ -2742,6 +2754,11 @@
             "type": "boolean",
             "default": false,
             "description": "A checkbox in front of the line (to-do item)."
+          },
+          "underline": {
+            "type": "boolean",
+            "default": false,
+            "description": "The text of the line underlined, in the color of the line."
           },
           "color": {
             "type": "string",

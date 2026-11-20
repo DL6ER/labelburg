@@ -1320,6 +1320,12 @@ def _preview_refused(error: Exception):
                          413 if isinstance(error, TextTooLong) else 400)
 
 
+# The X-Label-Parts header at most, in bytes: nginx takes 4 KB of headers by
+# default, the others need some of them
+MAX_PARTS_HEADER = 2048
+MAX_COLORS_HEADER = 512
+
+
 def _preview_of(label: SimpleLabel, im, return_format: str):
     """The response with the preview im of label, as PNG or base64
     (return_format), with what it tells about the label."""
@@ -1352,6 +1358,15 @@ def _label_headers(response, label: SimpleLabel):
     # setting
     if label.image_side:
         response.headers.set('X-Label-Image-Position', label.image_side)
+    # Where its lines, code and image are, for the label designer to pick one
+    # with a click. Left out for many lines: proxies take a few KB of headers.
+    parts = json.dumps(label.parts, separators=(',', ':'), sort_keys=False)
+    if len(parts) <= MAX_PARTS_HEADER:
+        response.headers.set('X-Label-Parts', parts)
+    # Colors the tape prints otherwise, for the label designer to say so
+    colors = json.dumps(label.printed_as, separators=(',', ':'))
+    if label.printed_as and len(colors) <= MAX_COLORS_HEADER:
+        response.headers.set('X-Label-Colors', colors)
 
 
 # Description of the API (OpenAPI), kept next to the routes it describes
@@ -1903,10 +1918,18 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
             raise TextTooLong("Text is too long")
 
     palette = _palette(context['label_size'])
-    fore_color = parse_color(_printable_color(context['print_color'], palette))
-    border_color = parse_color(_printable_color(context['border_color'], palette))
+    # The colors asked for that the tape prints otherwise, told with the preview
+    printed_as = {}
+
+    def printable(value):
+        color = _printable_color(value, palette)
+        if value and parse_color(value) != parse_color(color):
+            printed_as[value] = color
+        return color
+    fore_color = parse_color(printable(context['print_color']))
+    border_color = parse_color(printable(context['border_color']))
     for line in context['text']:
-        line['color'] = _printable_color(line.get('color'), palette)
+        line['color'] = printable(line.get('color'))
 
     if image is _LOAD_IMAGE:
         image = load_label_image(d, files)
@@ -1964,6 +1987,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
             and context['image_fit'] and not label.has_lines() and not with_code):
         label.turn_to_fit(*_fitting_orientation(
             image, width, height, label_orientation, margins, context['image_crop'], context['image_rotation']))
+    label.printed_as = printed_as
     return label
 
 

@@ -454,3 +454,214 @@ def test_preview_says_when_the_orientation_is_chosen_automatically(tmp_path, val
     response = client.post('/labeldesigner/api/preview', data=data)
     assert response.status_code == 200
     assert response.headers.get('X-Label-Orientation') == ('auto' if auto else None)
+
+
+def _line(text: str, **settings) -> dict:
+    return dict({'font': 'DejaVu Sans,Book', 'text': text, 'size': '40', 'align': 'left'}, **settings)
+
+
+def _parts_of(client, **settings) -> tuple:
+    """The parts of the preview of a label without a frame, each inside it,
+    and the preview in gray."""
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, border_thickness='0', **settings))
+    assert response.status_code == 200 and response.headers.get('X-Label-Warning') is None
+    image = Image.open(io.BytesIO(response.data)).convert('L')
+    parts = json.loads(response.headers['X-Label-Parts'])
+    for part in parts:
+        x0, y0, x1, y1 = part['box']
+        assert 0 <= x0 <= x1 <= image.width and 0 <= y0 <= y1 <= image.height
+    return parts, image
+
+
+def _ink(image: Image.Image, box=None):
+    """The box around what is printed of image, within box if given."""
+    return (image.crop(tuple(box)) if box else image).point(lambda v: 255 if v < 128 else 0).getbbox()
+
+
+def _uncovered(image: Image.Image, parts: list):
+    """The box around what is printed outside the boxes of parts."""
+    rest = image.copy()
+    for part in parts:
+        rest.paste(255, tuple(part['box']))
+    return _ink(rest)
+
+
+THREE_LINES = json.dumps([_line('Flour', inverted=True, align='center'), _line('Type 550, organic', size='30', checkbox=True),
+                          _line('Best before 2027', size='24', align='right')])
+
+
+@pytest.mark.parametrize('settings', [{}, {'orientation': 'rotated'}, {'high_res': '1'}, {'mirror': '1'}],
+                         ids=['across', 'along', 'high_res', 'mirrored'])
+def test_preview_tells_where_each_line_is(tmp_path, settings):
+    # The label designer picks a line with a click on the preview
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, text=THREE_LINES, **settings)
+    assert [(part['part'], part['index']) for part in parts] == [('line', 0), ('line', 1), ('line', 2)]
+    boxes = [part['box'] for part in parts]
+    # From top to bottom, each holding its line, nothing printed outside them;
+    # the black bar of white on black takes a dot of the room below it
+    assert all(above[3] <= below[1] + 1 for above, below in zip(boxes, boxes[1:]))
+    assert all(_ink(image, box) for box in boxes)
+    assert _uncovered(image, parts) is None
+
+
+def test_parts_are_told_with_a_preview_in_base64(tmp_path):
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, text=THREE_LINES)
+    png = client.post('/labeldesigner/api/preview', data=data)
+    text = client.post('/labeldesigner/api/preview', data=dict(data, return_format='base64'))
+    assert text.headers['X-Label-Parts'] == png.headers['X-Label-Parts']
+    assert png.headers['X-Label-Parts'].startswith('[{"part":"line","index":0,"box":[')
+
+
+@pytest.mark.parametrize('blank', ['', '   '], ids=['empty', 'spaces'])
+def test_a_blank_line_takes_its_room_between_the_others(tmp_path, blank):
+    # As wide as the text, so that a click between the lines picks it
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, text=json.dumps([_line('Flour'), _line(blank), _line('Sugar and salt')]))
+    assert [part['index'] for part in parts] == [0, 1, 2]
+    first, blank, last = (part['box'] for part in parts)
+    assert first[3] <= blank[1] < blank[3] <= last[1]
+    assert (blank[0], blank[2]) == (min(first[0], last[0]), max(first[2], last[2]))
+    assert _ink(image, blank) is None
+
+
+def test_a_line_that_wraps_has_one_box(tmp_path):
+    client = make_client(tmp_path)
+    text = json.dumps([_line('Whole wheat flour, stone ground in the mill of the village', size='60'), _line('1 kg')])
+    parts, image = _parts_of(client, text=text, text_wrap='1')
+    assert [part['index'] for part in parts] == [0, 1]
+    wrapped, single = (part['box'] for part in parts)
+    assert wrapped[3] - wrapped[1] > 2 * (single[3] - single[1])
+    assert _uncovered(image, parts) is None
+
+
+@pytest.mark.parametrize('side', ['above', 'below', 'left', 'right'])
+@pytest.mark.parametrize('orientation', ['standard', 'rotated'])
+def test_preview_tells_where_the_code_is(tmp_path, orientation, side):
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, print_type='qrcode_text', code_text='https://example.com', qrcode_size='5', image_fit='0',
+                             orientation=orientation, image_position=side, text=json.dumps([_line('Shelf 4'), _line('Screws', size='30')]))
+    assert [(part['part'], part.get('index')) for part in parts] == [('line', 0), ('line', 1), ('code', None)]
+    lines, code = [part['box'] for part in parts[:2]], parts[2]['box']
+    text = (min(box[0] for box in lines), lines[0][1], max(box[2] for box in lines), lines[1][3])
+    assert {'above': code[3] <= text[1], 'below': code[1] >= text[3], 'left': code[2] <= text[0], 'right': code[0] >= text[2]}[side]
+    assert _ink(image, code) and _uncovered(image, parts) is None
+
+
+@pytest.mark.parametrize('print_type, names', [('image', ['line', 'image']), ('image_qrcode_text', ['line', 'image', 'code'])])
+def test_preview_tells_where_the_image_is(tmp_path, print_type, names):
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, print_type=print_type, image_mode='grayscale', image_fit='0', code_text='https://example.com',
+                             qrcode_size='5', image_position='above', text=json.dumps([_line('Erika Mustermann')]),
+                             image=_upload(Image.new('L', (200, 120), 128), 'photo.png'))
+    assert [part['part'] for part in parts] == names
+    box = next(part['box'] for part in parts if part['part'] == 'image')
+    assert (box[2] - box[0], box[3] - box[1]) == (200, 120)
+    assert image.crop(tuple(box)).getextrema() == (128, 128)
+    assert _uncovered(image, parts) is None
+
+
+@pytest.mark.parametrize('orientation', ['standard', 'rotated'])
+def test_parts_of_a_cable_flag_are_on_both_labels(tmp_path, orientation):
+    # Across the tape the second label is upside down
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, label_size='62', cable_flag='1', orientation=orientation,
+                             text=json.dumps([_line('Router'), _line('Port 4', size='30')]))
+    first, second = parts[:2], parts[2:]
+    assert [part['index'] for part in first] == [part['index'] for part in second] == [0, 1]
+    for one, other in zip(first, second):
+        turned = image.crop(tuple(other['box']))
+        if orientation == 'standard':
+            turned = turned.transpose(Image.Transpose.ROTATE_180)
+        original = image.crop(tuple(one['box']))
+        assert _ink(image, one['box']) and (turned.size, turned.tobytes()) == (original.size, original.tobytes())
+
+
+def _bold(text: str, **settings) -> dict:
+    return _line(text, **dict({'font': 'DejaVu Sans,Bold', 'size': '70', 'align': 'center'}, **settings))
+
+
+def _tight(image: Image.Image, box: list) -> bool:
+    """Whether what is printed in box reaches its edges, give or take a dot."""
+    ink = _ink(image, box)
+    return bool(ink) and ink[0] <= 1 and ink[1] <= 1 and ink[2] >= box[2] - box[0] - 1 and ink[3] >= box[3] - box[1] - 1
+
+
+def _bands(image: Image.Image) -> list:
+    """From where to where down the label something is printed, each run of
+    rows with ink."""
+    rows = {y for y in range(image.height) if _ink(image, (0, y, image.width, y + 1))}
+    starts = sorted(y for y in rows if y - 1 not in rows)
+    return [(start, next(y for y in range(start, image.height) if y + 1 not in rows) + 1) for start in starts]
+
+
+@pytest.mark.parametrize('settings', [{}, {'orientation': 'rotated'}, {'mirror': '1'}, {'cable_flag': '1'}],
+                         ids=['across', 'along', 'mirrored', 'cable flag'])
+def test_a_line_box_is_what_is_printed_of_it(tmp_path, settings):
+    # The box the designer outlines ends at the letters, not at the room of
+    # the line, which reaches into the next one
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, text=json.dumps([_bold('ABC'), _bold('DEF')]), **settings)
+    boxes = sorted((part['box'] for part in parts), key=lambda box: box[1])
+    # Without the marks of a cable flag where it folds around the cable
+    bands = [band for band in _bands(image) if any(box[1] <= band[1] and band[0] <= box[3] for box in boxes)]
+    assert len(bands) == len(boxes)
+    for box, (top, bottom) in zip(boxes, bands):
+        assert abs(box[1] - top) <= 1 and abs(box[3] - bottom) <= 1
+        assert _tight(image, box)
+    abc, def_ink = parts[0]['box'], bands[1]
+    assert abc[3] < def_ink[0]
+
+
+@pytest.mark.parametrize('lines', [
+    pytest.param([_bold('gy'), _bold('ABC')], id='descenders'),
+    pytest.param([_bold('ABC', inverted=True), _bold('DEF')], id='white on black'),
+    pytest.param([_bold('ABC', underline=True), _bold('DEF')], id='underlined'),
+    pytest.param([_bold('ABC', checkbox=True, align='left'), _bold('DEF', align='left')], id='to-do'),
+    pytest.param([_bold('Jam {{mdi:star}}'), _bold('2026')], id='icon'),
+])
+@pytest.mark.parametrize('orientation', ['standard', 'rotated'])
+def test_each_line_box_holds_all_of_its_line_and_nothing_more(tmp_path, lines, orientation):
+    client = make_client(tmp_path)
+    parts, image = _parts_of(client, text=json.dumps(lines), orientation=orientation)
+    boxes = [part['box'] for part in parts]
+    assert len(boxes) == 2 and boxes[0][3] <= boxes[1][1]
+    assert all(_tight(image, box) for box in boxes)
+    assert _uncovered(image, parts) is None
+    if lines[0].get('inverted'):
+        # The black bar, letters white in it
+        x0, y0, x1, y1 = boxes[0]
+        assert all(image.getpixel(xy) < 128 for xy in ((x0, y0), (x1 - 1, y0), (x0, y1 - 1), (x1 - 1, y1 - 1)))
+
+
+@pytest.mark.parametrize('barcode_type', ['code128', 'ean13', 'qr'])
+def test_the_box_of_a_code_is_where_it_is_printed(tmp_path, barcode_type):
+    # Without the white room kept around the bars
+    client = make_client(tmp_path)
+    code_text = '4006381333931' if barcode_type == 'ean13' else 'https://example.com'
+    parts, image = _parts_of(client, print_type='qrcode_text', code_text=code_text, barcode_type=barcode_type, qrcode_size='5',
+                             image_fit='0', image_position='above', text=json.dumps([_line('Shelf 4')]))
+    code = next(part['box'] for part in parts if part['part'] == 'code')
+    assert _tight(image, code) and _uncovered(image, parts) is None
+
+
+def test_the_box_of_an_image_leaves_out_its_white_border(tmp_path):
+    client = make_client(tmp_path)
+    picture = Image.new('L', (200, 120), 255)
+    picture.paste(0, (50, 30, 150, 90))
+    parts, image = _parts_of(client, print_type='image', image_mode='grayscale', image_fit='0', image_position='above',
+                             text=json.dumps([_line('Erika Mustermann')]), image=_upload(picture, 'photo.png'))
+    box = next(part['box'] for part in parts if part['part'] == 'image')
+    assert (box[2] - box[0], box[3] - box[1]) == (100, 60) and _tight(image, box)
+
+
+def test_parts_of_many_lines_are_left_out(tmp_path):
+    # Proxies take a few KB of headers, nginx 4 KB by default, a longer
+    # header would fail the preview
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, text=json.dumps([_line(f'Line {i}', size='12') for i in range(60)]))
+    response = client.post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 200 and 'X-Label-Parts' not in response.headers
+    few = client.post('/labeldesigner/api/preview', data=dict(data, text=json.dumps([_line(f'Line {i}', size='12') for i in range(20)])))
+    assert len(json.loads(few.headers['X-Label-Parts'])) == 20
