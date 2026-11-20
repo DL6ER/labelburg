@@ -320,7 +320,9 @@ def status_of_printer(config: Config, path: str) -> dict | None:
         listed = {p['path']: (p.get('model', 'Unknown'), '') for p in _cached_printers}
     else:
         listed = {config['PRINTER_PRINTER']: (drivers.canonical(config['PRINTER_MODEL']), '')}
-    if path not in listed or is_simulation(path):
+    # The path as listed goes on to the driver and into the answer, not the one asked for
+    path = next((device for device in listed if device == path), None)
+    if path is None or is_simulation(path):
         return None
     model, name = listed[path]
     try:

@@ -1,7 +1,9 @@
 """The printer status of the API: what each printer reports, and the label
 size it prints on."""
 
-from app.labeldesigner import routes
+from types import SimpleNamespace
+
+from app.labeldesigner import printer, routes
 from tests.helpers import make_client
 
 
@@ -55,3 +57,16 @@ def test_tape_of_each_printer(tmp_path, monkeypatch):
     assert [('62' in p['takes'], 'puqu50x30' in p['takes']) for p in status['printers']] == [
         (True, False), (False, True), (True, False)]
     assert (status['tape'], status['takes']) == (status['printers'][0]['tape'], status['printers'][0]['takes'])
+
+
+def test_status_of_one_printer_names_it_as_listed(monkeypatch):
+    listed, asked = 'tcp://192.0.2.1', ''.join(['tcp://', '192.0.2.1'])
+    asked_driver = []
+    driver = SimpleNamespace(followed_status=lambda device, model: asked_driver.append(device) or {})
+    monkeypatch.setattr(printer.drivers, 'resolve', lambda device, model: (driver, model))
+    config = {'PRINTER_PRINTER': listed, 'PRINTER_MODEL': 'QL-800'}
+    state = printer.status_of_printer(config, asked)
+    # Equal, but what goes on is the path from the list
+    assert asked == listed and asked is not listed
+    assert asked_driver[0] is listed and state['path'] is listed
+    assert printer.status_of_printer(config, 'tcp://192.0.2.2') is None
