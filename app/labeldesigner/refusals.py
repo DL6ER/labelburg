@@ -174,8 +174,11 @@ def message(error: Exception, fallback: str) -> str:
     invalid input that has none INVALID_INPUT, any other error fallback."""
     text = str(error)
     limits, limit_patterns = _limits()
-    if text in MESSAGES or text in limits:
-        return text
+    # Answered with the entry of the list, not with the text of the error:
+    # CodeQL takes that for details of the error sent to the client
+    for known in MESSAGES + limits:
+        if text == known:
+            return known
     for pattern, known in PATTERNS + limit_patterns:
         if pattern.fullmatch(text):
             return known
