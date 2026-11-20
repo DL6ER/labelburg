@@ -116,3 +116,18 @@ def test_webhook_takes_leaves_first(tmp_path, monkeypatch):
     response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, leaves_first='side'))
     assert response.status_code == 400
     assert response.get_json() == {'success': False, 'message': 'leaves_first must be top or bottom'}
+
+
+def test_webhook_takes_a_label_size_as_a_json_number(tmp_path, monkeypatch):
+    # As saved labels take it, e.g. 62 for "62"
+    from app.labeldesigner import routes
+    sizes = []
+    monkeypatch.setattr(routes.PrinterQueue, 'process_queue', lambda self: sizes.append(self.label_size) or '')
+    client = make_client(tmp_path)
+    client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+    image = base64.b64encode(_upload(_red_square(), 'image.png').stream.read()).decode('ascii')
+    payload = {'password': 'secret', 'label_size': 62, 'model': 'QL-800', 'images': [image]}
+    assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 1}
+    assert sizes == ['62']
+    response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, label_size=63))
+    assert (response.status_code, response.get_json()['message']) == (400, 'Unknown label_size: 63')

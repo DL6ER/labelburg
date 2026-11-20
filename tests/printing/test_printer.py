@@ -65,9 +65,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(devices, 'status_cache', {})
     # Tests holding the device lock should not wait for the status long
     monkeypatch.setattr(devices, 'STATUS_LOCK_TIMEOUT', 0.2)
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    return client
+    return make_client(tmp_path, printer=DEVICE)
 
 
 def test_status_query_during_print(client):

@@ -7,7 +7,7 @@ import select
 import socket
 import time
 
-from .. import backends
+from .. import backends, devices
 
 DPI = 203
 # Port of raw printing on the network, and how long connecting may take
@@ -30,17 +30,6 @@ def label(rows: list[bytes], width: int) -> bytes:
             f'^FO0,0^GFA,{len(data)},{len(data)},{width},{data.hex().upper()}\n^XZ\n').encode()
 
 
-def address(device: str) -> tuple[str, int]:
-    """Host and port of tcp://<host>[:<port>], an IPv6 address in brackets."""
-    rest = device[len('tcp://'):]
-    if rest.startswith('['):
-        host, _, port = rest[1:].partition(']')
-        port = port.removeprefix(':')
-    else:
-        host, _, port = rest.partition(':')
-    return host, int(port or PORT)
-
-
 def _usb_write(printer, data: bytes):
     for start in range(0, len(data), WRITE_CHUNK):
         printer.write(data[start:start + WRITE_CHUNK])
@@ -56,7 +45,7 @@ def write(device: str, data: bytes):
         finally:
             printer.dispose()
     elif device.startswith('tcp://'):
-        with socket.create_connection(address(device), timeout=CONNECT_WAIT) as s:
+        with socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
             s.sendall(data)
     else:
         with open(device.removeprefix('file://'), 'wb') as f:
@@ -81,7 +70,7 @@ def _read_answer(read) -> bytes:
 def host_status(device: str) -> bytes:
     """The answer of the printer to ~HS, empty if it gave none."""
     if device.startswith('tcp://'):
-        with socket.create_connection(address(device), timeout=CONNECT_WAIT) as s:
+        with socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
             s.sendall(HOST_STATUS)
 
             def read(left):
@@ -91,8 +80,7 @@ def host_status(device: str) -> bytes:
     if device.startswith('usb://'):
         printer = backends.UsbPrinter(device)
         try:
-            while printer.read(256):
-                pass
+            backends.discard(lambda: printer.read(256))
             printer.write(HOST_STATUS)
             return _read_answer(lambda left: printer.read(256))
         finally:
@@ -100,8 +88,7 @@ def host_status(device: str) -> bytes:
     fd = os.open(device.removeprefix('file://'), os.O_RDWR)
     try:
         # An answer from before is not taken for this one
-        while select.select([fd], [], [], 0)[0] and os.read(fd, 256):
-            pass
+        backends.discard(lambda: select.select([fd], [], [], 0)[0] and os.read(fd, 256))
         os.write(fd, HOST_STATUS)
 
         # usblp also tells empty USB packets

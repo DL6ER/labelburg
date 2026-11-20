@@ -119,6 +119,26 @@ def test_list_labels_with_the_choices_of_a_blank(client, tmp_path):
     assert blanks == [{'name': 'Room', 'type': 'choice', 'choices': ['Garage', 'Cellar']}]
 
 
+def test_list_labels_with_a_field_that_is_no_object(client, tmp_path):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'Jar.json').write_text('{"label_size": "62", "text": [{"text": "{{blank:Made}}", "size": "60"}],'
+                                   ' "fields": {"Made": "date"}}')
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(repo)
+    assert tool(client, 'list_labels')['structuredContent']['result'][0]['blanks'] == [{'name': 'Made'}]
+
+
+def test_a_saved_label_without_text_keeps_the_others_usable(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    for name, text in (('empty', None), ('good', [{'text': '{{blank:Name}}', 'size': '60'}])):
+        assert client.post('/labeldesigner/api/repository/save',
+                           json={'name': name, 'label_size': '62', 'text': text}).status_code == 200
+    labels = tool(client, 'list_labels')['structuredContent']['result']
+    assert [(label['name'], label['text'], label['blanks']) for label in labels] == [
+        ('empty.json', [], []), ('good.json', ['{{blank:Name}}'], [{'name': 'Name'}])]
+    assert not tool(client, 'preview_label', name='good', blanks={'Name': 'Anna'}).get('isError')
+
+
 def test_the_code_types_are_those_of_the_api(client):
     _, answer = call(client, 'tools/list')
     descriptions = {t['name']: t['description'] for t in answer['result']['tools']}
@@ -494,8 +514,9 @@ def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monke
 def test_the_mcp_package_is_loaded_with_the_first_call_only():
     import subprocess
     import sys
-    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules)'
-    assert subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout.split()[-1] == 'False'
+    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)'
+    output = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout
+    assert output.split()[-2:] == ['False', 'False']
 
 
 def test_list_labels_with_the_tags_the_label_designer_shows(client, tmp_path):

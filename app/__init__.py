@@ -49,18 +49,15 @@ PRINTER_NAME = re.compile(r'[^\W_](?:[\w .-]{0,38}[^\W_])?')
 def _printer_list(value: str) -> list[tuple[str, ...]]:
     """Parse "[NAME:]MODEL=DEVICE,..." into (model, device) pairs, or
     (model, device, name) for a printer with a name."""
-    from .labeldesigner.drivers import canonical
-    from .labeldesigner.label_names import MODELS
-    models = list(MODELS)
     printers, names = [], set()
     for entry in value.split(','):
         if not entry.strip():
             continue
         left, sep, device = (part.strip() for part in entry.partition('='))
         name, colon, model = (part.strip() for part in left.rpartition(':'))
-        model = canonical(model)
-        if not sep or not device or model not in models:
+        if not sep or not device:
             raise ValueError(entry)
+        model = _model(model)
         if not colon:
             printers.append((model, device))
             continue
@@ -206,14 +203,13 @@ def get_fonts() -> fonts.Fonts:
 def parse_args(app, argv=None):
     """Apply command-line arguments to the app config. Only called by run.py,
     WSGI servers like gunicorn pass their own arguments."""
-    from .labeldesigner.label_names import MODELS
-    models = list(MODELS)
+    from .labeldesigner.drivers import MODELS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--default-label-size', default=app.config['LABEL_DEFAULT_SIZE'],
                         help='Label size inserted in your printer. Defaults to 62.')
     parser.add_argument('--default-orientation', default=app.config['LABEL_DEFAULT_ORIENTATION'], choices=('standard', 'rotated'),
                         help='Label orientation, defaults to "standard". To turn your text by 90°, state "rotated".')
-    parser.add_argument('--model', default=app.config['PRINTER_MODEL'], choices=models, type=_canonical,
+    parser.add_argument('--model', default=app.config['PRINTER_MODEL'], choices=MODELS, type=_canonical,
                         help='The model of your printer (default: QL-500)')
     parser.add_argument('printer', nargs='?', default=app.config['PRINTER_PRINTER'],
                         help='String descriptor for the printer to use (like tcp://192.168.0.23:9100 or file:///dev/usb/lp0), may be left out to use auto-detection.')

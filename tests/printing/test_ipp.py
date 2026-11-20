@@ -145,6 +145,17 @@ def test_error_status_is_refused():
         ipp.decode_response(response(status=0x0400))
 
 
+@pytest.mark.parametrize('body, message', [
+    # The length of the value cut off after the name
+    (bytes([ipp.TAG_KEYWORD]) + struct.pack('>H', 4) + b'abcd' + b'\x00', 'cut off'),
+    (attribute(ipp.TAG_MEMBER_NAME, '', b'x'), 'outside a collection'),
+    (attribute(ipp.TAG_END_COLLECTION, '', b''), 'outside a collection'),
+], ids=['value cut off', 'member name', 'end of a collection'])
+def test_broken_answer_is_refused(body, message):
+    with pytest.raises(ipp.IPPError, match=message):
+        ipp.decode_response(struct.pack('>BBHI', 2, 0, 0, 1) + b'\x04' + body)
+
+
 @pytest.fixture
 def fake_printer(monkeypatch):
     """An IPP server on localhost that answers with what the test sets:

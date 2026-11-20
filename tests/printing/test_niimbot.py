@@ -93,10 +93,7 @@ def fake(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'Niimbot/D110_M'
-    return client
+    return make_client(tmp_path, model='Niimbot/D110_M', printer=DEVICE)
 
 
 @pytest.fixture
@@ -257,23 +254,23 @@ def test_b1_rows_span_the_printhead_with_the_label_in_the_middle():
     _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30')
     assert (len(rows), len(rows[0])) == (240, 384)
     # Moved left and down by the shifts of the B1, as long as the label
-    assert rows[:2] == [[0] * 384] * 2
-    assert rows[2] == rows[-1] == [0] * 30 + [1] * 320 + [0] * 34
+    assert rows[:2] == [bytes(384)] * 2
+    assert rows[2] == rows[-1] == bytes(30) + b'\x01' * 320 + bytes(34)
 
 
 def test_b1_rows_follow_the_offset_of_the_printer():
     _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30', (0.5, -0.25))
-    assert len(rows) == 240 and rows[0] == [0] * 34 + [1] * 320 + [0] * 30
+    assert len(rows) == 240 and rows[0] == bytes(34) + b'\x01' * 320 + bytes(30)
 
 
 def test_b1_moved_up_keeps_the_length_of_the_label():
     _, rows = niimbot.label_rows(_Black(320, 240), 'niimbot40x30', (0, -0.5))
-    assert len(rows) == 240 and rows[-2:] == [[0] * 384] * 2 and rows[0][40] == 1
+    assert len(rows) == 240 and rows[-2:] == [bytes(384)] * 2 and rows[0][40] == 1
 
 
 def test_b1_moved_far_is_cut_at_the_printhead():
     _, rows = niimbot.label_rows(_Black(384, 240), 'niimbot50x30', (5.0, 0))
-    assert rows[2] == [0] * 38 + [1] * 346
+    assert rows[2] == bytes(38) + b'\x01' * 346
 
 
 def test_d110_m_ignores_an_offset():
@@ -283,9 +280,9 @@ def test_d110_m_ignores_an_offset():
 
 def test_b1_rows_beyond_the_printhead_are_left_out():
     # 50 mm across are printed on the middle 48 mm, moved left by the shift
-    assert niimbot.centered([1] * 8 + [0] * 384 + [1] * 8, 384) == [0] * 384
-    assert niimbot.centered([1] * 10 + [0] * 380 + [1] * 10, 384, 2) == [0] * 380 + [1] * 4
-    assert niimbot.centered([1] * 400, 384) == [1] * 384
+    assert niimbot.centered(b'\x01' * 8 + bytes(384) + b'\x01' * 8, 384) == bytes(384)
+    assert niimbot.centered(b'\x01' * 10 + bytes(380) + b'\x01' * 10, 384, 2) == bytes(380) + b'\x01' * 4
+    assert niimbot.centered(b'\x01' * 400, 384) == b'\x01' * 384
 
 
 def test_rows_tell_the_dots_in_each_third_of_a_wide_printhead():

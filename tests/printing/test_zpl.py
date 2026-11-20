@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from app.labeldesigner.drivers import devices, zpl
+from app.labeldesigner.drivers import backends, devices, zpl
 from app.labeldesigner.drivers.zpl import protocol
 from tests.helpers import make_client, without_status
 
@@ -17,10 +17,7 @@ TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
 
 @pytest.fixture
 def client(tmp_path):
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'Zebra/ZPL'
-    return client
+    return make_client(tmp_path, model='Zebra/ZPL', printer=DEVICE)
 
 
 @pytest.fixture
@@ -38,7 +35,7 @@ def test_label_as_a_graphic_field():
 @pytest.mark.parametrize('device, address', [('tcp://zebra.lan', ('zebra.lan', 9100)), ('tcp://192.0.2.1:6101', ('192.0.2.1', 6101)),
                                              ('tcp://[2001:db8::1]', ('2001:db8::1', 9100)), ('tcp://[2001:db8::1]:9100', ('2001:db8::1', 9100))])
 def test_network_address(device, address):
-    assert protocol.address(device) == address
+    assert devices.tcp_address(device, protocol.PORT) == address
 
 
 def test_label_is_printed_as_large_as_it_is(client, sent):
@@ -284,6 +281,46 @@ def test_printer_through_pyusb(monkeypatch):
     protocol.write(device, b'^XA^XZ\n')
     assert printers[0].written == [b'~HS'] and printers[1].written == [b'^XA^', b'XZ\n']
     assert all(printer.disposed for printer in printers)
+
+
+def _host_status_aside(device):
+    """protocol.host_status(device) run aside, so that a hang fails the test."""
+    outcome = []
+    thread = threading.Thread(target=lambda: outcome.append(protocol.host_status(device)), daemon=True)
+    thread.start()
+    thread.join(5)
+    assert not thread.is_alive()
+    return outcome[0]
+
+
+def test_printer_that_keeps_sending_through_usblp(monkeypatch):
+    # /dev/zero has always something to read
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.01)
+    assert set(_host_status_aside('/dev/zero')) == {0}
+
+
+def test_printer_that_keeps_sending_through_pyusb(monkeypatch):
+    reads = []
+
+    class Printer:
+        def __init__(self, device):
+            self.written = []
+
+        def read(self, length):
+            if len(reads) > 10 * backends.DISCARD_READS:
+                raise OSError('read on and on')
+            reads.append(list(self.written))
+            return DATAMAX_HS if self.written else b'old'
+
+        def write(self, data):
+            self.written.append(data)
+
+        def dispose(self):
+            pass
+    monkeypatch.setattr(protocol.backends, 'UsbPrinter', Printer)
+    assert _host_status_aside('usb://0x0a5f:0x0080/12J123456') == DATAMAX_HS
+    # What came before ~HS is read a while only
+    assert reads.index([b'~HS']) == backends.DISCARD_READS
 
 
 @pytest.mark.parametrize('device_id, model', [

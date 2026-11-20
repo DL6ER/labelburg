@@ -51,10 +51,7 @@ def fake(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'Epson/ESC-POS'
-    return client
+    return make_client(tmp_path, model='Epson/ESC-POS', printer=DEVICE)
 
 
 def test_raster_in_bands():

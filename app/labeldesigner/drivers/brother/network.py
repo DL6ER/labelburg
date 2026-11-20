@@ -201,15 +201,20 @@ def _snmp_network_status(device_specifier: str, host: str, default_model: str) -
     elif not errors:
         errors = [NO_LABELS]
     status['errors'] = errors
-    printing = printer_status == SNMP_PRINTING
-    if errors:
+    _set_state(status, printer_status == SNMP_PRINTING, printer_status not in SNMP_READY)
+    return status
+
+
+def _set_state(status: dict, printing: bool, stopped: bool):
+    """The status and phase type of a network printer by its errors, whether
+    it prints and whether it is stopped otherwise."""
+    if status['errors']:
         status['status_type'] = 'Error occurred'
     elif printing:
         status['status_type'] = devices.BUSY_STATUS_TYPE
     else:
-        status['status_type'] = 'Reply to status request' if printer_status in SNMP_READY else devices.STOPPED_STATUS_TYPE
+        status['status_type'] = devices.STOPPED_STATUS_TYPE if stopped else 'Reply to status request'
     status['phase_type'] = 'Printing state' if printing else 'Waiting to receive'
-    return status
 
 
 def label_printer_model(name: str) -> str | None:
@@ -253,14 +258,7 @@ def _ipp_network_status(device_specifier: str, host: str, default_model: str, la
     status['media_width'], status['media_length'], status['media_type'] = _ipp_media(attributes.get('media-col-ready'))
     status['errors'] = _ipp_errors(attributes)
     state = attributes.get('printer-state')
-    busy = state == ipp.PROCESSING
-    if status['errors']:
-        status['status_type'] = 'Error occurred'
-    elif busy:
-        status['status_type'] = devices.BUSY_STATUS_TYPE
-    else:
-        status['status_type'] = devices.STOPPED_STATUS_TYPE if state == ipp.STOPPED else 'Reply to status request'
-    status['phase_type'] = 'Printing state' if busy else 'Waiting to receive'
+    _set_state(status, state == ipp.PROCESSING, state == ipp.STOPPED)
     # Kept for when the printer does not answer
     devices.status_cache[devices.lock_key(device_specifier)] = status
     return dict(status)

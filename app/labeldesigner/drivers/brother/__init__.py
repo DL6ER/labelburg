@@ -32,11 +32,11 @@ class BrotherRaster(Driver):
     mac_address_prefixes = network.MAC_ADDRESS_PREFIXES
     refusals = tuple(length_problem(model) for model in MODELS)
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # Over USB/IP the device ID read at the import names the model
         if not usbip.is_address(device):
             return None
-        model = devices.device_id_fields(devices.usb_device_id(device)).get('MDL')
+        model = devices.device_id_fields(devices.usb_device_id(device) if device_id is None else device_id).get('MDL')
         return model if model in MODELS else None
 
     def fits(self, label, model):

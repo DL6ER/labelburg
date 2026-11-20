@@ -97,6 +97,21 @@ def test_repository_save_list_load_delete_and_preview(tmp_path, label: str):
     assert f'repo_test_{label}.json' not in names
 
 
+def test_first_line_fields_of_a_loaded_label(tmp_path):
+    # The settings of the first line, without lines the defaults
+    from app import get_fonts
+    config = make_client(tmp_path).application.config
+    defaults = {'font_size': str(config['LABEL_DEFAULT_FONT_SIZE']), 'font_inverted': False, 'font': get_fonts().get_default_font()[0],
+                'font_align': 'left', 'font_checkbox': False, 'font_color': 'black',
+                'line_spacing': str(config['LABEL_DEFAULT_LINE_SPACING'])}
+    assert fill_first_line_fields([], {'name': 'x'}) == dict(defaults, name='x')
+    assert fill_first_line_fields([{'text': 'x'}], {}) == defaults
+    first = {'size': 30, 'inverted': 1, 'font': 'DejaVu Sans,Bold', 'align': 'right', 'checkbox': True, 'color': 'red', 'line_spacing': 150}
+    assert fill_first_line_fields([first, {'size': 10, 'inverted': 0}], {}) == {
+        'font_size': '30', 'font_inverted': True, 'font': 'DejaVu Sans,Bold', 'font_align': 'right', 'font_checkbox': True,
+        'font_color': 'red', 'line_spacing': '150'}
+
+
 def test_save_image_restore_other_and_print(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
 
@@ -295,6 +310,19 @@ def test_cable_flag_is_saved_and_loaded(tmp_path):
     assert resp.status_code == 200
     loaded = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Patch.json'}).get_json()
     assert (loaded['cable_flag'], loaded['cable_diameter']) == (True, '8')
+
+
+@pytest.mark.parametrize('text', [None, []])
+def test_a_label_saved_without_lines_is_loaded_and_printed(tmp_path, text):
+    # Saving takes text null, the label has no lines
+    client = make_client(tmp_path, empty_repo=True)
+    label = {'name': 'Code.json', 'label_size': '62', 'print_type': 'qrcode_text', 'code_text': 'A1', 'text': text}
+    assert client.post(SAVE_URL, json=label).status_code == 200
+    loaded = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Code.json'})
+    assert loaded.status_code == 200 and json.loads(loaded.get_json()['text']) == []
+    assert client.get('/labeldesigner/api/repository/preview', query_string={'name': 'Code.json'}).status_code == 200
+    printed = client.post('/labeldesigner/api/repository/print', json={'name': 'Code.json', 'printer': 'simulation'})
+    assert printed.get_json() == {'success': True}
 
 
 def test_a_label_whose_image_cannot_be_read_is_not_loaded_without_it(tmp_path):

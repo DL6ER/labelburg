@@ -55,7 +55,11 @@ MAX_DATE_FORMAT_LENGTH = 100
 # this long
 MAX_BLANK_CHOICES = 50
 MAX_BLANK_CHOICE_LENGTH = 200
-DEFAULT_FONT_SIZE = 12
+# The characters of random texts, each line but the last is as high as they
+# are in its font
+PRINTABLE = string.ascii_letters + string.digits + string.punctuation
+# A line of text is drawn from the top of its start, middle or end
+TEXT_ANCHORS = {'left': 'lt', 'center': 'mt', 'right': 'rt'}
 
 # Pillow refuses to open images with more than twice this number of pixels,
 # so uploaded images above MAX_LABEL_PIXELS are rejected right when decoding
@@ -625,7 +629,7 @@ class SimpleLabel:
                 raise TextTooLong("Text is too long")
             if match.group(2):
                 line['shift'] = True
-            return ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=length))
+            return ''.join(random.choices(PRINTABLE, k=length))
         substitute(r"\{\{random(?:\:(\d+))?(?:\:(s(hift)?))?\}\}", random_replacer)
         text = ''.join(piece + value for piece, value in zip(pieces, values + ['']))
         if not marks:
@@ -787,7 +791,7 @@ class SimpleLabel:
         # when fitted, next to the text and a code on the other side of it
         parts = 1 + self.has_lines() + (code is not None)
         if img is not None:
-            img, self._image_scale = self._sized(img, width, height, parts)
+            img, self._image_scale = self._sized_image(img, width, height, parts)
             img_width, img_height = img.size
         else:
             img_width, img_height = (0, 0)
@@ -889,7 +893,7 @@ class SimpleLabel:
         # What is placed next to the text, by name
         boxes = [(name, (x, y, x + item.width, y + item.height))
                  for name, item, (x, y) in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
-        if self.want_text(img) and bboxes:
+        if bboxes:
             x, y = text_offset
             text_box = (x + textsize[0], y + textsize[1], x + textsize[2], y + textsize[3])
             overlapped = next((name for name, box in boxes if self._overlaps(text_box, box)), None)
@@ -909,9 +913,9 @@ class SimpleLabel:
             if length > LONG_CODE_LABEL:
                 self.warnings.append(long_code_warning(length))
 
-        logger.debug(f"Image resolution: {int(width)} x {int(height)} px")
+        logger.debug(f"Image resolution: {width} x {height} px")
         check_image_size(width, height)
-        imgResult = Image.new('RGB', (int(width), int(height)), 'white')
+        imgResult = Image.new('RGB', (width, height), 'white')
 
         if img is not None:
             imgResult.paste(img, image_offset)
@@ -959,8 +963,8 @@ class SimpleLabel:
             check_image_size(img.width * cos + img.height * sin, img.width * sin + img.height * cos)
             img = img.rotate(-self._image_rotation, expand=True, fillcolor="white")
 
-        # Rotation with expand=True may add an empty border around content.
-        if own_look and self._image_crop:
+        # Rotation with expand=True adds white corners, except by quarter turns
+        if own_look and self._image_crop and self._image_rotation % 90:
             img = self._crop_image_to_content(img)
         # Transparent once it is cropped to its content, white from here
         img = on_white(img)
@@ -970,11 +974,11 @@ class SimpleLabel:
             # Calculate the maximum allowed dimensions
             max_width = max(width - margin_left - margin_right, 1)
             max_height = max(height - margin_top - margin_bottom, 1)
+            grows_wide, grows_high = self._grows()
             # Next to text, along a side of the label that does not grow
             # with the text, the image takes its part of it, the text the
             # rest: half of it, a third with a code on the other side
             if parts > 1:
-                grows_wide, grows_high = self._grows()
                 if self._image_side(True) in ('left', 'right'):
                     if not grows_wide:
                         max_width = max(max_width // parts, 1)
@@ -991,7 +995,6 @@ class SimpleLabel:
             # Resize the image to fit within the maximum dimensions. A
             # label that grows with its content, endless tape, has only
             # the size across the tape to fit into.
-            grows_wide, grows_high = self._grows()
             if grows_high:
                 scale = max_width / img_width
             elif grows_wide:
@@ -1007,6 +1010,20 @@ class SimpleLabel:
         logger.debug(f"Resized image size: {new_size} px")
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale
+
+    def _sized_image(self, img: Image.Image, width: int, height: int, parts: int) -> tuple[Image.Image, float]:
+        """_sized() of the image, made once for the copies of a print job:
+        the layouts they share keep the last image sized, a job of many
+        pages one of them."""
+        if self._shared_layouts is None:
+            return self._sized(img, width, height, parts)
+        key = (id(img), width, height, parts, self._label_margin, self._image_crop, self._image_rotation,
+               self._image_fit, self._image_scaling_factor, self._grows(), self._image_side(True))
+        kept = self._shared_layouts.get('image')
+        if kept is None or kept[0] != key:
+            # img is kept along, so that no other image gets its id
+            kept = self._shared_layouts['image'] = (key, img, self._sized(img, width, height, parts))
+        return kept[2]
 
     @staticmethod
     def _crop_image_to_content(img: Image.Image) -> Image.Image:
@@ -1074,7 +1091,7 @@ class SimpleLabel:
         names = {color: name for name, color in COLORS.items()}
         return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size, names.get(self._fore_color, self._fore_color))
 
-    def _draw_text(self, img = None, bboxes = [], text_offset = (0, 0)):
+    def _draw_text(self, img, bboxes, text_offset=(0, 0)):
         """
         Returns a list of bounding boxes for each line, so each line can use a different font.
         """
@@ -1083,6 +1100,9 @@ class SimpleLabel:
             img = Image.new('L', (20, 20), 'white')
         draw = ImageDraw.Draw(img)
         y = 0
+        # Drawn, where the lines measured start and end across
+        left = min((entry[0][0] for entry in bboxes), default=0)
+        right = max((entry[0][2] for entry in bboxes), default=0)
 
         # Empty lines at the end leave the text as high as without them: the
         # last line that shows something is measured like the final line
@@ -1104,21 +1124,10 @@ class SimpleLabel:
             # Get font
             font = self._get_font(line['path'], self._line_size(line), measuring=not do_draw)
 
-            # Determine anchors
-            anchor = None
             align = line.get('align', 'center')
-
-            # Left aligned text
-            if align == "left":
-                anchor = "lt"
-            # Center aligned text
-            elif align == "center":
-                anchor = "mt"
-            # Right aligned text
-            elif align == "right":
-                anchor = "rt"
-            # else: error
-            else:
+            # A list or dict cannot be looked up, it is no alignment either
+            anchor = TEXT_ANCHORS.get(align) if isinstance(align, str) else None
+            if anchor is None:
                 raise ValueError(f"Unsupported alignment: {align}")
 
             color = parse_color(line.get('color') or 'black')
@@ -1136,9 +1145,7 @@ class SimpleLabel:
                     min_bbox_x = text_offset[0] + min(bbox[0][0] for bbox in bboxes)
                     max_bbox_x = text_offset[0] + bboxes[i][0][2] # max(bbox[0][2] for bbox in bboxes)
                 elif anchor == "mt":
-                    min_bbox_x = min(bbox[0][0] for bbox in bboxes)
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes)
-                    center_x = (min_bbox_x + max_bbox_x) // 2
+                    center_x = (left + right) // 2
                     min_bbox_x = text_offset[0] + center_x - (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                     max_bbox_x = text_offset[0] + center_x + (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                 elif anchor == "rt":
@@ -1183,8 +1190,8 @@ class SimpleLabel:
                     bbox = (bbox[0], y, bbox[2], y + bottom - top)
                 elif not IS_LAST_LINE:
                     # Some characters may need special height
-                    all_characters = ''.join(string.ascii_letters + string.digits + string.punctuation)
-                    Ag = draw.textbbox((0, y), all_characters, font, anchor="lt")
+                    top, bottom = _printable_extent(font)
+                    Ag = (0, y + top, 0, y + bottom)
                     # Get bbox with width of text and dummy height
                     bbox = (bbox[0], Ag[1], bbox[2], Ag[3])
                 # The box is drawn from the top of the line, its lower edge
@@ -1203,16 +1210,13 @@ class SimpleLabel:
                     x = text_offset[0]
                 # Center aligned text
                 elif align == "center":
-                    min_bbox_x = min(bbox[0][0] for bbox in bboxes) if len(bboxes) > 0 else 0
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes) if len(bboxes) > 0 else 0
                     # In the middle with a letter reaching left, e.g. a "j",
                     # as its white on black box: the font puts the middle of
                     # its width there
-                    x = (max_bbox_x - min_bbox_x) // 2 + min_bbox_x + text_offset[0] - bbox[0] // 2
+                    x = (right - left) // 2 + left + text_offset[0] - bbox[0] // 2
                 # Right aligned text
                 elif align == "right":
-                    max_bbox_x = max(bbox[0][2] for bbox in bboxes) if len(bboxes) > 0 else 0
-                    x = max_bbox_x + text_offset[0]
+                    x = right + text_offset[0]
 
                 # Draw checkbox if needed, in the room left for it in front of
                 # the text
@@ -1305,23 +1309,24 @@ class SimpleLabel:
         """The bounding box of a line of text at xy, also drawn in fill if
         given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
         on the same baseline as the text around them."""
-        if not any(icons.is_icon(char) for char in text):
+        if not icons.has_icon(text):
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
         runs = [(''.join(chars), self._get_font(path, font.size, measuring=measuring) if path else font)
                 for path, chars in itertools.groupby(text, icons.font_of)]
-        width = sum(run_font.getlength(run) for run, run_font in runs)
+        lengths = [run_font.getlength(run) for run, run_font in runs]
+        width = sum(lengths)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]
         # The runs share the baseline below the top of an "H"
-        baseline = xy[1] + self._baseline(draw, text, font)
+        baseline = xy[1] + self._baseline(draw, 'H', font)
         boxes = []
-        for run, run_font in runs:
+        for (run, run_font), length in zip(runs, lengths):
             if fill is not None:
                 draw.text((x, baseline), run, fill, font=run_font, anchor='ls')
             boxes.append(draw.textbbox((x, baseline), run, font=run_font, anchor='ls'))
-            x += run_font.getlength(run)
+            x += length
         return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
 
     @staticmethod
@@ -1692,3 +1697,12 @@ def _open_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
 # The sizes tried while text is fitted to the label, so that they do not
 # push out those of the labels drawn
 _load_measured_font = functools.lru_cache(maxsize=128)(_open_font)
+
+
+# By font object, as many as there are fonts measured
+@functools.lru_cache(maxsize=128)
+def _printable_extent(font) -> tuple[int, int]:
+    """Top and bottom of PRINTABLE in font, drawn from the top of its
+    letters at 0."""
+    box = ImageDraw.Draw(Image.new('L', (1, 1))).textbbox((0, 0), PRINTABLE, font, anchor='lt')
+    return box[1], box[3]

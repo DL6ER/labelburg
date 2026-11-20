@@ -8,7 +8,7 @@ import re
 from typing import Union
 
 import pytest
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageOps
 from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
@@ -503,3 +503,101 @@ def test_transparent_parts_print_white(tmp_path, image_mode, source, crop):
     assert response.status_code == 200
     label = Image.open(io.BytesIO(response.data)).convert('L')
     assert label.getextrema()[0] > 100
+
+
+def _letter_l() -> Image.Image:
+    """A black "L" on white, the top left corner of its box black."""
+    image = Image.new('L', (60, 80), 'white')
+    image.paste(0, (10, 10, 20, 70))
+    image.paste(0, (10, 60, 45, 70))
+    return image
+
+
+def _framed_logo() -> Image.Image:
+    """A black square in a black frame, white around the frame."""
+    image = Image.new('L', (100, 80), 'white')
+    ImageDraw.Draw(image).rectangle((10, 10, 89, 69), outline=0, width=3)
+    image.paste(0, (40, 30, 60, 50))
+    return image
+
+
+def _cropped_label(tmp_path, image: Image.Image, rotation: int) -> tuple:
+    """The label of image alone, cropped and rotated at its size, and the
+    box of what is black on it."""
+    response = make_client(tmp_path).post('/labeldesigner/api/preview', data={
+        'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_fit': '0', 'image_crop': '1',
+        'image_rotation': str(rotation), 'margin_top': '0', 'margin_bottom': '0', 'image': _upload(image, 'image.png')})
+    assert response.status_code == 200
+    label = Image.open(io.BytesIO(response.data)).convert('L')
+    return label, ImageOps.invert(label).getbbox()
+
+
+@pytest.mark.parametrize('image', [_letter_l, _framed_logo])
+@pytest.mark.parametrize('rotation', [0, 90, 180, 270])
+def test_cropped_image_keeps_what_is_in_its_corner(tmp_path, image, rotation):
+    # Black in the top left corner of the content is no background
+    source = image()
+    content = source.crop(ImageOps.invert(source).getbbox()).rotate(-rotation, expand=True)
+    label, ink = _cropped_label(tmp_path, source, rotation)
+    assert ink is not None
+    assert ImageChops.difference(label.crop(ink), content).getbbox() is None
+
+
+@pytest.mark.parametrize('rotation', [30, 135])
+def test_image_turned_by_another_angle_is_cropped_again(tmp_path, rotation):
+    # Without the white corners the rotation adds
+    label, ink = _cropped_label(tmp_path, _letter_l(), rotation)
+    assert ink[1] == 0 and ink[3] == label.height
+
+
+def _simulated_labels(printer) -> list:
+    """The labels printed on the simulator, removed from it."""
+    names = sorted(os.listdir(printer.SIMULATED_LABELS_DIR))
+    labels = []
+    for name in names:
+        path = os.path.join(printer.SIMULATED_LABELS_DIR, name)
+        with Image.open(path) as image:
+            labels.append(image.tobytes())
+        os.remove(path)
+    return labels
+
+
+def test_copies_of_a_job_size_the_image_once(tmp_path, monkeypatch):
+    # Cropped, rotated and scaled once for all copies
+    from app.labeldesigner import printer
+    from app.labeldesigner.label import SimpleLabel
+    crops, sized = [], []
+    crop, size = SimpleLabel._crop_image_to_content, SimpleLabel._sized
+    monkeypatch.setattr(SimpleLabel, '_crop_image_to_content', staticmethod(lambda img: crops.append(1) or crop(img)))
+    monkeypatch.setattr(SimpleLabel, '_sized', lambda self, *args, **kwargs: sized.append(1) or size(self, *args, **kwargs))
+    data = {'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_crop': '1', 'image_rotation': '30',
+            'print_count': '4', 'printer': 'simulation'}
+    client = make_client(tmp_path)
+    response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(_letter_l(), 'l.png')))
+    assert response.get_json() == {'success': True}
+    assert len(sized) == 1 and len(crops) == 2
+    labels = _simulated_labels(printer)
+    assert len(labels) == 4 and len(set(labels)) == 1
+    # As printed alone
+    response = client.post('/labeldesigner/api/print', data=dict(data, print_count='1', image=_upload(_letter_l(), 'l.png')))
+    assert response.get_json() == {'success': True}
+    assert _simulated_labels(printer) == labels[:1]
+
+
+def test_each_image_of_a_job_is_sized_on_its_own(tmp_path):
+    # Two images, each copy as the image printed alone
+    from app.labeldesigner import printer
+    data = {'label_size': '62', 'print_type': 'image', 'image_mode': 'grayscale', 'image_crop': '1', 'image_rotation': '90',
+            'printer': 'simulation'}
+    client = make_client(tmp_path)
+    files = [_upload(_letter_l(), 'l.png'), _upload(_framed_logo(), 'logo.png')]
+    response = client.post('/labeldesigner/api/print', data=dict(data, print_count='2', image=files))
+    assert response.get_json() == {'success': True}
+    labels = _simulated_labels(printer)
+    alone = []
+    for image in (_letter_l(), _framed_logo()):
+        response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(image, 'image.png')))
+        assert response.get_json() == {'success': True}
+        alone += _simulated_labels(printer)
+    assert alone[0] != alone[1]
+    assert labels == alone * 2

@@ -220,6 +220,11 @@ def test_symbol_templates_insert_the_symbols(tmp_path):
     assert icons.font_of(torx) == icons.font_of(resistor) == icons.SYMBOLS_FONT_PATH
 
 
+@pytest.mark.parametrize('code', [0xEFFFF, 0xF0000, 0xFFFFD, 0xFFFFE, 0xFFFFF, 0x100000, 0x10FFFD, 0x10FFFE, ord('A')])
+def test_a_text_has_an_icon_where_a_character_has_an_icon_font(code):
+    assert icons.has_icon(f'a {chr(code)} b') == (icons.font_of(chr(code)) is not None)
+
+
 def test_symbols_are_spelled_right():
     assert icons.icon('diode-schottky', 'electronic') and icons.icon('transistor-phototransistor', 'electronic')
     assert not icons.icon('diode-shottky', 'electronic')
@@ -250,6 +255,14 @@ def test_icon_and_text_in_one_line(tmp_path, align):
         with_icon = ink(f'{icon} 230 V')
         assert with_icon[2] - with_icon[0] > text_only[2] - text_only[0] + 30
         assert abs(with_icon[3] - with_icon[1] - (text_only[3] - text_only[1])) < 10
+
+
+@pytest.mark.parametrize('align', ['diagonal', ['left'], {'left': 1}, 1])
+def test_unknown_alignment_is_refused(tmp_path, align):
+    data = dict(EXAMPLE_FORMDATA, text=json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'x', 'size': '40', 'align': align}]))
+    response = make_client(tmp_path).post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 400
+    assert response.get_json()['message'] == 'Unsupported alignment'
 
 
 def test_random_template_length_is_limited(tmp_path):

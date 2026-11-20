@@ -311,6 +311,41 @@ def test_number_blanks_are_asked_for(designer):
     designer.wait_for_selector('#libFields input[data-blank="Number"]:focus', timeout=5000)
 
 
+def test_a_number_set_with_its_buttons_is_no_longer_to_fill_in(designer):
+    # The steppers put in a value as typing does
+    type_line(designer, 0, 'Shelf [Box]')
+    field = '#edFields input[data-blank="Box"]'
+    assert designer.inner_text('#edFields .open-count') == '1 to fill in'
+    designer.click('#edFields [data-stepf="1"]')
+    designer.wait_for_selector('#edFields .open-count', state='hidden', timeout=5000)
+    assert designer.input_value(field) == '1' and 'need' not in designer.get_attribute(field, 'class')
+    assert designer.evaluate('() => S.edit.values.Box') == '1'
+
+
+def test_blanks_emptied_after_printing_or_filled_in_again_show_it(designer, server, monkeypatch, tmp_path):
+    # In the wizard the first blank is emptied for the next label, a value
+    # printed before is put in again with its button
+    monkeypatch.setattr('app.labeldesigner.printer.SIMULATED_LABELS_DIR', str(tmp_path))
+    designer.request.post(server + '/labeldesigner/api/repository/save', headers={'Content-Type': 'application/json'},
+                          data=json.dumps({'name': 'Jar.json', 'title': 'Jar', 'label_size': '62',
+                                           'text': [{'text': 'Jam {{blank:What}}', 'size': '40'}]}))
+    try:
+        designer.evaluate("async () => { await loadSaved(); location.hash = 'fill/Jar.json?What=Plum'; }")
+        field = '#libFields input[data-blank="What"]'
+        designer.wait_for_selector(field)
+        assert 'need' not in designer.get_attribute(field, 'class')
+        designer.click('#libPrint')
+        assert printed(designer) == ['printed']
+        designer.wait_for_function("f => document.querySelector(f).value === '' && document.querySelector(f).matches('.need')", arg=field, timeout=5000)
+        # Opened anew it offers the value printed
+        designer.click('#libGrid .thumb:has(.t:text-is("Jar"))')
+        designer.click('#libFields [data-reuse="What"]')
+        designer.wait_for_function("f => document.querySelector(f).value === 'Plum' && !document.querySelector(f).matches('.need')", arg=field, timeout=5000)
+        assert designer.evaluate("() => document.activeElement.matches('#libFields input[data-blank=\"What\"]')")
+    finally:
+        designer.request.post(server + '/labeldesigner/api/repository/delete', form={'name': 'Jar.json'})
+
+
 def test_code_of_empty_blanks_takes_the_text(designer):
     # Like a code left empty, the server puts the text of the label into it.
     # It gets the blanks as they are, with their values.

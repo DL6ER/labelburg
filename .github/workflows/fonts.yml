@@ -35,6 +35,8 @@ permissions: {}
 
 jobs:
   check:
+    # Once for each commit, see ci.yml
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +47,8 @@ jobs:
         run: python tools/update_fonts.py --check
 
   symbols:
+    # Once for each commit, see ci.yml
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

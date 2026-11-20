@@ -8,10 +8,9 @@ import re
 
 from PIL import Image
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
-from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
@@ -50,16 +49,8 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
     if img.width != across:
         img = img.rotate(90, expand=True)
-    dither = label.label_content != LabelContent.IMAGE_BW
-    img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
-    # 1 bit images of PIL are packed MSB first with white 1, ESC/POS prints 1
-    width = (img.width + 7) // 8
-    data = bytes(255 - byte for byte in img.tobytes())
-    rows = [data[y * width:(y + 1) * width] for y in range(img.height)]
-    # The padding of the last byte of each row is white
-    if img.width % 8:
-        mask = (0xff << (8 - img.width % 8)) & 0xff
-        rows = [row[:-1] + bytes([row[-1] & mask]) for row in rows]
+    img = bitmap.black_and_white(img, label)
+    rows, width = bitmap.packed_rows(img)
     return img, rows, width
 
 
@@ -80,9 +71,11 @@ class Escpos(Driver):
     errors = (OSError, protocol.EscposError)
     reports_tape = False
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
-        fields = devices.device_id_fields(devices.usb_device_id(device)) if isinstance(device, str) else {}
+        if device_id is None:
+            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        fields = devices.device_id_fields(device_id)
         commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
         if 'ESC/POS' not in commands:
             return None

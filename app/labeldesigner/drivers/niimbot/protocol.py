@@ -13,7 +13,7 @@ import struct
 import threading
 import time
 
-from .. import backends, devices
+from .. import backends, bitmap, devices
 
 # 8 dots per mm, the printhead of the D110_M is 15 mm wide, that of the B1 48 mm
 DPI = 203
@@ -94,7 +94,7 @@ def parse(received: bytes) -> tuple[list[tuple[int, bytes]], bytes]:
         received = received[i + n + 7:]
 
 
-def row_packets(rows: list[list[int]], head: int = HEAD) -> list[bytes]:
+def row_packets(rows: list[bytes], head: int = HEAD) -> list[bytes]:
     """Rows of dots, 1 printed, as packets: equal rows that follow each
     other once with their count, bitmap rows (85) with the dots in each
     third of the printhead of head dots, empty rows (84) without them."""
@@ -103,13 +103,10 @@ def row_packets(rows: list[list[int]], head: int = HEAD) -> list[bytes]:
         n = 1
         while y + n < len(rows) and rows[y + n] == rows[y] and n < 255:
             n += 1
-        packed = bytearray((len(rows[y]) + 7) // 8)
-        for x, dot in enumerate(rows[y]):
-            if dot:
-                packed[x // 8] |= 0x80 >> (x % 8)
+        packed = bitmap.pack(rows[y])
         if any(packed):
-            counts = [sum(bin(byte).count('1') for byte in packed[k * third:(k + 1) * third]) for k in range(3)]
-            out.append(packet(0x85, struct.pack('>H3BB', y, *counts, n) + bytes(packed)))
+            counts = [int.from_bytes(packed[k * third:(k + 1) * third]).bit_count() for k in range(3)]
+            out.append(packet(0x85, struct.pack('>H3BB', y, *counts, n) + packed))
         else:
             out.append(packet(0x84, struct.pack('>HB', y, n)))
         y += n
@@ -486,7 +483,7 @@ def roll(c: Connection, send: bool = True, wait: float | None = None) -> dict | 
     return {'barcode': barcode, 'serial': serial, 'total': total, 'used': used, 'type': kind}
 
 
-def print_label(c: Connection, rows: list[list[int]], label_type: int, sequence: str = V4):
+def print_label(c: Connection, rows: list[bytes], label_type: int, sequence: str = V4):
     """Print one label, rows of dots across the printhead, as the script
     this came from prints one: a job of one page, then the printer is asked
     every PAGE_POLL seconds how many pages it printed. The B1 starts the

@@ -16,6 +16,7 @@ from flask import Config
 from . import bluetooth, drivers, mdns
 from .drivers import devices, progress
 from .drivers.backends import NoLibusb
+from .drivers.base import network_status
 from .label_names import check_label_size
 
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
@@ -184,7 +185,7 @@ class PrinterQueue:
         with devices.device_lock(self.device_specifier) as acquired:
             if not acquired:
                 logger.warning('Printer %s is busy with another job', self.device_specifier)
-                return "Printer is busy with another print job, please try again"
+                return BUSY
             return self._send(self.driver.calibration_job(self), 1, (False, False, False))
 
 
@@ -360,45 +361,9 @@ def get_ptr_status(config: Config):
     device_specifier = config['PRINTER_PRINTER']
     default_model = drivers.canonical(config['PRINTER_MODEL'])
 
-    SIMULATOR_PRINTER = {
-        'errors': [],
-        'path': 'simulation',
-        'media_category': None,
-        'media_length': 0,
-        'media_type': None,
-        'media_width': None,
-        'model': default_model,
-        'model_code': None,
-        'phase_type': 'Simulator',
-        'series_code': None,
-        'setting': None,
-        'status_code': 0,
-        'status_type': 'Simulator',
-        'tape_color': '',
-        'text_color': '',
-        'red_support': _red_support(default_model),
-        'red_roll': None,
-    }
-
-    status = {
-        "errors": [],
-        "path": device_specifier,
-        "media_category": None,
-        "media_length": 0,
-        "media_type": None,
-        "media_width": None,
-        "model": "Unknown",
-        "model_code": None,
-        "phase_type": "Unknown",
-        "series_code": None,
-        "setting": None,
-        "status_code": 0,
-        "status_type": "Unknown",
-        "tape_color": "",
-        "text_color": "",
-        "red_support": False,
-        "red_roll": None
-    }
+    SIMULATOR_PRINTER = dict(network_status('simulation', default_model, _red_support(default_model)),
+                             phase_type='Simulator', status_type='Simulator')
+    status = dict(network_status(device_specifier, 'Unknown'), phase_type='Unknown', status_type='Unknown')
     try:
         if config.get('PRINTERS'):
             # The configured printers, no detection. Each keeps its configured

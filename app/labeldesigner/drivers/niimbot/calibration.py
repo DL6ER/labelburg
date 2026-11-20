@@ -13,7 +13,7 @@ sits in the middle."""
 import functools
 import io
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageOps
 
 from . import protocol
 
@@ -125,12 +125,12 @@ def example(kind: str) -> bytes:
         ImageDraw.Draw(picture).ellipse((pad, pad, pad + width - 1, pad + height - 1), fill=label)
     else:
         picture.paste(label, (pad, pad, pad + width, pad + height))
-    for y in range(height):
-        for x in range(width):
-            printed = left + x - shift
-            on_label = picture.getpixel((pad + x, pad + y)) == label
-            if on_label and 0 <= printed < page.width and page.getpixel((printed, y)) < 128:
-                picture.putpixel((pad + x, pad + y), (20, 20, 20))
+    # The black of the page where it meets the label, the backing takes no
+    # print. Cropped beyond its edges, the page prints nothing there.
+    printed = page.point(lambda v: 255 if v < 128 else 0).crop((left - shift, 0, left - shift + width, height))
+    area = (pad, pad, pad + width, pad + height)
+    on_label = [band.point(lambda v, c=c: 255 if v == c else 0) for band, c in zip(picture.crop(area).split(), label)]
+    picture.paste((20, 20, 20), area, functools.reduce(ImageChops.darker, on_label, printed))
     picture = picture.resize((picture.width * zoom, picture.height * zoom), Image.Resampling.NEAREST)
     if kind == 'narrow':
         d = ImageDraw.Draw(picture)

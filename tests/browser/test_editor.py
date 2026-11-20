@@ -366,6 +366,12 @@ def test_2d_codes_offer_the_size_of_a_dot_and_their_levels_of_error_correction(d
     assert 'Error correction can be chosen for QR, Micro QR and rMQR codes.' in designer.inner_text('.ed-panel')
 
 
+def test_the_kinds_of_codes_come_with_the_page(designer, server):
+    # The same the API lists, without asking it
+    codes = designer.request.get(server + '/labeldesigner/api/barcodes').json()['codes']
+    assert designer.evaluate('() => S.codes') == codes
+
+
 def test_a_wide_code_that_makes_a_long_label_is_said_so(designer):
     designer.click('[data-lay="codetext"]')
     designer.fill('#edCode', 'https://example.com/pantry/shelf-3')
@@ -830,10 +836,9 @@ def test_automatic_orientation_is_explained(designer):
     designer.click('[data-lay="image"]')
     designer.set_input_files('#edFile', files=[{'name': 'portrait.png', 'mimeType': 'image/png', 'buffer': png(100, 300)}])
     designer.wait_for_function("() => document.getElementById('edFits').innerText.includes('Turned automatically to fit the label best.')")
-    # Scaled, the direction counts again. The hint follows the preview with a timeout.
+    # Scaled, the direction counts again
     designer.click('[data-fit="0"]')
     wait_for_preview(designer)
-    designer.evaluate('() => new Promise(resolve => setTimeout(resolve))')
     assert 'Turned automatically' not in fits_note(designer)
 
 

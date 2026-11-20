@@ -55,7 +55,8 @@ def verify_image(response_data: bytes, expected_image_path: str):
         f.write(response_data)
 
 
-def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = None) -> FlaskClient:
+def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = None,
+                printer: Union[str, None] = None) -> FlaskClient:
     app = create_app()
     # Bind app context
     app.app_context().push()
@@ -63,6 +64,8 @@ def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = No
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB
     if model:
         app.config['PRINTER_MODEL'] = model
+    if printer:
+        app.config['PRINTER_PRINTER'] = printer
     if empty_repo:
         # point repository to temporary folder
         repo_dir = tmp_path / 'label_repo'

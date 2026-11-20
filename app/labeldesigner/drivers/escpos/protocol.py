@@ -7,15 +7,13 @@ import select
 import socket
 import time
 
-from .. import backends, usbip
+from .. import backends, devices, usbip
+from ..backends import discard as _discard
 
 # Rows per raster image, the printer takes them in pieces
 BAND = 256
 # How long the printer may take to answer a status request, in s
 ANSWER_WAIT = 2
-# Reads of what came before a status request at most, one per late answer
-# over USB/IP: a printer that keeps sending must not hold the query and lock
-DISCARD_READS = 100
 # A job goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s, a long receipt takes longer to print
 WRITE_CHUNK = 16384
@@ -48,19 +46,14 @@ class EscposError(Exception):
 def raster(rows: list[bytes], width: int) -> bytes:
     """Rows of packed dots, width bytes each, MSB left, as GS v 0 images of
     BAND rows each."""
-    out = b''
-    for y in range(0, len(rows), BAND):
-        band = rows[y:y + BAND]
-        out += b'\x1dv0\x00' + bytes([width & 0xff, width >> 8, len(band) & 0xff, len(band) >> 8]) + b''.join(band)
-    return out
+    bands = (rows[y:y + BAND] for y in range(0, len(rows), BAND))
+    return b''.join(b'\x1dv0\x00' + bytes([width & 0xff, width >> 8, len(band) & 0xff, len(band) >> 8]) + b''.join(band)
+                    for band in bands)
 
 
 def job(labels: list[tuple]) -> bytes:
     """(cut after it, rows, bytes per row, ...) of each label as one job."""
-    out = INIT
-    for cut, rows, width, *_ in labels:
-        out += raster(rows, width) + (CUT if cut else b'')
-    return out
+    return INIT + b''.join(raster(rows, width) + (CUT if cut else b'') for cut, rows, width, *_ in labels)
 
 
 def errors(offline: int, paper: int) -> list[str]:
@@ -72,14 +65,6 @@ def errors(offline: int, paper: int) -> list[str]:
     if offline & 0x40:
         found.append('The printer reports an error, remove paper stuck at its cutter or switch it off and on')
     return found
-
-
-def _discard(read):
-    """Drop what the printer sent before a status request, read() returning
-    nothing when there is nothing left."""
-    for _ in range(DISCARD_READS):
-        if not read():
-            return
 
 
 class Connection:
@@ -148,13 +133,7 @@ class TcpConnection(Connection):
     out, an IPv6 address in brackets."""
 
     def __init__(self, device: str):
-        rest = device.removeprefix('tcp://')
-        if rest.startswith('['):
-            host, _, port = rest[1:].partition(']')
-            port = port.removeprefix(':')
-        else:
-            host, _, port = rest.partition(':')
-        self.socket = socket.create_connection((host, int(port or PORT)), timeout=CONNECT_WAIT)
+        self.socket = socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT)
 
     def __exit__(self, *args):
         self.socket.close()

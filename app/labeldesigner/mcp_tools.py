@@ -2,7 +2,6 @@
 the saved labels and to print. The tools call the API of the app, so that
 they share its checks and its messages. It needs the mcp package, see
 requirements-mcp.txt and docs/mcp.md."""
-import asyncio
 import base64
 import json
 import logging
@@ -14,7 +13,8 @@ from importlib.util import find_spec
 from werkzeug.wrappers import Response
 
 from . import tape
-from .label import BLANK_TEMPLATE, DATE_OFFSET, _iso_date
+from .drivers.backends import _same_serial
+from .label import DATE_OFFSET, _iso_date
 from .label_names import LABELS
 from .refusals import BARCODE_TYPES
 
@@ -76,10 +76,10 @@ def usb_info(device: str) -> dict:
             names = os.listdir(USB_DEVICES)
         except OSError:
             names = []
-        folder = next((os.path.join(USB_DEVICES, name) for name in sorted(names)
-                       if _read(os.path.join(USB_DEVICES, name), 'idVendor') == vendor
-                       and _read(os.path.join(USB_DEVICES, name), 'idProduct') == product
-                       and (not serial or _read(os.path.join(USB_DEVICES, name), 'serial').lstrip('0') == serial.lstrip('0'))),
+        folders = (os.path.join(USB_DEVICES, name) for name in sorted(names))
+        folder = next((folder for folder in folders
+                       if _read(folder, 'idVendor') == vendor and _read(folder, 'idProduct') == product
+                       and (not serial or _same_serial(_read(folder, 'serial'), serial))),
                       None)
     if not folder or not _read(folder, 'idVendor'):
         return {}
@@ -163,17 +163,6 @@ def _decoded(encoded: str) -> dict:
             or not isinstance(spec[body[0]], dict) or set(spec) != {'path', *body}):
         raise ValueError('Not a preview')
     return spec
-
-
-def _blank_names(data: dict) -> list[str]:
-    texts = [line.get('text', '') for line in data.get('text', []) if isinstance(line, dict)]
-    texts.append(str(data.get('code_text') or ''))
-    names = []
-    for text in texts:
-        for name in BLANK_TEMPLATE.findall(str(text)):
-            if name not in names:
-                names.append(name)
-    return names
 
 
 def _labels(count: int) -> str:
@@ -279,12 +268,16 @@ class Tools:
                  'loaded_label_sizes': loaded_sizes(p)}
                 for p in self._printers()]
 
-    def list_labels(self) -> list[dict]:
-        from .routes import _get_repo_dir
+    def list_labels(self, name: str | None = None) -> list[dict]:
+        """The saved labels, with name only those it names, with or without
+        .json."""
+        from .routes import _blank_names, _get_repo_dir
         labels = []
         with self.app.app_context():
             repo = _get_repo_dir()
         for entry in self._call('GET', '/repository/list')['files']:
+            if name is not None and entry['name'] not in (name, f'{name}.json'):
+                continue
             try:
                 with open(os.path.join(repo, entry['name']), encoding='utf-8') as fh:
                     data = json.load(fh)
@@ -292,25 +285,28 @@ class Tools:
                 continue
             fields = data.get('fields') if isinstance(data.get('fields'), dict) else {}
             defaults = data.get('blanks') if isinstance(data.get('blanks'), dict) else {}
+            # The API reads text saved as anything but a list as no lines
+            text = data.get('text') if isinstance(data.get('text'), list) else []
             blanks = []
-            for name in _blank_names(data):
-                blank = {'name': name, **{k: v for k, v in (fields.get(name) or {}).items() if k in ('type', 'format', 'default', 'choices')}}
-                if name in defaults:
-                    blank['default'] = defaults[name]
+            for blank_name in _blank_names(dict(data, text=text)):
+                field = fields.get(blank_name) if isinstance(fields.get(blank_name), dict) else {}
+                blank = {'name': blank_name, **{k: v for k, v in field.items() if k in ('type', 'format', 'default', 'choices')}}
+                if blank_name in defaults:
+                    blank['default'] = defaults[blank_name]
                 blanks.append(blank)
             labels.append({'name': entry['name'], 'title': entry.get('title') or entry['name'],
                            'label_size': entry.get('label_size_id'), 'tags': entry['tags'], 'blanks': blanks,
-                           'text': [line.get('text', '') for line in data.get('text', []) if isinstance(line, dict)],
+                           'text': [line.get('text', '') for line in text if isinstance(line, dict)],
                            'code': (data.get('code_text') or None) if 'qrcode' in str(data.get('print_type')) else None})
         return labels
 
     def _saved(self, name: str) -> dict:
         """The saved label name names, with or without .json."""
         from mcp.server.mcpserver.exceptions import ToolError
-        saved = next((label for label in self.list_labels() if label['name'] in (name, f'{name}.json')), None)
-        if saved is None:
+        saved = self.list_labels(name)
+        if not saved:
             raise ToolError(f'No saved label {name}, list_labels names them')
-        return saved
+        return saved[0]
 
     @staticmethod
     def _filled(saved: dict, fillings: list[dict]):
@@ -350,22 +346,19 @@ class Tools:
         from mcp.server.mcpserver.exceptions import ToolError
         found = self._printer(printer) if printer else None
         device = found['path'] if found else None
-        if name:
-            saved = self._saved(name)
+        saved = self._saved(name) if name else None
+        if saved:
             self._filled(saved, [blanks or {}])
-            if found:
-                size = self._size(found, label_size, saved['label_size'])
-            else:
-                size = label_size_for(None, label_size) if label_size else None
-            self._same_size(saved, found, size)
+        if found:
+            label_size = self._size(found, label_size, saved['label_size'] if saved else None)
+        elif label_size:
+            label_size = label_size_for(None, label_size)
+        if saved:
+            self._same_size(saved, found, label_size)
             body = {'name': saved['name'], 'blanks': blanks or {}}
             if device:
                 body['printer'] = device
             return {'path': '/repository/preview', 'json': body}
-        if found:
-            label_size = self._size(found, label_size)
-        elif label_size:
-            label_size = label_size_for(None, label_size)
         if not (lines or code) or not label_size:
             raise ToolError('Give the name of a saved label, or lines or a code and a label size')
         form = self._text_label(lines or [], label_size, font_size, code, code_type)
@@ -572,6 +565,7 @@ class Endpoint:
         self._lock = threading.Lock()
 
     def _start(self):
+        import asyncio
         from a2wsgi import ASGIMiddleware
         from mcp.server.transport_security import TransportSecuritySettings
         # Host and Origin are checked before, by app.hosts, also behind a

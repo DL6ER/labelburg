@@ -46,3 +46,9 @@ def font_of(char: str) -> str | None:
 def is_icon(char: str) -> bool:
     """Whether the character is drawn with an icon or symbol font."""
     return font_of(char) is not None
+
+
+def has_icon(text: str) -> bool:
+    """Whether text has a character drawn with an icon or symbol font."""
+    # Text without characters as high as the icons is left at once
+    return bool(text) and max(text) >= '\U000F0000' and any(map(font_of, text))

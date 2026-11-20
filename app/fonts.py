@@ -58,7 +58,6 @@ class Fonts:
         self.fonts = defaultdict(dict)
         self.default_family = default_family
         self.default_style = default_style
-        self.additional_path = additional_path
 
         # Scan for TTF/OTF fonts, see font_names().
         # :param additional_path: Directory (or list of directories) to search
@@ -95,7 +94,7 @@ class Fonts:
         # Consolidate fonts: Search for fonts that have children, e.g.
         # "DejaVu Sans" and "DejaVu Sans Condensed" and move children
         # under the parent font, adding them as a style instead
-        for family, styles in list(self.fonts.items()):
+        for family in list(self.fonts):
             for other_family in list(self.fonts.keys()):
                 if family != other_family and family in other_family:
                     extra_style = other_family.replace(family + ' ', '')
@@ -123,10 +122,6 @@ class Fonts:
     def get_default_font(self):
         """Return the default font family and style."""
         return (self.default_family, self.default_style)
-
-    def fontfamilies(self):
-        """Return a sorted list of font family names."""
-        return sorted(self.fonts.keys(), key=str.lower)
 
     def fontlist(self):
         """Return a sorted list of font styles for each family."""

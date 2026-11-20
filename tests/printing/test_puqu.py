@@ -79,10 +79,7 @@ def fake(monkeypatch):
 
 @pytest.fixture
 def client(tmp_path):
-    client = make_client(tmp_path)
-    client.application.config['PRINTER_PRINTER'] = DEVICE
-    client.application.config['PRINTER_MODEL'] = 'PUQU/Q00'
-    return client
+    return make_client(tmp_path, model='PUQU/Q00', printer=DEVICE)
 
 
 def test_rows_are_compressed():

@@ -12,10 +12,9 @@ import time
 
 from PIL import Image
 
-from .. import devices, progress
+from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
-from ...enums import LabelContent
 from . import protocol
 
 logger = logging.getLogger(__name__)
@@ -83,7 +82,8 @@ def loaded(length: int) -> tuple[int, int] | None:
     """Width and length in mm of the labels of a length the printer measured
     in dots, e.g. 1214 dots (152 mm) 102 x 152 mm. None if labels of another
     width have that length too, the printer does not tell their width."""
-    sizes = [size for size in SIZES if size[1] == measured(length)]
+    mm = measured(length)
+    sizes = [size for size in SIZES if size[1] == mm]
     return sizes[0] if len(sizes) == 1 else None
 
 
@@ -101,16 +101,8 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     # are turned as by the other drivers, their end leaves first.
     across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
     img = img.rotate(-90 if img.width != across else 180, expand=True)
-    dither = label.label_content != LabelContent.IMAGE_BW
-    img = img.convert('L').convert('1', dither=Image.Dither.FLOYDSTEINBERG if dither else Image.Dither.NONE)
-    # 1 bit images of PIL are packed MSB first with white 1, ZPL prints 1
-    width = (img.width + 7) // 8
-    data = bytes(255 - byte for byte in img.tobytes())
-    rows = [data[y * width:(y + 1) * width] for y in range(img.height)]
-    # The padding of the last byte of each row is white
-    if img.width % 8:
-        mask = (0xff << (8 - img.width % 8)) & 0xff
-        rows = [row[:-1] + bytes([row[-1] & mask]) for row in rows]
+    img = bitmap.black_and_white(img, label)
+    rows, width = bitmap.packed_rows(img)
     return img, rows, width
 
 
@@ -127,12 +119,13 @@ class Zpl(Driver):
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
 
-    def model_of(self, device):
+    def model_of(self, device, device_id=None):
         # By the IEEE 1284 device ID on USB, e.g. MFG:Zebra Technologies;
         # CMD:ZPL;MDL:GK420t;... A Datamax-O'Neil tells CMD:DPL, its ZPL
         # emulation is configured.
-        told = devices.usb_device_id(device) if isinstance(device, str) else ''
-        return MODELS[0] if ZPL_DEVICE_ID.search(told) else None
+        if device_id is None:
+            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        return MODELS[0] if ZPL_DEVICE_ID.search(device_id) else None
 
     def fits(self, label, model):
         return label in LABELS
@@ -177,15 +170,15 @@ class Zpl(Driver):
                 devices.status_cache[devices.lock_key(device)] = state
             return state
         state['errors'] = protocol.errors(answer)
-        state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
+        state['status_type'] = devices.status_type(state['errors'])
         state['phase_type'] = 'Waiting to receive'
         # The label designer then picks the labels. Of a length that labels
         # of several widths have, only the length is told.
         size = loaded(answer['length'])
         if size:
             state['media_width'], state['media_length'] = size
-        elif measured(answer['length']):
-            state['media_length'] = measured(answer['length'])
+        elif length := measured(answer['length']):
+            state['media_length'] = length
         devices.status_cache[devices.lock_key(device)] = state
         return state
 

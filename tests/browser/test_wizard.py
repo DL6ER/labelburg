@@ -1,6 +1,8 @@
 """The wizard of the label designer: looks, templates, demo labels and
 search."""
 
+import pytest
+
 from tests.browser.helpers import fake_printer, printed, wait_for_preview
 
 
@@ -43,6 +45,47 @@ def test_saved_label_is_printed_from_the_wizard(designer, monkeypatch, tmp_path)
     # It is in the printed labels, ready to print again
     designer.click('.lib-nav [data-cat="printed"]')
     assert designer.locator('#libGrid .thumb').count() == 1
+
+
+def test_a_link_to_a_saved_label_loads_it_once(designer):
+    # Its thumbnail takes the label loaded for the link
+    loads = []
+    designer.on('request', lambda request: '/api/repository/load?name=QR-Example.json' in request.url and loads.append(request.url))
+    designer.evaluate("() => { location.hash = 'fill/QR-Example.json'; }")
+    wait_for_preview(designer, '#libStage')
+    designer.wait_for_function("() => ((document.querySelector('#libGrid .thumb.sel img') || {}).src || '').startsWith('blob:')")
+    assert len(loads) == 1
+
+
+@pytest.mark.parametrize('load', ['waiting', 'failed'])
+def test_the_label_panel_closes_while_its_label_loads_or_after_it_failed(designer, load):
+    # Over the list in narrow windows, it is gone once closed
+    designer.set_viewport_size({'width': 1000, 'height': 800})
+    designer.click('[data-tab="wizard"]')
+    designer.click('.lib-nav [data-cat="saved"]')
+    held = []
+    designer.route('**/api/repository/load*', lambda route: held.append(route) if load == 'waiting' else route.fulfill(status=500, json={}))
+    designer.click('#libGrid .thumb:has(.t:text-is("QR Example"))')
+    designer.wait_for_selector('#libDetail p:text-is("Loading...")' if load == 'waiting' else '#libDetail p:text-is("The label could not be loaded")')
+    designer.click('#libDetail .close')
+    designer.wait_for_selector('#libDetail', state='hidden', timeout=5000)
+    assert designer.evaluate('() => S.libSel') is None
+    # Failed after it was closed, it stays closed
+    for route in held:
+        route.abort()
+    designer.wait_for_function("() => !designCache.has('saved:QR-Example.json')")
+    assert not designer.is_visible('#libDetail')
+    assert 'could not be loaded' not in designer.text_content('#libDetail')
+
+
+def test_the_row_of_label_groups_shows_that_more_follow_also_when_drawn_anew(designer):
+    # On a phone it scrolls sideways, faded out where more groups follow
+    designer.set_viewport_size({'width': 390, 'height': 844})
+    designer.click('[data-tab="wizard"]')
+    designer.wait_for_selector('.lib-nav.more-right', timeout=5000)
+    designer.eval_on_selector('.lib-nav', 'nav => { nav.dataset.before = "1"; }')
+    designer.click('#libFits')
+    designer.wait_for_selector('.lib-nav.more-right:not([data-before])', timeout=5000)
 
 
 def test_text_in_the_wizard_shows_looks_and_templates(designer):
