@@ -20,9 +20,10 @@ def event(code, index, params=b''):
     return struct.pack('<HHH', code, index, len(params)) + params
 
 
-def found(address, kind=1, name='', services=()):
-    """A Device Found event, the advertising data with a name and services."""
-    data = b''
+def found(address, kind=1, name='', services=(), raw=b''):
+    """A Device Found event, the advertising data with a name and services,
+    or raw as it is."""
+    data = raw
     if name:
         data += bytes([len(name) + 1, 0x09]) + name.encode()
     if services:
@@ -93,6 +94,13 @@ def test_devices_on_bluetooth_le_are_found_with_their_names_and_services(managem
     assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x06'), (0x0024, b'\x06')]
 
 
+def test_a_malformed_advertisement_of_another_device_still_finds_the_b1(management):
+    # Any device nearby may advertise anything: a field running past its
+    # data, an event too short for its header
+    management([found(OTHER, raw=b'\x02\x01\x06\x02'), event(0x0012, 0, b'\x01\x02\x03'), found(B1, name='B1-TEST0001')])
+    assert {device['address']: device['name'] for device in bluetooth.discover(1)} == {OTHER: '', B1: 'B1-TEST0001'}
+
+
 @pytest.mark.parametrize('kwargs', [{'start_status': 0x14}, {'controllers': ()}])
 def test_no_search_finds_nothing(management, kwargs):
     # Without the right to control the adapter, or without one
@@ -113,6 +121,7 @@ def test_no_bluetooth_finds_nothing(monkeypatch):
     # Over Bluetooth LE only the B1 is printed on
     ({'address': B1, 'name': 'D110-TEST0001', 'le': True, 'services': [NIIMBOT]}, None),
     ({'address': OTHER, 'name': 'Phone', 'le': True, 'services': []}, None),
+    ({'address': OTHER, 'name': 'B1 Speaker', 'le': True, 'services': []}, None),
 ])
 def test_a_niimbot_b1_is_known_by_its_name_or_its_service(device, printer_):
     assert niimbot.DRIVER.found_on_bluetooth(device) == printer_

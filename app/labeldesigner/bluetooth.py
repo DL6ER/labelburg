@@ -26,9 +26,10 @@ def _command(op: int, index: int, params: bytes = b'') -> bytes:
 
 
 def _fields(data: bytes) -> dict[int, list[bytes]]:
-    """The fields of advertising data by their type."""
+    """The fields of advertising data by their type. Any device nearby may
+    advertise anything: a field running past the data ends the fields."""
     fields, i = {}, 0
-    while i < len(data) and data[i]:
+    while i + 1 < len(data) and data[i] and i + 1 + data[i] <= len(data):
         fields.setdefault(data[i + 1], []).append(data[i + 2:i + 1 + data[i]])
         i += 1 + data[i]
     return fields
@@ -58,9 +59,11 @@ def discover(timeout: float = 5.0) -> list[dict]:
                     if not select.select([sock], [], [], remaining)[0]:
                         break
                     data = sock.recv(1024)
+                    if len(data) < 6:
+                        continue
                     code, at, length = struct.unpack_from('<HHH', data)
                     params = data[6:6 + length]
-                    if code in (COMMAND_COMPLETE, COMMAND_STATUS):
+                    if code in (COMMAND_COMPLETE, COMMAND_STATUS) and len(params) >= 3:
                         op, status = struct.unpack_from('<HB', params)
                         if op == READ_INDEX_LIST and code == COMMAND_COMPLETE:
                             count = struct.unpack_from('<H', params, 3)[0] if not status else 0
@@ -72,7 +75,8 @@ def discover(timeout: float = 5.0) -> list[dict]:
                             logger.info('Bluetooth printers are not looked for: the search was refused (%#04x)', status)
                             index = None
                             return []
-                    elif code == DEVICE_FOUND and at == index:
+                    # One too short for its header is left out
+                    elif code == DEVICE_FOUND and at == index and len(params) >= 14:
                         device = _device(params)
                         known = found.setdefault(device['address'], device)
                         known['name'] = device['name'] or known['name']
