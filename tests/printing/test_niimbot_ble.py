@@ -38,7 +38,7 @@ class LePrinter:
                              (0x000d, 0x12, 0x000e, bytes(range(16))),
                              (value - 1, 0x1e, value, NIIMBOT)]
         self.made, self.addresses, self.sent = [], [], []
-        self.fail, self.closed, self.dropped = None, 0, False
+        self.fail, self.closed, self.dropped, self.tries = None, 0, False, 0
 
     def __call__(self, family, kind, proto):
         # In place of socket.socket
@@ -49,6 +49,9 @@ class LePrinter:
         self.bound = address
 
     def connect(self, address):
+        self.tries += 1
+        if self.fail == 'timeout':
+            raise socket.timeout('timed out')
         if self.fail:
             raise OSError(self.fail, 'Host is down')
         self.addresses.append(address)
@@ -274,3 +277,14 @@ def test_b1_on_bluetooth_le_with_a_status_question_unanswered_is_not_asked_again
     le.incoming.append(bytes([0x1b]) + struct.pack('<H', le.value) + protocol.packet(0xdd, B1_CLOSED))
     assert b1.get(followed).get_json()['printers'][0]['errors'] == []
     assert heartbeats(le) == 2 and len(le.addresses) == 1
+
+
+def test_b1_out_of_reach_on_bluetooth_le_is_left_alone_until_looked_for(b1, le):
+    # Switched off or out of reach it does not advertise, the connection times
+    # out as one of classic Bluetooth fails at once, both are left alone so
+    le.fail = 'timeout'
+    errors = b1.get(STATUS).get_json()['printers'][0]['errors']
+    b1.get(STATUS)
+    assert le.tries == 1 and errors == [devices.unanswered_reason(OSError(errno.EHOSTDOWN, 'Host is down'))]
+    b1.get(STATUS + '?look=1')
+    assert le.tries == 2

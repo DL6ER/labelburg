@@ -5,6 +5,7 @@ niimbluelib's B1PrintTask (https://github.com/MultiMote/niimbluelib, MIT).
 Packets are 55 55 <command> <length> <data> <checksum> aa aa, the checksum
 the XOR of command, length and data."""
 
+import errno
 import os
 import select
 import socket
@@ -171,7 +172,12 @@ class LeSocket:
         try:
             self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:
-                self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+                try:
+                    self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+                except TimeoutError as e:
+                    # Not advertising, e.g. switched off: as classic
+                    # Bluetooth tells of a printer it cannot page
+                    raise OSError(errno.EHOSTDOWN, 'Host is down') from e
             told = self._ask(0x02, struct.pack('<H', ATT_MTU))
             self.mtu = min(ATT_MTU, struct.unpack('<H', told[:2])[0])
             self.value, end = self._characteristic(NIIMBOT_CHARACTERISTIC)
