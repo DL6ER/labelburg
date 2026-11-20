@@ -62,7 +62,7 @@ def test_a_public_name_is_refused(client, caplog):
     assert response.status_code == 403
     assert response.mimetype == 'text/plain'
     assert response.text == REFUSED
-    assert 'labels.example.com' in caplog.text
+    assert [r.args for r in caplog.records if r.msg == 'Refused a request for host %r'] == [('labels.example.com',)]
 
 
 def test_names_of_hosts(client):
