@@ -89,12 +89,12 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `LABEL_TEMPLATE_ENV_VARS` | Environment variables labels may insert with `{{env:<var>}}`, comma-separated. All others stay empty, so that nobody can read secrets of the server through a label. | none |
 | `WEBHOOK_PASSWORD` | Turns on the webhook, see [API](#api) | off |
 | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | Address and API token of Paperless-ngx, whose next archive serial number `[ASN]` continues from, see [Paperless-ngx](docs/paperless.md) | none |
-| `TRUSTED_HOSTS` | Host names you open the label designer with, comma-separated, e.g. `labels.local,192.168.0.10`. Requests for other names are refused, which protects against DNS rebinding. | all |
+| `HOSTS` | Further host names Labelburg answers besides those of the home network, comma-separated, e.g., `labels.example.com` or `.example.com` with its subdomains, see [Host names](#host-names). `MCP_HOSTS`, its former name, still works. | none |
+| `TRUSTED_HOSTS` | Only these host names, comma-separated, e.g., `labels.local,192.168.0.10`, instead of those of the home network and `HOSTS` | none |
 | `PROXY_COUNT` | Number of reverse proxies in front of the server, e.g. to serve the label designer below a path, see [Reverse proxy](docs/reverse-proxy.md). Only then the `X-Forwarded-*` headers they set are used, others could fake them. | `0` |
 | `PRINT_MAX_COUNT` | Most labels per print request | `100` |
 | `MCP_ENABLED` | `false` to turn off the [MCP endpoint](docs/mcp.md) for AI assistants | `true` |
 | `MCP_MAX_COUNT` | Most labels per call of an [AI assistant](docs/mcp.md) | `10` |
-| `MCP_HOSTS` | Further host names the [MCP endpoint](docs/mcp.md#host-names) answers, comma-separated, e.g. `labels.example.com` or `.example.com` with its subdomains | none |
 | `MAX_CONTENT_LENGTH` | Largest request in bytes, e.g. for uploaded images | 32 MB |
 | `FONT_FOLDER` | Folder with more fonts, see [Fonts](#fonts) | none |
 | `SYSTEM_FONTS` | `false` to offer only the fonts of `FONT_FOLDER`, not those installed on the system | `true` |
@@ -102,6 +102,10 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `SERVER_PORT` | Port the server listens on with `python3 run.py`, e.g. for several instances on one host. The container always uses 8013, map another port with `ports:`. | `8013` |
 
 Other settings, e.g. the default font and margins, go into `instance/application.py`, see [`config.py`](./config.py). Environment variables take precedence over it. An invalid value stops the server at startup with a message naming the variable.
+
+### Host names
+
+Labelburg answers only requests for the names a home network uses, IP addresses, single-label names (e.g., `printserver`) and names ending in `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain` or `.fritz.box`, and for those listed in `HOSTS`. That protects against DNS rebinding, where a website points its own name at your server to use it through your browser. Other names go into `HOSTS`, e.g., of a domain of your own, behind a [reverse proxy](docs/reverse-proxy.md), of Tailscale (`*.ts.net`) or of dynamic DNS like DuckDNS or `synology.me`.
 
 ### Printer addresses
 

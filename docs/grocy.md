@@ -39,7 +39,7 @@ Or as environment variables, e.g., for Grocy in Docker. `LABEL_PRINTER_PARAMS` c
       - GROCY_LABEL_PRINTER_HOOK_JSON=true
 ```
 
-Further parameters, e.g., `printer` or `print_count`, go into `LABEL_PRINTER_PARAMS` or the address as well. Keep `LABEL_PRINTER_HOOK_JSON` on: without it Grocy sends a form, which has no `stock_entry` and of `details` only plain values such as `details[stock_amount]`, so `[details.location.name]` stays empty and `[stock_entry.best_before_date]` prints today. Keep `LABEL_PRINTER_RUN_SERVER` on as well: requests that Grocy's pages send from the browser are refused, because another website must not print through a visitor's browser.
+A name for `<host>` outside the home network, e.g., `labels.example.com`, has to be listed in [`HOSTS`](../README.md#host-names) of Labelburg. Further parameters, e.g., `printer` or `print_count`, go into `LABEL_PRINTER_PARAMS` or the address as well. Keep `LABEL_PRINTER_HOOK_JSON` on: without it Grocy sends a form, which has no `stock_entry` and of `details` only plain values such as `details[stock_amount]`, so `[details.location.name]` stays empty and `[stock_entry.best_before_date]` prints today. Keep `LABEL_PRINTER_RUN_SERVER` on as well: requests that Grocy's pages send from the browser are refused, because another website must not print through a visitor's browser.
 
 ## Trying it
 
