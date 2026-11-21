@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, paperless, printer_settings, refusals, tape
+from . import adding, bp, codes, demos, paperless, printer_settings, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -204,9 +204,11 @@ def _designer_config() -> dict:
     """What the pages of the label designer are given: label sizes, fonts,
     the defaults of new labels and what each printer model offers."""
     fonts = get_fonts()
+    # Of a roll with several labels to a page, one label is designed
     label_sizes = [
         {'id': label.identifier, 'name': label_name(label), 'form': label.form_factor.name.lower(),
-         'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1, 'pieces': list(label.pieces),
+         'tape': list(sheets.piece(label).tape_size), 'dots': list(sheets.piece(label).dots_printable), 'red': label.color == 1,
+         'pieces': list(label.pieces), 'sheet': list(label.tape_size),
          'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set
@@ -2578,7 +2580,8 @@ def _get_label_dimensions(label_size: str, high_res: bool = False):
     label = label_of(label_size)
     if label is None:
         raise LookupError("Unknown label_size")
-    dimensions = label.dots_printable
+    # A label is made for one label of a page, see sheets
+    dimensions = sheets.piece(label).dots_printable
     if high_res:
         return (2 * dimensions[0], 2 * dimensions[1])
     return dimensions

@@ -14,11 +14,11 @@ from urllib.parse import urlsplit
 
 from flask import Config
 
-from . import bluetooth, drivers, mdns
+from . import bluetooth, drivers, mdns, sheets
 from .drivers import devices, progress, reach, usbip
 from .drivers.backends import NoLibusb
 from .drivers.base import network_status
-from .label_names import check_label_size
+from .label_names import check_label_size, label_of
 
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
 
@@ -150,6 +150,16 @@ class PrinterQueue:
             return WRONG_MODEL
         return ''
 
+    def _grouped(self, entries: list[dict]) -> list[dict]:
+        """The entries of the queue as printed: on a roll with several labels
+        to a page, the labels of each page as one, see sheets.Sheet."""
+        label = label_of(self.label_size)
+        per = sheets.per_sheet(label) if label else 1
+        if per == 1:
+            return entries
+        return [dict(entries[i], label=sheets.Sheet(label, [entry['label'] for entry in entries[i:i + per]]))
+                for i in range(0, len(entries), per)]
+
     def label_cuts(self) -> list[bool]:
         """Whether the printer cuts after each label of the queue, as
         self.cut says: after each one, the last one or none."""
@@ -162,6 +172,7 @@ class PrinterQueue:
             logger.warning("Print queue is empty.")
             return "Print queue is empty."
 
+        self._print_queue = self._grouped(self._print_queue)
         entries = [dict(entry, cut=cut) for entry, cut in zip(self._print_queue, self.label_cuts())]
         self._print_queue.clear()
 

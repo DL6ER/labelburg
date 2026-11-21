@@ -622,7 +622,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -686,7 +686,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2072,7 +2072,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2472,7 +2472,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "cut_once": {
                         "type": "integer",
