@@ -14,7 +14,7 @@ from app.labeldesigner import ipp, printer
 from app.labeldesigner.drivers import devices, reach
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import usb
-from tests.helpers import Answering, within
+from tests.helpers import Answering, outcome, within
 from tests.printing.test_reach import names  # noqa: F401
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fixtures', 'ipp')
@@ -239,7 +239,8 @@ COVER_OPEN = response(attribute(0x41, 'printer-make-and-model', b'Brother QL-800
 @pytest.fixture
 def network_job(fake_printer, monkeypatch, tmp_path):
     """Print on a network printer at 127.0.0.1: the IPP answers come from
-    the fake printer, what is sent to port 9100 is collected."""
+    the fake printer, what is sent to port 9100 is collected. With the
+    client that prints."""
     from tests.helpers import EXAMPLE_FORMDATA, make_client
     sent = []
     monkeypatch.setattr(network, 'send', lambda data, device: sent.append(device))
@@ -248,14 +249,14 @@ def network_job(fake_printer, monkeypatch, tmp_path):
 
     def print_label():
         return client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer='tcp://127.0.0.1'))
-    return fake_printer, sent, print_label
+    return fake_printer, sent, print_label, client
 
 
 def test_job_waits_until_the_network_printer_finished(network_job):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     answer['bodies'] = [READY, PRINTING, PRINTING, STOPPED, READY]
     response = print_label()
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert sent == ['tcp://127.0.0.1']
     # Checked before, then asked until it was idle again
     assert answer['requests'] == 5
@@ -265,40 +266,39 @@ def test_job_waits_until_the_network_printer_finished(network_job):
 def test_network_job_waits_as_long_as_its_labels_take(network_job, monkeypatch, speed, success):
     # Besides the time any job may take, as long as the labels take at the
     # slowest printers
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     monkeypatch.setattr(network, 'NETWORK_JOB_TIMEOUT', 0)
     monkeypatch.setattr(usb, 'SLOWEST_PRINT_SPEED', speed)
     answer['bodies'] = [READY, PRINTING, PRINTING, PRINTING, READY]
     response = print_label()
     if success:
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
     else:
-        assert response.get_json()['message'] == 'The printer did not report that it finished the label, check whether it was printed'
+        assert outcome(client, response) == (
+            'failed', 'The printer did not report that it finished the label, check whether it was printed')
 
 
 def test_network_printer_error_after_the_job_is_reported(network_job):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     answer['bodies'] = [READY, PRINTING, fixture('ql810w-stopped-other-error.bin')]
     response = print_label()
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer reports: See the lights or display of the printer'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: See the lights or display of the printer'))
 
 
 def test_job_is_not_sent_to_a_network_printer_with_an_error(network_job):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     answer['bodies'] = [COVER_OPEN]
     response = print_label()
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer reports: The cover is open'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: The cover is open'))
     assert sent == []
 
 
 def test_network_printer_without_ipp_prints_as_before(network_job, monkeypatch):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     with socket.socket() as unused:
         unused.bind(('127.0.0.1', 0))
         monkeypatch.setattr(network, 'IPP_PORT', unused.getsockname()[1])
-    assert print_label().get_json() == {'success': True}
+    assert outcome(client, print_label()) == ('printed', '')
     assert sent == ['tcp://127.0.0.1']
 
 

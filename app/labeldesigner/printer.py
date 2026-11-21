@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlsplit
 
 from flask import Config
+from PIL import Image
 
 from . import bluetooth, drivers, mdns, sheets
 from .drivers import devices, progress, reach, usbip
@@ -165,6 +166,29 @@ class PrinterQueue:
         self.cut says: after each one, the last one or none."""
         last = len(self._print_queue) - 1
         return [self.cut == 'each' or (self.cut == 'last' and i == last) for i in range(last + 1)]
+
+    def check(self) -> Image.Image | None:
+        """The image of the first label of the queue, drawn as printing
+        draws it, which raises what printing would raise for it. None
+        without labels. It is drawn again when it prints."""
+        if not self._print_queue:
+            return None
+        size = label_of(self.label_size)
+        page = self._print_queue[:sheets.per_sheet(size) if size else 1]
+        made = [entry['label'] for entry in page]
+        # A page (sheets.Sheet) takes over the turn of its labels, which keep
+        # it for printing
+        kept = [(each.turned, getattr(each, 'keep_generated', False)) for each in made]
+        made[0].keep_generated = True
+        try:
+            [first] = self._grouped(page)
+            cut = self.cut == 'each' or self.cut == 'last' and len(page) == len(self._print_queue)
+            self.driver.render(self, [dict(first, cut=cut)], None)
+            return getattr(made[0], 'generated', None)
+        finally:
+            for each, (turned, keep) in zip(made, kept):
+                each.turned, each.keep_generated = turned, keep
+            made[0].generated = None
 
     def process_queue(self) -> str:
         """Print the labels of the queue as one job."""

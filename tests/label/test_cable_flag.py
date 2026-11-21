@@ -11,7 +11,7 @@ from app.labeldesigner import label as label_module
 from app.labeldesigner.cable_flag import wrap_dots
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, TEXT
+from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, outcome, TEXT
 
 FLAG_TAPE = 'Cable flags need continuous tape'
 DIAMETER = 'The cable diameter must be a number from 1 to 50 mm'
@@ -162,7 +162,7 @@ def test_flag_longer_than_the_printer_takes_is_refused(tmp_path):
     text = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'X' * 120, 'size': '60', 'align': 'center'}])
     data = _data(label_size='pt12', orientation='rotated', text=text, printer='simulation', model='PT-P700')
     # About 700 mm, twice that does not fit
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     response = client.post('/labeldesigner/api/print', data=dict(data, cable_flag='1'))
     assert response.status_code == 400 and response.get_json()['message'] == 'Labels on the PT-P700 can be at most 1000 mm long'
 

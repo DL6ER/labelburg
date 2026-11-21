@@ -7,12 +7,8 @@ from app.labeldesigner import print_queue
 USB = 'file:///dev/usb/lp0'
 WAIT = 10
 
-
-@pytest.fixture(autouse=True)
-def clean_queue():
-    print_queue.reset()
-    yield
-    print_queue.reset()
+# Added jobs are not waited for, conftest.py empties the queue around each test
+pytestmark = pytest.mark.usefixtures('queued')
 
 
 def explain(error):

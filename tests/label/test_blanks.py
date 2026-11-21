@@ -10,7 +10,7 @@ from PIL import Image
 
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _image_and_text_boxes, _upload, EXAMPLE_FORMDATA, make_client, TEXT
+from tests.helpers import _image_and_text_boxes, _upload, EXAMPLE_FORMDATA, make_client, outcome, TEXT
 
 
 def test_blanks_are_filled_in(tmp_path, monkeypatch):
@@ -200,7 +200,7 @@ def test_choice_blanks_are_filled_in_with_one_of_their_choices(tmp_path, caplog)
     # Saved, also when printed by name
     assert client.post('/labeldesigner/api/repository/save', json={'name': 'Room.json', 'label_size': '62', 'text': text, 'fields': fields}).status_code == 200
     response = client.post('/labeldesigner/api/repository/print', json={'name': 'Room.json', 'printer': 'simulation', 'blanks': {'Room': 'Kitchen'}})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     response = client.post('/labeldesigner/api/repository/print', json={'name': 'Room.json', 'printer': 'simulation', 'blanks': {'Room': 'Cellar'}})
     assert response.status_code == 400 and response.get_json()['message'] == 'A value is none of the choices of its blank'
     # A value saved with the label is one of them as well
@@ -227,7 +227,7 @@ def test_choices_in_a_json_body_are_numbers_as_written(tmp_path):
     assert loaded['fields']['Shelf']['choices'] == ['1', '2.50']
     response = client.post('/labeldesigner/api/repository/print', data='{"name": "Shelf.json", "printer": "simulation", "blanks": {"Shelf": 2.50}}',
                            content_type='application/json')
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 CHOICES_NEEDED = 'A choice blank needs 1 to 50 choices, each a text of at most 200 characters'

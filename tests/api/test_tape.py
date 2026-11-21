@@ -15,7 +15,7 @@ from app.labeldesigner.drivers import devices, usbip
 from app.labeldesigner.label import LabelOrientation
 from app.labeldesigner.printer import PrinterQueue
 from app.labeldesigner.routes import _loaded_tape, _resolved_printer, _settings_of
-from tests.helpers import EXAMPLE_FORMDATA, _red_square, make_client, pixels
+from tests.helpers import EXAMPLE_FORMDATA, _red_square, make_client, outcome, pixels
 
 STATUS = {'errors': [], 'path': 'simulation', 'model': 'QL-800', 'media_width': 29, 'media_length': 90}
 SETTINGS = '/labeldesigner/api/settings'
@@ -477,7 +477,7 @@ def test_saved_label_prints_on_the_loaded_tape(network, monkeypatch):
 def test_demo_label_prints_on_the_loaded_tape(network, monkeypatch):
     seen = queued(monkeypatch)
     r = network.post('/labeldesigner/api/demos/print', json={'id': 'signs/001-fire-extinguisher-62.json'})
-    assert r.get_json() == {'success': True}
+    assert outcome(network, r) == ('printed', '')
     assert seen[0][0] == '29x90'
 
 

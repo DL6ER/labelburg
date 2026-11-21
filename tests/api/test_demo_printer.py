@@ -18,7 +18,7 @@ def demo(client) -> dict:
 
 
 @pytest.fixture
-def queued(monkeypatch):
+def labels_printed(monkeypatch):
     """The model and label size of each label printed."""
     labels = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue',
@@ -65,7 +65,7 @@ def test_the_demo_printer_has_the_roll_of_its_model(tmp_path):
     assert demo(client)['tape']['id'] == 'escpos58-180'
 
 
-def test_prints_on_the_demo_printer_are_made_for_its_model_and_roll(tmp_path, queued):
+def test_prints_on_the_demo_printer_are_made_for_its_model_and_roll(tmp_path, labels_printed):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     on_vc = {**EXAMPLE_FORMDATA, 'label_size': 'vc25', 'printer': 'simulation'}
     assert client.post('/labeldesigner/api/print', data=on_vc).status_code == 400
@@ -76,7 +76,7 @@ def test_prints_on_the_demo_printer_are_made_for_its_model_and_roll(tmp_path, qu
     assert client.post('/labeldesigner/api/print', data=on_vc).status_code == 200
     # A request without a printer, where none is configured, too
     assert client.post('/labeldesigner/api/print', data={**on_vc, 'printer': ''}).status_code == 200
-    assert queued == [('VC-500W', 'vc9'), ('VC-500W', 'vc25'), ('VC-500W', 'vc25')]
+    assert labels_printed == [('VC-500W', 'vc9'), ('VC-500W', 'vc25'), ('VC-500W', 'vc25')]
 
 
 @pytest.mark.parametrize('printer, model', [('tcp://192.0.2.10', 'QL-1100'), ('simulation', 'QL-9000'),
@@ -120,13 +120,13 @@ def test_configured_simulators_are_one_demo_printer(tmp_path):
     assert demo(client)['model'] == 'Niimbot/B1'
 
 
-def test_prints_by_the_name_of_a_configured_simulator_are_on_the_demo_printer(tmp_path, queued):
+def test_prints_by_the_name_of_a_configured_simulator_are_on_the_demo_printer(tmp_path, labels_printed):
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['PRINTERS'] = [('QL-700', 'simulation'), ('QL-1100', 'simulation', 'Office')]
     client.post(URL, data={'printer': 'simulation', 'demo_model': 'Niimbot/B1'})
     r = client.post('/labeldesigner/api/print', data={**EXAMPLE_FORMDATA, 'label_size': 'niimbot50x30', 'printer': 'Office'})
     assert r.status_code == 200, r.get_json()
-    assert queued == [('Niimbot/B1', 'niimbot40x20')]
+    assert labels_printed == [('Niimbot/B1', 'niimbot40x20')]
 
 
 def test_a_configured_name_names_the_demo_printer(tmp_path):

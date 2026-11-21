@@ -9,13 +9,14 @@ import base64
 import secrets
 import threading
 import contextlib
+import contextvars
 import datetime
 import functools
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, paperless, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, paperless, print_queue, printer_settings, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -928,18 +929,66 @@ def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLa
     queued = []
     for i, image in enumerate(labels):
         queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn))
-        # Only the first label keeps its image, the print routes return it
-        queued[-1].keep_generated = i == 0
         printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
     return queued
 
 
-def _printed_image(result: dict, queued: list[SimpleLabel], return_format) -> dict:
-    """result with the image of the first label printed as base64 (image)
-    for return_format png, as the printer got it."""
-    if return_format == 'png' and queued and getattr(queued[0], 'generated', None) is not None:
-        result['image'] = base64.b64encode(image_to_png_bytes(queued[0].generated, gray=not queued[0].in_color)).decode()
-    return result
+# The preview of a job in the queue, at most this many pixels on its long side
+PREVIEW_SIZE = 240
+MAX_TITLE_LENGTH = 200
+# Where a job comes from as a request may tell it, the routes name the others
+TOLD_SOURCES = ('designer', 'mcp')
+
+
+def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, preview_image: Image.Image | None = None,
+            in_color: bool = False, return_format=None, extra: dict | None = None):
+    """Add the job run() prints to the line of the printer and answer that it
+    waits there. preview_image is its first label as printer.check() drew
+    it, returned as base64 (image) for return_format png. in_color as the
+    label tells it once drawn."""
+    preview = image = None
+    if preview_image is not None:
+        small = preview_image.copy()
+        small.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
+        preview = image_to_png_bytes(small, gray=not in_color)
+        if return_format == 'png':
+            image = base64.b64encode(image_to_png_bytes(preview_image, gray=not in_color)).decode()
+    # Printed as in this request, e.g. its connections checked where it names
+    # a printer, see _check_named()
+    context = contextvars.copy_context()
+    try:
+        job = print_queue.add(printer.device_specifier, lambda: context.run(run), title=title, labels=labels, source=source,
+                              preview=preview, explain=lambda e: refusals.message(e, refusals.PRINT_FAILED))
+    except print_queue.Full:
+        current_app.logger.warning('Not queued, %d jobs wait for %s already', print_queue.MAX_WAITING, printer.device_specifier)
+        return _fail(BUSY, PRINTER_FAILED)
+    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
+    if image is not None:
+        result['image'] = image
+    return jsonify(result)
+
+
+def _job_title(data: dict, fallback: str = 'Label') -> str:
+    """The title of a print job in the queue: the one of the request, else
+    the first line of the text of the label, else the name it is saved
+    under, else fallback."""
+    try:
+        lines = json.loads(data['text']) if isinstance(data.get('text'), str) else data.get('text')
+    except ValueError:
+        lines = None
+    texts = [line.get('text') for line in lines if isinstance(line, dict)] if isinstance(lines, list) else []
+    name = data.get('name')
+    for title in (_requested('title'), *texts, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
+        if isinstance(title, str) and title.strip():
+            return title.strip()[:MAX_TITLE_LENGTH]
+    return fallback
+
+
+def _job_source(default: str) -> str:
+    """Where a print job comes from: as the request tells it for the label
+    designer and MCP, else default, that of the route."""
+    source = _requested('source')
+    return source if source in TOLD_SOURCES else default
 
 
 def _next_asn(data: dict) -> int | None:
@@ -1147,20 +1196,19 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
 
 def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, collate: bool, high_res: bool, fast: bool,
                return_format, **stored):
-    """Print print_count copies of the label, of each of its images, see
-    _copies(), and answer how it went. stored tells where the image of a
-    stored label is, see load_label_images()."""
+    """Queue print_count copies of the label, of each of its images, see
+    _copies(), to be printed. stored tells where the image of a stored label
+    is, see load_label_images()."""
     try:
         # Decode the image once, all labels of the job share it. Of a PDF
         # each selected page is a label of its own.
         images, _ = load_label_images(data, files, copies=print_count, **stored)
         queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
-        status = printer.process_queue()
+        image = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    if status:
-        return _fail(status, PRINTER_FAILED)
-    return _printed_image({'success': True}, queued, return_format)
+    return _queued(printer, run=printer.process_queue, title=_job_title(data), source=_job_source('api'), labels=len(queued),
+                   preview_image=image, in_color=image is not None and queued[0].in_color, return_format=return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -1877,12 +1925,9 @@ def print_calibration():
         if offsets:
             queue.offset = (offsets.get('across', queue.offset[0]), offsets.get('along', queue.offset[1]))
             printer_settings.checked_offsets(*queue.offset)
-        message = queue.print_calibration()
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
-    if message:
-        return _fail(message, PRINTER_FAILED)
-    return jsonify({'success': True})
+    return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
 
 
 @bp.route('/api/calibration/example.png', methods=['GET'])
@@ -2819,25 +2864,18 @@ def webhook_print():
         current_app.logger.exception(e)
         return _fail('Failed to read images', 400)
 
-    # Process and queue each image
+    # Queue each image
     try:
         printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
-        status = printer.process_queue()
+        image = printer.check()
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
-
-    result = {
-        'success': len(status) == 0,
-        'count': len(labels)
-    }
-    if status:
-        result['message'] = status
-        return make_response(jsonify(result), PRINTER_FAILED)
-    return jsonify(result)
+    return _queued(printer, run=printer.process_queue, title=_job_title({}), source=_job_source('webhook'), labels=len(labels),
+                   preview_image=image, in_color=image is not None and labels[0].in_color, extra={'count': len(labels)})
 
 
 # --- Homebox ------------------------------------------------------------------
@@ -2938,11 +2976,10 @@ def homebox(name: str | None = None):
             orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
         # Printed as it is shown, dithered like the labels made here
         image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
-        printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
-                                   high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
-        status = printer.process_queue()
+        label = _image_label(img, label_size, orientation, image_mode, high_res=high_res)
+        printer.add_label_to_queue(label, high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
+        image = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    if status:
-        return _fail(status, PRINTER_FAILED)
-    return {'success': True}
+    return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}), source=_job_source('homebox'),
+                   labels=1, preview_image=image, in_color=image is not None and label.in_color)

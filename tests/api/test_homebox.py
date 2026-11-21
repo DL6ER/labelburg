@@ -8,7 +8,7 @@ from PIL import Image
 
 from app.labeldesigner import printer, routes
 from app.labeldesigner.enums import LabelOrientation
-from tests.helpers import make_client, pixels
+from tests.helpers import make_client, outcome, pixels
 from tests.repository.helpers import SAVE_URL
 
 URL = '/labeldesigner/api/homebox'
@@ -48,7 +48,7 @@ def client(tmp_path):
 
 
 @pytest.fixture
-def queued(monkeypatch):
+def labels_printed(monkeypatch):
     """The labels printed, and the label size of their job. Each label tells
     how it was printed and its job."""
     labels = []
@@ -112,18 +112,18 @@ def test_unknown_saved_label_for_homebox(client):
     assert response.get_json() == {'success': False, 'message': 'Not found'}
 
 
-def test_label_for_homebox_is_not_printed(client, queued):
+def test_label_for_homebox_is_not_printed(client, labels_printed):
     # Homebox shows the label it gets, it prints it with its print command
     assert client.get(URL, query_string=HOMEBOX_QUERY).status_code == 200
-    assert queued == []
+    assert labels_printed == []
 
 
-def test_homebox_prints_the_label_it_got(client, queued):
+def test_homebox_prints_the_label_it_got(client, labels_printed):
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     # Its print command sends the file, e.g. with wget --post-file
     response = client.post(URL, data=image, headers={'Content-Type': 'image/png', 'User-Agent': 'Wget/1.25.0'})
-    assert response.get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, response) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '62'
     # Printed as it was shown, dot for dot
     printed = io.BytesIO()
@@ -131,18 +131,18 @@ def test_homebox_prints_the_label_it_got(client, queued):
     assert pixels(printed.getvalue()) == pixels(image)
 
 
-def test_homebox_prints_on_the_tape_in_the_printer(client, queued, monkeypatch):
+def test_homebox_prints_on_the_tape_in_the_printer(client, labels_printed, monkeypatch):
     _reports(monkeypatch, _status(media_width=29, media_length=90))
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '29x90'
     printed = io.BytesIO()
     label.generate().save(printed, 'PNG')
     assert pixels(printed.getvalue()) == pixels(image)
 
 
-def test_homebox_asks_the_printer_once_per_request(client, queued, monkeypatch):
+def test_homebox_asks_the_printer_once_per_request(client, labels_printed, monkeypatch):
     # Its status tells the tape as well
     status, asked = _status(media_width=29, media_length=90), []
     monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): asked.append('status') or status)
@@ -150,26 +150,26 @@ def test_homebox_asks_the_printer_once_per_request(client, queued, monkeypatch):
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306) and asked == ['status']
     asked.clear()
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    assert asked == ['status'] and queued[0][0] == '29x90'
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    assert asked == ['status'] and labels_printed[0][0] == '29x90'
 
 
-def test_homebox_prints_a_saved_label_on_its_size(client, queued):
+def test_homebox_prints_a_saved_label_on_its_size(client, labels_printed):
     label = {'name': 'Small', 'label_size': '29x90', 'print_type': 'text',
              'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     image = client.get(f'{URL}/Small', query_string=HOMEBOX_QUERY).data
-    assert client.post(f'{URL}/Small', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    assert [label_size for label_size, _ in queued] == ['29x90']
+    assert outcome(client, client.post(f'{URL}/Small', data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    assert [label_size for label_size, _ in labels_printed] == ['29x90']
 
 
-def test_homebox_prints_a_label_of_its_own_templates(client, queued):
+def test_homebox_prints_a_label_of_its_own_templates(client, labels_printed):
     # Labels of Homebox's own templates go through the same print command,
     # they are fitted to the label
     image = io.BytesIO()
     Image.new('L', (400, 160), 'white').save(image, 'PNG')
-    assert client.post(URL, data=image.getvalue(), headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL, data=image.getvalue(), headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '62'
 
 
@@ -177,34 +177,34 @@ def test_homebox_prints_a_label_of_its_own_templates(client, queued):
     (b'', {'Content-Type': 'image/png'}),
     (b'not an image', {'Content-Type': 'image/png'}),
 ])
-def test_homebox_print_without_an_image(client, queued, body, headers):
+def test_homebox_print_without_an_image(client, labels_printed, body, headers):
     response = client.post(URL, data=body, headers=headers)
     assert response.status_code == 400
     assert response.get_json() == {'success': False, 'message': 'Send the label as an image, e.g. the file Homebox made'}
-    assert queued == []
+    assert labels_printed == []
 
 
-def test_homebox_print_of_an_unknown_saved_label(client, queued):
+def test_homebox_print_of_an_unknown_saved_label(client, labels_printed):
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     response = client.post(f'{URL}/Nothing', data=image, headers={'Content-Type': 'image/png'})
     assert response.status_code == 404
-    assert queued == []
+    assert labels_printed == []
 
 
-def test_homebox_print_from_another_website_is_refused(client, queued):
+def test_homebox_print_from_another_website_is_refused(client, labels_printed):
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     response = client.post(URL, data=image, headers={'Content-Type': 'image/png', 'Origin': 'https://elsewhere.example'})
     assert response.status_code == 403
-    assert queued == []
+    assert labels_printed == []
 
 
-def test_homebox_prints_a_saved_label_at_its_resolution(client, queued):
+def test_homebox_prints_a_saved_label_at_its_resolution(client, labels_printed):
     label = {'name': 'Sharp', 'label_size': '62', 'print_type': 'text', 'high_res': '1',
              'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     image = client.get(f'{URL}/Sharp', query_string=HOMEBOX_QUERY).data
-    assert client.post(f'{URL}/Sharp', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, printed_label)] = queued
+    assert outcome(client, client.post(f'{URL}/Sharp', data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, printed_label)] = labels_printed
     # Made at 600 dpi, printed at 600 dpi dot for dot
     assert printed_label.high_res is True
     printed = io.BytesIO()
@@ -218,63 +218,63 @@ def _printed(label) -> bytes:
     return printed.getvalue()
 
 
-def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
+def test_homebox_prints_on_the_tape_set_by_hand(client, labels_printed, monkeypatch):
     # The simulator reports no tape, the one set in the printer settings counts
     monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): _status(path='simulation'))
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306)
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '29x90'
     assert pixels(_printed(label)) == pixels(image)
 
 
-def test_homebox_prints_on_the_demo_printer_as_its_model(client, queued):
+def test_homebox_prints_on_the_demo_printer_as_its_model(client, labels_printed):
     # Where nothing else is found, the demo printer of the model chosen for it
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'demo_model': 'VC-500W'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert (label_size, label.job.model) == ('vc9', 'VC-500W')
 
 
-def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, queued, monkeypatch):
+def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, labels_printed, monkeypatch):
     _reports(monkeypatch, _status(media_width=62))
     assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '29x90'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '62'
     assert pixels(_printed(label)) == pixels(image)
 
 
-def test_homebox_makes_a_saved_label_without_a_size_for_the_tape_the_printer_reports(client, queued, monkeypatch):
+def test_homebox_makes_a_saved_label_without_a_size_for_the_tape_the_printer_reports(client, labels_printed, monkeypatch):
     _reports(monkeypatch, _status(media_width=62))
     assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '29x90'}).status_code == 200
     label = {'name': 'Shelf', 'print_type': 'text', 'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     image = client.get(URL + '/Shelf', query_string=HOMEBOX_QUERY).data
-    assert client.post(URL + '/Shelf', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, label)] = queued
+    assert outcome(client, client.post(URL + '/Shelf', data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, label)] = labels_printed
     assert label_size == '62'
     assert pixels(_printed(label)) == pixels(image)
 
 
-def test_homebox_places_a_saved_label_on_the_tape_in_the_printer(client, queued, monkeypatch):
+def test_homebox_places_a_saved_label_on_the_tape_in_the_printer(client, labels_printed, monkeypatch):
     _reports(monkeypatch, _status(media_width=29, media_length=90))
     label = {'name': 'Bin', 'label_size': '62', 'print_type': 'text',
              'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     image = client.get(f'{URL}/Bin', query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306)
-    assert client.post(f'{URL}/Bin', data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, printed)] = queued
+    assert outcome(client, client.post(f'{URL}/Bin', data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, printed)] = labels_printed
     assert label_size == '29x90'
     assert pixels(_printed(printed)) == pixels(image)
 
 
-def test_homebox_label_size_set_by_hand_gives_way_to_the_tape_the_printer_reports(client, queued, monkeypatch):
+def test_homebox_label_size_set_by_hand_gives_way_to_the_tape_the_printer_reports(client, labels_printed, monkeypatch):
     _reports(monkeypatch, _status(media_width=29, media_length=90))
     assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '62'}).status_code == 200
     assert _size(client.get(URL, query_string=HOMEBOX_QUERY).data) == (991, 306)
@@ -286,33 +286,33 @@ def test_homebox_label_size_set_by_hand_gives_way_to_the_tape_the_printer_report
     assert client.post(SAVE_URL, json={'name': 'Unsized', **label}).status_code == 200
     sized, unsized = (client.get(f'{URL}/{name}', query_string=HOMEBOX_QUERY).data for name in ('Sized', 'Unsized'))
     assert (_size(sized), _size(unsized)) == ((991, 306), (306, 991))
-    assert client.post(f'{URL}/Unsized', data=unsized, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(label_size, printed)] = queued
+    assert outcome(client, client.post(f'{URL}/Unsized', data=unsized, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(label_size, printed)] = labels_printed
     assert (label_size, printed.label_orientation) == ('29x90', LabelOrientation.ROTATED)
     assert pixels(_printed(printed)) == pixels(unsized)
 
 
 @pytest.mark.parametrize('quality, high_res, fast', [('high', True, False), ('fast', False, True), ('quality', False, False)])
-def test_homebox_prints_in_the_quality_set_for_the_printer(client, queued, quality, high_res, fast):
+def test_homebox_prints_in_the_quality_set_for_the_printer(client, labels_printed, quality, high_res, fast):
     # Also a label saved in the label designer, which saves high_res 0
     label = {'name': 'Bin', 'label_size': '62', 'print_type': 'text', 'high_res': '0', 'fast_printing': '1',
              'text': [{'font': 'DejaVu Sans,Book', 'size': '60', 'text': '{{blank:TitleText}}'}]}
     assert client.post(SAVE_URL, json=label).status_code == 200
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'quality': quality}).status_code == 200
     for name in ('', '/Bin'):
-        queued.clear()
+        labels_printed.clear()
         image = client.get(URL + name, query_string=HOMEBOX_QUERY).data
-        assert client.post(URL + name, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-        [(_, printed)] = queued
+        assert outcome(client, client.post(URL + name, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+        [(_, printed)] = labels_printed
         assert (printed.high_res, printed.fast) == (high_res, fast)
         # Made and printed at the same resolution, dot for dot
         assert pixels(_printed(printed)) == pixels(image)
 
 
-def test_homebox_cuts_and_leaves_first_as_set_for_the_printer(client, queued):
+def test_homebox_cuts_and_leaves_first_as_set_for_the_printer(client, labels_printed):
     settings = {'printer': 'simulation', 'cut': 'none', 'leaves_first': 'bottom'}
     assert client.post(SETTINGS_URL, data=settings).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
-    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
-    [(_, label)] = queued
+    assert outcome(client, client.post(URL, data=image, headers={'Content-Type': 'image/png'})) == ('printed', '')
+    [(_, label)] = labels_printed
     assert (label.job.cut, label.job.leaves_first) == ('none', 'bottom')

@@ -14,7 +14,7 @@ from app import create_app
 from app.labeldesigner import adding, printer, printer_settings, refusals
 from config import Config
 from app.labeldesigner.drivers import devices, reach, usbip
-from tests.helpers import make_client, within
+from tests.helpers import make_client, outcome, within
 from tests.printing.test_reach import names  # noqa: F401
 from tests.printing.test_usbip import TEXT, FakeQL
 from tests.printing.usbip_host import QL1100_ID, FakeHost, SharedDevice
@@ -86,7 +86,7 @@ def test_requests_print_on_an_added_printer(client, host):
     add(client, host.address(), 'Garage')
     for chosen in ('Garage', host.address()):
         before = len(host.ql.received)
-        assert client.post(f'{API}/print', data={**JOB, 'printer': chosen}).get_json() == {'success': True}
+        assert outcome(client, client.post(f'{API}/print', data={**JOB, 'printer': chosen})) == ('printed', '')
         assert host.ql.received.endswith(b'\x1a') and len(host.ql.received) > before + 1000
     # Its settings are kept by the same name
     answer = client.post(f'{API}/settings', data={'printer': 'Garage', 'cut': 'last'})
@@ -180,15 +180,15 @@ def test_each_connection_to_an_added_printer_is_checked(client, names, host):  #
     names['printer.test'] = ['127.0.0.1']
     address = f'usbip://printer.test:{host.port}'
     add(client, address, 'Garage')
-    assert client.post(f'{API}/print', data={**JOB, 'printer': 'Garage'}).get_json() == {'success': True}
+    assert outcome(client, client.post(f'{API}/print', data={**JOB, 'printer': 'Garage'})) == ('printed', '')
     # The name now leads outside the local network, e.g. a rebinding attack
     names['printer.test'] = ['8.8.8.8']
     usbip.disconnect(address)
     seen = len(host.connections)
     shown = next(p for p in listed(client) if p['path'] == address)
     assert shown['errors'] == [reach.NOT_ALLOWED]
-    answer = client.post(f'{API}/print', data={**JOB, 'printer': 'Garage'}).get_json()
-    assert answer['message'].endswith(reach.NOT_ALLOWED)
+    told_state, told = outcome(client, client.post(f'{API}/print', data={**JOB, 'printer': 'Garage'}))
+    assert told_state == 'failed' and told.endswith(reach.NOT_ALLOWED)
     assert len(host.connections) == seen
 
 

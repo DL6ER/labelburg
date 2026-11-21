@@ -8,7 +8,7 @@ import pytest
 from app.labeldesigner.drivers import devices, progress, puqu
 from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 
 DEVICE = 'bt://CD:AC:BB:E0:46:4C/2'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '60'}])
@@ -152,7 +152,7 @@ def test_labels_are_printed_one_after_the_other(client, fake):
     printer = fake()
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     header = bytes([0x3a, 48, 240, 0])
     kinds = ['query' if data == protocol.STATE_QUERY else 'header' if data[:4] == header else 'rows' for data in printer.sent]
     assert kinds == ['header', 'rows', 'query', 'header', 'rows', 'query']
@@ -166,7 +166,7 @@ def test_labels_are_counted_while_printing(client, fake):
     printer.sendall = lambda data: (data[:4] == bytes([0x3a, 48, 240, 0]) and seen.append(progress.state(DEVICE))) or send(data)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert [(state['label'], state['labels']) for state in seen] == [(1, 2), (2, 2)]
     assert all(state['seconds_left'] >= 0 for state in seen)
     assert progress.state(DEVICE) is None
@@ -179,7 +179,7 @@ def test_printer_is_asked_once_it_is_quiet(client, fake):
     printer = fake(reports=[printing, printing])
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     kinds = ['query' if data == protocol.STATE_QUERY else 'label' for data in printer.sent]
     assert kinds == ['label', 'label', 'query', 'label', 'label', 'query']
 
@@ -190,7 +190,7 @@ def test_printer_that_keeps_printing_is_not_asked(client, fake, monkeypatch):
     monkeypatch.setattr(protocol, 'QUIET', 1)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': False, 'message': 'The printer did not tell that it printed the label'}
+    assert outcome(client, response) == ('failed', 'The printer did not tell that it printed the label')
     assert len(printer.headers()) == 1 and printer.queries() == 0
 
 
@@ -198,14 +198,14 @@ def test_error_while_printing_stops_the_job(client, fake):
     printer = fake(reports=[reply(protocol.NO_PAPER)])
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': False, 'message': 'The printer has no labels'}
+    assert outcome(client, response) == ('failed', 'The printer has no labels')
     assert len(printer.headers()) == 1
 
 
 def test_printer_that_does_not_answer_after_a_label(client, fake):
     printer = fake(answers=[b''])
     response = client.post('/labeldesigner/api/print', data={'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': False, 'message': 'The printer does not answer'}
+    assert outcome(client, response) == ('failed', 'The printer does not answer')
     assert printer.queries() == 1
 
 
@@ -214,7 +214,7 @@ def test_printer_that_is_off(client, monkeypatch):
         raise OSError(112, 'Host is down')
     monkeypatch.setattr(protocol, 'connect', unreachable)
     response = client.post('/labeldesigner/api/print', data={'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['success'] is False
+    assert outcome(client, response)[0] == 'failed'
 
 
 def test_status_through_the_label_designer(client, fake):
@@ -276,8 +276,8 @@ def test_printer_that_is_off_does_not_pile_up_tracebacks(client, monkeypatch):
 def test_printer_that_answers_again_is_asked_again(client, fake, monkeypatch):
     devices.note_answer(DEVICE, OSError(112, 'Host is down'))
     printer = fake()
-    assert client.post('/labeldesigner/api/print', data={
-        'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data={
+        'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT})) == ('printed', '')
     assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
     assert len(printer.connected) == 2
 

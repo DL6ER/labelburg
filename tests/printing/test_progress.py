@@ -13,7 +13,7 @@ from app.labeldesigner.drivers import backends, devices, progress
 from app.labeldesigner.drivers.brother import raster, usb
 from app.labeldesigner.drivers.brother.models import MODELS
 from app.labeldesigner.label import LabelContent, LabelOrientation, LabelType
-from tests.helpers import EXAMPLE_FORMDATA, make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_usb_jobs import REPLY, Clock, FakePrinter, page, status
 
 DEVICE = 'file:///dev/usb/lp0'
@@ -194,7 +194,7 @@ def test_job_on_a_usb_printer_tells_its_labels_and_time(tmp_path, usb_printer):
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = DEVICE
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='3'))
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     labels = [state['label'] for state in usb_printer]
     assert labels[0] == 1 and labels[-1] == 3 and labels == sorted(labels)
     assert all(state['labels'] == 3 and state['seconds_left'] >= 0 for state in usb_printer)

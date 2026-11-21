@@ -10,7 +10,7 @@ import pytest
 
 from app.labeldesigner.drivers import devices, niimbot
 from app.labeldesigner.drivers.niimbot import protocol
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 from tests.printing.test_niimbot import B1_CLOSED, B1_REPLIES, REPLIES, TEXT, FakePrinter
 
 MAC = '00:00:5E:00:53:01'
@@ -172,7 +172,7 @@ def test_a_label_is_written_in_pieces_the_mtu_takes(b1, monkeypatch, mtu):
     monkeypatch.setattr(protocol.socket, 'socket', peer)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     # Each write fits the MTU, the fake checks, and the page was printed
     assert 0xf3 in peer.printer.commands
 
@@ -190,7 +190,7 @@ def test_b1_on_bluetooth_keeps_its_connection_for_the_designer_following_it(b1, 
     assert len(le.addresses) == 1 and heartbeats(le) == 2
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True} and len(le.addresses) == 1
+    assert outcome(b1, response) == ('printed', '') and len(le.addresses) == 1
 
 
 def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le, monkeypatch):

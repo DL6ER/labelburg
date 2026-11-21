@@ -15,7 +15,7 @@ from werkzeug.datastructures import FileStorage
 from app.labeldesigner.enums import LabelContent
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _pdf, _red_square, _upload, EXAMPLE_FORMDATA, make_client, UPDATE_IMAGES, verify_image
+from tests.helpers import _pdf, _red_square, _upload, EXAMPLE_FORMDATA, make_client, outcome, UPDATE_IMAGES, verify_image
 
 
 class TestLabelDesignerAPI:
@@ -288,7 +288,7 @@ def test_print_uploaded_image_several_times(tmp_path, filename, save_format):
     data.update({'print_type': 'image', 'print_count': '3', 'image': FileStorage(stream=buffer, filename=filename)})
     response = client.post('/labeldesigner/api/print', data=data)
     assert response.status_code == 200
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_red_and_black_image_mode(tmp_path):
@@ -349,7 +349,7 @@ def test_uploaded_image_is_decoded_once_per_job(tmp_path, monkeypatch):
     data = EXAMPLE_FORMDATA.copy()
     data.update({'print_type': 'image', 'print_count': '3', 'image': _upload(_red_square(), 'red.png')})
     response = client.post('/labeldesigner/api/print', data=data)
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert len(calls) == 1
 
 
@@ -574,13 +574,13 @@ def test_copies_of_a_job_size_the_image_once(tmp_path, monkeypatch):
             'print_count': '4', 'printer': 'simulation'}
     client = make_client(tmp_path)
     response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(_letter_l(), 'l.png')))
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert len(sized) == 1 and len(crops) == 2
     labels = _simulated_labels(printer)
     assert len(labels) == 4 and len(set(labels)) == 1
     # As printed alone
     response = client.post('/labeldesigner/api/print', data=dict(data, print_count='1', image=_upload(_letter_l(), 'l.png')))
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert _simulated_labels(printer) == labels[:1]
 
 
@@ -592,12 +592,12 @@ def test_each_image_of_a_job_is_sized_on_its_own(tmp_path):
     client = make_client(tmp_path)
     files = [_upload(_letter_l(), 'l.png'), _upload(_framed_logo(), 'logo.png')]
     response = client.post('/labeldesigner/api/print', data=dict(data, print_count='2', image=files))
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     labels = _simulated_labels(printer)
     alone = []
     for image in (_letter_l(), _framed_logo()):
         response = client.post('/labeldesigner/api/print', data=dict(data, image=_upload(image, 'image.png')))
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
         alone += _simulated_labels(printer)
     assert alone[0] != alone[1]
     assert labels == alone * 2
