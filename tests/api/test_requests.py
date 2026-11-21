@@ -238,7 +238,7 @@ def test_refused_requests_get_fixed_messages_and_the_log_the_details(tmp_path, m
         caplog.clear()
         response = client.post(url, data=data)
         assert response.status_code == 400
-        assert response.get_json()[key] == message
+        assert response.get_json() == {'success': False, key: message}
         assert any(str(error) in record.getMessage() for record in caplog.records)
     # An unexpected error is logged with its traceback
     caplog.clear()

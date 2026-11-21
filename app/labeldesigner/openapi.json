@@ -227,7 +227,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -237,7 +237,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -3264,14 +3264,6 @@
           "font_family": {
             "type": "string",
             "description": "A font family of the server or of the label designer's font menu, e.g. `DejaVu Sans` or `DejaVu Sans Mono`: new labels of the label designer start with it, lines of a request without a font are printed in its regular style. Empty: the configured default font."
-          }
-        }
-      },
-      "Message": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
           }
         }
       },

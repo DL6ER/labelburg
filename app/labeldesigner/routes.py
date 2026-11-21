@@ -1128,8 +1128,7 @@ def scan_print():
             try:
                 label, im, _ = _preview_label(data, _get_repo_dir(), image_bytes, False, True, filled)
             except Exception as e:
-                _log_refused_request('Preview', e)
-                return _fail(refusals.message(e, refusals.PREVIEW_FAILED), 413 if isinstance(e, TextTooLong) else 400)
+                return _preview_refused(e)
             return {**result, 'image': base64.b64encode(image_to_png_bytes(im, gray=not label.in_color)).decode()}
         printed = _print_stored_label(data, _get_repo_dir(), image_bytes, filled, 'png')
         return {**result, **printed} if isinstance(printed, dict) else printed
@@ -1399,8 +1398,7 @@ def _preview_refused(error: Exception):
     """The answer to a preview that cannot be made: a fixed message, the
     details are in the log."""
     _log_refused_request('Preview', error)
-    return make_response(jsonify({'message': refusals.message(error, refusals.PREVIEW_FAILED)}),
-                         413 if isinstance(error, TextTooLong) else 400)
+    return _fail(refusals.message(error, refusals.PREVIEW_FAILED), 413 if isinstance(error, TextTooLong) else 400)
 
 
 # The X-Label-Parts header at most, in bytes: nginx takes 4 KB of headers by
