@@ -9,7 +9,7 @@ import {
     loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending
 } from './core.js';
 import { calibrationHTML, bindCalibration } from './calibration.js';
-import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged, drawPrintButton } from './editor.js';
+import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged } from './editor.js';
 import { closePop } from './field.js';
 import { mountGallery, openTemplates, openFill, savedSub } from './gallery.js';
 import { renderSettings, redrawSettings, redrawLabelSettings } from './settings.js';
@@ -423,7 +423,7 @@ async function receiveShared() {
     forgetGoneKeys();
     bindTop();
     mountPhone();
-    mountQueue(drawPrintButton);
+    mountQueue();
     renderChip();
     await Promise.all([refresh(true), loadDemos(), loadSaved(), carryOverLabelSettings()]);
     await receiveShared();

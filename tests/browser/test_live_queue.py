@@ -42,7 +42,7 @@ def test_a_label_printed_while_another_prints_waits_in_the_queue(editor, queued,
         editor.click('#print')
         editor.wait_for_selector('#queue .q-line:has-text("Printing Shelf")', timeout=10000)
         editor.wait_for_selector('#queue [data-more]:has-text("1 waiting")', timeout=10000)
-        assert editor.locator('#print:text-is("Queue")').count() == 1
+        assert editor.locator('#print:text-is("Print")').count() == 1
     finally:
         release.set()
     editor.wait_for_function("() => labelEditor.S.history.length === 2 && labelEditor.S.history.every(h => h.state === 'printed')", timeout=15000)

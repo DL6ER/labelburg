@@ -11,7 +11,6 @@ import {
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
     loadSaved, roomFrom, isSheet, sheetNote, untold
 } from './core.js';
-import { queueBusy } from './queue.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
 import { swatchHTML, openColors, closeColors } from './colors.js';
@@ -443,18 +442,9 @@ function pick(p, fromLabel) {
     } else markLine(-1);
 }
 
-// While the printer is busy a print waits in its queue, the button says so
-export function drawPrintButton() {
-    const busy = queueBusy(), b = $('#print');
-    if (b.dataset.busy === String(busy)) return;
-    b.dataset.busy = busy;
-    b.innerHTML = busy ? `${icon('clock')}Queue` : `${icon('printer')}Print`;
-}
-
 function updateActions() {
     const E = S.edit, empty = isEmptyDesign(E.design), missing = choicesMissing(editItem(E)).length > 0;
     $('#print').disabled = empty || ui.failed || missing;
-    drawPrintButton();
     $('#save').disabled = empty || missing;
     $('#save').title = E.origin && E.origin.kind === 'saved' ? `Save "${E.title}"` : 'Save to your labels';
     if (document.activeElement !== $('#title')) $('#title').value = E.title;

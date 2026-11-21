@@ -219,14 +219,11 @@ SHELF = queued('j1', 'Shelf 12', labels=3, state='printing', progress={'labels':
 JAR, BOX = queued('j2', 'Spice jar'), queued('j3', 'Box 7', labels=2, source='Homebox')
 
 
-def test_the_print_button_reads_queue_while_the_printer_is_busy(editor):  # noqa: F811
-    lines = {None: line(SHELF)}
-    answer_lines(editor, lines)
+def test_the_print_button_reads_print_while_the_printer_is_busy(editor):  # noqa: F811
+    answer_lines(editor, {None: line(SHELF)})
     choose(editor, printer(printing=True))
-    editor.wait_for_selector('#print:text-is("Queue")')
-    assert editor.get_attribute('#print use', 'href') == '#i-clock'
-    lines[None] = line()
-    editor.wait_for_selector('#print:text-is("Print")', timeout=5000)
+    editor.wait_for_selector('#queue:not([hidden])')
+    assert editor.locator('#print:text-is("Print")').count() == 1
     assert editor.get_attribute('#print use', 'href') == '#i-printer'
 
 
@@ -249,7 +246,7 @@ def test_printing_on_a_busy_printer_adds_the_label_to_the_queue(editor):  # noqa
     answer_lines(editor, {None: line(SHELF)})
     choose(editor, printer(printing=True))
     type_label(editor, 'Spice jar')
-    editor.wait_for_selector('#print:text-is("Queue")')
+    editor.wait_for_selector('#queue:not([hidden])')
     answer_print(editor, job='j2')
     answer_queue(editor, [job('waiting', id='j2')])
     editor.click('#print')
@@ -313,7 +310,7 @@ def test_a_held_queue_continues(editor):  # noqa: F811
     choose(editor, printer(waiting=2, held=True))
     editor.wait_for_selector('#queue:not([hidden])')
     assert editor.inner_text('#queue .q-line > span') == 'Not printed: The tape is used up. 2 waiting.'
-    assert editor.locator('#print:text-is("Queue")').count() == 1
+    assert editor.locator('#print:text-is("Print")').count() == 1
     lines[None] = line(queued('j2', 'Spice jar', state='printing'), [BOX])
     editor.click('#queue button:text-is("Continue")')
     editor.wait_for_selector('#queue .q-line > span:text-is("Printing Spice jar")')

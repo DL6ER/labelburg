@@ -35,9 +35,7 @@ export function lineHTML(line, open = false) {
 
 // --- Reading ---------------------------------------------------------------------
 
-let reading = null, again = null, open = false, drawn = '', changed = () => { };
-
-export const queueBusy = () => lineBusy(S.printer);
+let reading = null, again = null, open = false, drawn = '';
 
 // The line as read, null where it could not be read
 async function readOnce() {
@@ -81,14 +79,13 @@ export function drawQueue() {
         if (focused && $(focused, el)) $(focused, el).focus();
     }
     queueBack();
-    changed();
 }
 
 // While it has jobs or holds, or this browser waits for one of its own; the
 // jobs of this browser on it are followed by the same reads
 export function followQueue() {
     drawQueue();
-    if (!reading && queueBusy() && !followsLine(S.printer.path)) readQueue();
+    if (!reading && lineBusy(S.printer) && !followsLine(S.printer.path)) readQueue();
 }
 
 async function send(path, body) {
@@ -145,9 +142,7 @@ async function clicked(e) {
     readQueue();
 }
 
-// onChange: the print button follows the queue
-export function mountQueue(onChange) {
-    changed = onChange;
+export function mountQueue() {
     QUEUE.read = () => { drawQueue(); return readQueue(); };
     QUEUE.follow = followQueue;
     $('#queue').addEventListener('click', clicked);
