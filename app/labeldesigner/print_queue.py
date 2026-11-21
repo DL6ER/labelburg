@@ -2,7 +2,8 @@
 
 Every line has a worker thread that prints one job after the other, so
 a second job waits instead of being refused while the printer is busy. A job
-that fails holds the jobs behind it until the line is resumed.
+that reports it did not print holds the jobs behind it until the line is
+resumed or nothing waits anymore.
 """
 import logging
 import threading
@@ -10,7 +11,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable
 
 from . import printer
 from .drivers import devices
@@ -25,6 +26,8 @@ OUTCOME_KEPT = 86400.0
 REMOVED = 'Removed from the queue'
 PRINTING_ALREADY = 'It is printing already'
 NOT_WAITING = 'It is not waiting in the queue anymore'
+
+FAILED = 'It was not printed'
 
 SOURCES = {'designer': '', 'api': 'the API', 'homebox': 'Homebox', 'webhook': 'the webhook', 'mcp': 'MCP', 'calibration': ''}
 
@@ -42,12 +45,12 @@ class Job:
     source: str
     state: str = 'waiting'
     message: str = ''
-    preview: Optional[bytes] = None
+    preview: bytes | None = None
     created: float = field(default_factory=time.monotonic)
-    ended: Optional[float] = None
+    ended: float | None = None
     done: threading.Event = field(default_factory=threading.Event)
-    run: Optional[Callable[[], str]] = field(default=None, repr=False)
-    explain: Optional[Callable[[Exception], str]] = field(default=None, repr=False)
+    run: Callable[[], str] | None = field(default=None, repr=False)
+    explain: Callable[[Exception], str] | None = field(default=None, repr=False)
 
     def told(self) -> dict:
         return {'id': self.id, 'title': self.title, 'labels': self.labels, 'from': SOURCES.get(self.source, ''),
@@ -84,17 +87,33 @@ def _prune():
 
 def _start_worker(key, line):
     if line.worker is None and line.held is None and line.waiting:
-        line.worker = threading.Thread(target=_work, args=(key, line), name=f'print-queue-{key}', daemon=True)
-        line.worker.start()
+        worker = threading.Thread(target=_work, args=(key, line), name=f'print-queue-{key}', daemon=True)
+        worker.start()
+        line.worker = worker
 
 
 def _end(job, state, message):
-    job.state, job.message, job.ended = state, message, time.monotonic()
+    job.message, job.ended = message, time.monotonic()
+    job.state = state
     job.run = job.explain = None
     job.done.set()
 
 
 def _work(key, line):
+    try:
+        _print_all(key, line)
+    except BaseException:
+        logger.exception('The print worker of %s stopped', key)
+    finally:
+        with _lock:
+            if line.worker is threading.current_thread():
+                line.worker = None
+                # Jobs added while this worker was stopping still need one
+                if _lines.get(key) is line:
+                    _start_worker(key, line)
+
+
+def _print_all(key, line):
     while True:
         with _lock:
             if _lines.get(key) is not line or line.held is not None or not line.waiting:
@@ -102,20 +121,24 @@ def _work(key, line):
                 return
             job = line.printing = line.waiting.popleft()
             job.state = 'printing'
+        message, error = FAILED, True
         try:
-            message = job.run()
-            error = False
-        except Exception as e:
-            logger.exception('Print job %s failed', job.id)
-            message, error = job.explain(e), True
-        with _lock:
-            _end(job, 'failed' if message else 'printed', message)
-            line.printing = None
-            if message and not error and line.waiting:
-                line.held = message
+            try:
+                message, error = job.run(), False
+            except Exception as e:
+                logger.exception('Print job %s failed', job.id)
+                message = job.explain(e)
+        except Exception:
+            logger.exception('Explaining the failure of print job %s failed', job.id)
+        finally:
+            with _lock:
+                _end(job, 'failed' if error or message else 'printed', message)
+                line.printing = None
+                if message and not error and line.waiting:
+                    line.held = message
 
 
-def add(device: str, run: Callable[[], str], *, title: str, labels: int, source: str, preview: Optional[bytes] = None,
+def add(device: str, run: Callable[[], str], *, title: str, labels: int, source: str, preview: bytes | None = None,
         explain: Callable[[Exception], str]) -> Job:
     """Queue a job. run() prints and returns '' or the reason it did not
     print, explain() words an error it raises."""
@@ -128,11 +151,16 @@ def add(device: str, run: Callable[[], str], *, title: str, labels: int, source:
         job = Job(uuid.uuid4().hex, key, title, labels, source, preview=preview, run=run, explain=explain)
         _jobs[job.id] = job
         line.waiting.append(job)
-        _start_worker(key, line)
+        try:
+            _start_worker(key, line)
+        except BaseException:
+            line.waiting.remove(job)
+            del _jobs[job.id]
+            raise
         return job
 
 
-def get(job_id: str) -> Optional[Job]:
+def get(job_id: str) -> Job | None:
     with _lock:
         _prune()
         return _jobs.get(job_id)
@@ -149,7 +177,6 @@ def line(device: str) -> dict:
         current = _lines.get(key_of(device))
         if current is None:
             return {'printing': None, 'waiting': [], 'held': None}
-        _release_if_empty(current)
         return {'printing': current.printing.told() if current.printing else None,
                 'waiting': [job.told() for job in current.waiting], 'held': current.held}
 
@@ -159,7 +186,7 @@ def summary(device: str) -> dict:
     return {'printing': told['printing'] is not None, 'waiting': len(told['waiting']), 'held': told['held'] is not None}
 
 
-def remove(job_id: str) -> Optional[str]:
+def remove(job_id: str) -> str | None:
     with _lock:
         _prune()
         job = _jobs.get(job_id)
@@ -178,6 +205,7 @@ def remove(job_id: str) -> Optional[str]:
 
 def resume(device: str) -> None:
     with _lock:
+        _prune()
         key = key_of(device)
         current = _lines.get(key)
         if current is not None:

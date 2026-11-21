@@ -1,6 +1,4 @@
 import threading
-import time
-
 import pytest
 
 from app.labeldesigner import print_queue
@@ -190,13 +188,102 @@ def test_line_tells_the_printing_job_and_the_waiting_ones():
     release.set()
 
 
-def test_previews_and_outcomes_are_dropped_in_time(monkeypatch):
-    monkeypatch.setattr(print_queue, 'PREVIEW_KEPT', 0.05)
-    monkeypatch.setattr(print_queue, 'OUTCOME_KEPT', 0.1)
+def test_previews_and_outcomes_are_dropped_in_time():
     job = add(USB, recorder([], 1), preview=b'png')
     assert job.done.wait(WAIT)
     assert print_queue.get(job.id).preview == b'png'
-    time.sleep(0.06)
+    job.ended -= print_queue.PREVIEW_KEPT + 1
     assert print_queue.get(job.id).preview is None
-    time.sleep(0.06)
+    job.ended -= print_queue.OUTCOME_KEPT
     assert print_queue.get(job.id) is None
+
+
+def test_a_failing_explain_does_not_stop_the_line():
+    def raises():
+        raise ValueError('x')
+
+    def explain_raises(error):
+        raise RuntimeError('y')
+    failing = print_queue.add(USB, raises, title='Label', labels=1, source='api', explain=explain_raises)
+    assert failing.done.wait(WAIT)
+    assert failing.state == 'failed'
+    assert failing.message == print_queue.FAILED
+    later = add(USB, recorder([], 2))
+    assert later.done.wait(WAIT)
+    assert later.state == 'printed'
+    assert print_queue.line(USB)['printing'] is None
+
+
+def test_a_raising_job_fails_even_when_explain_says_nothing():
+    def raises():
+        raise ValueError('x')
+    job = print_queue.add(USB, raises, title='Label', labels=1, source='api', explain=lambda error: '')
+    assert job.done.wait(WAIT)
+    assert job.state == 'failed'
+
+
+def test_a_job_that_raises_more_than_an_exception_does_not_stop_the_line():
+    def exits():
+        raise SystemExit
+    failing = add(USB, exits)
+    assert failing.done.wait(WAIT)
+    assert failing.state == 'failed'
+    later = add(USB, recorder([], 2))
+    assert later.done.wait(WAIT)
+    assert later.state == 'printed'
+
+
+def test_a_worker_that_cannot_start_leaves_no_job_behind(monkeypatch):
+    def refuses(thread):
+        raise RuntimeError("can't start new thread")
+    with monkeypatch.context() as patched:
+        patched.setattr(threading.Thread, 'start', refuses)
+        with pytest.raises(RuntimeError):
+            add(USB, recorder([], 1))
+    assert print_queue.line(USB) == {'printing': None, 'waiting': [], 'held': None}
+    later = add(USB, recorder([], 2))
+    assert later.done.wait(WAIT)
+    assert later.state == 'printed'
+
+
+def test_an_ended_job_frees_its_functions():
+    job = add(USB, recorder([], 1))
+    assert job.done.wait(WAIT)
+    assert job.run is None
+    assert job.explain is None
+
+
+def test_a_raising_job_logs_its_traceback(caplog):
+    def raises():
+        raise ValueError('boom')
+    job = add(USB, raises)
+    assert job.done.wait(WAIT)
+    record = next(record for record in caplog.records if record.exc_info)
+    assert record.exc_info[0] is ValueError
+
+
+def test_the_state_comes_after_the_message():
+    # A reader outside the lock must not see a failed job without its message
+    seen = []
+
+    class Watching(print_queue.Job):
+        def __setattr__(self, name, value):
+            if name == 'state' and value == 'failed':
+                seen.append(self.message)
+            super().__setattr__(name, value)
+    job = Watching('id', 'key', 'Label', 1, 'api')
+    print_queue._end(job, 'failed', 'The cover is open')
+    assert seen == ['The cover is open']
+
+
+def test_resume_does_nothing_on_a_line_that_is_not_held():
+    run, started, release = blocked()
+    add(USB, run)
+    assert started.wait(WAIT)
+    waiting = add(USB, recorder([], 2))
+    print_queue.resume(USB)
+    assert waiting.state == 'waiting'
+    assert print_queue.summary(USB) == {'printing': True, 'waiting': 1, 'held': False}
+    release.set()
+    assert waiting.done.wait(WAIT)
+    print_queue.resume('tcp://192.0.2.5')
