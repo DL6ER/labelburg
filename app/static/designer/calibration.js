@@ -2,7 +2,7 @@
 // prints off to one side by how the roll sits, the server keeps how far its
 // labels are moved. Offered at the printer chip and in the Settings.
 
-import { $, $$, esc, icon, S, C, API, post, capsOf, toast, followJob, openLayer, closeLayer, UNREACHABLE } from './core.js';
+import { $, $$, esc, icon, S, C, API, post, capsOf, toast, followJob, lineBusy, openLayer, closeLayer, UNREACHABLE } from './core.js';
 
 const svg = paths => `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 const RULER = svg('<path d="M3 15 15 3l6 6L9 21z"/><path d="m7 11 2 2M10 8l2 2M13 5l2 2"/>');
@@ -60,18 +60,19 @@ async function postCalibration(p, extra, shown = toast, trying = false) {
     }
 }
 
-// Whether it printed, else the reason shown. Followed in the queue until
-// printed. Moved as in the open dialog,
-// which is not saved yet.
-async function printCalibration(p, shown, working) {
+// Whether it printed, else the reason shown, after following it in the queue.
+// Moved as in the open dialog, which is not saved yet.
+async function printCalibration(p, shown, working, told) {
     try {
+        const behind = lineBusy(p);
         const r = await post('/calibration/print', form(p, { label_size: tapeOf(p), ...working }, false));
         const j = await r.json().catch(() => ({}));
         if (!r.ok) shown(j.message || 'The calibration label could not be printed');
         else if (!j.job) return true;
         else {
             const entry = { job: j.job, start: j.start, seen: j.state };
-            await followJob(entry);
+            if (behind && j.state === 'waiting') told('The calibration label waits in the queue.');
+            await followJob(entry, () => { if (entry.seen === 'printing') told('Printing the calibration label.'); });
             if (entry.state === 'printed') return true;
             shown(entry.message || 'The calibration label could not be printed');
         }
@@ -147,7 +148,7 @@ export async function openCalibration(p, changed) {
         printButton.disabled = true;
         say('Printing the calibration label.');
         const at = { ...working };
-        if (await printCalibration(p, text => say(text, true), at)) {
+        if (await printCalibration(p, text => say(text, true), at, say)) {
             printed = at;
             say('');
         }

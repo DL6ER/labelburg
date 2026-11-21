@@ -94,6 +94,7 @@ def test_an_outcome_asked_too_late_is_not_known(editor):  # noqa: F811
 
 def test_jobs_left_printing_are_resolved_when_the_page_opens_again(editor):  # noqa: F811
     type_label(editor, 'Shelf')
+    answer_print(editor, 'printed')
     editor.click('#print')
     editor.wait_for_function("() => labelEditor.S.history[0] && labelEditor.S.history[0].state === 'printed'")
     editor.evaluate("""() => {
@@ -374,7 +375,7 @@ def test_continue_works_again_after_it_did_not_reach_the_server(editor):  # noqa
     choose(editor, printer(waiting=1, held=True))
     editor.click('#queue button:text-is("Continue")')
     editor.wait_for_selector('#toast:has-text("The label designer could not be reached")')
-    with editor.expect_request('**/api/queue/continue'):
+    with editor.expect_response('**/api/queue/continue'):
         editor.click('#queue button:text-is("Continue")', timeout=8000)
     assert len(continued) == 2
 

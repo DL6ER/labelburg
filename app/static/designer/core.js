@@ -1071,8 +1071,9 @@ export async function printJob(job, onDone, printer = S.printer) {
 
 // Asks for the job of entry ({ job, start, seen }) every 1.5 s, one request
 // at a time and not from a tab in the background, until it is printed,
-// failed or lost. Sets entry.state and entry.message.
-export function followJob(entry) {
+// failed or lost, calling changed when its state moves on. Sets entry.state
+// and entry.message.
+export function followJob(entry, changed = () => { }) {
     return new Promise(resolve => {
         let asking = false;
         const end = (state, message = '') => {
@@ -1093,7 +1094,7 @@ export function followJob(entry) {
                     else end('failed', 'The label designer was restarted before it printed');
                 } else if (data.state === 'printed') end('printed');
                 else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'It was not printed');
-                else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); }
+                else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); changed(); }
                 else if (!data.state && entry.seen === 'failed') end('failed', 'It was not printed');
             } catch (e) {
                 // The next one asks again, unless the answer told the outcome already
