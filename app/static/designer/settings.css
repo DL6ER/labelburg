@@ -80,6 +80,13 @@
 .set-note .custom { font-size: 12px; padding: 0; }
 .set-card a:not(.btn) { color: var(--select); }
 
+.q-card .q-row { padding: 8px 16px; }
+.q-card .q-row + .q-row { border-top-color: var(--line); }
+.q-card .set-card-h + .q-row, .q-card .q-held + .q-row { border-top: 0; }
+.q-card .q-img { width: 84px; height: 36px; }
+.q-held { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--bad-soft); color: var(--bad); border-bottom: 1px solid var(--line); }
+.q-held span { flex: 1; min-width: 0; }
+
 @media (max-width: 700px) {
     .set { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
     .set-nav { flex-direction: row; overflow-x: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }

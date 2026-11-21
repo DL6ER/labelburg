@@ -10,13 +10,15 @@ import {
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
+import { queuePage } from './queue.js';
 import { calibrationHTML, openCalibration, dismissCalibration } from './calibration.js';
 
-const PARTS = [['printers', 'Printers', 'printer'], ['labels', 'Labels', 'tag'], ['printed', 'Printed labels', 'clock'],
+const PARTS = [['printers', 'Printers', 'printer'], ['queue', 'Print queue', 'queue'], ['labels', 'Labels', 'tag'], ['printed', 'Printed labels', 'clock'],
     ['connections', 'Connections', 'link'], ['about', 'About', 'info']];
 // Line icons of this page only, the others are symbols of the page
 const PATHS = {
     tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><path d="M7.5 7.5h.01"/>',
+    queue: '<path d="M9 6h12M9 12h12M9 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
@@ -508,6 +510,7 @@ DRAW.labels = box => {
 
 // --- Printed labels -----------------------------------------------------------------
 
+DRAW.queue = queuePage;
 DRAW.printed = box => {
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>Printed labels</h2><p class="muted">The labels printed in this browser, newest first.</p></div></header>
         <section class="set-card set-hist" id="setHist"></section>`;

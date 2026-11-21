@@ -2,7 +2,7 @@
 // job printing, those waiting behind it, a line held by a job that did not
 // print. Read while it has jobs or this browser waits for one of its own.
 
-import { $, API, S, QUEUE, esc, icon, jobText, lineBusy, post, toast, queueBack } from './core.js';
+import { $, API, S, QUEUE, esc, icon, jobText, lineBusy, post, toast, queueBack, printerLabel } from './core.js';
 
 // --- As markup, for this panel and the list of every printer -------------------
 
@@ -111,13 +111,8 @@ function toggle(b) {
     drawn = lineHTML(line, open);
 }
 
-async function clicked(e) {
-    const b = e.target.closest('button');
-    if (!b || !S.printer) return;
-    if ('more' in b.dataset) {
-        toggle(b);
-        return;
-    }
+// Remove or Continue (of the printer at path), shared by the panel and the page
+async function act(b, path) {
     if (b.dataset.remove) {
         // Its sender here is told by the list, not by a message of its own
         const id = b.dataset.remove;
@@ -126,8 +121,19 @@ async function clicked(e) {
         if (!await send(`/queue/${encodeURIComponent(id)}/remove`)) QUEUE.removed.delete(id);
     } else if ('continue' in b.dataset) {
         b.disabled = true;
-        await send('/queue/continue', new URLSearchParams({ printer: S.printer.path }));
-    } else return;
+        await send('/queue/continue', new URLSearchParams({ printer: path }));
+    } else return false;
+    return true;
+}
+
+async function clicked(e) {
+    const b = e.target.closest('button');
+    if (!b || !S.printer) return;
+    if ('more' in b.dataset) {
+        toggle(b);
+        return;
+    }
+    if (!await act(b, S.printer.path)) return;
     // Drawn anew, also where the line stays as it was: its buttons work again
     drawn = null;
     readQueue();
@@ -142,4 +148,74 @@ export function mountQueue(onChange) {
     setInterval(followQueue, 1500);
     document.addEventListener('visibilitychange', followQueue);
     followQueue();
+}
+
+// --- The page of every printer's queue (Settings) -----------------------------------
+
+const NOTHING = 'Nothing is printing or waiting.';
+let pageBox = null, pageRead = null, pageDrawn = null, lines = null;
+
+const printerOf = path => S.printers.find(p => p.path === path);
+const lineName = path => { const p = printerOf(path); return p ? printerLabel(p) : path.replace('file://', ''); };
+function cardHTML(l) {
+    const held = !!l.held, state = held ? 'Stopped' : l.printing ? 'Printing' : 'Waiting';
+    const printing = l.printing && `<div class="q-row"><span class="q-img">${l.printing.preview ? `<img alt="" src="${esc(l.printing.preview)}">` : ''}</span>
+        <span class="grow"><b>${esc(printingText(l.printing))}</b></span></div>`;
+    return `<section class="set-card q-card" data-queue="${esc(l.printer)}">
+        <div class="set-card-h"><span class="d ${held ? 'bad' : ''}"></span><b class="grow">${esc(lineName(l.printer))}</b><small class="muted">${state}</small></div>
+        ${held ? `<div class="q-held"><span role="alert">${esc(heldText(l))}</span><button class="tbtn" type="button" data-continue>Continue</button></div>` : ''}
+        ${printing || ''}${l.waiting.map(jobRow).join('')}</section>`;
+}
+function pageHTML() {
+    if (!lines) return '';
+    const quiet = S.printers.filter(p => !lines.some(l => l.printer === p.path)).map(printerLabel);
+    return lines.length ? lines.map(cardHTML).join('') + (quiet.length ? `<p class="muted">${esc(quiet.join(', '))}: nothing printing or waiting.</p>` : '')
+        : `<p class="muted">${NOTHING}</p>`;
+}
+function drawPage(force = false) {
+    if (!pageBox || !pageBox.isConnected) return;
+    const list = $('#setQueue', pageBox), html = pageHTML();
+    if (!force && html === pageDrawn) return;
+    pageDrawn = html;
+    const f = document.activeElement, d = list.contains(f) ? f.dataset : {};
+    const focused = d.remove ? `[data-remove="${CSS.escape(d.remove)}"]` : 'continue' in d ? `[data-queue="${CSS.escape(f.closest('[data-queue]').dataset.queue)}"] [data-continue]` : '';
+    list.innerHTML = html;
+    if (focused && $(focused, list)) $(focused, list).focus();
+}
+const pageShown = () => !!pageBox && pageBox.isConnected && pageBox.dataset.part === 'queue' && document.body.dataset.view === 'settings';
+
+// One read at a time, only while the page is shown by a visible tab
+async function readPage() {
+    if (!pageShown() || document.hidden) return;
+    if (pageRead) return pageRead;
+    pageRead = (async () => {
+        try {
+            const r = await fetch(`${API}/queue`);
+            const data = r.ok ? await r.json() : null;
+            if (data && pageShown()) { lines = data.printers || []; drawPage(); }
+        } catch (e) {
+            // The next one reads it
+        }
+    })().finally(() => { pageRead = null; });
+    return pageRead;
+}
+
+export function queuePage(box) {
+    pageBox = box;
+    lines = null;
+    pageDrawn = null;
+    box.innerHTML = `<header class="set-h"><div class="grow"><h2>Print queue</h2><p class="muted">What the printers print and what waits, from this browser, other devices and the API. A waiting label can be removed.</p></div></header>
+        <div class="set-list" id="setQueue"></div>`;
+    $('#setQueue', box).addEventListener('click', async e => {
+        const b = e.target.closest('button'), card = b && b.closest('[data-queue]');
+        if (!card || !await act(b, card.dataset.queue)) return;
+        // Drawn anew, also where the line stays as it was: its buttons work again
+        drawPage(true);
+        readPage();
+    });
+    if (!queuePage.timer) {
+        queuePage.timer = setInterval(readPage, 1500);
+        document.addEventListener('visibilitychange', readPage);
+    }
+    readPage();
 }
