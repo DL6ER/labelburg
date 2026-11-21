@@ -296,11 +296,10 @@ export function blanksOf(design) {
 export const blankFields = item => (item.design && item.design.fields) || {};
 export const BLANK_KINDS = [['text', 'Text'], ['number', 'Number'], ['date', 'Date'], ['choice', 'Choice']];
 export const guessKind = name => /(^|\s)on$|\bdate\b/i.test(name) ? 'date' : /^(box|number|portions|no\.?|count)$/i.test(name) ? 'number' : 'text';
-// The kinds of blanks, a saved label naming another is guessed by its name
-const FIELD_TYPES = ['text', 'number', 'date', 'choice'];
+// A kind of blank a saved label names that is none of BLANK_KINDS is guessed by its name
 export const fieldType = (item, name) => {
     const type = (blankFields(item)[name] || {}).type;
-    return FIELD_TYPES.includes(type) ? type : guessKind(name);
+    return BLANK_KINDS.some(([kind]) => kind === type) ? type : guessKind(name);
 };
 export const blankChoices = (item, name) => ((blankFields(item)[name] || {}).choices || []).map(String);
 export const choicesOf = text => [...new Set(String(text).split('\n').map(c => c.trim()).filter(Boolean))];
