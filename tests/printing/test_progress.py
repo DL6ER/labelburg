@@ -274,3 +274,10 @@ def test_printer_status_tells_the_job(tmp_path, clock, monkeypatch):
     assert status['printers'][0]['status_type'] == devices.BUSY_STATUS_TYPE
     # No job on the simulator
     assert 'job' not in status['printers'][1]
+
+
+def test_pages_of_several_labels_are_told(clock):
+    progress.start(DEVICE, [10, 10], (10, 0), unit='page')
+    assert progress.state(DEVICE)['unit'] == 'page'
+    progress.start(DEVICE, [10, 10], (10, 0))
+    assert 'unit' not in progress.state(DEVICE)

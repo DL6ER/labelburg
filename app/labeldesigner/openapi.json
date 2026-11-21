@@ -9,7 +9,7 @@
     "/labeldesigner/api/preview": {
       "post": {
         "summary": "Generate the label image without printing",
-        "description": "The label as it is printed: the quality the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label size the request names is shown as it is, not placed on the tape loaded in the printer.",
+        "description": "The label as it is printed: the quality the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label size the request names is shown as it is, not placed on the tape loaded in the printer. On a roll of several labels to a page, the preview is its first page as the label is seen upright: the label first, top left, followed by as many of the `print_count` copies as fit, each with its counter, the rest of the page blank.",
         "operationId": "preview",
         "parameters": [
           {
@@ -52,6 +52,17 @@
                         ],
                         "default": "0",
                         "description": "1 shows blanks without a value in the text as their name and a question mark, e.g. `Room?`, as the label designer previews them. A code that takes the text gets it without them."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                      },
+                      "labels_per_copy": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -86,6 +97,17 @@
                         ],
                         "default": "0",
                         "description": "1 shows blanks without a value in the text as their name and a question mark, e.g. `Room?`, as the label designer previews them. A code that takes the text gets it without them."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                      },
+                      "labels_per_copy": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -100,6 +122,12 @@
             "headers": {
               "X-Label-Warning": {
                 "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Label-Sheet": {
+                "description": "On a roll of several labels to a page, how `print_count` copies of `labels_per_copy` labels fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. Not set for other label sizes.",
                 "schema": {
                   "type": "string"
                 }
@@ -622,7 +650,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -686,7 +714,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2072,7 +2100,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2472,7 +2500,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -3769,7 +3797,14 @@
               },
               "labels": {
                 "type": "integer",
-                "description": "The labels of the job."
+                "description": "The labels of the job, its pages where `unit` is `page`."
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "page"
+                ],
+                "description": "`page` where the printer prints pages of several labels, e.g. a Niimbot B1 on such a roll: `label` and `labels` count pages. Left out otherwise."
               },
               "seconds_left": {
                 "type": "integer",

@@ -25,7 +25,9 @@ class Label:
     the printer, the length 0 for endless tape. offset_r moves the print this
     many dots off the right edge, so that it is centered, feed_margin is fed
     before and after it. models lists the printers it is made for, empty for
-    all printers of its driver."""
+    all printers of its driver. pieces are the labels of a page of several,
+    e.g. of a Niimbot roll, half cut apart: how many across (lanes), how many
+    along (rows), and the gap between lanes in mm."""
     identifier: str
     tape_size: tuple[int, int]
     form_factor: FormFactor
@@ -35,6 +37,7 @@ class Label:
     feed_margin: int = 0
     models: tuple[str, ...] = ()
     color: Color = Color.BLACK_WHITE
+    pieces: tuple[int, int, float] = (1, 1, 0)
 
     @property
     def name(self) -> str:

@@ -7,8 +7,9 @@ import {
     $, $$, esc, icon, clone, debounce, toast, hideToast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
     savedItem, demoItem, itemDesign, thumbUrl, drawThumb, preview, defaults, blanksOf, fieldType, blankChoices, valuesNow,
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
-    printedSub, NO_IMAGE
+    printedSub, NO_IMAGE, sheetNote
 } from './core.js';
+import { perCopyOf } from './media.js';
 
 let ctx = null;
 const G = { cat: 'saved', fitsOnly: true, typed: '', typedCat: false, sel: null };
@@ -214,6 +215,7 @@ async function showDetail(item, values = null) {
         ${blanks.length ? `<div class="tpl-fields" id="tplFields">${blanks.map((b, i) => blankField({ design: work.design }, b, work.values[b], i)).join('')}</div>` : ''}
         <div class="tpl-print"><span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(before ? before.copies : 1)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>
             <button class="btn primary" type="button" id="tplPrint"${before && before.noImage ? ` disabled title="${esc(NO_IMAGE)}"` : ''}>${icon('printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        <p class="mnote sheetnote" id="tplSheet" hidden></p>
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
             ${saved ? `<button class="btn ghost" type="button" id="tplLinks">${icon('qr')}Use from anywhere</button>
@@ -222,7 +224,20 @@ async function showDetail(item, values = null) {
         </div>
         <div id="tplMore"></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
-    const shot = () => preview(work.design, work.values).then(p => { const img = $('#tplShot'); if (img && G.sel === item) img.src = p.url; }, () => { });
+    const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+    // Only the answer to the last preview asked is shown, earlier ones may come later
+    let asked = 0;
+    const shot = () => {
+        const mine = ++asked;
+        return perCopyOf(work.design).then(n => preview(work.design, work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
+    };
+    const shotDone = (p, mine) => {
+        const img = $('#tplShot'), note = $('#tplSheet');
+        if (!img || G.sel !== item || mine !== asked) return;
+        img.src = p.url;
+        note.innerHTML = sheetNote(p.sheet);
+        note.hidden = !note.innerHTML;
+    };
     shot();
     const later = debounce(shot, 250);
     // One print at a time: a key held down or a second click waits for it
@@ -233,7 +248,7 @@ async function showDetail(item, values = null) {
         try { await printOnce(); } finally { printing = false; }
     };
     const printOnce = async () => {
-        const copies = Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+        const copies = copiesNow();
         const now = valuesNow(work.values, starts, { design: work.design });
         toast(`Printing ${copies} ${copies === 1 ? 'label' : 'labels'}...`, null, 120000);
         const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } });
@@ -248,7 +263,14 @@ async function showDetail(item, values = null) {
         inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => { work.values[inp.dataset.blank] = inp.value; later(); });
         inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) print(); } });
     });
-    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(100, Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); });
+    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(100, Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); later(); });
+    $('#tplCopies').addEventListener('input', later);
+    $('#tplSheet').onclick = e => {
+        const fill = e.target.closest('[data-fill]');
+        if (!fill) return;
+        $('#tplCopies').value = fill.dataset.fill;
+        shot();
+    };
     $('#tplPrint').onclick = print;
     $('#tplOpen').onclick = async () => {
         let open = item, design = work.design;

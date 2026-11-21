@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom
+    loadSaved, roomFrom, isSheet, sheetNote
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -303,7 +303,7 @@ export function renderEditor() {
                     <div class="labelbox" id="labelbox">
                         <span class="printer vslot" id="vslot" aria-hidden="true"><span class="led"></span><span class="model"></span><span class="mouth"></span></span>
                         <div class="lead" id="lead" hidden></div>
-                        <div class="paper" id="paper"><img id="labelImg" alt="Label preview"><div class="picks" id="picks"></div></div>
+                        <div class="paper" id="paper"><img id="labelImg" alt="Label preview"><svg class="pagecuts" id="pagecuts" aria-hidden="true"></svg><div class="picks" id="picks"></div></div>
                         <span class="cutmark" id="cutmark" aria-hidden="true" hidden>${icon('scissors')}</span>
                         <span class="dim" id="dimW" title="Width of the tape"><b></b><i></i></span>
                         <span class="dim" id="dimL" title="Length as cut"><b></b><i></i></span>
@@ -311,6 +311,7 @@ export function renderEditor() {
                     </div>
                     <div class="printer slot" id="slot" aria-hidden="true"><span class="led"></span><span class="model"></span><span class="mouth"></span></div>
                     <p class="made" id="made" hidden></p>
+                    <p class="mnote sheetnote" id="sheetNote" hidden></p>
                     <div class="fill" id="fill" hidden></div>
                     <div class="composer">
                         <div class="field" id="field" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="Label text" data-ph="Type the label text, [ for blanks and dates"></div>
@@ -361,6 +362,15 @@ function bindStage() {
     $('#templates').onclick = () => hooks.templates && hooks.templates();
     $('#advBtn').onclick = () => toggleAdvanced();
     $('#zoom').onclick = () => toggleLarge();
+    $('#sheetNote').onclick = e => {
+        const fill = e.target.closest('[data-fill]');
+        if (!fill) return;
+        // Filled for this page, they go back on a printer without pages
+        if (S.edit && S.edit.filledFrom === undefined) S.edit.filledFrom = copies();
+        $('#copies').value = fill.dataset.fill;
+        if (S.edit) S.edit.copies = +fill.dataset.fill;
+        copiesChanged();
+    };
     // The label takes the room left once Advanced has moved in or out
     $('#center').addEventListener('transitionend', e => { if (e.target.id === 'center' && e.propertyName === 'margin-right') fitLabel(); });
     // The name the label is saved under, a saved one is renamed when saved
@@ -561,7 +571,7 @@ const drawPreview = latest(async () => {
     const values = previewValues(E);
     let p;
     try {
-        p = await preview(shown, values);
+        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0);
     } catch (e) {
         if (me < shownSeq) return;
         shownSeq = me;
@@ -570,6 +580,7 @@ const drawPreview = latest(async () => {
         $('#labelbox').classList.remove('busy');
         $('#labelbox').classList.add('failed');
         $('#picks').innerHTML = '';
+        drawSheet(null);
         fitsNote('', e.message);
         updateActions();
         laidOut(true);
@@ -609,9 +620,37 @@ const drawPreview = latest(async () => {
         renderToolbar();
     }
     fitsNote(empty ? null : p.warning, '');
+    drawSheet(empty ? null : p.sheet);
     updateActions();
     if (!empty && hooks.previewed) hooks.previewed(ui.last, shown);
 });
+
+// Where a page of several labels is cut into them and the gap between lanes,
+// over the page as the server tells it: shown, never printed
+function drawCuts(w, h) {
+    const box = $('#pagecuts'), sheet = ui.last && ui.last.sheet;
+    if (!box) return;
+    if (!sheet) { box.innerHTML = ''; return; }
+    const kx = w / sheet.size[0], ky = h / sheet.size[1], r = n => Math.round(n * 10) / 10;
+    const rects = sheet.labels.map(([x, y, bw, bh]) => [r(x * kx), r(y * ky), r(bw * kx), r(bh * ky)]);
+    const holes = rects.map(([x, y, rw, rh]) => `M${x} ${y}h${rw}v${rh}h${-rw}z`).join('');
+    box.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    box.innerHTML = '<defs><pattern id="gapHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5"/></pattern></defs>'
+        + `<path class="gap" d="M0 0H${w}V${h}H0z${holes}"/>`
+        + rects.map(([x, y, rw, rh]) => `<rect x="${x + .5}" y="${y + .5}" width="${rw - 1}" height="${rh - 1}"/>`).join('');
+}
+
+// Where the copies leave the last page of a roll with several labels to a
+// page not full, as the server tells it
+function drawSheet(sheet) {
+    const note = $('#sheetNote'), html = sheetNote(sheet);
+    note.innerHTML = html;
+    note.hidden = !html;
+}
+// Only a roll with several labels to a page previews the copies
+export function copiesChanged() {
+    if (ui.last && isSheet(ui.last.labelSize)) drawPreview();
+}
 
 function previewValues(E) {
     const item = editItem(E);
@@ -678,6 +717,7 @@ export function fitLabel() {
     $('#slot').style.width = `${w + 72}px`;
     $('#vslot').style.height = `${h + 24}px`;
     drawDims(g);
+    drawCuts(w, h);
     const zoom = $('#zoom');
     zoom.setAttribute('aria-pressed', String(large));
     zoom.title = large ? 'Smaller preview' : 'Larger preview';
@@ -1218,6 +1258,11 @@ function askReplace(title, replace, asNew) {
 export function printerChanged() {
     if (!S.edit || !$('#stage')) return;
     placeEdit(S.edit);
+    if (S.edit.filledFrom !== undefined && !isSheet(onTape(S.edit.design).label_size)) {
+        S.edit.copies = S.edit.filledFrom;
+        $('#copies').value = S.edit.copies;
+        delete S.edit.filledFrom;
+    }
     drawTape();
     drawPrinter();
     if (ui.adv) renderAdvanced();

@@ -240,6 +240,9 @@ async function unitsOf(d) {
     return units;
 }
 
+// The labels each copy of a label prints
+export const perCopyOf = async d => (await unitsOf(d)).length;
+
 function unitNow() {
     if (M.edit !== S.edit) { M.edit = S.edit; M.unit = 0; M.units = []; }
     return M.units[Math.min(M.unit, M.units.length - 1)] || null;
@@ -260,7 +263,7 @@ const countUnits = latest(async () => {
     const units = await unitsOf(E.design);
     if (S.edit !== E) return;
     // Before the units are known, the first one is shown
-    const before = unitNow() || units[0];
+    const before = unitNow() || units[0], counted = M.units.length;
     M.units = units;
     // The file shown before stays shown, e.g. after another one was removed
     const kept = M.keep ? units.findIndex(u => u.key === M.keep.key && u.page === M.keep.page) : -1;
@@ -270,6 +273,8 @@ const countUnits = latest(async () => {
     const now = unitNow();
     drawStepper();
     if (before && now && (before.file !== now.file || before.page !== now.page)) { ed.markBusy(); ed.redraw(); }
+    // The note on the last page of a roll with several labels counts them all
+    else if (units.length !== counted) ed.redraw();
 });
 
 function step(by) {
@@ -723,6 +728,7 @@ export function mountMedia(editor) {
     hooks.addImage = addImage;
     hooks.files = readImages;
     hooks.shown = shown;
+    hooks.perCopy = () => M.units.length;
     hooks.previewed = previewed;
     const input = document.createElement('input');
     Object.assign(input, { type: 'file', id: 'imageFile', accept: 'image/*,application/pdf', multiple: true, hidden: true });
