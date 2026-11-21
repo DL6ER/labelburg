@@ -29,6 +29,8 @@ REMOVED = 'Removed from the queue'
 PRINTING_ALREADY = 'It is printing already'
 NOT_WAITING = 'It is not waiting in the queue anymore'
 NO_SUCH_JOB = 'No such print job'
+NO_PREVIEW = 'The preview of this print job is no longer kept'
+PRINTER_REQUIRED = 'printer is required'
 
 FAILED = 'It was not printed'
 

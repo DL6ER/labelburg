@@ -2485,7 +2485,7 @@
         "operationId": "demoLoad",
         "parameters": [
           {
-            "name": "job_id",
+            "name": "id",
             "in": "query",
             "required": true,
             "description": "Id of the demo label from the list, e.g. `signs/01-fire-extinguisher-62.json`.",
@@ -2545,7 +2545,7 @@
         "operationId": "demoPreview",
         "parameters": [
           {
-            "name": "job_id",
+            "name": "id",
             "in": "query",
             "required": true,
             "description": "Id of the demo label from the list, e.g. `signs/01-fire-extinguisher-62.json`.",
@@ -2649,7 +2649,7 @@
         "operationId": "demoPrint",
         "parameters": [
           {
-            "name": "job_id",
+            "name": "id",
             "in": "query",
             "required": false,
             "description": "Id of the demo label, also accepted as `id` in a JSON body or form.",

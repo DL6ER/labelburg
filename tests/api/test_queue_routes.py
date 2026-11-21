@@ -85,7 +85,24 @@ def test_a_job_and_its_preview(client, queued, monkeypatch):
     unknown = client.get(f'{QUEUE}/nothing')
     assert (unknown.status_code, unknown.get_json()) == (404, {
         'success': False, 'message': 'No such print job', 'start': print_queue.START})
-    assert client.get(f'{QUEUE}/nothing/preview.png').status_code == 404
+    missing = client.get(f'{QUEUE}/nothing/preview.png')
+    assert (missing.status_code, missing.get_json()['message']) == (404, 'No such print job')
+    # A job whose preview is dropped
+    print_queue.get(job_id).preview = None
+    gone = client.get(told['preview'])
+    assert (gone.status_code, gone.get_json()['message']) == (404, 'The preview of this print job is no longer kept')
+
+
+def test_an_empty_printer_lists_every_line(client, queued, monkeypatch):
+    _, _, release = _two_jobs(client, monkeypatch)
+    answer = client.get(QUEUE, query_string={'printer': ''}).get_json()
+    release.set()
+    assert [line['printer'] for line in answer['printers']] == [DEVICE]
+
+
+def test_continue_needs_a_printer(client):
+    answer = client.post(f'{QUEUE}/continue', data={})
+    assert (answer.status_code, answer.get_json()) == (400, {'success': False, 'message': 'printer is required'})
 
 
 def test_a_job_without_a_preview_has_none(client, queued):

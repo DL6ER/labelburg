@@ -1972,8 +1972,8 @@ def _no_such_job():
 def queue_of_printers():
     """The jobs of the line of the printer, or of every line with a job or
     a hold. Never asks a printer."""
-    if 'printer' in request.args:
-        device = request.args['printer']
+    device = request.args.get('printer')
+    if device:
         return jsonify({**_line_told(print_queue.line(device), device), 'start': print_queue.START})
     return jsonify(printers=[{'printer': told['printer'], **_line_told(told, told['printer'])} for told in print_queue.lines()],
                    start=print_queue.START)
@@ -1990,9 +1990,13 @@ def queue_job(job_id):
 @bp.route('/api/queue/<job_id>/preview.png', methods=['GET'])
 def queue_preview(job_id):
     job = print_queue.get(job_id)
-    if job is None or job.preview is None:
+    if job is None:
         return _fail(print_queue.NO_SUCH_JOB, 404)
-    response = make_response(job.preview)
+    # Read once, it is dropped in time
+    preview = job.preview
+    if preview is None:
+        return _fail(print_queue.NO_PREVIEW, 404)
+    response = make_response(preview)
     response.headers.set('Content-type', 'image/png')
     return response
 
@@ -2013,7 +2017,7 @@ def queue_continue():
     """Print on after a job that did not print held the jobs behind it."""
     values = {**request.values.to_dict(), **_json_body()}
     if not values.get('printer'):
-        return _fail('printer is required', 400)
+        return _fail(print_queue.PRINTER_REQUIRED, 400)
     print_queue.resume(values['printer'])
     return jsonify(success=True)
 
