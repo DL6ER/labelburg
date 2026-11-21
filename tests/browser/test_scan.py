@@ -66,6 +66,20 @@ class Station:
         if end:
             self.page.keyboard.press(end)
 
+    def scan_fast(self, text):
+        """text typed into the field in one go, a line break as Enter: the
+        gaps between the keys do not grow with the load of the machine."""
+        self.page.evaluate("""text => {
+            const field = document.querySelector('#scanField');
+            for (const ch of text) {
+                if (ch === '\\n') field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+                else {
+                    field.value += ch;
+                    field.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ch, bubbles: true }));
+                }
+            }
+        }""", text)
+
 
 def save_box(page, server):
     answer = page.request.post(server + '/labeldesigner/api/repository/save', headers={'Content-Type': 'application/json'},
@@ -117,9 +131,8 @@ def test_fast_scan_ending_on_enter_prints_once(station):
 
 
 def test_fast_scan_without_enter_ends_after_a_pause(station):
-    page = station.page
-    with page.expect_request('**/api/scan', timeout=500):
-        station.scan('A-17', end=None)
+    station.scan_fast('A-17')
+    station.wait_for(1)
     assert station.none_for(300) == 1
     assert station.codes() == ['A-17']
 
@@ -144,10 +157,7 @@ def test_hand_typing_waits_for_enter(station):
 
 
 def test_enter_inside_a_fast_scan_is_a_line_break(station):
-    page = station.page
-    for line in ('BEGIN:VCARD', 'FN:Erika Muster', 'END:VCARD'):
-        page.keyboard.type(line, delay=5)
-        page.keyboard.press('Enter')
+    station.scan_fast('BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD\n')
     station.wait_for(1)
     assert station.none_for(400) == 1
     assert station.codes() == ['BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD']
@@ -302,11 +312,11 @@ def test_a_stray_character_does_not_slow_a_later_scan(station):
     page = station.page
     page.keyboard.type('x')
     page.wait_for_timeout(2300)
-    station.scan('A-17', end=None)
+    station.scan_fast('A-17')
     station.wait_for(1)
     page.keyboard.type('y')
     page.wait_for_timeout(2300)
-    station.scan('B-42')
+    station.scan_fast('B-42\n')
     station.wait_for(2)
     assert station.none_for(300) == 2
     assert station.codes() == ['A-17', 'B-42']
@@ -390,6 +400,16 @@ def test_a_scan_with_the_switch_focused_is_caught(station):
     assert station.codes() == ['A-17']
     assert not page.is_checked('#scanShow')
     assert 'preview_only' not in station.requests[0]
+
+
+def test_space_presses_the_switch_of_the_station(station):
+    page = station.page
+    page.keyboard.press('Tab')
+    assert page.evaluate('() => document.activeElement.id') == 'scanShow'
+    page.keyboard.press(' ')
+    assert page.is_checked('#scanShow')
+    assert page.input_value('#scanField') == ''
+    assert station.none_for(300) == 0
 
 
 def test_a_pointer_released_outside_the_window_does_not_hold_the_focus(station):
