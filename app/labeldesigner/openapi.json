@@ -520,11 +520,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -540,7 +540,7 @@
             }
           },
           "503": {
-            "description": "The printer could not print it, the message tells why.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -756,11 +756,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -776,7 +776,223 @@
             }
           },
           "503": {
-            "description": "Not printed, the printer could not print the label, `message` says why, e.g. \"The printer reports: Replace media error\". The same request may succeed later.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/queue": {
+      "get": {
+        "summary": "Read the print queue",
+        "description": "The jobs waiting and printing in the line of a printer, or in every line that has a job or a hold. Never asks a printer, so it may be polled often. A line prints one job after the other: a job that did not print holds the jobs behind it until `/labeldesigner/api/queue/continue` or until they are removed.",
+        "operationId": "getQueue",
+        "parameters": [
+          {
+            "name": "printer",
+            "in": "query",
+            "required": false,
+            "description": "The `path` of a listed printer. Left out, every line with a printing job, waiting jobs or a hold is listed, the others are left out.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The line of the printer, or the lines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/QueueLine"
+                    },
+                    {
+                      "$ref": "#/components/schemas/QueueLines"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/queue/{job_id}": {
+      "get": {
+        "summary": "Read a print job",
+        "description": "The state of a job a print request added. A job that ended is told for 24 hours, its preview for 10 minutes. `start` changes when the server restarts: jobs it did not print are lost with it.",
+        "operationId": "getQueueJob",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `job` of the answer to a print request.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueJob"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, e.g. it ended long ago or the server was restarted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/queue/{job_id}/preview.png": {
+      "get": {
+        "summary": "The preview of a print job",
+        "description": "Its first label, at most 240 pixels on the long side.",
+        "operationId": "getQueuePreview",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `job` of the answer to a print request.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job, or it has no preview (anymore).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/queue/{job_id}/remove": {
+      "post": {
+        "summary": "Remove a waiting job",
+        "description": "Takes a job that waits out of its line. A job that prints or ended cannot be removed.",
+        "operationId": "removeQueueJob",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `job` of the answer to a print request.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The job prints already or is not waiting anymore, `message` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such job.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueNotFound"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/queue/continue": {
+      "post": {
+        "summary": "Print on after a job did not print",
+        "description": "A job that did not print holds the jobs behind it. This lets the line print them.",
+        "operationId": "continueQueue",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "printer"
+                ],
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The `path` of a listed printer."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The line prints on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No printer named.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2131,11 +2347,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -2171,7 +2387,7 @@
             }
           },
           "503": {
-            "description": "Not printed, the printer could not print the label, `message` says why, e.g. \"The printer reports: Replace media error\". The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2269,7 +2485,7 @@
         "operationId": "demoLoad",
         "parameters": [
           {
-            "name": "id",
+            "name": "job_id",
             "in": "query",
             "required": true,
             "description": "Id of the demo label from the list, e.g. `signs/01-fire-extinguisher-62.json`.",
@@ -2329,7 +2545,7 @@
         "operationId": "demoPreview",
         "parameters": [
           {
-            "name": "id",
+            "name": "job_id",
             "in": "query",
             "required": true,
             "description": "Id of the demo label from the list, e.g. `signs/01-fire-extinguisher-62.json`.",
@@ -2433,7 +2649,7 @@
         "operationId": "demoPrint",
         "parameters": [
           {
-            "name": "id",
+            "name": "job_id",
             "in": "query",
             "required": false,
             "description": "Id of the demo label, also accepted as `id` in a JSON body or form.",
@@ -2526,11 +2742,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -2566,7 +2782,7 @@
             }
           },
           "503": {
-            "description": "Not printed, the printer could not print the label, `message` says why, e.g. \"The printer reports: Replace media error\". The same request may succeed later.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2650,20 +2866,24 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/QueuedAnswer"
                     },
-                    "count": {
-                      "type": "integer",
-                      "description": "Number of labels."
+                    {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer",
+                          "description": "Number of labels."
+                        }
+                      }
                     }
-                  }
+                  ]
                 }
               }
             }
@@ -2699,7 +2919,7 @@
             }
           },
           "503": {
-            "description": "Not printed, the printer could not print the label, `message` says why, e.g. \"The printer reports: Replace media error\". The same request may succeed later.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2802,11 +3022,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -2832,7 +3052,7 @@
             }
           },
           "503": {
-            "description": "The printer did not print the label, `message` says why.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2954,11 +3174,11 @@
         },
         "responses": {
           "200": {
-            "description": "Printed.",
+            "description": "Accepted: the job waits in the line of its printer, or prints at once if the line is empty. `success` tells that the job was accepted, not that it printed: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Result"
+                  "$ref": "#/components/schemas/QueuedAnswer"
                 }
               }
             }
@@ -2984,7 +3204,7 @@
             }
           },
           "503": {
-            "description": "The printer did not print the label, `message` says why.",
+            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3024,6 +3244,164 @@
       }
     },
     "schemas": {
+      "QueuedAnswer": {
+        "type": "object",
+        "description": "The answer to a print request: the job is accepted. `success` does not tell that it printed, read that from `/labeldesigner/api/queue/{job_id}`.",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "queued": {
+            "type": "boolean",
+            "description": "Always `true`."
+          },
+          "job": {
+            "type": "string",
+            "description": "The id of the job, for `/labeldesigner/api/queue/{job_id}`."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "printing"
+            ],
+            "description": "Where the job is when the request is answered."
+          },
+          "start": {
+            "type": "string",
+            "description": "Changes when the server restarts."
+          },
+          "image": {
+            "type": "string",
+            "description": "The image of the first label as base64 PNG, with `return_format=png`."
+          }
+        }
+      },
+      "QueueJob": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "What the job prints, as the queue shows it."
+          },
+          "labels": {
+            "type": "integer",
+            "description": "Number of labels."
+          },
+          "from": {
+            "type": "string",
+            "description": "Where the job came from, e.g. `the API` or `Homebox`. Empty for the label designer."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "printing",
+              "printed",
+              "failed",
+              "removed"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Why a job failed, or that it was removed. Empty otherwise."
+          },
+          "preview": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The URL of its preview, `null` without one."
+          },
+          "progress": {
+            "type": "object",
+            "description": "The `job` of the printer as `/labeldesigner/api/printer_status` tells it, only for the job that prints in a line read by `printer`."
+          },
+          "start": {
+            "type": "string",
+            "description": "Only when a single job is read."
+          }
+        }
+      },
+      "QueueLine": {
+        "type": "object",
+        "properties": {
+          "printing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "waiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueJob"
+            },
+            "description": "In the order they print."
+          },
+          "held": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the line waits: the message of the job that did not print. `null` if it does not."
+          },
+          "start": {
+            "type": "string"
+          }
+        }
+      },
+      "QueueLines": {
+        "type": "object",
+        "properties": {
+          "printers": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/QueueLine"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "printer": {
+                      "type": "string",
+                      "description": "The device path the line was added under."
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "start": {
+            "type": "string"
+          }
+        }
+      },
+      "QueueNotFound": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [
+              false
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          }
+        }
+      },
       "Result": {
         "type": "object",
         "properties": {
@@ -3778,6 +4156,24 @@
           "calibration": {
             "$ref": "#/components/schemas/Calibration",
             "description": "Of a printer that offers calibration (the Niimbot B1): how its labels are moved, see /api/calibration."
+          },
+          "queue": {
+            "type": "object",
+            "description": "The line of print jobs of the printer, see `/labeldesigner/api/queue`.",
+            "properties": {
+              "printing": {
+                "type": "boolean",
+                "description": "A job prints."
+              },
+              "waiting": {
+                "type": "integer",
+                "description": "Jobs waiting."
+              },
+              "held": {
+                "type": "boolean",
+                "description": "A job did not print, the jobs behind it wait for `/labeldesigner/api/queue/continue`."
+              }
+            }
           },
           "job": {
             "type": "object",

@@ -28,6 +28,7 @@ OUTCOME_KEPT = 86400.0
 REMOVED = 'Removed from the queue'
 PRINTING_ALREADY = 'It is printing already'
 NOT_WAITING = 'It is not waiting in the queue anymore'
+NO_SUCH_JOB = 'No such print job'
 
 FAILED = 'It was not printed'
 
@@ -66,7 +67,9 @@ class Job:
 
 
 class _Line:
-    def __init__(self):
+    def __init__(self, device: str = ''):
+        # As the first job of the line was added, for lines()
+        self.device = device
         self.waiting = deque()
         self.printing = None
         self.held = None
@@ -161,7 +164,7 @@ def add(device: str, run: Callable[[], str], *, title: str, labels: int, source:
     key = key_of(device)
     with _lock:
         _prune()
-        line = _lines.setdefault(key, _Line())
+        line = _lines.setdefault(key, _Line(device))
         if len(line.waiting) >= MAX_WAITING:
             raise Full()
         job = Job(uuid.uuid4().hex, key, title, labels, source, preview=preview, run=run, explain=explain)
@@ -203,6 +206,16 @@ def line(device: str) -> dict:
             return {'printing': None, 'waiting': [], 'held': None}
         return {'printing': current.printing.told() if current.printing else None,
                 'waiting': [job.told() for job in current.waiting], 'held': current.held}
+
+
+def lines() -> list[dict]:
+    """Every line with a printing job, waiting jobs or a hold, as line()
+    tells it, with the device path it was added under as printer."""
+    with _lock:
+        _prune()
+        return [{'printer': current.device, 'printing': current.printing.told() if current.printing else None,
+                 'waiting': [job.told() for job in current.waiting], 'held': current.held}
+                for current in _lines.values() if current.printing or current.waiting or current.held is not None]
 
 
 def summary(device: str) -> dict:

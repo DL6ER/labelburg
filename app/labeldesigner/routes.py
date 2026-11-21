@@ -1525,6 +1525,8 @@ def get_printer_status():
         printer['takes'] = tape.takes(model)
         # The label size of that tape, for API users
         printer['label_size'], printer['label_size_assumed'] = printed_on.id, printed_on.assumed
+        if printer.get('path'):
+            printer['queue'] = print_queue.summary(printer['path'])
         # A job of this server, added to what the printer tells of it
         job = progress.state(printer['path']) if printer.get('path') else None
         if job:
@@ -1944,6 +1946,76 @@ def print_calibration():
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
     return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
+
+
+def _job_told(told: dict, printing_on: str | None = None) -> dict:
+    """A job as print_queue tells it, its preview as the URL of the image
+    and, for the printing one, the progress of its printer."""
+    told = dict(told, preview=url_for('.queue_preview', job_id=told['id']) if told['preview'] else None)
+    if printing_on is not None and told['state'] == 'printing':
+        progressing = progress.state(printing_on)
+        if progressing:
+            told['progress'] = progressing
+    return told
+
+
+def _line_told(told: dict, device: str) -> dict:
+    return {'printing': _job_told(told['printing'], device) if told['printing'] else None,
+            'waiting': [_job_told(job) for job in told['waiting']], 'held': told['held']}
+
+
+def _no_such_job():
+    return make_response(jsonify({'success': False, 'message': print_queue.NO_SUCH_JOB, 'start': print_queue.START}), 404)
+
+
+@bp.route('/api/queue', methods=['GET'])
+def queue_of_printers():
+    """The jobs of the line of the printer, or of every line with a job or
+    a hold. Never asks a printer."""
+    if 'printer' in request.args:
+        device = request.args['printer']
+        return jsonify({**_line_told(print_queue.line(device), device), 'start': print_queue.START})
+    return jsonify(printers=[{'printer': told['printer'], **_line_told(told, told['printer'])} for told in print_queue.lines()],
+                   start=print_queue.START)
+
+
+@bp.route('/api/queue/<job_id>', methods=['GET'])
+def queue_job(job_id):
+    job = print_queue.get(job_id)
+    if job is None:
+        return _no_such_job()
+    return jsonify({**_job_told(job.told()), 'start': print_queue.START})
+
+
+@bp.route('/api/queue/<job_id>/preview.png', methods=['GET'])
+def queue_preview(job_id):
+    job = print_queue.get(job_id)
+    if job is None or job.preview is None:
+        return _fail(print_queue.NO_SUCH_JOB, 404)
+    response = make_response(job.preview)
+    response.headers.set('Content-type', 'image/png')
+    return response
+
+
+@bp.route('/api/queue/<job_id>/remove', methods=['POST'])
+def queue_remove(job_id):
+    """Take a job that waits out of its line."""
+    refused = print_queue.remove(job_id)
+    if refused is None:
+        return _no_such_job()
+    if refused:
+        return _fail(refused, 409)
+    return jsonify(success=True)
+
+
+@bp.route('/api/queue/continue', methods=['POST'])
+def queue_continue():
+    """Print on after a job that did not print held the jobs behind it."""
+    values = {**request.values.to_dict(), **_json_body()}
+    if not values.get('printer'):
+        return _fail('printer is required', 400)
+    print_queue.resume(values['printer'])
+    return jsonify(success=True)
 
 
 @bp.route('/api/calibration/example.png', methods=['GET'])

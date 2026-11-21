@@ -118,8 +118,8 @@ def _pdf(*sizes) -> bytes:
 def outcome(client: FlaskClient, response) -> tuple[str, str]:
     """The state of the print job a print request added and the message of
     a job that was not printed."""
-    job = print_queue.get(response.get_json()['job'])
-    return job.state, job.message
+    job = client.get(f"/labeldesigner/api/queue/{response.get_json()['job']}").get_json()
+    return job['state'], job['message']
 
 
 def printing() -> bool:

@@ -185,6 +185,31 @@ def test_line_tells_the_printing_job_and_the_waiting_ones():
     release.set()
 
 
+def test_lines_tells_every_line_with_something_in_it():
+    run, started, release = blocked()
+    printing = add(USB, run)
+    assert started.wait(WAIT)
+    waiting = add(USB, recorder([], 2))
+    idle = add('tcp://192.0.2.5', recorder([], 3))
+    assert idle.done.wait(WAIT)
+    # The line of the idle printer is empty now
+    assert print_queue.lines() == [{'printer': USB, 'printing': printing.told(), 'waiting': [waiting.told()], 'held': None}]
+    release.set()
+    assert waiting.done.wait(WAIT)
+    assert print_queue.lines() == []
+
+
+def test_lines_tells_a_hold():
+    run, started, release = blocked()
+    first = add(USB, run)
+    assert started.wait(WAIT)
+    failing = add(USB, recorder([], 1, 'Cover open'))
+    add(USB, recorder([], 2))
+    release.set()
+    assert failing.done.wait(WAIT)
+    assert [(told['printer'], told['held']) for told in print_queue.lines()] == [(USB, 'Cover open')]
+
+
 def test_previews_and_outcomes_are_dropped_in_time():
     job = add(USB, recorder([], 1), preview=b'png')
     assert job.done.wait(WAIT)

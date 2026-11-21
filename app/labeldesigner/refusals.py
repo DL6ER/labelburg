@@ -22,7 +22,7 @@ from .label import (MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_STAR
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
-from .print_queue import FAILED as NOT_PRINTED, NOT_WAITING, PRINTING_ALREADY, REMOVED
+from .print_queue import FAILED as NOT_PRINTED, NO_SUCH_JOB, NOT_WAITING, PRINTING_ALREADY, REMOVED
 from .printer import BUSY as PRINTER_BUSY, WRONG_MODEL
 from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE,
                                SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
@@ -105,6 +105,7 @@ MESSAGES = (
     REMOVED,
     PRINTING_ALREADY,
     NOT_WAITING,
+    NO_SUCH_JOB,
     NOT_PRINTED,
     'print_count must be greater than 0',
     *check_digit_problems(),
