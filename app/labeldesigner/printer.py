@@ -14,11 +14,11 @@ from urllib.parse import urlsplit
 
 from flask import Config
 
-from . import bluetooth, drivers, mdns
+from . import bluetooth, drivers, mdns, sheets
 from .drivers import devices, progress, reach, usbip
 from .drivers.backends import NoLibusb
 from .drivers.base import network_status
-from .label_names import check_label_size
+from .label_names import check_label_size, label_of
 
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
 
@@ -150,6 +150,16 @@ class PrinterQueue:
             return WRONG_MODEL
         return ''
 
+    def _grouped(self, entries: list[dict]) -> list[dict]:
+        """The entries of the queue as printed: on a roll with several labels
+        to a page, the labels of each page as one, see sheets.Sheet."""
+        label = label_of(self.label_size)
+        per = sheets.per_sheet(label) if label else 1
+        if per == 1:
+            return entries
+        return [dict(entries[i], label=sheets.Sheet(label, [entry['label'] for entry in entries[i:i + per]]))
+                for i in range(0, len(entries), per)]
+
     def label_cuts(self) -> list[bool]:
         """Whether the printer cuts after each label of the queue, as
         self.cut says: after each one, the last one or none."""
@@ -162,6 +172,10 @@ class PrinterQueue:
             logger.warning("Print queue is empty.")
             return "Print queue is empty."
 
+        labels = len(self._print_queue)
+        self._print_queue = self._grouped(self._print_queue)
+        size = label_of(self.label_size)
+        unit = 'page' if size and sheets.per_sheet(size) > 1 else 'label'
         entries = [dict(entry, cut=cut) for entry, cut in zip(self._print_queue, self.label_cuts())]
         self._print_queue.clear()
 
@@ -176,7 +190,7 @@ class PrinterQueue:
             problem = '' if simulation else self._model_problem()
             if problem:
                 return problem
-            logger.info('Printing %d labels', len(entries))
+            logger.info('Printing %d labels', labels)
             job = self.driver.render(self, entries, _Simulator() if simulation else None)
             if simulation:
                 _prune_simulated_labels()
@@ -186,13 +200,13 @@ class PrinterQueue:
             fast = all(entry['fast'] for entry in entries)
             red = 'red' in str(self.label_size)
             mode = (fast, any(entry['high_res'] for entry in entries), red)
-            return self._send(job, len(entries), mode)
+            return self._send(job, len(entries), mode, unit)
 
-    def _send(self, job, labels: int, mode: tuple[bool, bool, bool]) -> str:
+    def _send(self, job, labels: int, mode: tuple[bool, bool, bool], unit: str = 'label') -> str:
         """Send the job of the locked printer, its progress counted."""
         fast, _, red = mode
         lengths = self.driver.label_lengths(job) or [0.0] * labels
-        progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode)
+        progress.start(self.device_specifier, lengths, self.driver.print_speed(self.model, fast, red), mode, unit)
         printed = False
         try:
             message = self.driver.send(self, job)

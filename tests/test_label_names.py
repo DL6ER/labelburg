@@ -84,6 +84,8 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     html = make_client(tmp_path).get('/labeldesigner/').get_data(as_text=True)
     config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
     sizes = {size['id']: size for size in config['label_sizes']}
+    # Pages of several labels, where they are cut apart
+    assert (sizes['niimbot13x35-2x1']['pieces'], sizes['62']['pieces']) == ([2, 1, 2], [1, 1, 0])
     assert (sizes['62']['dpi'], sizes['pt12']['dpi'], sizes['vc25']['dpi']) == ([300, 600], [180, 360], [320, 320])
     assert (sizes['pt36']['dpi'], sizes['18']['dpi']) == ([360, 720], [360, 720])
     models = config['models']

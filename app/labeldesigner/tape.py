@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from . import drivers
+from . import drivers, sheets
 from .drivers.labels import FormFactor
 from .label_names import LABELS, SIZES, label_printers, label_size_problem
 
@@ -160,7 +160,8 @@ def _die_cut(size_id: str) -> bool:
 
 
 def _long_along_tape(size_id: str) -> bool:
-    return size_id in SIZES and SIZES[size_id].tape_size[1] > SIZES[size_id].tape_size[0]
+    # Of a page of several labels, the label designed
+    return size_id in SIZES and sheets.piece(SIZES[size_id]).tape_size[1] > sheets.piece(SIZES[size_id]).tape_size[0]
 
 
 def _runs_along(design: dict) -> bool:
