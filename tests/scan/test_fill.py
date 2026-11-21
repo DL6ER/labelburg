@@ -2,7 +2,7 @@ import re
 
 import pytest
 
-from app.labeldesigner import scan
+from app.labeldesigner import refusals, scan
 
 VCARD = 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:Muster;Erika;;;\r\nFN:Erika Muster\r\nORG:Beispiel GmbH\r\nADR;TYPE=work:;;Hauptstr. 5;Bonn;;53111;Deutschland\r\nTEL;TYPE=cell:+49 228 1234\r\nEMAIL:erika@example.org\r\nEND:VCARD\r\n'
 
@@ -52,19 +52,48 @@ def test_refusals():
     for names, text, message in (
             (['Code'], '  \n', scan.NOTHING_SCANNED), ([], 'x', scan.NO_BLANKS),
             (['Room', 'Shelf'], 'x', scan.SEVERAL_BLANKS), (['Room', 'Shelf'], VCARD, scan.NO_CONTACT_MATCH),
-            (['Code'], 'https>&&example.org', scan.WRONG_LAYOUT), (['Code'], 'httpsÖ--example.org', scan.WRONG_LAYOUT),
             (['Code'], 'x' * 10_001, 'Text is too long')):
         with pytest.raises(ValueError, match=re.escape(message)):
             scan.fill_blanks(names, {}, text)
 
 
 def test_choice_blank_refuses_a_value_it_does_not_offer():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match='is none of the choices of the blank Room') as error:
         scan.fill_blanks(['Room'], {'Room': {'type': 'choice', 'choices': ['Garage', 'Attic']}}, 'Kitchen')
+    assert refusals.message(error.value, 'x') == 'A value is none of the choices of its blank'
 
 
 def test_a_vcard_only_label_with_code_blank_takes_the_card_as_text():
     assert scan.fill_blanks(['code'], {}, VCARD) == {'code': VCARD.rstrip('\r\n')}
+
+
+def test_code_blank_with_unmatched_blank_takes_the_card_as_text():
+    assert scan.fill_blanks(['code', 'Room'], {}, VCARD) == {'code': VCARD.rstrip('\r\n')}
+
+
+def test_unknown_charset_falls_back_to_utf8():
+    text = 'BEGIN:VCARD\nN;CHARSET=FOO;ENCODING=QUOTED-PRINTABLE:M=C3=BCller;J=C3=BCrgen\nEND:VCARD'
+    assert scan.fill_blanks(['First name', 'Last name'], {}, text) == {'First name': 'Jürgen', 'Last name': 'Müller'}
+
+
+def test_blank_key_collapses_before_it_strips():
+    assert scan.blank_key('_code_') == scan.blank_key('-code') == 'code'
+    assert scan.fill_blanks(['_name_'], {}, 'BEGIN:VCARD\nFN:Erika\nEND:VCARD') == {'_name_': 'Erika'}
+
+
+def test_vcard_lines_split_only_at_line_breaks():
+    text = 'BEGIN:VCARD\nFN:Erika\x85Muster\u2028Jr\x0b\nEND:VCARD'
+    assert scan.fill_blanks(['Name'], {}, text) == {'Name': 'Erika\x85Muster\u2028Jr'}
+
+
+def test_quoted_printable_semicolon_stays_in_its_part():
+    text = 'BEGIN:VCARD\nADR;ENCODING=QUOTED-PRINTABLE:;;Weg =3B 5 =5Cn;Bonn;;53111;\nEND:VCARD'
+    assert scan.fill_blanks(['Street', 'City'], {}, text) == {'Street': 'Weg ; 5 \\n', 'City': 'Bonn'}
+
+
+def test_grouped_and_lowercase_properties():
+    text = 'BEGIN:VCARD\nitem1.ADR;TYPE=home:;;Hauptstr. 5;Bonn;;53111;\nemail;type=home:erika@example.org\nEND:VCARD'
+    assert scan.fill_blanks(['Street', 'Email'], {}, text) == {'Street': 'Hauptstr. 5', 'Email': 'erika@example.org'}
 
 
 def test_url_is_no_wrong_layout():

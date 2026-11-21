@@ -1,4 +1,5 @@
 """Values for the blanks of a label from a text read by a barcode scanner."""
+import codecs
 import quopri
 import re
 
@@ -32,7 +33,7 @@ _WRONG_LAYOUT_PREFIXES = ('https>&&', 'http>&&', 'httpsö--', 'httpö--', 'begin
 
 
 def blank_key(name: str) -> str:
-    return re.sub(r'[_\- ]+', ' ', name.casefold().strip())
+    return re.sub(r'[_\- ]+', ' ', name.casefold()).strip()
 
 
 def wrong_layout(text: str) -> bool:
@@ -60,25 +61,35 @@ def _unescape(value: str) -> str:
     return re.sub(r'\\(.)', lambda m: '\n' if m.group(1) in 'nN' else m.group(1), value, flags=re.S)
 
 
-def _parts(value: str, sep: str, count: int = 0) -> list[str]:
-    parts = [_unescape(part).strip() for part in _split(value, sep)]
+def _parts(value: str, sep: str, count: int = 0, decode=str) -> list[str]:
+    parts = [decode(_unescape(part)).strip() for part in _split(value, sep)]
     return parts + [''] * (count - len(parts))
 
 
-def _vcard_lines(text: str) -> list[tuple[str, dict[str, str], str]]:
-    """(property, parameters, value) of each line, unfolded and decoded."""
-    lines = re.sub(r'\r?\n[ \t]', '', text).splitlines()
+def _quoted_printable(charset: str):
+    """Decoder of quoted-printable text in charset (UTF-8 if unknown)."""
+    try:
+        codecs.lookup(charset)
+    except LookupError:
+        charset = 'UTF-8'
+    return lambda part: quopri.decodestring(part.encode('utf-8')).decode(charset, 'replace')
+
+
+def _vcard_lines(text: str) -> list[tuple[str, str, object]]:
+    """(property, value, decoder of its parts) of each line, unfolded."""
+    lines = re.split(r'\r\n|\n|\r', re.sub(r'\r?\n[ \t]', '', text))
     result, i = [], 0
     while i < len(lines):
         line, i = lines[i], i + 1
         head, _, value = line.partition(':')
         name, *params = head.split(';')
         params = {p.partition('=')[0].upper(): p.partition('=')[2].upper() for p in params}
+        decode = str
         if params.get('ENCODING') == 'QUOTED-PRINTABLE':
             while value.endswith('=') and i < len(lines):
                 value, i = value[:-1] + lines[i], i + 1
-            value = quopri.decodestring(value.encode('utf-8')).decode(params.get('CHARSET', 'UTF-8'), 'replace')
-        result.append((name.rsplit('.', 1)[-1].upper(), params, value))
+            decode = _quoted_printable(params.get('CHARSET', 'UTF-8'))
+        result.append((name.rsplit('.', 1)[-1].upper(), value, decode))
     return result
 
 
@@ -92,13 +103,13 @@ def read_contact(text: str) -> dict[str, str] | None:
     head = text.lstrip()[:11].upper()
     raw: dict[str, list[str]] = {}
     if head == 'BEGIN:VCARD':
-        for name, _, value in _vcard_lines(text):
+        for name, value, decode in _vcard_lines(text):
             if name == 'ORG':
-                raw.setdefault(name, _parts(value, ';')[:1])
+                raw.setdefault(name, _parts(value, ';', decode=decode)[:1])
             elif name in ('FN', 'TEL', 'EMAIL'):
-                raw.setdefault(name, [_unescape(value).strip()])
+                raw.setdefault(name, [decode(_unescape(value)).strip()])
             elif name in ('N', 'ADR'):
-                raw.setdefault(name, _parts(value, ';', 7))
+                raw.setdefault(name, _parts(value, ';', 7, decode))
     elif head[:7] == 'MECARD:':
         for field in _split(text.lstrip()[7:], ';'):
             name, _, value = field.partition(':')
@@ -145,7 +156,7 @@ def fill_blanks(names: list[str], fields: dict, text: str) -> dict[str, str]:
         for name in others:
             if contact.get(keys.get(blank_key(name), '')):
                 values[name] = contact[keys[blank_key(name)]]
-        if others and not any(name in values for name in others):
+        if not values:
             raise ValueError(NO_CONTACT_MATCH)
     elif not values:
         if len(names) > 1:
