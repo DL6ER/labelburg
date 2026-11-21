@@ -10,6 +10,7 @@ export const REFUSED = 'The browser did not allow the camera. Allow it in the ad
 export const NO_CAMERA = 'No camera found.';
 export const NOT_STARTED = 'The camera could not be started. Close other apps that use it and try again.';
 export const NO_READER = 'The code reader could not be loaded. Load the page again and try again.';
+export const ENDED = 'The camera stopped. Press "Use the camera" to start it again.';
 
 export const cameraBlocked = () => !isSecureContext || !navigator.mediaDevices;
 
@@ -49,10 +50,11 @@ const ended = stream => { if (stream) stream.getTracks().forEach(track => track.
 // The camera's picture in video and each code read in it passed to
 // onCode(text), a frame about every `every` ms. A code still in view is
 // taken once: the same text seen less than `again` ms before is left out.
-// No frame is read while paused() is true. onError(message) when the
-// camera or the reader cannot start.
+// No frame is read while paused() is true, and the time paused does not
+// count for the codes seen before. onError(message) when the camera or the
+// reader cannot start, or the camera ends, e.g. unplugged.
 export function camera(video, onCode, { clock = performance, again = 3000, every = 150, open = openStream, read = null, paused = () => false, onError = () => { } } = {}) {
-    let stopped = false, timer = null;
+    let stopped = false, timer = null, pausedAt = null;
     const seen = new Map(), canvas = document.createElement('canvas');
     const frame = async () => {
         const w = video.videoWidth, h = video.videoHeight;
@@ -68,13 +70,23 @@ export function camera(video, onCode, { clock = performance, again = 3000, every
         ended(video.srcObject);
         video.srcObject = null;
     };
+    const fail = message => { if (!stopped) { stop(); onError(message); } };
     const tick = async () => {
         let text = null;
-        try {
-            if (!paused()) text = await (read || frame)();
-        } catch (e) {
-            if (!stopped) { stop(); onError(NO_READER); }
-            return;
+        if (paused()) {
+            if (pausedAt === null) pausedAt = clock.now();
+        } else {
+            if (pausedAt !== null) {
+                const gap = clock.now() - pausedAt;
+                for (const [t, when] of seen) seen.set(t, when + gap);
+                pausedAt = null;
+            }
+            try {
+                text = await (read || frame)();
+            } catch (e) {
+                fail(NO_READER);
+                return;
+            }
         }
         if (stopped) return;
         if (text) {
@@ -89,7 +101,8 @@ export function camera(video, onCode, { clock = performance, again = 3000, every
     Promise.resolve().then(open).then(stream => {
         if (stopped) { ended(stream); return; }
         video.srcObject = stream;
-        video.play().catch(() => { });
+        if (stream) stream.getVideoTracks().forEach(track => track.addEventListener('ended', () => fail(ENDED)));
+        video.play().catch(() => fail(NOT_STARTED));
         tick();
     }, e => {
         if (!stopped) { stopped = true; onError(problem(e)); }

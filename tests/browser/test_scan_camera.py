@@ -76,7 +76,7 @@ def camera_station(browser, server, app):
     """The station with a camera that sees a QR code; the URLs the page loads recorded."""
     opened = []
 
-    def start(viewport=None, init='', **options):
+    def start(viewport=None, init='', before=None, **options):
         with contextlib.suppress(FileNotFoundError):
             os.remove(os.path.join(app.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE))
         context = browser.new_context(viewport=viewport or {'width': 1600, 'height': 900}, locale='en-US', **options)
@@ -88,6 +88,8 @@ def camera_station(browser, server, app):
         station = Station(page)
         serve_codes(page, server)
         page.add_init_script(FAKE_CAMERA + init)
+        if before:
+            before(page)
         page.goto(f'{server}/labeldesigner/#scan/{BOX}')
         page.wait_for_selector('#scanField:focus')
         opened.append((context, errors))
@@ -173,6 +175,7 @@ def test_same_code_in_view_prints_once(camera_station):
         const frames = [['X', 0], ['X', 500], ['X', 2900], ['Y', 3000], ['X', 3100], ['X', 6200]];
         let now = 0, i = 0;
         const taken = [], video = document.createElement('video');
+        video.muted = true;
         return new Promise(done => {
             const cam = camera(video, text => taken.push([text, now]), {
                 clock: { now: () => now },
@@ -232,6 +235,14 @@ def test_camera_reads_nothing_while_a_dialog_is_open(camera_station):
     page, station, _ = camera_station()
     page.click('#scanCamera')
     station.wait_for(1)
+    # The code stays in view while a dialog is open for longer than a code is kept
+    page.click('#scanChange')
+    page.wait_for_selector('.scan-pick')
+    page.wait_for_timeout(3500)
+    page.keyboard.press('Escape')
+    page.wait_for_selector('.scan-pick', state='detached')
+    assert station.none_for(800) == 1
+    # A code put in view while a dialog is open prints once it is closed
     page.click('#scanChange')
     page.wait_for_selector('.scan-pick')
     page.evaluate("() => window.cameraShows('/test-codes/dm.png')")
@@ -240,6 +251,82 @@ def test_camera_reads_nothing_while_a_dialog_is_open(camera_station):
     page.wait_for_selector('.scan-pick', state='detached')
     station.wait_for(2)
     assert station.codes() == [LINK, 'A-17']
+
+
+def test_a_hidden_page_lets_go_of_the_camera(camera_station):
+    page, station, _ = camera_station()
+    page.click('#scanCamera')
+    station.wait_for(1)
+    page.evaluate("""() => {
+        Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""")
+    page.wait_for_selector('#scanCamera:has-text("Use the camera")')
+    assert ended(page) == ['ended']
+    assert not page.locator('#scanCam video').is_visible()
+    page.evaluate("""() => {
+        Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""")
+    # Started again by a press
+    assert page.evaluate('() => window.cameraAsked') == 1
+    page.click('#scanCamera')
+    page.wait_for_selector('#scanCamera:has-text("Stop the camera")')
+    page.wait_for_function('() => window.cameraAsked === 2')
+
+
+def test_a_camera_that_ends_says_so(camera_station):
+    # e.g. unplugged, or the system took it away
+    page, station, _ = camera_station()
+    page.click('#scanCamera')
+    station.wait_for(1)
+    page.evaluate("() => window.cameraTracks[0].dispatchEvent(new Event('ended'))")
+    page.wait_for_selector('#scanCamNote:has-text("The camera stopped. Press \\"Use the camera\\" to start it again.")')
+    page.wait_for_selector('#scanCamera:has-text("Use the camera")')
+    assert not page.locator('#scanCam video').is_visible()
+
+
+def test_a_picture_that_does_not_play_says_so(camera_station):
+    page, station, _ = camera_station(init="HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('No', 'NotAllowedError'));")
+    page.click('#scanCamera')
+    page.wait_for_selector('#scanCamNote:has-text("The camera could not be started. Close other apps that use it and try again.")')
+    page.wait_for_selector('#scanCamera:has-text("Use the camera")')
+    assert ended(page) == ['ended']
+    assert not page.locator('#scanCam video').is_visible()
+
+
+def test_a_reader_that_does_not_load_says_so(camera_station):
+    page, station, loaded = camera_station(before=lambda page: page.route('**/zxing_reader.wasm', lambda route: route.fulfill(status=404, body='')))
+    page.click('#scanCamera')
+    page.wait_for_selector('#scanCamNote:has-text("The code reader could not be loaded. Load the page again and try again.")')
+    page.wait_for_selector('#scanCamera:has-text("Use the camera")')
+    assert ended(page) == ['ended']
+    assert station.none_for(300) == 0
+
+
+def test_a_label_deleted_meanwhile_stops_the_camera(camera_station, server):
+    # The list of saved labels the station asks for when it opens comes after
+    # the camera is on, without the label
+    lists = []
+
+    def hold(page):
+        def handle(route):
+            lists.append(route)
+            if len(lists) == 1:
+                route.continue_()
+        page.route('**/api/repository/list', handle)
+
+    page, station, _ = camera_station(before=hold)
+    page.click('#scanCamera')
+    station.wait_for(1)
+    assert len(lists) == 2
+    answer = lists[1].fetch()
+    files = [f for f in answer.json()['files'] if f['name'] != BOX]
+    lists[1].fulfill(response=answer, json={**answer.json(), 'files': files})
+    page.wait_for_selector('.scan-label:has-text("is no longer saved")')
+    page.wait_for_function("() => window.cameraTracks.every(track => track.readyState === 'ended')")
+    assert page.is_disabled('#scanCamera')
+    assert station.none_for(300) == 1
 
 
 def test_camera_stopped_before_it_answers_stays_off(camera_station):

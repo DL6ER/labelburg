@@ -124,6 +124,9 @@ export function renderScan(el, name) {
         send();
     };
     const stopCamera = () => { if (cam) cam.stop(); cam = null; };
+    // A hidden page lets go of the camera; a press starts it again
+    const onHidden = () => { if (document.hidden && cam) { stopCamera(); drawCamera(); } };
+    document.addEventListener('visibilitychange', onHidden);
     const drawCamera = () => {
         const box = $('#scanCam'), says = $('#scanCamNote');
         if (!box) return;
@@ -182,7 +185,7 @@ export function renderScan(el, name) {
     draw();
     // Saved meanwhile in another browser
     loadSaved().then(changed => { if (changed && live) draw(); });
-    return { stop: () => { live = false; if (input) input.stop(); input = null; stopCamera(); } };
+    return { stop: () => { live = false; if (input) input.stop(); input = null; stopCamera(); document.removeEventListener('visibilitychange', onHidden); } };
 }
 
 function pick(chosen) {
