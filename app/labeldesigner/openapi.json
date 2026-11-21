@@ -2183,6 +2183,104 @@
         }
       }
     },
+    "/labeldesigner/api/scan": {
+      "post": {
+        "summary": "Print a saved label filled with a scanned code",
+        "description": "Loads the saved label `name`, fills its blanks from the scanned text `code` and prints it as `repository/print` does (saved copies, cutting, quality), or with `preview_only` only returns its image. A blank named `code` gets the text as it is. Without one, the only blank of the label gets it. A vCard or MECARD fills the blanks named like its details, e.g. `Name`, `First name`, `Last name`, `Company`, `Street`, `Postcode`, `City`, `Country`, `Phone`, `Email` and `Address`. Other fields of the request never fill blanks.",
+        "operationId": "scanPrint",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Printed, or only previewed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "printed": {
+                      "type": "boolean",
+                      "description": "False for `preview_only`."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "File name of the saved label."
+                    },
+                    "filled": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The values the blanks got, by name."
+                    },
+                    "image": {
+                      "type": "string",
+                      "description": "The image of the first label as base64 PNG: as the printer got it, or with `preview_only` placed on the tape loaded in the printer."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused, `message` says why: nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, or a scanner with another keyboard layout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The request was refused, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not printed, the printer could not print the label, `message` says why. The same request may succeed later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/demos/list": {
       "get": {
         "summary": "List the demo labels",
@@ -3024,6 +3122,33 @@
       }
     },
     "schemas": {
+      "ScanRequest": {
+        "type": "object",
+        "required": ["name", "code"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "File name of the saved label, e.g. `Box.json`."
+          },
+          "code": {
+            "type": "string",
+            "description": "The scanned text."
+          },
+          "printer": {
+            "type": "string",
+            "description": "Printer to use, as for `repository/print`."
+          },
+          "model": {
+            "type": "string",
+            "description": "Printer model, as for `repository/print`."
+          },
+          "preview_only": {
+            "type": "integer",
+            "enum": [0, 1],
+            "description": "1 prints nothing and only returns the image."
+          }
+        }
+      },
       "Result": {
         "type": "object",
         "properties": {

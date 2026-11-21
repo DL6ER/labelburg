@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, paperless, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, paperless, printer_settings, refusals, scan, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -1065,6 +1065,26 @@ def repo_preview():
                            'Failed to preview file')
 
 
+def _with_blanks(data: dict, blanks: dict[str, str] | None) -> dict[str, str]:
+    """The values for the blanks of a stored label: blanks over those stored
+    with it, else as _requested_blanks() has them."""
+    return _requested_blanks(data) if blanks is None else {**_blank_values(data.get('blanks')), **blanks}
+
+
+def _preview_label(data: dict, image_dir: str, image_bytes: bytes | None, mark_blanks: bool, on_tape: bool,
+                   blanks: dict[str, str] | None = None) -> tuple[SimpleLabel, Image.Image, int | None]:
+    """The label of a stored label whose image is in image_dir, or in
+    image_bytes where it was read with the label, its preview and the page
+    count of its PDF. With blanks, they fill the blanks instead of the
+    request."""
+    data['blanks'] = _with_blanks(data, blanks)
+    if on_tape:
+        data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
+    images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
+    label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data))
+    return label, label.generate(), page_count
+
+
 def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None, mark_blanks: bool = False,
                       on_tape: bool = False):
     """The preview of a stored label whose image is in image_dir, or of
@@ -1072,12 +1092,7 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
     (return_format). With mark_blanks, blanks without a value show their
     name. With on_tape, it is made as _print_stored_label() prints it."""
     try:
-        data['blanks'] = _requested_blanks(data)
-        if on_tape:
-            data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
-        images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
-        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data))
-        im = label.generate()
+        label, im, page_count = _preview_label(data, image_dir, image_bytes, mark_blanks, on_tape)
     except Exception as e:
         return _preview_refused(e)
 
@@ -1094,6 +1109,30 @@ def repo_print():
     # and perform the same printing logic as the /api/print endpoint.
     return _saved_response(lambda data, image_bytes: _print_stored_label(data, _get_repo_dir(), image_bytes),
                            'Failed to load file')
+
+
+@bp.route('/api/scan', methods=['POST'])
+def scan_print():
+    # Print a saved label with the blanks filled from a scanned code, or only
+    # preview it with preview_only.
+    code = _requested('code')
+    preview_only = str(_requested('preview_only')).lower() in ('1', 'true')
+
+    def respond(data, image_bytes):
+        try:
+            filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), code if isinstance(code, str) else '')
+        except ValueError as e:
+            return _refused('Scan', e, refusals.INVALID_INPUT)
+        result = {'success': True, 'printed': not preview_only, 'label': _requested_name(), 'filled': filled}
+        if preview_only:
+            try:
+                label, im, _ = _preview_label(data, _get_repo_dir(), image_bytes, False, True, filled)
+            except Exception as e:
+                return _preview_refused(e)
+            return {**result, 'image': base64.b64encode(image_to_png_bytes(im, gray=not label.in_color)).decode()}
+        printed = _print_stored_label(data, _get_repo_dir(), image_bytes, filled, 'png')
+        return {**result, **printed} if isinstance(printed, dict) else printed
+    return _saved_response(respond, 'Failed to load file')
 
 
 def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]:
@@ -1115,12 +1154,14 @@ def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]
     return tape.on_tape(data, loaded), kept
 
 
-def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None):
+def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None, blanks: dict[str, str] | None = None,
+                        return_format=None):
     """Print a stored label whose image is in image_dir, or image_bytes where
-    it was read with the label, like /api/print."""
+    it was read with the label, like /api/print. With blanks, they fill the
+    blanks instead of the request."""
     # Prepare printer queue using requested or default device/model and label_size from data
     try:
-        data['blanks'] = _requested_blanks(data)
+        data['blanks'] = _with_blanks(data, blanks)
         device, model = _resolved_printer(_requested('printer'), _requested('model'))
         data, kept = _stored_as_printed(data, device, model)
         printer = _queue(model, device, data['label_size'])
@@ -1141,7 +1182,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         data['high_res'] = high_res
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _print_job(printer, data, {}, print_count, collate, high_res, fast, _requested('return_format'),
+    return _print_job(printer, data, {}, print_count, collate, high_res, fast, return_format or _requested('return_format'),
                       image_dir=image_dir, image_bytes=image_bytes)
 
 
