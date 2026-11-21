@@ -115,9 +115,8 @@ external_components:
   - source: github://PedroPerfecto/esphome-usbip-server@v0.2.1
     components: [usbip_server]
 
-# Any Brother printer on the USB-A port, 0x04B8 for an Epson one
+# Any printer on the USB-A port
 usbip_server:
-  vid: 0x04F9
 
 # Optional, shown in Home Assistant
 binary_sensor:
@@ -156,7 +155,7 @@ services:
       - PRINTER_PRINTER=usbip://192.168.1.50
 ```
 
-With other printers, use `PRINTERS` instead, e.g., `QL-810W=usbip://192.168.1.50,QL-700=file:///dev/usb/lp0`. For an Epson receipt printer, set `vid: 0x04B8` on the board and name the model, e.g., `PRINTERS=Epson/ESC-POS=usbip://192.168.1.50`.
+With other printers, use `PRINTERS` instead, e.g., `QL-810W=usbip://192.168.1.50,QL-700=file:///dev/usb/lp0`. For an Epson receipt printer, name the model, e.g., `PRINTERS=Epson/ESC-POS=usbip://192.168.1.50`.
 
 ### Other firmware, not tried
 
@@ -284,6 +283,6 @@ SSH encrypts the connection and needs a key, so port 3240 can stay closed to the
 
 - "The printer refuses the connection": nothing listens on port 3240. `usbipd` or the firmware of the ESP32 does not run, or the SSH tunnel is down.
 - "The printer cannot be reached" or "The printer does not answer": the device with the printer is switched off, not in the network or at another address.
-- "The printer is switched off or not connected": the device shares no printer. On a Linux computer, `usbip list -l` lists the printers plugged in, `usbip list -r <device>` from elsewhere the ones it shares; a printer that a client uses is not listed. On an ESP32, "Printer connected" in Home Assistant or the log of the board tells whether it sees the printer, and `vid` has to match its maker.
+- "The printer is switched off or not connected": the device shares no printer. On a Linux computer, `usbip list -l` lists the printers plugged in, `usbip list -r <device>` from elsewhere the ones it shares; a printer that a client uses is not listed. On an ESP32, "Printer connected" in Home Assistant or the log of the board tells whether it sees the printer.
 - "The printer is in use by another program": another computer took the printer from a Linux computer. There, `usbip port` lists the devices it took, `sudo usbip detach -p <port>` gives one back. An ESP32 hands the printer to the computer that connected last instead, so only one label designer should use it.
 - "The printer does not answer the status query, the log of the server names the reason": e.g., the host name does not resolve, name the device by its address. Through SSH, also when the tunnel runs but nothing answers behind it.
