@@ -64,18 +64,29 @@ export function forgetGoneKeys() {
     try { if (window.indexedDB) indexedDB.deleteDatabase('brother_ql_images'); } catch (e) { }
 }
 
-let toastTimer;
+// A message at the bottom, gone after ms. The queue of the printer shown
+// there gives way to it and comes back after it, see queue.js.
+let toastTimer, toastId = 0;
+export function queueBack() {
+    const q = $('#queue');
+    if (q) q.hidden = !q.childElementCount || !$('#toast').hidden;
+}
 export function toast(text, action, ms = 0) {
     const el = $('#toast');
     el.innerHTML = `<span>${esc(text)}</span>` + (action ? `<button class="tbtn" type="button">${esc(action.label)}</button>` : '');
     el.hidden = false;
-    if (action) el.querySelector('button').onclick = () => { el.hidden = true; action.run(); };
+    queueBack();
+    if (action) el.querySelector('button').onclick = () => { el.hidden = true; queueBack(); action.run(); };
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
+    toastTimer = setTimeout(() => { el.hidden = true; queueBack(); }, ms || (action ? 6000 : 3500));
+    return ++toastId;
 }
-export function hideToast() {
+// The message shown, or the one toast() returned id for while it is shown
+export function hideToast(id = toastId) {
+    if (id !== toastId) return;
     clearTimeout(toastTimer);
     $('#toast').hidden = true;
+    queueBack();
 }
 
 export function fmtTime(ts) {
@@ -987,19 +998,45 @@ export function entryName(e) {
     return line || e.title || 'Label';
 }
 
+// The queue of the printer chosen as queue.js read it last: the path of the
+// printer, its line ({ printing, waiting, held }) and the status of the
+// printer then; the jobs taken out of it here. read() draws it and reads it
+// anew.
+export const QUEUE = { path: '', line: null, status: null, removed: new Set(), read: () => Promise.resolve() };
+const pendingOn = path => S.history.some(h => h.state === 'printing' && h.path === path);
+// Whether a print on printer p waits behind others: its line as last read
+// has a job or a hold, its status says so where it was not read since, or a
+// print of this browser on it has no outcome yet
+export function lineBusy(p = S.printer) {
+    if (!p || !p.path) return false;
+    const read = QUEUE.path === p.path && QUEUE.line, told = QUEUE.status !== p && p.queue;
+    return !!(read && (read.printing || read.waiting.length || read.held)) || !!(told && (told.printing || told.waiting || told.held)) || pendingOn(p.path);
+}
+// Whether the outcome of a print of this browser goes without a message of
+// its own: printed while others of this browser have none yet, taken out of
+// the queue here, or told by the held queue of the printer chosen
+export function untold(entry) {
+    if (entry.state === 'printed') return S.history.some(h => h !== entry && h.state === 'printing');
+    if (entry.job && QUEUE.removed.has(entry.job)) return true;
+    return !!S.printer && entry.path === S.printer.path && QUEUE.path === entry.path && !!(QUEUE.line && QUEUE.line.held);
+}
+
 // job: { title, design, values, copies, source }. Kept in the history of
 // this browser, Settings list it under Printed labels. Printed on printer,
 // the one chosen unless another is given.
 export async function printJob(job, onDone, printer = S.printer) {
     job = Object.assign({}, job, { design: clone(job.design) });
+    const behind = lineBusy(printer), path = (printer && printer.path) || '';
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
         design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', state: 'printing', message: ''
+        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
     };
     S.history.unshift(entry);
     saveHistory();
-    toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
+    const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
+    const shown = () => !!S.printer && S.printer.path === path;
+    QUEUE.read();
     try {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
@@ -1012,16 +1049,23 @@ export async function printJob(job, onDone, printer = S.printer) {
             entry.state = 'failed';
             entry.message = data.message || ('The printer answered ' + r.status);
         } else if (data.job && data.state !== 'printed') {
-            // Queued: followed until its outcome is known
+            // Queued: followed until its outcome is known. The server answers
+            // waiting also for one about to print, so behind says which waits.
             Object.assign(entry, { job: data.job, start: data.start, seen: data.state });
             saveHistory();
+            if (behind && data.state === 'waiting') toast(`Added ${entryName(entry)} to the queue`);
+            else if (shown()) QUEUE.read().then(() => hideToast(printing));
             await followJob(entry);
         } else entry.state = 'printed';
     } catch (e) {
         entry.state = 'failed';
         entry.message = UNREACHABLE;
     }
+    hideToast(printing);
     saveHistory();
+    // Read before it is told: a job that did not print may hold the queue shown
+    const read = QUEUE.read();
+    if (entry.state !== 'printed' && shown()) await read;
     if (onDone) onDone(entry);
     return entry;
 }
@@ -1080,6 +1124,7 @@ export function printAgain(h, onDone = announcePrint) {
     return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source }, onDone);
 }
 export function announcePrint(entry, again = () => printAgain(entry)) {
+    if (untold(entry)) return;
     hideToast();
     if (entry.state === 'printed') toast(`Printed ${entry.copies === 1 ? '1 label' : `${entry.copies} labels`}: ${entryName(entry)}`, { label: 'Print again', run: again });
     else if (entry.state === 'unknown') toast(`Maybe not printed: ${entry.message}`, { label: 'Print again', run: again }, 10000);

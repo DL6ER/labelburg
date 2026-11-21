@@ -591,6 +591,23 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
 .layer.sheet .pop-card::before { content: ""; width: 40px; height: 4px; border-radius: 4px; background: var(--line-2); margin: 0 auto 4px; flex: none; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--on-ink); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; box-shadow: var(--sh-pop); display: flex; gap: 12px; align-items: center; z-index: 50; max-width: calc(100% - 32px); }
 .tbtn { border: 0; background: transparent; color: inherit; text-decoration: underline; font-weight: 600; }
+/* The queue of the printer chosen in place of the message: one line, the
+   jobs waiting below it where opened */
+.queue { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(400px, calc(100% - 32px)); border-radius: 12px; box-shadow: var(--sh-pop); font-size: 13.5px; z-index: 50; }
+.q-line { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--on-ink); }
+.q-line > span { flex: 1; min-width: 0; }
+.q-line.held { background: var(--bad); }
+.queue.open .q-line { border-radius: 12px 12px 0 0; }
+.q-more { border: 0; background: transparent; color: inherit; font-weight: 600; display: flex; align-items: center; gap: 4px; padding: 0; white-space: nowrap; }
+.q-more[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.q-list { max-height: min(50vh, 320px); overflow: auto; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; }
+.q-row { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; }
+.q-row + .q-row { border-top: 1px solid var(--line); }
+.q-row .grow { flex: 1; min-width: 0; }
+.q-row b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.q-row small { color: var(--muted); }
+.q-img { width: 64px; height: 36px; flex: none; padding: 3px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; }
+.q-img img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 2px; }
 
 @media (max-width: 1100px) {
     .search { width: auto; }
@@ -707,6 +724,7 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
     .palette .res-list { max-height: calc(100dvh - 150px); }
     .pal-foot .keys { display: none; }
 
-    .toast { bottom: calc(var(--foot-h) + var(--sheet-h, 0px) + 12px + env(safe-area-inset-bottom)); width: max-content; }
-    body[data-view="settings"] .toast { bottom: 16px; }
+    .toast, .queue { bottom: calc(var(--foot-h) + var(--sheet-h, 0px) + 12px + env(safe-area-inset-bottom)); }
+    .toast { width: max-content; }
+    body[data-view="settings"] .toast, body[data-view="settings"] .queue { bottom: 16px; }
 }

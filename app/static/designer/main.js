@@ -9,11 +9,12 @@ import {
     loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending
 } from './core.js';
 import { calibrationHTML, bindCalibration } from './calibration.js';
-import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged } from './editor.js';
+import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged, drawPrintButton } from './editor.js';
 import { closePop } from './field.js';
 import { mountGallery, openTemplates, openFill, savedSub } from './gallery.js';
 import { renderSettings, redrawSettings, redrawLabelSettings } from './settings.js';
 import { mountPhone, phone } from './phone.js';
+import { mountQueue, followQueue } from './queue.js';
 
 // Views other parts of the page register, e.g. the settings
 export const views = {};
@@ -83,6 +84,7 @@ function shown(before) {
     if ($('.pp')) drawPrinters();
     if (tapeState() !== before) printerChanged();
     redrawSettings();
+    followQueue();
 }
 // Every 20 s from a tab that is shown: one left in the background keeps no
 // printer busy, e.g. a B1 its Bluetooth connection. Shown again it asks at once.
@@ -124,6 +126,7 @@ function drawPrinters() {
         detectTape();
         renderChip();
         drawPrinters();
+        followQueue();
         if (tapeState() !== before) printerChanged();
     });
     $('#look').onclick = async () => { $('#look').disabled = true; await refresh(true); };
@@ -420,6 +423,7 @@ async function receiveShared() {
     forgetGoneKeys();
     bindTop();
     mountPhone();
+    mountQueue(drawPrintButton);
     renderChip();
     await Promise.all([refresh(true), loadDemos(), loadSaved(), carryOverLabelSettings()]);
     await receiveShared();
