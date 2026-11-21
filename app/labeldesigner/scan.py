@@ -40,10 +40,15 @@ def wrong_layout(text: str) -> bool:
     return text.lower().startswith(_WRONG_LAYOUT_PREFIXES)
 
 
+def _lead_off(text: str) -> str:
+    """text without the white space and byte order marks before it."""
+    return re.sub(r'^[\s\ufeff]+', '', text)
+
+
 def incomplete(text: str) -> bool:
     """A part of a vCard, e.g. split by a pause of the scanner within it."""
     upper = text.upper()
-    return upper.lstrip().startswith('BEGIN:VCARD') != ('END:VCARD' in upper)
+    return _lead_off(upper).startswith('BEGIN:VCARD') != ('END:VCARD' in upper)
 
 
 def _split(value: str, sep: str) -> list[str]:
@@ -108,7 +113,8 @@ def _address(parts: list[str]) -> dict[str, str]:
 
 def read_contact(text: str) -> dict[str, str] | None:
     """The details of a vCard or MECARD in text, None for any other text."""
-    head = text.lstrip()[:11].upper()
+    text = _lead_off(text)
+    head = text[:11].upper()
     raw: dict[str, list[str]] = {}
     if head == 'BEGIN:VCARD':
         for name, value, decode in _vcard_lines(text):
@@ -119,7 +125,7 @@ def read_contact(text: str) -> dict[str, str] | None:
             elif name in ('N', 'ADR'):
                 raw.setdefault(name, _parts(value, ';', 7, decode))
     elif head[:7] == 'MECARD:':
-        for field in _split(text.lstrip()[7:], ';'):
+        for field in _split(text[7:], ';'):
             name, _, value = field.partition(':')
             name = name.strip().upper()
             if name == 'N':

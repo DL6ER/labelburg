@@ -67,6 +67,12 @@ def test_a_vcard_cut_in_parts_is_refused():
     assert refusals.message(ValueError(scan.INCOMPLETE), 'x') == scan.INCOMPLETE
 
 
+def test_a_byte_order_mark_before_the_card_is_left_out():
+    assert scan.fill_blanks(['Name', 'Room'], {}, '\ufeff' + VCARD) == {'Name': 'Erika Muster'}
+    assert scan.fill_blanks(['Name', 'Room'], {}, '\ufeffMECARD:N:Muster,Erika;;') == {'Name': 'Erika Muster'}
+    assert scan.fill_blanks(['code', 'Room'], {}, '\ufeffA-17') == {'code': '\ufeffA-17'}
+
+
 def test_choice_blank_refuses_a_value_it_does_not_offer():
     with pytest.raises(ValueError, match='is none of the choices of the blank Room') as error:
         scan.fill_blanks(['Room'], {'Room': {'type': 'choice', 'choices': ['Garage', 'Attic']}}, 'Kitchen')
