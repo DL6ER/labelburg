@@ -76,6 +76,12 @@ def test_unknown_charset_falls_back_to_utf8():
     assert scan.fill_blanks(['First name', 'Last name'], {}, text) == {'First name': 'Jürgen', 'Last name': 'Müller'}
 
 
+def test_charset_that_is_no_text_encoding_falls_back_to_utf8():
+    for charset in ('BASE64', 'HEX', 'ROT13'):
+        text = f'BEGIN:VCARD\nN;CHARSET={charset};ENCODING=QUOTED-PRINTABLE:M=C3=BCller;J=C3=BCrgen\nEND:VCARD'
+        assert scan.fill_blanks(['First name', 'Last name'], {}, text) == {'First name': 'Jürgen', 'Last name': 'Müller'}
+
+
 def test_blank_key_collapses_before_it_strips():
     assert scan.blank_key('_code_') == scan.blank_key('-code') == 'code'
     assert scan.fill_blanks(['_name_'], {}, 'BEGIN:VCARD\nFN:Erika\nEND:VCARD') == {'_name_': 'Erika'}
