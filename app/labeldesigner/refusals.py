@@ -14,16 +14,20 @@ from barcode.errors import BarcodeError, BarcodeNotFoundError, IllegalCharacterE
 from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFPopplerTimeoutError, PDFSyntaxError
 from PIL import Image
 
+from . import adding
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
 from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
-from .label import MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH, TextTooLong
+from .label import (MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH,
+                    PARTS_DIRECTION_REFUSED, PARTS_ORDER_REFUSED, PARTS_TWICE_REFUSED, TextTooLong)
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
-from .printer import BUSY as PRINTER_BUSY
-from .printer_settings import CALIBRATION_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_PRINTERS
+from .printer import BUSY as PRINTER_BUSY, WRONG_MODEL
+from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE,
+                               SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
+LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
 # A detected printer whose status names no model this server knows
@@ -64,11 +68,17 @@ MESSAGES = (
     FIELDS_MESSAGE,
     SETTINGS_MESSAGE,
     TOO_MANY_PRINTERS,
+    LABEL_SETTINGS_MESSAGE,
+    TOO_MANY_ADDED,
+    *adding.MESSAGES,
     CALIBRATION_MESSAGE,
     READINGS_DISAGREE,
     NO_CALIBRATION,
     OFFSET_LIMIT,
     'image_position must be above, below, left or right',
+    PARTS_ORDER_REFUSED,
+    PARTS_TWICE_REFUSED,
+    PARTS_DIRECTION_REFUSED,
     'label_length must be a length in millimeters or empty',
     *label_length_problems(),
     'vertical_align must be top, center or bottom',
@@ -90,6 +100,7 @@ MESSAGES = (
     UNKNOWN_MODEL,
     *devices.not_sent_messages(),
     PRINTER_BUSY,
+    WRONG_MODEL,
     'print_count must be greater than 0',
     *check_digit_problems(),
     *code_problems(),

@@ -10,16 +10,16 @@ import time
 
 import pytest
 
-from app.labeldesigner import printer_settings, routes
+from app.labeldesigner import drivers, printer, printer_settings, routes
 from app.labeldesigner.drivers import BROTHER, backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
 from app.labeldesigner.drivers.vc500w import DRIVER as VC500W
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
-from tests.helpers import make_client
+from tests.helpers import make_client, within
 from tests.printing.test_vc500w import FakeVC500W
 from tests.printing.test_usb_jobs import COMPLETED, PHASE_CHANGE, PRINTING, REPLY, WAITING, status
-from tests.printing.usbip_host import QL1100_ID, VC500W_ID, FakeHost, SharedDevice
+from tests.printing.usbip_host import QL1100_ID, VC500W_ID, FakeHost, SharedDevice, TricklingHost
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Shared', 'size': '40'}])
 
@@ -226,7 +226,7 @@ def test_printer_that_cannot_be_reached_has_no_device_id():
 def test_printer_that_cannot_be_reached_is_tried_once_for_its_model(tmp_path, monkeypatch):
     attempts = []
 
-    def unreachable(host, port, timeout):
+    def unreachable(host, port, timeout, deadline=None):
         attempts.append(host)
         raise OSError(errno.EHOSTUNREACH, 'No route to host')
     monkeypatch.setattr(usbip, '_connect', unreachable)
@@ -608,3 +608,145 @@ def test_requests_name_only_configured_shared_printers(tmp_path):
     response = client.post('/labeldesigner/api/print', data={
         'printer': 'usbip://192.0.2.1', 'label_size': '62', 'print_type': 'text', 'text': TEXT})
     assert 'Unsupported printer' in response.get_json()['message']
+
+
+@pytest.mark.parametrize('stage', ['devlist', 'import'])
+def test_host_that_trickles_is_given_up(monkeypatch, stage):
+    # Its device list and the import have one deadline together
+    monkeypatch.setattr(usbip, 'HANDSHAKE_TIMEOUT', 1)
+    host = TricklingHost(stage)
+    try:
+        started = time.monotonic()
+        with pytest.raises(OSError):
+            within(5, lambda: usbip.connect(host.address()))
+        assert time.monotonic() - started < 2
+        assert not usbip.connected(host.address())
+    finally:
+        host.close()
+
+
+def test_devices_a_host_lists_are_few():
+    host = FakeHost(*(SharedDevice(busid=f'1-{i}') for i in range(1, 41)))
+    try:
+        assert [d['busid'] for d in usbip.shared_devices('127.0.0.1', host.port)] == [f'1-{i}' for i in range(1, usbip.MAX_DEVICES + 1)]
+    finally:
+        host.close()
+
+
+def test_device_id_is_not_waited_for_while_the_printer_is_imported(host):
+    FakeQL(host.devices[0])
+    told = usbip.connect(host.address()).device_id
+    usbip.disconnect(host.address())
+    taken, done = threading.Event(), threading.Event()
+
+    def importing():
+        with usbip._lock(usbip.key(host.address())):
+            taken.set()
+            done.wait(10)
+    threading.Thread(target=importing, daemon=True).start()
+    taken.wait()
+    try:
+        assert within(2, lambda: usbip.device_id(host.address())) == told
+        assert within(2, lambda: devices.usb_device_id(host.address(), connect=False)) == told
+        # Let go later, once the import is done
+        within(2, lambda: usbip.disconnect(host.address()))
+    finally:
+        done.set()
+
+
+def test_known_device_id_imports_nothing(host):
+    assert devices.usb_device_id(host.address(), connect=False) == ''
+    assert host.devices[0].imports == 0
+    usbip.connect(host.address())
+    assert devices.usb_device_id(host.address(), connect=False) == QL1100_ID
+
+
+def test_model_waits_for_the_first_import_of_the_printer():
+    # No device ID told yet: the model is not taken from the configuration
+    # while another thread imports the printer over a slow link
+    device = SharedDevice(product=0x0E15, device_id='MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;')
+    host = FakeHost(device)
+    taken = threading.Event()
+
+    def first_import():
+        with usbip._lock(usbip.key(host.address())):
+            taken.set()
+            time.sleep(3)
+            usbip.connect(host.address())
+    threading.Thread(target=first_import, daemon=True).start()
+    taken.wait()
+    try:
+        assert within(8, lambda: drivers.resolve(host.address(), 'QL-800'))[1] == 'Epson/ESC-POS'
+    finally:
+        host.close()
+
+
+def test_model_waits_for_one_import_at_most(monkeypatch):
+    # Another thread holds the printer, e.g. in an import that fails slowly
+    monkeypatch.setattr(usbip, 'HANDSHAKE_TIMEOUT', 1)
+    monkeypatch.setattr(usbip, 'CONNECT_TIMEOUT', 0.25)
+    address = 'usbip://127.0.0.1:3299'
+    taken, done = threading.Event(), threading.Event()
+
+    def importing():
+        with usbip._lock(usbip.key(address)):
+            taken.set()
+            done.wait(20)
+    threading.Thread(target=importing, daemon=True).start()
+    taken.wait()
+    try:
+        started = time.monotonic()
+        assert within(10, lambda: drivers.resolve(address, 'QL-800'))[1] == 'QL-800'
+        assert time.monotonic() - started < 2.5
+    finally:
+        done.set()
+
+
+def test_a_failed_import_is_not_tried_again_at_once(monkeypatch):
+    with socket.create_server(('127.0.0.1', 0)) as closed:
+        address = f'usbip://127.0.0.1:{closed.getsockname()[1]}'
+    with pytest.raises(OSError):
+        usbip.connect(address)
+    tried = []
+
+    def refused(*args, **kwargs):
+        tried.append(args)
+        raise ConnectionRefusedError(errno.ECONNREFUSED, 'Connection refused')
+    monkeypatch.setattr(usbip, '_connect', refused)
+    assert usbip.device_id(address) == ''
+    assert tried == []
+
+
+TM_T20II = 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;'
+
+
+@pytest.fixture
+def unknown_epson(tmp_path):
+    """An Epson receipt printer shared over USB/IP that never told its device
+    ID: its first import failed a moment ago, e.g. in a status query. The
+    label designer has the default model."""
+    device = SharedDevice(product=0x0E15, device_id=TM_T20II)
+    host = FakeHost(device)
+    tm = FakeTM(device)
+    usbip._unreachable[usbip.key(host.address())] = time.monotonic() + 60
+    client = make_client(tmp_path, empty_repo=True)
+    client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
+    yield client, tm
+    host.close()
+
+
+def test_a_job_made_for_another_model_is_not_sent(unknown_epson):
+    client, tm = unknown_epson
+    answer = client.post('/labeldesigner/api/print', data={'label_size': '62', 'print_type': 'text', 'text': TEXT})
+    assert (answer.status_code, answer.get_json()) == (503, {'success': False, 'message': printer.WRONG_MODEL})
+    assert tm.received == b''
+    # Imported meanwhile, it is the model its device ID names
+    with client.application.test_request_context():
+        assert routes._printer(None, None)[1] == 'Epson/ESC-POS'
+
+
+def test_a_printer_that_never_told_its_model_is_asked_in_its_own_commands(unknown_epson):
+    client, tm = unknown_epson
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert shown['model'] == 'Epson/ESC-POS'
+    assert tm.received == b''

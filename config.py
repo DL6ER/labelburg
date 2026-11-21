@@ -37,6 +37,15 @@ class Config(object):
     # is listed only when configured, e.g. 'QL-700=simulation'.
     PRINTERS = []
 
+    # Printers the search does not find, e.g. shared over USB/IP, may be
+    # added in the Settings of the label designer: 'local' only at addresses
+    # of the local network, 'any' also elsewhere, 'off' not at all, printers
+    # added before are then not used. Anyone who reaches the label designer
+    # can add them, there is no login. The same holds for network printers
+    # requests name by their address that are neither configured, added nor
+    # found by the search.
+    ADD_PRINTERS = 'local'
+
     # Number of reverse proxies in front of the server whose X-Forwarded-For,
     # -Proto, -Host and -Prefix headers are trusted, e.g. 1 for nginx serving
     # the label designer below a path. 0 ignores these headers.

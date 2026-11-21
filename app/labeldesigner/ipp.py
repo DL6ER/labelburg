@@ -6,9 +6,13 @@ Network printers do not answer status requests on the raw printing port
 Get-Printer-Attributes request for these and decodes the answer, with the
 standard library only."""
 
+import socket
 import struct
+import threading
 import http.client
 from itertools import count
+
+from .drivers import reach
 
 # Operation and the tags of RFC 8010 that are needed here
 GET_PRINTER_ATTRIBUTES = 0x000B
@@ -35,6 +39,9 @@ STATUS_ATTRIBUTES = (
 
 # printer-state
 IDLE, PROCESSING, STOPPED = 3, 4, 5
+
+# A longer answer is refused, the attributes asked for take a few KB
+MAX_ANSWER = 256 * 1024
 
 _request_ids = count(1)
 
@@ -112,12 +119,16 @@ def _attributes(data: bytes) -> dict:
         name_length = struct.unpack('>H', data[i:i + 2])[0]
         new_name = data[i + 2:i + 2 + name_length].decode('utf-8', 'replace')
         i += 2 + name_length
+        if i + 2 > len(data):
+            raise IPPError('The answer is cut off')
         value_length = struct.unpack('>H', data[i:i + 2])[0]
         raw = data[i + 2:i + 2 + value_length]
         i += 2 + value_length
         if len(raw) != value_length:
             raise IPPError('The answer is cut off')
 
+        if tag in (TAG_MEMBER_NAME, TAG_END_COLLECTION) and not stack:
+            raise IPPError('The answer has collection parts outside a collection')
         if tag == TAG_MEMBER_NAME:
             stack[-1][1] = raw.decode('utf-8', 'replace')
             continue
@@ -147,20 +158,56 @@ def _add(container: dict, name: str, value):
         container[name] = [container[name], value]
 
 
+def _end(connection: http.client.HTTPConnection, ended: threading.Event):
+    ended.set()
+    if connection.sock is not None:
+        try:
+            connection.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+
 def get_printer_attributes(host: str, port: int = 631, path: str = '/ipp/print',
                            attributes=STATUS_ATTRIBUTES, timeout: float = 3.0) -> dict:
     """Ask a printer for attributes. Raises OSError if it does not answer,
     e.g. ConnectionRefusedError without IPP, and IPPError for an answer
-    that is not one."""
+    that is not one, longer than MAX_ANSWER, or not there within twice the
+    timeout after connecting, also when it trickles in."""
     host_in_uri = f'[{host}]' if ':' in host else host
     body = encode_request(f'ipp://{host_in_uri}:{port}{path}', attributes)
     connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    # To the host of an added printer only where ADD_PRINTERS allows
+    connection._create_connection = reach.create_connection
+    try:
+        connection.connect()
+    except BaseException:
+        connection.close()
+        raise
+    # From the connection on: a name may take its time to resolve, the
+    # socket the timer ends must be there
+    ended = threading.Event()
+    stop = threading.Timer(2 * timeout, _end, (connection, ended))
+    stop.start()
     try:
         connection.request('POST', path, body, {'Content-Type': 'application/ipp'})
         response = connection.getresponse()
-        data = response.read()
+        length = response.getheader('Content-Length') or ''
+        if length.strip().isdigit() and int(length) > MAX_ANSWER:
+            raise IPPError('The answer is too long')
+        data = b''
+        while chunk := response.read1(65536):
+            data += chunk
+            if len(data) > MAX_ANSWER:
+                raise IPPError('The answer is too long')
+    except (OSError, http.client.HTTPException):
+        if ended.is_set():
+            raise IPPError('The printer took too long to answer') from None
+        raise
     finally:
+        stop.cancel()
         connection.close()
+    if ended.is_set():
+        raise IPPError('The printer took too long to answer')
     if response.status != 200:
         raise IPPError(f'The printer answers with HTTP status {response.status}')
     return decode_response(data)

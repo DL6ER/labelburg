@@ -88,21 +88,28 @@ def decode_records(data: bytes) -> list[tuple[str, int, object]]:
 
 
 def services(records, sources=None) -> list[dict]:
-    """The announced services: instance name, service type, address, port
-    and the TXT entries (e.g. "ty" with the model). sources maps an instance
-    to the address its answer came from, used without an A record."""
+    """The announced services: instance name, service type, addresses (the
+    first also as address), port and the TXT entries (e.g. "ty" with the
+    model). sources maps an instance to the address its answer came from,
+    used without an A record."""
     by_type: dict = {}
     for name, record_type, value in records:
-        by_type.setdefault(record_type, {}).setdefault(name.lower(), value)
+        if record_type != TYPE_A:
+            by_type.setdefault(record_type, {}).setdefault(name.lower(), value)
+            continue
+        # A host may tell several, e.g. a link-local one before the one of DHCP
+        told = by_type.setdefault(TYPE_A, {}).setdefault(name.lower(), [])
+        if value not in told:
+            told.append(value)
     found = []
     for name, record_type, instance in records:
         if record_type != TYPE_PTR:
             continue
         key = instance.lower()
         port, target = by_type.get(TYPE_SRV, {}).get(key, (None, None))
-        address = by_type.get(TYPE_A, {}).get((target or '').lower()) or (sources or {}).get(key)
-        if address:
-            found.append({'name': instance, 'service': name, 'address': address, 'port': port,
+        addresses = by_type.get(TYPE_A, {}).get((target or '').lower()) or [(sources or {}).get(key)]
+        if addresses[0]:
+            found.append({'name': instance, 'service': name, 'address': addresses[0], 'addresses': addresses, 'port': port,
                           'txt': by_type.get(TYPE_TXT, {}).get(key, {})})
     return found
 

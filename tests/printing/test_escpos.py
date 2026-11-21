@@ -393,7 +393,7 @@ def test_printer_on_the_network_that_keeps_sending(monkeypatch):
         def close(self):
             pass
     printer = Printer()
-    monkeypatch.setattr(protocol.socket, 'create_connection', lambda to, timeout: printer)
+    monkeypatch.setattr(socket, 'create_connection', lambda to, timeout: printer)
     with protocol.connect('tcp://192.0.2.1') as c:
         assert asked_while_sending(c, lambda: setattr(printer, 'quiet', True)) == QUIET
 
@@ -420,7 +420,7 @@ def test_address_of_a_printer_on_the_network(monkeypatch, device, address):
     class Socket:
         def close(self):
             pass
-    monkeypatch.setattr(protocol.socket, 'create_connection', lambda to, timeout: asked.append(to) or Socket())
+    monkeypatch.setattr(socket, 'create_connection', lambda to, timeout: asked.append(to) or Socket())
     with protocol.connect(device):
         pass
     assert asked == [address]

@@ -12,7 +12,6 @@ on:
       - tools/fonts/**
       - tools/update_fonts.py
       - app/static/mdi/**
-      - app/static/fontawesome/**
       - tools/symbols/**
       - tools/fastener_svgs.py
       - tools/symbols_font.py
@@ -24,7 +23,6 @@ on:
       - tools/fonts/**
       - tools/update_fonts.py
       - app/static/mdi/**
-      - app/static/fontawesome/**
       - tools/symbols/**
       - tools/fastener_svgs.py
       - tools/symbols_font.py

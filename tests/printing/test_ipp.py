@@ -4,15 +4,18 @@ import os
 import socket
 import struct
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from app import create_app
 from app.labeldesigner import ipp, printer
-from app.labeldesigner.drivers import devices
+from app.labeldesigner.drivers import devices, reach
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import usb
+from tests.helpers import Answering, within
+from tests.printing.test_reach import names  # noqa: F401
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fixtures', 'ipp')
 
@@ -258,7 +261,6 @@ def test_job_waits_until_the_network_printer_finished(network_job):
     assert answer['requests'] == 5
 
 
-
 @pytest.mark.parametrize('speed, success', [(1, True), (1e6, False)])
 def test_network_job_waits_as_long_as_its_labels_take(network_job, monkeypatch, speed, success):
     # Besides the time any job may take, as long as the labels take at the
@@ -342,3 +344,100 @@ def test_arp_candidate_that_is_no_label_printer_is_dropped(fake_printer, monkeyp
     fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
     status = app.test_client().get('/labeldesigner/api/printer_status').get_json()
     assert [p['path'] for p in status['printers']] == ['tcp://127.0.0.1', 'simulation']
+
+
+def endless_chunks(pause):
+    def send(connection):
+        connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nTransfer-Encoding: chunked\r\n\r\n')
+        while True:
+            connection.sendall(b'4000\r\n' + bytes(0x4000) + b'\r\n')
+            time.sleep(pause)
+    return send
+
+
+def trickling_headers(connection):
+    connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nX-Slow: ')
+    while True:
+        connection.sendall(b'a')
+        time.sleep(0.05)
+
+
+def too_long(connection):
+    connection.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/ipp\r\nContent-Length: 1000000000\r\n\r\n')
+    while True:
+        connection.sendall(bytes(4096))
+        time.sleep(0.05)
+
+
+@pytest.mark.parametrize('send', [endless_chunks(0), endless_chunks(0.05), trickling_headers, too_long])
+def test_answers_without_end_are_given_up(send):
+    printer = Answering(send)
+    try:
+        started = time.monotonic()
+        with pytest.raises((ipp.IPPError, OSError)):
+            within(5, lambda: ipp.get_printer_attributes('127.0.0.1', printer.port, timeout=0.5))
+        assert time.monotonic() - started < 2
+    finally:
+        printer.close()
+
+
+def collection_end(name: str = '') -> bytes:
+    return attribute(ipp.TAG_END_COLLECTION, name, b'')
+
+
+@pytest.mark.parametrize('body', [
+    # A member name outside a collection, the end of one never begun
+    response(attribute(ipp.TAG_MEMBER_NAME, '', b'x-dimension')),
+    response(collection_end('media-col-ready')),
+    # Cut off within a value
+    response(attribute(ipp.TAG_KEYWORD, 'printer-state-reasons', b'none'))[:-3],
+])
+def test_malformed_answers_are_refused(body):
+    with pytest.raises(ipp.IPPError):
+        ipp.decode_response(body)
+
+
+@pytest.mark.parametrize('attributes, width', [
+    ({'media-col-ready': {'media-size': 'x'}}, None),
+    ({'media-col-ready': {'media-size': {'x-dimension': 6200, 'y-dimension': 2900}, 'media-source-properties': 5,
+                          'media-type': ['labels']}}, 62),
+    ({'media-col-ready': [5]}, None),
+    ({'printer-state-reasons': [5, None, {'a': 1}]}, None),
+    ({'printer-state-reasons': 5}, None),
+    ({'printer-make-and-model': 5, 'printer-state': 'idle'}, None),
+])
+def test_answers_of_strange_types_are_taken_as_telling_nothing(fake_printer, monkeypatch, attributes, width):
+    fake_printer['body'] = b'ok'
+    monkeypatch.setattr(ipp, 'decode_response', lambda data: attributes)
+    status = network.query_network_status('tcp://127.0.0.1', 'QL-800')
+    assert (status['model'], status['errors'], status['media_width']) == ('QL-800', [], width)
+    assert network.printer_problem('tcp://127.0.0.1', 'QL-800') == ''
+
+
+def slowly(names, seconds):
+    names['slow.test'] = lambda: time.sleep(seconds) or ['127.0.0.1']
+
+
+def test_a_printer_whose_name_resolves_slowly_is_asked(fake_printer, names):  # noqa: F811
+    fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
+    slowly(names, 1.2)
+    assert ipp.get_printer_attributes('slow.test', network.IPP_PORT, timeout=0.5)['printer-make-and-model'] == 'Brother QL-810W'
+
+
+def test_an_answer_that_trickles_after_a_slow_name_is_given_up(names):  # noqa: F811
+    printer = Answering(trickling_headers)
+    slowly(names, 1.2)
+    try:
+        started = time.monotonic()
+        with pytest.raises((ipp.IPPError, OSError)):
+            within(8, lambda: ipp.get_printer_attributes('slow.test', printer.port, timeout=0.5))
+        assert time.monotonic() - started < 3
+    finally:
+        printer.close()
+
+
+def test_an_added_printer_whose_name_resolves_slowly_is_asked(fake_printer, names, monkeypatch):  # noqa: F811
+    fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
+    slowly(names, 1.2)
+    monkeypatch.setattr(reach, '_watched', {'slow.test': 'local'})
+    assert ipp.get_printer_attributes('slow.test', network.IPP_PORT, timeout=0.5)['printer-make-and-model'] == 'Brother QL-810W'

@@ -22,7 +22,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
-Labelburg finds printers plugged in with USB by itself, most network printers too. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
+Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
 
 ## Features
 
@@ -32,8 +32,8 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, and today's date or a date some days ahead, e.g., "best before".
 - **Icons:** 7400 icons, e.g., a light bulb, and symbols of screws, nuts, washers and electronic parts for workshop bins, next to the text, found by name.
 - **Labels:** save your labels, group them by tags and print them again, pass them on as files, or start from one of about 680 ready-made labels in English and German, e.g., addresses, safety signs, hazard labels, name badges, price tags and pictures for kids.
-- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes. Labels that come out off to one side on a Niimbot B1 are lined up with a calibration label: open the printer and choose "Calibrate printer".
-- **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
+- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes. Labels that come out off to one side on a Niimbot B1 are lined up with a calibration label: choose "Calibrate printer" at the printer in the Settings.
+- **Easy to use:** a preview that shows the label as it will come out, templates that show the text you type in them, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
 - **Several printers:** use several printers at once, each with a name of your choice and the same settings in every browser, or try everything without a printer.
 - **Other programs:** e.g., [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md) can print their labels through Labelburg, labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents, and [AI assistants](docs/mcp.md) can find, fill in and print your labels for you.
 
@@ -42,8 +42,8 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 | Saved and ready-made labels | Image with text |
 |---|---|
 | ![Saved and ready-made labels](./screenshots/image2.png) | ![Image with text](./screenshots/image3.png) |
-| **Barcodes** | **Wizard in dark mode** |
-| ![Barcodes](./screenshots/image4.png) | ![Wizard in dark mode](./screenshots/image6.png) |
+| **Barcodes** | **Your text in the templates, in dark mode** |
+| ![Barcodes](./screenshots/image4.png) | ![Your text in the templates, in dark mode](./screenshots/image6.png) |
 | **Blanks, filled in when printing** | **Printer settings** |
 | ![Blanks, filled in when printing](./screenshots/image7.png) | ![Printer settings](./screenshots/image8.png) |
 
@@ -84,6 +84,7 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `PRINTER_PRINTER` | The printer, see [Printer addresses](#printer-addresses) | `?` |
 | `PRINTER_MODEL` | Model of a printer that does not report it, e.g. a network printer. Models of other makers than Brother are named with their maker, e.g. `PUQU/Q00` or `Epson/ESC-POS` (`Epson/ESC-POS-180` for a receipt printer with a 180 dpi head, e.g. a TM-T88), Brother ones with or without it (`Brother/QL-800`). | `QL-800` |
 | `PRINTERS` | Several printers of different models instead of `PRINTER_PRINTER` and `PRINTER_MODEL`, as `<model>=<printer>`, comma-separated, e.g., `QL-700=usb://0x04f9:0x2042,QL-1100=file:///dev/usb/lp1,PUQU/Q00=bt://<MAC>`, the models as for `PRINTER_MODEL`. A name in front, e.g., `Kitchen:QL-700=usb://0x04f9:0x2042`, is shown in the label designer, and requests may choose the printer by it (`printer=Kitchen`). There is no detection, each printer keeps its model and its own printer settings, requests that name no printer go to the first one. The simulator is offered only when listed, e.g., `QL-700=simulation`. | none |
+| `ADD_PRINTERS` | Where printers the search does not find may be added in the Settings of the label designer: `local` only in your own network (private addresses, `localhost`, 100.64.0.0/10 as on Tailscale, which also holds the carrier-grade NAT of your provider, and names like `printer.local` that lead there), `any` also elsewhere, `off` not at all, printers added before are then not used. The same holds for network printers that requests name by their address, e.g., `tcp://<host>`, and that are neither configured, added nor found by the search. Anyone who can open Labelburg can add printers, there is no login, and the answers of Identify show them which hosts and ports exist there, the refusals of requests whether a name exists and is local. | `local` |
 | `LABEL_DEFAULT_SIZE` | Label size the label designer starts with when the printer does not report its roll, e.g., the simulator. The name tells the kind: `62` or `102` is endless tape, `62x29` or `103x164` die-cut labels, `d24` round ones. | `62` |
 | `LABEL_DEFAULT_ORIENTATION` | `standard` or `rotated` | `standard` |
 | `LABEL_TEMPLATE_ENV_VARS` | Environment variables labels may insert with `{{env:<var>}}`, comma-separated. All others stay empty, so that nobody can read secrets of the server through a label. | none |
@@ -145,7 +146,7 @@ Address each printer in one way only (e.g. always `file:///dev/usb/lp0`). Two ad
 
 ### Network printers
 
-Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others with `tcp://<IP address>` and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing.
+Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others in the Settings of the label designer, or with `tcp://<IP address>` in `PRINTER_PRINTER` or `PRINTERS`, and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing.
 
 ### Fonts
 
@@ -153,7 +154,7 @@ The label designer offers all `.ttf` and `.otf` fonts it finds in the system fon
 
 ### Label designer
 
-Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. The Variables button in the label designer explains them all.
+Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. In the label designer, `[` offers them all, and "What the variables do" explains them.
 
 Images can be PNG, JPG, WEBP, AVIF, GIF, TIFF, BMP and many more formats. A PDF gives one label per page if you like.
 
@@ -176,7 +177,7 @@ The browser offers to install the label designer as an app only over HTTPS, e.g.
 Everything the label designer does is also available as a REST API. It is described in OpenAPI format in [`app/labeldesigner/openapi.json`](app/labeldesigner/openapi.json), which a running server also serves at `/labeldesigner/api/openapi.json` for tools like Swagger UI, Postman or code generators.
 
 ```bash
-# Print a text label (lines of text as JSON, without "font" the default font is used)
+# Print a text label (lines of text as JSON, without "font" the font of new labels is used)
 curl -X POST http://localhost:8013/labeldesigner/api/print \
   -F label_size=62 -F 'text=[{"text": "Hello", "size": "70"}]'
 
@@ -196,9 +197,10 @@ curl -X POST http://localhost:8013/labeldesigner/api/webhook/print \
   -H "Authorization: Bearer $WEBHOOK_PASSWORD" -F label_size=62 -F images=@label.png
 ```
 
-- A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses).
+- A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses). A network printer that is neither configured, added in the Settings nor found by the search prints only at an address `ADD_PRINTERS` allows.
 - Labels are printed on the tape in the printer, as in the label designer: a label made for another tape is placed on it.
 - The printer settings of the label designer (the label size set by hand, cutting, which end of the labels leaves first and quality) are kept on the server in `.printers.json` in the folder of the labels, the same for every browser; `/labeldesigner/api/settings` reads and changes them, `printer_status` tells them with each printer, and print requests and previews of the API take what they leave out from them. A label size left out is that of the tape the printer reports, else the label size set by hand, else `LABEL_DEFAULT_SIZE`.
+- The label settings (how dates are written, the order of copies of several files and the font of new labels) are kept in the same file; `/labeldesigner/api/settings/labels` reads and changes them. Requests that leave out `collate`, lines without a font and date blanks without a format take them from there, else the order as sets, the default font and `%Y-%m-%d`.
 - Requests that print, save or delete labels must be `POST` requests and are refused when a browser sends them from another website, so that a malicious page cannot use your printer. Scripts and `curl` are not affected.
 - Text lines may have up to 10000 characters (100000 per label) after the templates are filled in, barcodes up to 1000. Labels and images may have up to 64 million pixels, enough for a 62 mm wide label of about 2 m at 600 dpi. Of PDFs the first page is printed, or the pages `pdf_pages` selects (e.g., `1-3, 5` or `all`), each as a label of its own. Several `image` fields in a print request are printed one after the other. Blanks are filled in from `blanks`, e.g., `{"Room": "Garage"}`, also in saved labels printed by name, or else with their default. A saved label printed by name also takes fields of the request named like its blanks, which is how [Grocy](docs/grocy.md) prints its labels.
 
@@ -219,7 +221,7 @@ python -m playwright install --with-deps chromium
 pytest -n auto tests/browser
 ```
 
-To build the image yourself, with the commit and build time shown in the navbar:
+To build the image yourself, with the commit and build time shown in the Settings under About:
 
 ```bash
 docker compose build --build-arg GIT_COMMIT=$(git rev-parse HEAD) --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -234,7 +236,6 @@ Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_
 It is published under the terms of the GPLv3, see [LICENSE](./LICENSE). It includes software of third parties under other licenses:
 
 - [Archivo](https://github.com/Omnibus-Type/Archivo), the typeface of the label designer, [SIL Open Font License 1.1](app/static/designer/OFL.txt)
-- [Font Awesome](https://github.com/FortAwesome/Font-Awesome), CC BY 4.0 License
 - [Material Design Icons](https://github.com/Templarian/MaterialDesign-Webfont) 7.4.47 by Pictogrammers, the font under the Apache 2.0 License, see [LICENSE](app/static/mdi/LICENSE)
 - The fasteners drawn as in [gflabel](https://github.com/ndevenish/gflabel) by Nicholas Devenish under the BSD 3-Clause License, and the [electronic symbols](https://github.com/chris-pikul/electronic-symbols) by Chris Pikul under the MIT License, built into one font by `tools/symbols_font.py`, see [LICENSE](app/static/symbols/LICENSE)
 - The pictograms and the photo silhouette of the demo labels from [Wikimedia Commons](app/labeldesigner/demos/images/SOURCES.md), public domain and CC0

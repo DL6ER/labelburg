@@ -36,7 +36,10 @@ class BrotherRaster(Driver):
         # Over USB/IP the device ID read at the import names the model
         if not usbip.is_address(device):
             return None
-        model = devices.device_id_fields(devices.usb_device_id(device) if device_id is None else device_id).get('MDL')
+        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+
+    def model_in(self, device_id):
+        model = devices.device_id_fields(device_id).get('MDL')
         return model if model in MODELS else None
 
     def fits(self, label, model):

@@ -73,12 +73,19 @@ class Driver:
     mac_address_prefixes: tuple = ()
     # Whether its status tells the tape or roll in the printer
     reports_tape: bool = True
+    # Whether it prints on printers another device shares over USB/IP
+    takes_usbip: bool = True
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
         e.g. vc500w://<host>, whatever model is configured. None if the
         address does not tell. device_id: its device ID as
         devices.usb_device_id() tells it, read if None."""
+        return None
+
+    def model_in(self, device_id: str) -> str | None:
+        """The model of a printer of this driver an IEEE 1284 device ID names,
+        e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., None for other devices."""
         return None
 
     def fits(self, label, model: str) -> bool:

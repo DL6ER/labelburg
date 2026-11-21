@@ -15,11 +15,10 @@ an implementation of our own. Standard library only."""
 import collections
 import os
 import select
-import socket
 import time
 import xml.etree.ElementTree as ET
 
-from .. import usbip
+from .. import reach, usbip
 
 PORT = 9100
 # Resolution across the tape (crossweb_dpi in /config.xml)
@@ -43,6 +42,14 @@ MODEL_NAMES = {'Wedge': 'VC-500W'}
 DEVICE_ID_MODEL = 'MDL:VC-500W;'
 
 TIMEOUT = 5
+# Its answers are a few KB, a longer one is refused. One that trickles in
+# is given up after twice its timeout.
+MAX_ANSWER = 1 << 20
+TOO_LONG_ANSWER = 'The printer sent an answer too long'
+# What a new connection drops of answers nobody read, a printer sending
+# more or longer does not stop
+DRAIN_BYTES = 65536
+DRAIN_TIME = 1.0
 # Data that arrives right after "ready to receive" is partly lost on USB when
 # the job follows another one, the printer then waits for it forever
 DATA_DELAY = 2.0
@@ -196,14 +203,19 @@ class Connection:
             self._socket = (usbip.Socket if usbip.is_address(self._target) else _Device)(self._target, self._timeout)
             # An answer someone before did not read would be taken for ours
             self._socket.settimeout(0.1)
+            drained, until = 0, time.monotonic() + DRAIN_TIME
             try:
-                while self._socket.recv(65536):
-                    pass
+                while data := self._socket.recv(65536):
+                    drained += len(data)
+                    if drained > DRAIN_BYTES or time.monotonic() > until:
+                        self._socket.close()
+                        self._socket = None
+                        raise VC500WError('The printer does not stop sending')
             except TimeoutError:
                 pass
             self._socket.settimeout(self._timeout)
         else:
-            self._socket = socket.create_connection((self._target, self._port), timeout=self._timeout)
+            self._socket = reach.create_connection((self._target, self._port), timeout=self._timeout)
 
     def __enter__(self):
         return self
@@ -212,21 +224,30 @@ class Connection:
         if self._socket is not None:
             self._socket.close()
 
-    def _receive(self, timeout: float | None = None):
+    def _receive(self, timeout: float, deadline: float):
         if self._socket is None:
             raise VC500WError('The connection to the printer is closed')
-        self._socket.settimeout(self._timeout if timeout is None else timeout)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise TimeoutError('The printer took too long to answer')
+        self._socket.settimeout(min(timeout, left))
         data = self._socket.recv(65536)
         if not data:
             raise VC500WError('The printer closed the connection')
         self._buffer += data
+        if len(self._buffer) > 2 * MAX_ANSWER:
+            raise VC500WError(TOO_LONG_ANSWER)
 
     def answer(self, timeout: float | None = None) -> tuple[ET.Element, bytes]:
         """The next answer: its <status> element, and the data announced by
         <datasize>, which follows after a line break and a NUL byte."""
+        timeout = self._timeout if timeout is None else timeout
+        deadline = time.monotonic() + 2 * timeout
         end = self._buffer.find(b'</status>')
         while end < 0:
-            self._receive(timeout)
+            if len(self._buffer) > MAX_ANSWER:
+                raise VC500WError(TOO_LONG_ANSWER)
+            self._receive(timeout, deadline)
             end = self._buffer.find(b'</status>')
         end += len(b'</status>')
         status = _element(self._buffer[:end])
@@ -236,13 +257,15 @@ class Connection:
             comment = _text(status, 'comment')
             raise VC500WError(f'The printer refused the command: {comment or "code " + code}', comment)
         size = int(_text(status, 'datasize', '0') or 0)
+        if size > MAX_ANSWER:
+            raise VC500WError(TOO_LONG_ANSWER)
         data = b''
         if size > 0:
             while len(self._buffer) < size + 1:
-                self._receive(timeout)
+                self._receive(timeout, deadline)
             self._buffer = self._buffer.lstrip(b'\x00')
             while len(self._buffer) < size:
-                self._receive(timeout)
+                self._receive(timeout, deadline)
             data, self._buffer = self._buffer[:size], self._buffer[size:]
         return status, data
 

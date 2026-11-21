@@ -9,6 +9,8 @@ import socket
 import time
 from itertools import count
 
+from .drivers import reach
+
 PORT = 161
 COMMUNITY = 'public'
 
@@ -155,7 +157,7 @@ def get_values(host: str, oids: list, port: int = PORT, community: str = COMMUNI
     have one of the values."""
     request_id = next(_request_ids)
     request = encode_message(GET_REQUEST, request_id, [(oid, None) for oid in oids], community)
-    family, kind, protocol, _, address = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM)[0]
+    family, kind, protocol, _, address = reach.getaddrinfo(host, port, socket.SOCK_DGRAM)[0]
     with socket.socket(family, kind, protocol) as sock:
         # Connected, so that a closed port is refused instead of timing out
         sock.connect(address)

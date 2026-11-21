@@ -1,6 +1,6 @@
 from .enums import LabelContent, LabelOrientation, LabelType
 from . import codes, icons
-from .cable_flag import flag_strip
+from .cable_flag import flag_box, flag_strip
 import os
 import uuid
 from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
@@ -44,6 +44,13 @@ MAX_FILLED_RATIO = 16
 LONG_CODE_LABEL = 200
 # Where an image or code can be next to the text
 IMAGE_POSITIONS = ('above', 'below', 'left', 'right')
+# The parts of a label that can be placed in any order, side by side as the
+# text reads (row) or one below the other (column)
+PARTS = ('image', 'code', 'text')
+PARTS_DIRECTIONS = ('row', 'column')
+PARTS_ORDER_REFUSED = 'parts_order must name image, code or text, separated by commas'
+PARTS_TWICE_REFUSED = 'parts_order must name each part once'
+PARTS_DIRECTION_REFUSED = 'parts_direction must be row or column'
 # The contents of labels with an image, by its colors
 IMAGE_CONTENTS = (LabelContent.IMAGE_BW, LabelContent.IMAGE_GRAYSCALE, LabelContent.IMAGE_RED_BLACK, LabelContent.IMAGE_COLORED)
 # Where the content is on a label that has room to spare above and below it
@@ -92,6 +99,29 @@ def check_image_position(value) -> str | None:
     value = value or None
     if value is not None and value not in IMAGE_POSITIONS:
         raise ValueError("image_position must be above, below, left or right")
+    return value
+
+
+def check_parts_order(value) -> tuple[str, ...] | None:
+    """The parts in the order given, e.g. "image,code,text", None where none
+    is given (left out or empty), ValueError for an unknown part or one
+    named twice."""
+    if value is None or value == '':
+        return None
+    names = [name.strip() for name in str(value).split(',')]
+    if not all(name in PARTS for name in names):
+        raise ValueError(PARTS_ORDER_REFUSED)
+    if len(set(names)) < len(names):
+        raise ValueError(PARTS_TWICE_REFUSED)
+    return tuple(names)
+
+
+def check_parts_direction(value) -> str | None:
+    """row or column, None where none is given (left out or empty),
+    ValueError for another."""
+    value = value or None
+    if value is not None and value not in PARTS_DIRECTIONS:
+        raise ValueError(PARTS_DIRECTION_REFUSED)
     return value
 
 
@@ -311,6 +341,8 @@ class SimpleLabel:
         text_wrap: bool = False,
         image_text_gap: int | None = None,
         image_position: str | None = None,
+        parts_order: str | None = None,
+        parts_direction: str | None = None,
         blanks: dict[str, str] | None = None,
         blank_fields: dict | None = None,
         mark_blanks: bool = False,
@@ -322,6 +354,7 @@ class SimpleLabel:
         fixed_length: bool = False,
         vertical_align: str = 'center',
         mirror: bool = False,
+        date_format: str = '%Y-%m-%d',
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -331,11 +364,14 @@ class SimpleLabel:
         "%d.%m.%Y"}}. With mark_blanks the text shows blanks without a value
         as their name and a question mark, as the label designer previews
         them. with_code puts a code next to the image of an image label, on
-        the other side of the text. With fixed_length an endless label has
-        the size given, it does not grow with its content. vertical_align
-        places the content at the top, in the center or at the bottom of a
-        label that does not grow with it in height. dpi tells the length of
-        the label in mm, which warnings name."""
+        the other side of the text; parts_order and parts_direction place
+        image, code and text in any order (see _arrangement()). With
+        fixed_length an endless label has the size given, it does not grow
+        with its content. vertical_align places the content at the top, in
+        the center or at the bottom of a label that does not grow with it in
+        height. dpi tells the length of the label in mm, which warnings
+        name. date_format writes the dates of blanks without a format of
+        their own."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -414,6 +450,8 @@ class SimpleLabel:
         self._image_text_gap = image_text_gap
         # Where an image or code is next to the text, see _image_side()
         self._image_position = check_image_position(image_position)
+        self._parts_order = check_parts_order(parts_order)
+        self._parts_direction = check_parts_direction(parts_direction)
         self._vertical_align = check_vertical_align(vertical_align)
         # How much the image or code was enlarged or shrunk to fit the label
         self._image_scale = 1.0
@@ -427,8 +465,17 @@ class SimpleLabel:
         # Known once the label is generated as well: where the image or code
         # is next to the text, for labels with both
         self.image_side: str | None = None
+        # Its parts in their order and direction, where it has two or more
+        self.parts_order: list[str] = []
+        self.parts_direction: str | None = None
+        # And where its lines, code and image are on it, see _parts()
+        self.parts: list[dict] = []
+        # The colors asked for that its tape prints otherwise, as printed
+        self.printed_as: dict[str, str] = {}
+        self._line_boxes: dict[int, tuple] = {}
         self._blanks = blanks or {}
         self._blank_fields = blank_fields or {}
+        self._date_format = date_format
         self._mark_blanks = mark_blanks
         self._shown_code = code_text
         # The value of each blank, made once for the label
@@ -506,10 +553,13 @@ class SimpleLabel:
         lines with its settings."""
         self.text = []
         total_length = 0
-        for line in copy.deepcopy(self.input_text):
+        for index, line in enumerate(copy.deepcopy(self.input_text)):
             # Only the templates and wrapping set them, not the request
             line.pop('unmarked', None)
             line.pop('todo_continued', None)
+            # Which line given it is, also once wrapped or broken into
+            # several, see _place_lines()
+            line['line_index'] = index
             text_val = line.get('text', '')
             if len(text_val) > WARNING_TEXT_LENGTH:
                 logger.warning(
@@ -735,7 +785,7 @@ class SimpleLabel:
             date = _iso_date(value)
         if date is None:
             return value
-        date_format = str(field.get('format') or '%Y-%m-%d')
+        date_format = str(field.get('format') or self._date_format)
         if len(date_format) > MAX_DATE_FORMAT_LENGTH:
             raise TextTooLong("The date format of a blank is too long")
         try:
@@ -758,8 +808,12 @@ class SimpleLabel:
         img = self._generate_label()
         if self._flag_wrap:
             # Both halves from one render, so random texts and counters match
-            img = flag_strip(img, self._flag_wrap, self._flag_dpi, self._label_orientation == LabelOrientation.ROTATED)
+            along = self._label_orientation == LabelOrientation.ROTATED
+            half = img.size
+            img = flag_strip(img, self._flag_wrap, self._flag_dpi, along)
             check_image_size(*img.size)
+            # Its parts are on both labels
+            self.parts += [dict(part, box=flag_box(part['box'], half, self._flag_wrap, along)) for part in self.parts]
         return img.rotate(180) if self.turned else img
 
     def _generate_label(self):
@@ -790,15 +844,21 @@ class SimpleLabel:
         # The parts of a side of the label that the image or code may take
         # when fitted, next to the text and a code on the other side of it
         parts = 1 + self.has_lines() + (code is not None)
+        # Without text the image and the code share that side and keep their
+        # distance in it, automatic as at the size of the code fitted alone
+        between = 0
+        if code is not None and self._image_fit and not self.has_lines():
+            self._code_scale = self._sized(code, width, height, parts, own_look=False)[1]
+            between = self.auto_image_text_gap if self._image_text_gap is None else self._image_text_gap
         if img is not None:
-            img, self._image_scale = self._sized_image(img, width, height, parts)
+            img, self._image_scale = self._sized_image(img, width, height, parts, between)
             img_width, img_height = img.size
         else:
             img_width, img_height = (0, 0)
         # The code next to an image keeps its size where it is not fitted:
         # the crop, rotation and scale are those of the image
         if code is not None:
-            code, self._code_scale = self._sized(code, width, height, parts, own_look=False)
+            code, self._code_scale = self._sized(code, width, height, parts, own_look=False, between=between)
         self._code_size = code.size if code is not None else None
 
         if self.want_text(img):
@@ -823,60 +883,93 @@ class SimpleLabel:
         no_room = (bool(bboxes) and (self._shrink_text or self._fill_text) and self.has_text()
                    and not self._fits_room(textsize, *self._text_space(width, height, img_width, img_height, gap)))
 
-        # The image or code is at the margin on its side of the text, the
-        # code of a label with both at the other one, the text in the middle
-        # of the room left. An endless label grows along the tape to hold
-        # them, the text starts at the margin or next to an image or code
-        # there. Without an image or code there is no side for it.
+        # The parts one after the other in their order (see _arrangement()):
+        # those before the text from the start margin on, those after it
+        # from the end margin back, the text in the middle of the room left.
+        # An endless label grows along the tape to hold them. Without text
+        # the room left is after the first part.
         paired = img is not None and (self.has_lines() or code is not None)
-        side = self._image_side(with_text=paired)
-        self.image_side = side if paired else None
-        beside = side in ('left', 'right')
-        # Left or above the text, and right or below it
-        first, last = (img, code) if side in ('left', 'above') else (code, img)
-        (first_width, first_height), (last_width, last_height) = (item.size if item is not None else (0, 0) for item in (first, last))
-        first_gap = gap if first is not None else 0
-        last_gap = gap if last is not None and (bboxes or first is None) else 0
+        what = self._main_part()
+        order, direction = self._arrangement(paired)
+        items = {what: img, 'code': code} if code is not None else {what: img}
+        laid_out = self.has_lines() or img is None
+        placed = [name for name in order if (laid_out if name == 'text' else items.get(name) is not None)]
+        self.parts_order, self.parts_direction = (list(placed), direction) if paired else ([], None)
+        self.image_side = self._side_of(placed, what, direction) if paired else None
+        if not laid_out:
+            placed.insert(1, 'text')
+        beside = direction == 'row'
         grows_wide, grows_high = self._grows()
         text_height = textsize[3] - textsize[1]
         # Where a letter reaches left of where the lines start, e.g. a "j",
         # the text takes room for it: a label that grows in width makes it
         text_width = self._text_width(textsize)
         bearing = -min(textsize[0], 0)
+        sizes = {name: item.size for name, item in items.items() if item is not None}
+        sizes['text'] = (text_width, text_height)
+        axis = 0 if beside else 1
+        # The text keeps a distance only where it draws lines
+        shown = [name for name in placed if name != 'text' or bboxes]
+        extent = sum(sizes[name][axis] for name in shown) + gap * max(len(shown) - 1, 0)
+        before, after = placed[:placed.index('text')], placed[placed.index('text') + 1:]
+        lead = sum(sizes[name][axis] + gap for name in before)
         if grows_high:
-            height = (max(first_height, text_height, last_height) if beside
-                      else first_height + first_gap + text_height + last_gap + last_height) + margin_top + margin_bottom
+            height = (max(sizes[name][1] for name in placed) if beside else extent) + margin_top + margin_bottom
         if grows_wide:
-            width = (first_width + first_gap + text_width + last_gap + last_width if beside
-                     else max(first_width, text_width, last_width)) + margin_left + margin_right
+            width = (extent if beside else max(sizes[name][0] for name in placed)) + margin_left + margin_right
 
+        offsets = {}
         if beside:
-            # In the middle of the room between the margins, at its start if
-            # the text is wider
-            room = width - margin_left - margin_right - first_width - first_gap - last_width - last_gap
-            horizontal_offset_text = margin_left + first_width + first_gap + max((room - text_width)//2, 0) + bearing
             # From its top, e.g., of an icon reaching above the first line.
             # All share their middle, at the top or bottom the highest of
             # them is at the margin.
-            block = max(first_height, text_height, last_height)
-            shift = self._vertical_start(height, block) - ((height - block)//2 + (margin_top - margin_bottom)//2)
-            vertical_offset_text = (height - textsize[3] - textsize[1])//2 + (margin_top - margin_bottom)//2 + shift
-            first_offset = margin_left, (height - first_height)//2 + (margin_top - margin_bottom)//2 + shift
-            last_offset = width - margin_right - last_width, (height - last_height)//2 + (margin_top - margin_bottom)//2 + shift
+            block = max(sizes[name][1] for name in placed)
+            shift = self._vertical_start(height, block) - self._middle(height, block, margin_top, margin_bottom)
+
+            def across(name):
+                return self._middle(height, sizes[name][1], margin_top, margin_bottom) + shift
+            at = margin_left
+            for name in before:
+                offsets[name] = at, across(name)
+                at += sizes[name][0] + gap
+            end = width - margin_right
+            for name in reversed(after):
+                end -= sizes[name][0]
+                offsets[name] = end, across(name)
+                end -= gap
+            # In the middle of the room left, at its start if the text is wider
+            room = end - margin_left - lead
+            horizontal_offset_text = margin_left + lead + max((room - text_width)//2, 0) + bearing
+            vertical_offset_text = self._middle(height, textsize[3] - textsize[1], margin_top, margin_bottom) - textsize[1] + shift
         else:
-            start = margin_top if grows_high else self._vertical_start(height, first_height + first_gap + text_height + last_gap + last_height)
+            start = margin_top if grows_high else self._vertical_start(height, extent)
+
+            def across(name):
+                return self._middle(width, sizes[name][0], margin_left, margin_right)
             # Across, in the middle between the margins
-            horizontal_offset_text = max((width - text_width)//2 + (margin_left - margin_right)//2, 0) + bearing
-            vertical_offset_text = start + first_height + first_gap - textsize[1]
-            first_offset = (width - first_width)//2 + (margin_left - margin_right)//2, margin_top
-            last_offset = (width - last_width)//2 + (margin_left - margin_right)//2, height - margin_bottom - last_height
-            if self._placed() != 'center':
-                # At the top or bottom, all of them at their distance
-                first_offset = first_offset[0], start
-                last_offset = last_offset[0], start + first_height + first_gap + text_height + last_gap
+            horizontal_offset_text = max(self._middle(width, text_width, margin_left, margin_right), 0) + bearing
+            vertical_offset_text = start + lead - textsize[1]
+            # In the middle the parts before the text are at the top margin,
+            # those after it at the bottom one; at the top or bottom all of
+            # them are at their distance
+            at = margin_top if self._placed() == 'center' else start
+            for name in before:
+                offsets[name] = across(name), at
+                at += sizes[name][1] + gap
+            if self._placed() == 'center':
+                end = height - margin_bottom
+                for name in reversed(after):
+                    end -= sizes[name][1]
+                    offsets[name] = across(name), end
+                    end -= gap
+            else:
+                below = start + lead + text_height + (gap if bboxes else 0)
+                for name in after:
+                    offsets[name] = across(name), below
+                    below += sizes[name][1] + gap
 
         text_offset = horizontal_offset_text, vertical_offset_text
-        image_offset, code_offset = (first_offset, last_offset) if first is img else (last_offset, first_offset)
+        image_offset, code_offset = offsets.get(what, (0, 0)), offsets.get('code', (0, 0))
 
         # Ensure height and width are at least 1 to avoid generating valishing
         # preview images for empty inputs. PIL cannot store images with 0
@@ -889,10 +982,9 @@ class SimpleLabel:
         self.warnings = list(self._given_warnings)
         if self._code_of_marks:
             self.warnings.append('The code is empty until its blanks are filled in.')
-        what = 'code' if self._label_content in (LabelContent.QRCODE_ONLY, LabelContent.TEXT_QRCODE) else 'image'
         # What is placed next to the text, by name
-        boxes = [(name, (x, y, x + item.width, y + item.height))
-                 for name, item, (x, y) in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
+        items = [(name, item, offset) for name, item, offset in ((what, img, image_offset), ('code', code, code_offset)) if item is not None]
+        boxes = [(name, (x, y, x + item.width, y + item.height)) for name, item, (x, y) in items]
         if bboxes:
             x, y = text_offset
             text_box = (x + textsize[0], y + textsize[1], x + textsize[2], y + textsize[3])
@@ -922,6 +1014,7 @@ class SimpleLabel:
         if code is not None:
             imgResult.paste(code, code_offset)
 
+        self._line_boxes = {}
         if self.want_text(img):
             self._draw_text(imgResult, bboxes, text_offset)
 
@@ -944,13 +1037,37 @@ class SimpleLabel:
         # Left and right swapped as the text reads, the preview shows it so
         if self._mirror:
             imgResult = ImageOps.mirror(imgResult)
+        self.parts = self._parts([(name, self._printed_box(item, offset)) for name, item, offset in items], imgResult.size)
         return imgResult
 
-    def _sized(self, img: Image.Image, width: int, height: int, parts: int, own_look: bool = True) -> tuple[Image.Image, float]:
+    def _parts(self, boxes: list, size: tuple) -> list[dict]:
+        """Where the lines and the image or code (boxes, by name) are on the
+        label of size, for the label designer to pick one with a click on
+        the preview: boxes [x0, y0, x1, y1] in its dots, within it."""
+        width, height = size
+        parts = [({'part': 'line', 'index': index}, box) for index, box in self._line_boxes.items()]
+        placed = []
+        for part, (x0, y0, x1, y1) in parts + [({'part': name}, box) for name, box in boxes]:
+            x0, x1 = (min(max(x, 0), width) for x in (math.floor(x0), math.ceil(x1)))
+            y0, y1 = (min(max(y, 0), height) for y in (math.floor(y0), math.ceil(y1)))
+            if self._mirror:
+                x0, x1 = width - x1, width - x0
+            placed.append(dict(part, box=[x0, y0, x1, y1]))
+        return placed
+
+    @staticmethod
+    def _printed_box(item: Image.Image, xy: tuple) -> tuple:
+        """Where item placed at xy prints, without the white around it, e.g.
+        the room kept beside the bars of a code; all of it where it is white."""
+        ink = item.convert('L').point(lambda v: 255 if v < 255 else 0).getbbox() or (0, 0, item.width, item.height)
+        return xy[0] + ink[0], xy[1] + ink[1], xy[0] + ink[2], xy[1] + ink[3]
+
+    def _sized(self, img: Image.Image, width: int, height: int, parts: int, own_look: bool = True, between: int = 0) -> tuple[Image.Image, float]:
         """img as it is placed on the label and how much it was enlarged or
         shrunk: with own_look cropped, rotated and scaled as set, fitted to
         the label where image_fit is set. Next to text, along a side of the
-        label that does not grow with the text, it takes one of parts of it."""
+        label that does not grow with the text, it takes one of parts of it,
+        of what is left once between dots are kept between the parts."""
         margin_left, margin_right, margin_top, margin_bottom = self._label_margin
         if own_look and self._image_crop:
             img = self._crop_image_to_content(img)
@@ -977,13 +1094,13 @@ class SimpleLabel:
             grows_wide, grows_high = self._grows()
             # Next to text, along a side of the label that does not grow
             # with the text, the image takes its part of it, the text the
-            # rest: half of it, a third with a code on the other side
+            # rest: half of it, a third with a code as well
             if parts > 1:
-                if self._image_side(True) in ('left', 'right'):
+                if self._arrangement()[1] == 'row':
                     if not grows_wide:
-                        max_width = max(max_width // parts, 1)
+                        max_width = max((max_width - between) // parts, 1)
                 elif not grows_high:
-                    max_height = max(max_height // parts, 1)
+                    max_height = max((max_height - between) // parts, 1)
 
             # Get image dimensions
             img_width, img_height = img.size
@@ -1011,18 +1128,18 @@ class SimpleLabel:
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale
 
-    def _sized_image(self, img: Image.Image, width: int, height: int, parts: int) -> tuple[Image.Image, float]:
+    def _sized_image(self, img: Image.Image, width: int, height: int, parts: int, between: int = 0) -> tuple[Image.Image, float]:
         """_sized() of the image, made once for the copies of a print job:
         the layouts they share keep the last image sized, a job of many
         pages one of them."""
         if self._shared_layouts is None:
-            return self._sized(img, width, height, parts)
-        key = (id(img), width, height, parts, self._label_margin, self._image_crop, self._image_rotation,
-               self._image_fit, self._image_scaling_factor, self._grows(), self._image_side(True))
+            return self._sized(img, width, height, parts, between=between)
+        key = (id(img), width, height, parts, between, self._label_margin, self._image_crop, self._image_rotation,
+               self._image_fit, self._image_scaling_factor, self._grows(), self._arrangement()[1])
         kept = self._shared_layouts.get('image')
         if kept is None or kept[0] != key:
             # img is kept along, so that no other image gets its id
-            kept = self._shared_layouts['image'] = (key, img, self._sized(img, width, height, parts))
+            kept = self._shared_layouts['image'] = (key, img, self._sized(img, width, height, parts, between=between))
         return kept[2]
 
     @staticmethod
@@ -1115,6 +1232,8 @@ class SimpleLabel:
         last = len(lines) - 1
         last_shown = max((i for i, line in enumerate(lines) if self._shows_something(line)), default=last)
         spaced = last if lines and self._shows_something(lines[-1]) else last - 1
+        # Drawn, each line with the box of what it draws, see _place_lines()
+        placed = []
 
         # Iterate over lines of text
         for i, line in enumerate(lines):
@@ -1138,6 +1257,12 @@ class SimpleLabel:
             indented = checkbox or line.get('todo_continued', False)
 
             INVERT_LINE = 'inverted' in line and line['inverted']
+            # From where to where it is drawn across, its boxes and its text
+            extents = []
+            if do_draw:
+                # What the line draws is what changes around its room
+                region = self._line_region(img, bboxes, i, text_offset)
+                before = img.crop(region)
             if do_draw and INVERT_LINE:
                 # Draw a filled rectangle
                 center_x = 0
@@ -1155,6 +1280,7 @@ class SimpleLabel:
                 y_min = bboxes[i][0][1] + text_offset[1]
                 y_max = bboxes[i][0][3] + text_offset[1]
                 draw.rectangle((min_bbox_x, y_min, max_bbox_x, y_max), fill=color)
+                extents.append((min_bbox_x, max_bbox_x + 1))
                 # Overwrite font color with white on colored background
                 color = (255, 255, 255)
 
@@ -1198,6 +1324,9 @@ class SimpleLabel:
                 # included, also where the text is lower or there is none
                 if checkbox:
                     bbox = (bbox[0], bbox[1], bbox[2], max(bbox[3], text_y + 8 * self._line_size(line) // 10 + 1))
+                underline = self._underline(draw, line, font, text_y)
+                if underline:
+                    bbox = (bbox[0], bbox[1], bbox[2], max(bbox[3], underline[1]))
                 bboxes.append((bbox, text_y, line))
                 y += bbox[3] - bbox[1] + (spacing if i < spaced else 0)
             else:
@@ -1230,8 +1359,13 @@ class SimpleLabel:
                     bbox = self._draw_line(draw, (x - 1.2 * checkbox_box_dimensions, y), line['text'], font, anchor, align=align, measuring=not do_draw)
                     box_dimensions = bbox[0], y, bbox[0] + checkbox_box_dimensions, y + checkbox_box_dimensions
                     draw.rounded_rectangle(box_dimensions, radius=5, outline=color, width=max(1, checkbox_box_dimensions//10), fill=(255,255,255))
+                    extents.append((box_dimensions[0], box_dimensions[2] + 1))
 
-                self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing)
+                drawn = self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing)
+                extents.append((drawn[0], drawn[2]))
+                underline = self._underline(draw, line, font, y)
+                if underline:
+                    draw.rectangle((drawn[0], underline[0], drawn[2] - 1, underline[1] - 1), fill=color)
 
                 # Shift text around if requested
                 if "shift" in line:
@@ -1242,9 +1376,44 @@ class SimpleLabel:
                             new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
                             draw.text((x + x_shift, y + y_shift), new_random_text, color, font=font, anchor=anchor, align=align, spacing=spacing)
 
+                # Faint edges of letters left out, as they look on the preview
+                ink = ImageChops.difference(before, img.crop(region)).point(lambda v: 255 if v > 127 else 0).getbbox()
+                if ink:
+                    placed.append((line, (region[0] + ink[0], region[1] + ink[1], region[0] + ink[2], region[1] + ink[3]), True))
+                else:
+                    room = bboxes[i][0]
+                    placed.append((line, (min(start for start, _ in extents), room[1] + text_offset[1],
+                                          max(end for _, end in extents), room[3] + text_offset[1]), False))
+
+        if do_draw:
+            self._place_lines(placed)
         # Return total bbox
         # each in form (x0, y0, x1, y1)
         return bboxes
+
+    def _place_lines(self, placed: list) -> None:
+        """Keep where the lines drawn (placed, each with its box and whether
+        it drew anything) are, by their index in the lines given: the lines a
+        line wrapped or broke into share one box. A line that drew nothing
+        keeps its room, as wide as the text, so that a click on it picks it."""
+        shown = [box for line, box, inked in placed if inked]
+        for line, box, inked in placed:
+            if shown and not inked:
+                box = (min(b[0] for b in shown), box[1], max(b[2] for b in shown), box[3])
+            known = self._line_boxes.get(line['line_index'], box)
+            self._line_boxes[line['line_index']] = (min(known[0], box[0]), min(known[1], box[1]), max(known[2], box[2]), max(known[3], box[3]))
+
+    def _line_region(self, img, bboxes, i, text_offset) -> tuple:
+        """Where line i of the text placed at text_offset draws on img: its
+        room and the width of the text, a size around them for letters
+        reaching out and shifted text."""
+        size = self._line_size(bboxes[i][2])
+        room = bboxes[i][0]
+        x0 = text_offset[0] + min(bbox[0][0] for bbox in bboxes) - size
+        x1 = text_offset[0] + max(bbox[0][2] for bbox in bboxes) + size
+        y0, y1 = room[1] + text_offset[1] - size, room[3] + text_offset[1] + size
+        x0, y0 = min(max(0, math.floor(x0)), img.width), min(max(0, math.floor(y0)), img.height)
+        return x0, y0, max(x0, min(img.width, math.ceil(x1))), max(y0, min(img.height, math.ceil(y1)))
 
     def _wrapped(self, draw, lines) -> list:
         """The lines as laid out: where long lines wrap, each line wider than
@@ -1337,6 +1506,21 @@ class SimpleLabel:
             text = 'H'
         return -draw.textbbox((0, 0), text, font=font, anchor='ls')[1]
 
+    def _underline(self, draw, line, font, y) -> tuple | None:
+        """From where to where an underlined line's bar is drawn below its
+        text at y, None where it has none or no words. It scales with the
+        size of the line like the underline of a font does."""
+        if not line.get('underline') or not self._has_words(line):
+            return None
+        # Characters that take no room, e.g. a zero-width space, leave no
+        # width for a bar
+        box = self._draw_line(draw, (0, 0), line['text'], font, 'lt', measuring=True)
+        if box[2] <= box[0]:
+            return None
+        size = self._line_size(line)
+        top = y + self._baseline(draw, line['text'], font) + max(1, round(size * .1))
+        return top, top + max(1, round(size / 16))
+
     def _line_size(self, line) -> int:
         """Font size of a line, made smaller when the text is shrunk to fit."""
         return max(1, int(int(line['size']) * self._text_scale))
@@ -1375,7 +1559,14 @@ class SimpleLabel:
             return margin_top
         if self._placed() == 'bottom':
             return height - margin_bottom - extent
-        return (height - extent)//2 + (margin_top - margin_bottom)//2
+        return self._middle(height, extent, margin_top, margin_bottom)
+
+    @staticmethod
+    def _middle(size: int, extent: int, start: int, end: int) -> int:
+        """Where extent dots begin in the middle of size dots between the
+        margins start and end: an odd dot left over goes to the end, so that
+        what fills the room stays within both."""
+        return start + (size - start - end - extent) // 2
 
     def _placed(self) -> str:
         """Where the content is placed: as given, in the middle on a label
@@ -1392,6 +1583,39 @@ class SimpleLabel:
         if self._with_code:
             return 'left'
         return 'above' if self._label_orientation == LabelOrientation.STANDARD else 'left'
+
+    def _main_part(self) -> str:
+        """The name of the image or code the label is made of: the code of a
+        label of a code, else the image."""
+        return 'code' if self._label_content in (LabelContent.QRCODE_ONLY, LabelContent.TEXT_QRCODE) else 'image'
+
+    def _arrangement(self, paired: bool = True) -> tuple[list[str], str]:
+        """The parts of the label by name in their order and whether they are
+        side by side as the text reads (row) or one below the other (column):
+        as given in parts_order and parts_direction, each else as at
+        image_position, the image or code on its side of the text and a code
+        next to an image on the other one. Parts left out of the order follow
+        it, parts the label does not have are in it too. Without a part next
+        to it (paired) the image or code is where it is without a choice."""
+        side = self._image_side(with_text=paired)
+        main = self._main_part()
+        order = [main, 'text'] + (['code'] if main == 'image' else [])
+        if side in ('right', 'below'):
+            order.reverse()
+        direction = 'row' if side in ('left', 'right') else 'column'
+        if paired:
+            order = list(dict.fromkeys((*(self._parts_order or ()), *order)))
+            direction = self._parts_direction or direction
+        return order, direction
+
+    @staticmethod
+    def _side_of(placed: list[str], main: str, direction: str) -> str:
+        """Where the image or code main is next to the text, or next to the
+        code where the label has no text: left, right, above or below."""
+        first = placed.index(main) < placed.index('text' if 'text' in placed else 'code')
+        if direction == 'row':
+            return 'left' if first else 'right'
+        return 'above' if first else 'below'
 
     def _draws_code(self) -> bool:
         """Whether the label has a code: alone, with text, or next to an
@@ -1444,8 +1668,8 @@ class SimpleLabel:
             width, grows_wide = min(MAX_LABEL_PIXELS // max(height, 1), MAX_FILLED_RATIO * height), False
         if largest and grows_high:
             height, grows_high = min(MAX_LABEL_PIXELS // max(width, 1), MAX_FILLED_RATIO * width), False
-        beside = self._image_side() in ('left', 'right')
-        # A code next to an image is on the other side of the text
+        beside = self._arrangement()[1] == 'row'
+        # A code next to an image takes its room as well
         code_width, code_height = (self._code_size[0] + gap, self._code_size[1] + gap) if self._code_size else (0, 0)
         max_width = None if grows_wide else width - margin_left - margin_right - (img_width + gap + code_width if beside else 0)
         max_height = None if grows_high else height - margin_top - margin_bottom - (0 if beside else img_height + gap + code_height)

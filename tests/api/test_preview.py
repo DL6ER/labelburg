@@ -146,3 +146,22 @@ def test_preview_without_red_or_color_is_stored_in_gray(tmp_path, settings, mode
     response = client.post('/labeldesigner/api/preview', data=data, content_type='multipart/form-data')
     assert response.status_code == 200
     assert Image.open(io.BytesIO(response.data)).mode == mode
+
+
+@pytest.mark.parametrize('label_size, told', [
+    pytest.param('62', {'#2563eb': 'black', '#EA580C': 'black', 'red': 'black', '#16a34a': 'black', '#db2777': 'black'}, id='black'),
+    pytest.param('62red', {'#2563eb': 'black', '#EA580C': 'red', '#16a34a': 'black', '#db2777': 'red'}, id='black and red'),
+    pytest.param('vc25', None, id='color tape'),
+])
+def test_the_preview_tells_the_colors_the_tape_prints_otherwise(tmp_path, label_size, told):
+    # The label designer says so next to the color, the rule stays here
+    client = make_client(tmp_path)
+    lines = [{'font': 'DejaVu Sans,Book', 'text': text, 'size': '30', 'color': color}
+             for text, color in (('Blue', '#2563eb'), ('Orange', '#EA580C'), ('Red', 'red'), ('Black', 'black'), ('Plain', ''))]
+    data = dict(EXAMPLE_FORMDATA, label_size=label_size, text=json.dumps(lines), print_type='qrcode_text', code_text='x',
+                print_color='#16a34a', border_color='#db2777', border_thickness='2')
+    response = client.post('/labeldesigner/api/preview', data=data)
+    assert response.status_code == 200
+    header = response.headers.get('X-Label-Colors')
+    assert (json.loads(header) if header else None) == told
+

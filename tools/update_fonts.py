@@ -1,6 +1,6 @@
-"""Copy the icon fonts in app/static from the npm packages of the versions in
-tools/fonts/package-lock.json, which Dependabot raises, and write the names of
-the Material Design Icons used for {{mdi:<name>}} in label texts to
+"""Copy the Material Design Icons in app/static from the npm package of the
+version in tools/fonts/package-lock.json, which Dependabot raises, and write
+the names of the icons used for {{mdi:<name>}} in label texts to
 app/static/mdi/icons.json:
 
     python3 tools/update_fonts.py           # writes the files
@@ -28,11 +28,6 @@ FILES = {
     '@mdi/font': {
         'fonts/materialdesignicons-webfont.ttf': 'mdi/materialdesignicons-webfont.ttf',
         'LICENSE': 'mdi/LICENSE',
-    },
-    '@fortawesome/fontawesome-free': {
-        'css/all.min.css': 'fontawesome/css/all.min.css',
-        **{f'webfonts/{name}.woff2': f'fontawesome/webfonts/{name}.woff2'
-           for name in ('fa-brands-400', 'fa-regular-400', 'fa-solid-900', 'fa-v4compatibility')},
     },
 }
 

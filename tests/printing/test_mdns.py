@@ -2,7 +2,9 @@
 DNS, decoded from answers built like those of a Brother printer."""
 import struct
 
-from app.labeldesigner import mdns
+import pytest
+
+from app.labeldesigner import mdns, printer
 
 
 def name(*labels: str) -> bytes:
@@ -46,6 +48,7 @@ def test_announced_printer_is_decoded():
         'name': 'Brother QL-810W._pdl-datastream._tcp.local',
         'service': '_pdl-datastream._tcp.local',
         'address': '192.0.2.94',
+        'addresses': ['192.0.2.94'],
         'port': 9100,
         # Keys are case-insensitive
         'txt': {'txtvers': '1', 'ty': 'Brother QL-810W', 'usb_mdl': 'QL-810W'},
@@ -66,3 +69,30 @@ def test_looping_name_pointers_are_refused():
         pass
     else:
         raise AssertionError('A name pointing to itself was accepted')
+
+
+def test_every_address_of_a_host_is_told():
+    # A printer may announce its link-local address before the one it got by DHCP
+    records = mdns.decode_records(answer()) + [('BRW00005E005301.local', mdns.TYPE_A, '192.168.1.94')]
+    assert mdns.services(records)[0]['addresses'] == ['192.0.2.94', '192.168.1.94']
+
+
+@pytest.mark.parametrize('addresses, found', [
+    (['192.168.1.94'], 'tcp://192.168.1.94'),
+    (['169.254.3.4', '192.168.1.94'], 'tcp://192.168.1.94'),
+    (['203.0.113.9', '192.168.1.94'], 'tcp://192.168.1.94'),
+    # Without DHCP, on the local link, as before
+    (['169.254.3.4'], 'tcp://169.254.3.4'),
+    # Anyone on the network may answer, the search is a local one
+    (['203.0.113.9'], None),
+    (['8.8.8.8'], None),
+    (['169.254.169.254'], None),
+    (['not an address'], None),
+])
+def test_printers_that_announce_themselves_are_found_at_a_local_address(monkeypatch, addresses, found):
+    monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', True)
+    monkeypatch.setattr(printer, '_discovered', None)
+    services = [{'name': 'QL', 'service': '_ipp._tcp.local', 'address': addresses[0], 'addresses': addresses, 'port': 631,
+                 'txt': {'ty': 'Brother QL-810W'}}]
+    monkeypatch.setattr(printer.mdns, 'discover', lambda: services)
+    assert printer._discovered_label_printers() == ([(found, 'QL-810W')] if found else [])

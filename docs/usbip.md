@@ -2,7 +2,9 @@
 
 USB/IP shares a USB device over the network. The printer is plugged into a small device next to it, an ESP32 or a Linux computer, and the label designer uses it from wherever it runs as if it were plugged in there: it reads the model, the loaded labels and errors like on USB.
 
-Name the printer in `PRINTER_PRINTER` or `PRINTERS` as `usbip://<host>[:<port>][/<bus ID>]`, e.g., `usbip://192.168.1.50`. The port is 3240 unless given. The bus ID is only needed when the device shares several printers, or a Linux computer shares other devices too, else the first one is taken. Printers on USB/IP are not detected, and only the configuration can name them, requests cannot.
+Add the printer in the Settings of the label designer: under Printers, type its address in "Add a printer" as `usbip://<host>[:<port>][/<bus ID>]`, e.g., `usbip://192.168.1.50`, click Identify, give it a name if you like and click Add. Or name it in `PRINTER_PRINTER` or `PRINTERS` of the configuration. The port is 3240 unless given. The bus ID is only needed when the device shares several printers, or a Linux computer shares other devices too, else the first one is taken. Printers on USB/IP are not detected, and requests cannot name others than those added or configured.
+
+The Settings add a printer only at an address in your own network, unless `ADD_PRINTERS` allows more, see [Settings](../README.md#settings). That covers the examples below, also `127.0.0.1` and the Docker bridge for a tunnel through SSH.
 
 The label designer speaks USB/IP itself. Its computer needs neither a kernel module nor root, and in Docker neither `devices` nor `privileged`.
 
@@ -138,7 +140,7 @@ sensor:
 
 ### In the label designer
 
-Name the printer by the address of the board:
+Add the printer in the Settings of the label designer with the address of the board, e.g., `usbip://192.168.1.50`. Or name it in the configuration:
 
 ```yaml
 services:
@@ -219,7 +221,7 @@ Many desktops run `ipp-usb`, which takes printers with IPP over USB, e.g., the V
 sudo systemctl mask --now ipp-usb.service
 ```
 
-In the label designer, name the printer by the host name or address of that computer, e.g., `PRINTER_PRINTER=usbip://printer-pi`. If it shares other devices too, add the bus ID that `usbip list -l` shows there, e.g., `usbip://printer-pi/1-1.2`.
+Add the printer in the Settings of the label designer by the host name or address of that computer, e.g., `usbip://printer-pi`, or name it in the configuration, e.g., `PRINTER_PRINTER=usbip://printer-pi`. If it shares other devices too, add the bus ID that `usbip list -l` shows there, e.g., `usbip://printer-pi/1-1.2`.
 
 A label designer on the computer that shares the printer leaves it to USB/IP and says so below its list of printers. To print on it there too, name it with `localhost`, e.g., `usbip://localhost/1-1.2`. In Docker, this needs `network_mode: host`.
 

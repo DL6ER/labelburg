@@ -8,7 +8,7 @@ import time
 from urllib.parse import urlsplit
 
 from ... import ipp, snmp
-from .. import devices
+from .. import devices, reach
 from ..base import network_status
 from . import usb
 from .models import MODELS
@@ -88,7 +88,7 @@ STATUS_ERROR_MESSAGES = {
 def send(data: bytes, device_specifier: str):
     """Send a job to port 9100 of a network printer, which answers nothing."""
     address = urlsplit(device_specifier)
-    with socket.create_connection((address.hostname, address.port or 9100), timeout=10) as connection:
+    with reach.create_connection((address.hostname, address.port or 9100), timeout=10) as connection:
         connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         connection.sendall(data)
         connection.shutdown(socket.SHUT_RDWR)
@@ -142,12 +142,15 @@ def _ipp_media(media) -> tuple:
         media = media[0] if media else None
     if not isinstance(media, dict):
         return None, 0, None
-    size = media.get('media-size') or {}
+    # Values of other types than asked for tell nothing
+    size, source = media.get('media-size'), media.get('media-source-properties')
+    size = size if isinstance(size, dict) else {}
     x, y = size.get('x-dimension'), size.get('y-dimension')
     if not isinstance(x, int) or x <= 0:
         return None, 0, None
-    feed = (media.get('media-source-properties') or {}).get('media-source-feed-direction')
-    endless = media.get('media-type') in IPP_ENDLESS_MEDIA_TYPES or not isinstance(y, int) or y <= 0
+    feed = source.get('media-source-feed-direction') if isinstance(source, dict) else None
+    kind = media.get('media-type')
+    endless = isinstance(kind, str) and kind in IPP_ENDLESS_MEDIA_TYPES or not isinstance(y, int) or y <= 0
     if endless:
         return round(x / 100), 0, 'Continuous length tape'
     across, along = (max(x, y), min(x, y)) if feed == 'long-edge-first' else (x, y)
@@ -160,11 +163,11 @@ def _ipp_errors(attributes: dict) -> list:
     QL-810W is briefly "stopped" without a reason at the end of every job,
     so only reasons count."""
     reasons = attributes.get('printer-state-reasons') or []
-    if isinstance(reasons, str):
+    if not isinstance(reasons, list):
         reasons = [reasons]
     errors = []
     for reason in reasons:
-        if reason == 'none' or reason.endswith(('-report', '-warning')):
+        if not isinstance(reason, str) or reason == 'none' or reason.endswith(('-report', '-warning')):
             continue
         keyword = reason.removesuffix('-error')
         message = IPP_REASON_MESSAGES.get(keyword, f'The printer reports "{keyword}"')

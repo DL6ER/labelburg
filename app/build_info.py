@@ -1,4 +1,4 @@
-"""Release, commit and build time of the running version, shown in the navbar."""
+"""Release, commit and build time of the running version, shown in the Settings under About."""
 
 import os
 import re

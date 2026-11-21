@@ -1,22 +1,40 @@
+import io
 import os
+import re
 import logging
 import struct
 from collections import defaultdict
+from functools import lru_cache
+
+from PIL import Image, ImageDraw, ImageFont
 
 # Name records in these (platform, encoding) pairs can be read: Unicode,
 # Windows Unicode and Macintosh Roman
 NAME_ENCODINGS = {**{(0, encoding): 'utf_16_be' for encoding in range(7)},
                   (3, 0): 'utf_16_be', (3, 1): 'utf_16_be', (3, 10): 'utf_16_be', (1, 0): 'mac_roman'}
 
+# The widths of usWidthClass 1 to 9 in the OS/2 table, as CSS names them
+WIDTHS = ('ultra-condensed', 'extra-condensed', 'condensed', 'semi-condensed', 'normal',
+          'semi-expanded', 'expanded', 'extra-expanded', 'ultra-expanded')
+# Words of font names for a weight, a width or a slant, e.g. "Extra Condensed"
+# as one. What else a style names is a family of its own, e.g. Mono.
+WEIGHT_WORDS = {'thin': 100, 'hairline': 100, 'extralight': 200, 'ultralight': 200, 'light': 300, 'semilight': 300,
+                'book': 400, 'regular': 400, 'normal': 400, 'roman': 400, 'medium': 500, 'semibold': 600, 'demibold': 600,
+                'demi': 600, 'bold': 700, 'extrabold': 800, 'ultrabold': 800, 'black': 900, 'heavy': 900,
+                'extrablack': 900, 'ultrablack': 900}
+WIDTH_WORDS = {'ultracondensed': 'ultra-condensed', 'extracondensed': 'extra-condensed', 'condensed': 'condensed',
+               'narrow': 'condensed', 'semicondensed': 'semi-condensed', 'semiexpanded': 'semi-expanded',
+               'expanded': 'expanded', 'wide': 'expanded', 'extraexpanded': 'extra-expanded', 'ultraexpanded': 'ultra-expanded'}
+SLANT_WORDS = ('italic', 'oblique')
+
 
 class FontNotFound(LookupError):
     """A font given as "<family>,<style>" that is not installed."""
 
 
-def font_names(path) -> tuple[str | None, str | None]:
-    """Family and style of a TrueType or OpenType font: the first readable,
-    non-empty records with name IDs 1 and 2 in its name table. A broken file
-    raises ValueError or struct.error."""
+def _tables(path, tags: tuple) -> dict:
+    """The tables of a TrueType or OpenType font named in tags, those it has.
+    A broken file raises ValueError or struct.error."""
     with open(path, 'rb') as fh:
         def read(offset: int, length: int) -> bytes:
             fh.seek(offset)
@@ -25,15 +43,19 @@ def font_names(path) -> tuple[str | None, str | None]:
                 raise ValueError(f'Font file too short: {path}')
             return data
 
-        tables = struct.unpack('>H', read(4, 2))[0]
-        directory = read(12, 16 * tables)
-        for i in range(tables):
+        count = struct.unpack('>H', read(4, 2))[0]
+        directory = read(12, 16 * count)
+        found = {}
+        for i in range(count):
             tag, _, offset, length = struct.unpack_from('>4sIII', directory, 16 * i)
-            if tag == b'name':
-                break
-        else:
-            return None, None
-        table = read(offset, length)
+            if tag in tags and tag not in found:
+                found[tag] = (offset, length)
+        return {tag: read(offset, length) for tag, (offset, length) in found.items()}
+
+
+def _names(table: bytes | None, path) -> tuple[str | None, str | None]:
+    if table is None:
+        return None, None
     _, count, strings = struct.unpack_from('>HHH', table)
     names = {}
     for i in range(count):
@@ -48,6 +70,103 @@ def font_names(path) -> tuple[str | None, str | None]:
     return names.get(1), names.get(2)
 
 
+def _os2_face(table: bytes | None) -> dict | None:
+    """Weight, width and slant of a font's OS/2 table, None without one or
+    with classes out of range."""
+    if table is None or len(table) < 64:
+        return None
+    weight, width = struct.unpack_from('>HH', table, 4)
+    selection = struct.unpack_from('>H', table, 62)[0]
+    # Some old fonts have 1 to 9 for 100 to 900, Windows once had 250 and
+    # 275 for Thin and ExtraLight, e.g. Inconsolata
+    if 1 <= weight <= 9:
+        weight *= 100
+    weight = {250: 100, 275: 200}.get(weight, weight)
+    if not 1 <= weight <= 1000 or not 1 <= width <= 9:
+        return None
+    # A weight between two classes is the lighter one; ITALIC or OBLIQUE in
+    # fsSelection
+    return {'weight': max(100, min(900, weight // 100 * 100)), 'width': WIDTHS[width - 1], 'italic': bool(selection & 0x201)}
+
+
+def _words(name: str) -> list[tuple[str, str]]:
+    """The words of a font name with their keys, e.g. "Extra Condensed" as
+    one word with the key "extracondensed". Two words are one only where
+    they name a weight or width together, "Demi Oblique" stays two."""
+    words = []
+    for word in filter(None, re.split(r'[\s/_-]+', name)):
+        joined = words[-1][1] + word.lower() if words else ''
+        if words and words[-1][1] in ('extra', 'ultra', 'semi', 'demi') and (joined in WEIGHT_WORDS or joined in WIDTH_WORDS):
+            words[-1] = (f'{words[-1][0]} {word}', joined)
+        else:
+            words.append((word, word.lower()))
+    return words
+
+
+def _named_face(name: str) -> dict:
+    """Weight, width and slant as the words of a font name tell them."""
+    keys = [key for _, key in _words(name)]
+    weights = [WEIGHT_WORDS[key] for key in keys if key in WEIGHT_WORDS]
+    widths = [WIDTH_WORDS[key] for key in keys if key in WIDTH_WORDS]
+    return {'weight': weights[-1] if weights else 400, 'width': widths[-1] if widths else 'normal',
+            'italic': any(key in SLANT_WORDS for key in keys)}
+
+
+def _variant(style: str) -> str:
+    """What a style names besides weight, width and slant, e.g. Mono of
+    "Mono / Bold Oblique"."""
+    return ' '.join(word for word, key in _words(style)
+                    if key not in WEIGHT_WORDS and key not in WIDTH_WORDS and key not in SLANT_WORDS)
+
+
+def font_info(path) -> tuple[str | None, str | None, dict | None]:
+    """Family, style and face (weight 100 to 900, width as in WIDTHS and
+    italic) of a TrueType or OpenType font, the face as its OS/2 table tells
+    it. A broken file raises ValueError or struct.error."""
+    tables = _tables(path, (b'name', b'OS/2'))
+    family, style = _names(tables.get(b'name'), path)
+    return family, style, _os2_face(tables.get(b'OS/2'))
+
+
+def font_names(path) -> tuple[str | None, str | None]:
+    """Family and style of a TrueType or OpenType font: the first readable,
+    non-empty records with name IDs 1 and 2 in its name table. A broken file
+    raises ValueError or struct.error."""
+    return font_info(path)[:2]
+
+
+SAMPLE_SIZE = 40
+
+
+@lru_cache(maxsize=256)
+def sample(path: str, text: str) -> bytes | None:
+    """text drawn in the font, black on transparent as a PNG image, None
+    where the font has no glyph for one of its characters. Every sample is
+    as high and has its baseline at the same height. A file that cannot
+    draw, e.g. a broken one, has none either; kept, it is told once."""
+    try:
+        return _sample(path, text)
+    except OSError as e:
+        logging.getLogger(__name__).warning('The font %s cannot draw a sample: %s', path, e)
+        return None
+
+
+def _sample(path: str, text: str) -> bytes | None:
+    font = ImageFont.truetype(path, SAMPLE_SIZE)
+    missing = font.getmask('\U0010fffd')
+
+    def drawn(char):
+        mask = font.getmask(char)
+        return mask.size != missing.size or bytes(mask) != bytes(missing)
+    if not all(drawn(char) for char in set(text) if not char.isspace()):
+        return None
+    image = Image.new('LA', (round(font.getlength(text)) + 4, round(SAMPLE_SIZE * 1.4)), (0, 0))
+    ImageDraw.Draw(image).text((2, round(SAMPLE_SIZE * 1.1)), text, font=font, fill=(0, 255), anchor='ls')
+    out = io.BytesIO()
+    image.save(out, 'PNG', optimize=True)
+    return out.getvalue()
+
+
 class Fonts:
     def __init__(self,
                  logger: logging.Logger,
@@ -56,6 +175,8 @@ class Fonts:
                  additional_path: str | list[str] = '',
                  system_fonts: bool = True):
         self.fonts = defaultdict(dict)
+        # Weight, width and slant of each font file, see font_info()
+        self.faces = {}
         self.default_family = default_family
         self.default_style = default_style
 
@@ -82,9 +203,11 @@ class Fonts:
                     if file.lower().endswith(font_exts):
                         font_path = os.path.join(root, file)
                         try:
-                            family, style = font_names(font_path)
+                            family, style, face = font_info(font_path)
                             if family and style:
                                 self.fonts[family][style] = font_path
+                                # Without an OS/2 table as its names tell it
+                                self.faces[font_path] = face or _named_face(f'{family} {style}')
                         except Exception:
                             continue
 
@@ -119,6 +242,14 @@ class Fonts:
             self.default_style = first['styles'][0]
             logger.warning(f'The default font is now set to: {self.default_family} ({self.default_style})')
 
+        # The families of the font menu and the regular font of each name
+        # family_font() takes, made once: every label and sample asks
+        self._families = self._grouped()
+        self._regular = {family['name']: family['regular'] for family in self._families}
+        for family in self._families:
+            for style in family['styles']:
+                self._regular.setdefault(style['font'].split(',', 1)[0], family['regular'])
+
     def get_default_font(self):
         """Return the default font family and style."""
         return (self.default_family, self.default_style)
@@ -137,6 +268,42 @@ class Fonts:
                 'styles': sorted_styles
             })
         return fontlist
+
+    def families(self) -> list[dict]:
+        """The font families as the font menu of the label designer lists
+        them: the families of the server, what a style names besides weight,
+        width and slant a family of its own, e.g. DejaVu Sans Mono. Each with
+        its regular font, the weight of its bold (None without one) and its
+        styles, narrow to wide and light to heavy: the font as the API takes
+        it, its weight, width and whether it is italic. Shared, not to be
+        changed."""
+        return self._families
+
+    def _grouped(self) -> list[dict]:
+        grouped = defaultdict(list)
+        for family, styles in self.fonts.items():
+            for style, path in styles.items():
+                name = ' '.join(filter(None, (family, _variant(style))))
+                grouped[name].append({'font': f'{family},{style}', **(self.faces.get(path) or _named_face(style))})
+        listed = []
+        for name in sorted(grouped, key=str.casefold):
+            styles = sorted(grouped[name], key=lambda s: (WIDTHS.index(s['width']), s['weight'], s['italic']))
+            regular = min(styles, key=lambda s: (s['italic'], abs(WIDTHS.index(s['width']) - 4), abs(s['weight'] - 400), s['weight']))
+            # Bold in the label designer: of the weights from 600 the one nearest 700
+            bold = min((s['weight'] for s in styles if s['weight'] >= 600), key=lambda w: (abs(w - 700), -w), default=None)
+            listed.append({'name': name, 'regular': regular['font'], 'bold': bold, 'styles': styles})
+        return listed
+
+    def family_font(self, name: str) -> str:
+        """The regular font of a family as families() names it, or of a
+        family of the server, e.g. a font of new labels kept before."""
+        if name not in self._regular:
+            raise FontNotFound(f'Unknown font family: {name}')
+        return self._regular[name]
+
+    def family_names(self) -> set[str]:
+        """The names family_font() takes."""
+        return set(self._regular)
 
     def fonts_available(self):
         """Return True if any fonts are available, else False."""

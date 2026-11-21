@@ -20,7 +20,6 @@ MDI_CSS = '''.mdi-blank::before {
   content: "\\F0004";
 }
 '''
-FA_WEBFONTS = ('fa-brands-400', 'fa-regular-400', 'fa-solid-900', 'fa-v4compatibility')
 
 
 def tarball(files: dict) -> bytes:
@@ -39,16 +38,12 @@ def integrity(data: bytes) -> str:
 
 @pytest.fixture
 def registry(tmp_path, monkeypatch):
-    """Both packages on a fake npm registry, and a lock file naming them."""
+    """The package on a fake npm registry, and a lock file naming it."""
     packages = {
         '@mdi/font': tarball({
             'fonts/materialdesignicons-webfont.ttf': b'mdi font',
             'LICENSE': b'mdi license',
             'css/materialdesignicons.css': MDI_CSS.encode(),
-        }),
-        '@fortawesome/fontawesome-free': tarball({
-            'css/all.min.css': b'fa css',
-            **{f'webfonts/{name}.woff2': name.encode() for name in FA_WEBFONTS},
         }),
     }
     lock = {'lockfileVersion': 3, 'packages': {'': {}}}
@@ -83,41 +78,37 @@ def test_files_of_the_locked_versions_written(registry):
     static = registry.static
     assert (static / 'mdi/materialdesignicons-webfont.ttf').read_bytes() == b'mdi font'
     assert (static / 'mdi/LICENSE').read_bytes() == b'mdi license'
-    assert (static / 'fontawesome/css/all.min.css').read_bytes() == b'fa css'
-    for name in FA_WEBFONTS:
-        assert (static / f'fontawesome/webfonts/{name}.woff2').read_bytes() == name.encode()
     assert json.loads((static / 'mdi/icons.json').read_text()) == {
         'version': '1.2.3', 'icons': {'account': 'F0004', 'lightbulb': 'F0335'}}
     assert sorted(path.relative_to(static).as_posix() for path in static.rglob('*') if path.is_file()) == sorted(
-        ['mdi/materialdesignicons-webfont.ttf', 'mdi/LICENSE', 'mdi/icons.json', 'fontawesome/css/all.min.css']
-        + [f'fontawesome/webfonts/{name}.woff2' for name in FA_WEBFONTS])
+        ['mdi/materialdesignicons-webfont.ttf', 'mdi/LICENSE', 'mdi/icons.json'])
 
 
 def test_check_names_the_files_that_differ(registry, capsys):
     assert registry.run() == 0
     assert registry.run('--check') == 0
-    css = registry.static / 'fontawesome/css/all.min.css'
-    css.write_bytes(b'fa css of before')
+    font = registry.static / 'mdi/materialdesignicons-webfont.ttf'
+    font.write_bytes(b'mdi font of before')
     (registry.static / 'mdi/icons.json').unlink()
     capsys.readouterr()
     assert registry.run('--check') == 1
     err = capsys.readouterr().err
-    assert 'fontawesome/css/all.min.css' in err and 'mdi/icons.json' in err
+    assert 'mdi/materialdesignicons-webfont.ttf' in err and 'mdi/icons.json' in err
     assert 'mdi/LICENSE' not in err
     # Only checked, nothing written
-    assert css.read_bytes() == b'fa css of before'
+    assert font.read_bytes() == b'mdi font of before'
     assert not (registry.static / 'mdi/icons.json').exists()
     assert registry.run() == 0
     assert registry.run('--check') == 0
 
 
 def test_package_not_matching_its_integrity_is_refused(registry):
-    package = registry.lock['packages']['node_modules/@fortawesome/fontawesome-free']
+    package = registry.lock['packages']['node_modules/@mdi/font']
     package['integrity'] = integrity(b'another package')
     registry.write_lock()
     with pytest.raises(ValueError, match='integrity'):
         registry.run()
-    assert not (registry.static / 'fontawesome').exists()
+    assert not (registry.static / 'mdi').exists()
 
 
 def test_package_only_from_the_npm_registry(registry):
@@ -134,5 +125,4 @@ def test_lock_file_names_the_versions_in_the_repository():
     static = os.path.join(os.path.dirname(__file__), '..', 'app', 'static')
     with open(os.path.join(static, 'mdi', 'icons.json'), encoding='utf-8') as f:
         assert json.load(f)['version'] == locked['@mdi/font']['version']
-    with open(os.path.join(static, 'fontawesome', 'css', 'all.min.css'), encoding='utf-8') as f:
-        assert f"Font Awesome Free {locked['@fortawesome/fontawesome-free']['version']} by" in f.read(300)
+    assert list(locked) == ['@mdi/font']

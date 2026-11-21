@@ -46,6 +46,17 @@ def flag_strip(half: Image.Image, wrap: int, dpi: int, along: bool) -> Image.Ima
     return strip.transpose(Image.Transpose.ROTATE_270)
 
 
+def flag_box(box: list, size: tuple, wrap: int, along: bool) -> list:
+    """Where box [x0, y0, x1, y1] on a label of size is on the second label
+    of the flag flag_strip() makes of it."""
+    width, height = size
+    x0, y0, x1, y1 = box
+    if along:
+        return [x0 + width + wrap, y0, x1 + width + wrap, y1]
+    end = 2 * height + wrap
+    return [width - x1, end - y1, width - x0, end - y0]
+
+
 def _strip(first: Image.Image, second: Image.Image, wrap: int, dpi: int) -> Image.Image:
     width, height = first.size
     strip = Image.new(first.mode, (2 * width + wrap, height), 'white')

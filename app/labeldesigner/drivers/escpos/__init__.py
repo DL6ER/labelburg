@@ -73,8 +73,11 @@ class Escpos(Driver):
 
     def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
-        if device_id is None:
-            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        if not isinstance(device, str):
+            return None
+        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+
+    def model_in(self, device_id):
         fields = devices.device_id_fields(device_id)
         commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
         if 'ESC/POS' not in commands:

@@ -6,11 +6,12 @@ import json
 import os
 import struct
 import time
+from types import SimpleNamespace
 
 import pytest
 
 from app.labeldesigner import printer, printer_settings
-from app.labeldesigner.drivers import devices, niimbot, progress
+from app.labeldesigner.drivers import devices, niimbot, progress, usbip
 from app.labeldesigner.drivers.niimbot import calibration, protocol
 from tests.helpers import make_client, without_status
 
@@ -101,9 +102,10 @@ def b1(client, monkeypatch):
     """The client with a B1 as its printer, which answers as one."""
     client.application.config['PRINTER_MODEL'] = 'Niimbot/B1'
     client.application.config['PRINTER_PRINTER'] = B1_DEVICE
-    # Not asked over the network for a device ID
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    # Not asked over the network for a device ID, nor imported for it
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: '')
     monkeypatch.setattr(devices, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(usbip, 'connect', lambda device: SimpleNamespace(device_id=''))
     for command, reply in B1_REPLIES.items():
         monkeypatch.setitem(REPLIES, command, reply)
     return client
@@ -202,7 +204,7 @@ def test_b1_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
     monkeypatch.setattr(protocol.backends, 'open_printer', open_printer)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
     # Not asked over the network for a device ID
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: '')
     monkeypatch.setattr(devices, 'usb_device_id', lambda device: '')
     b1.application.config['PRINTER_PRINTER'] = B1_DEVICE
     response = b1.post('/labeldesigner/api/print', data={

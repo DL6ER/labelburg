@@ -15,17 +15,16 @@
     </script>
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='images/favicon/favicon-32x32.png') }}">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='images/favicon/favicon-16x16.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='fontawesome/css/all.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='designer/designer.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='designer/main.css') }}">
 </head>
 <body>
     <header class="top">
-        <a class="logo" href="{{ url_for('main.index') }}"><span class="mark"><svg viewBox="111 112 290 290" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M111 186 V112 H169 V164 H227 V112 H285 V164 H343 V112 H401 V326 L325 402 H135 A24 24 0 0 1 111 378 Z M216 402 V322 A40 40 0 0 1 296 322 V402 Z"/><path class="peel" d="M401 326 L325 402 V336 A10 10 0 0 1 335 326 Z"/></svg></span><span>Labels</span></a>
+        <a class="brand" href="{{ url_for('main.index') }}"><span class="mark"><svg viewBox="111 112 290 290" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M111 186 V112 H169 V164 H227 V112 H285 V164 H343 V112 H401 V326 L325 402 H135 A24 24 0 0 1 111 378 Z M216 402 V322 A40 40 0 0 1 296 322 V402 Z"/></svg></span><span>Labels</span></a>
     </header>
     <main class="error-page">
         <h1>{{ title }}</h1>
         <p class="muted">{{ message }}</p>
-        <a class="btn" href="{{ url_for('main.index') }}"><i class="fa-solid fa-pen-ruler"></i>Open the label designer</a>
+        <a class="btn primary" href="{{ url_for('main.index') }}">Open the label designer</a>
     </main>
 </body>
 </html>

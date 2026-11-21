@@ -13,6 +13,8 @@ import struct
 import threading
 import time
 
+from . import reach
+
 logger = logging.getLogger(__name__)
 
 PORT = 3240
@@ -47,6 +49,14 @@ PROTOCOLS = (2, 1, 3)
 
 CONNECT_TIMEOUT = 5
 CONTROL_TIMEOUT = 5
+# The list of shared devices and the import of a printer together, also
+# for a host that answers a byte now and then
+HANDSHAKE_TIMEOUT = 10
+# Devices of a list that are looked at, a host shares a few
+MAX_DEVICES = 32
+# How long the device ID of a printer imported before and letting a
+# printer go wait for another thread importing the printer
+LOCK_WAIT = 0.5
 # A printer that could not be reached is asked for its device ID again after
 # so many seconds, the drivers each ask for it to find the model
 UNREACHABLE_FOR = 5
@@ -82,16 +92,22 @@ def key(address: str) -> str:
     return f"usbip://{f'[{host}]' if ':' in host else host}:{port}" + (f'/{busid}' if busid else '')
 
 
-def _connect(host: str, port: int, timeout: float) -> socket.socket:
-    connection = socket.create_connection((host, port), timeout=timeout)
+def _connect(host: str, port: int, timeout: float, deadline: float | None = None) -> socket.socket:
+    connection = reach.create_connection((host, port), timeout=timeout, deadline=deadline)
     connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     return connection
 
 
-def _receive(connection: socket.socket, size: int, until=None) -> bytes:
-    """Exactly size bytes. Timeouts are waited out until until() is true."""
+def _receive(connection: socket.socket, size: int, until=None, deadline: float | None = None) -> bytes:
+    """Exactly size bytes. Timeouts are waited out until until() is true.
+    With deadline, by that time.monotonic() at the latest."""
     data = b''
     while len(data) < size:
+        if deadline is not None:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError(errno.ETIMEDOUT, 'The host took too long to answer')
+            connection.settimeout(left)
         try:
             chunk = connection.recv(size - len(data))
         except TimeoutError as e:
@@ -110,26 +126,32 @@ def _text(field: bytes) -> str:
     return field.split(b'\0', 1)[0].decode('ascii', 'replace')
 
 
-def shared_devices(host: str, port: int = PORT, timeout: float = CONNECT_TIMEOUT) -> list[dict]:
+def _deadline(deadline: float | None) -> float:
+    return time.monotonic() + HANDSHAKE_TIMEOUT if deadline is None else deadline
+
+
+def shared_devices(host: str, port: int = PORT, timeout: float = CONNECT_TIMEOUT, deadline: float | None = None) -> list[dict]:
     """The devices a host shares that no client uses: their bus ID, vendor,
-    product, class and the classes of their interfaces."""
-    with _connect(host, port, timeout) as connection:
+    product, class and the classes of their interfaces. The first
+    MAX_DEVICES, by HANDSHAKE_TIMEOUT or the time.monotonic() deadline."""
+    deadline = _deadline(deadline)
+    with _connect(host, port, timeout, deadline) as connection:
         connection.sendall(OP.pack(VERSION, OP_REQ_DEVLIST, 0))
-        _, code, status = OP.unpack(_receive(connection, OP.size))
+        _, code, status = OP.unpack(_receive(connection, OP.size, deadline=deadline))
         if code != OP_REP_DEVLIST or status:
             raise OSError(errno.EPROTO, f'{host} did not list its devices')
-        count, = struct.unpack('>I', _receive(connection, 4))
+        count, = struct.unpack('>I', _receive(connection, 4, deadline=deadline))
         found = []
-        for _ in range(min(count, 256)):
-            record = DEVICE.unpack(_receive(connection, DEVICE.size))
-            classes = [INTERFACE.unpack(_receive(connection, INTERFACE.size))[0] for _ in range(record[13])]
+        for _ in range(min(count, MAX_DEVICES)):
+            record = DEVICE.unpack(_receive(connection, DEVICE.size, deadline=deadline))
+            classes = [INTERFACE.unpack(_receive(connection, INTERFACE.size, deadline=deadline))[0] for _ in range(record[13])]
             found.append({'busid': _text(record[1]), 'vendor': record[5], 'product': record[6],
                           'device_class': record[8], 'interface_classes': classes})
         return found
 
 
-def _printer_busid(host: str, port: int, timeout: float) -> str:
-    shared = shared_devices(host, port, timeout)
+def _printer_busid(host: str, port: int, timeout: float, deadline: float) -> str:
+    shared = shared_devices(host, port, timeout, deadline)
     printers = [device for device in shared if PRINTER_CLASS in (device['device_class'], *device['interface_classes'])]
     if not printers:
         # Linux lists a device it has not configured without interfaces,
@@ -172,8 +194,9 @@ class SharedPrinter:
 
     def __init__(self, address: str, timeout: float = CONNECT_TIMEOUT):
         host, port, busid = parse(address)
-        busid = busid or _printer_busid(host, port, timeout)
-        self._socket = _connect(host, port, timeout)
+        deadline = _deadline(None)
+        busid = busid or _printer_busid(host, port, timeout, deadline)
+        self._socket = _connect(host, port, timeout, deadline)
         self._lock = threading.Condition()
         self._send_lock, self._read_lock, self._write_lock = threading.Lock(), threading.Lock(), threading.Lock()
         # Direction and length of the transfers not answered yet, answers not taken yet
@@ -184,44 +207,47 @@ class SharedPrinter:
         self._error = None
         self._closed = False
         try:
-            self._import(host, busid)
+            self._import(host, busid, deadline)
+            self._socket.settimeout(timeout)
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             for name, value in (('TCP_KEEPIDLE', KEEPALIVE), ('TCP_KEEPINTVL', 10), ('TCP_KEEPCNT', 3),
                                 ('TCP_USER_TIMEOUT', USER_TIMEOUT * 1000)):
                 if hasattr(socket, name):
                     self._socket.setsockopt(socket.IPPROTO_TCP, getattr(socket, name), value)
             threading.Thread(target=self._take_answers, name=f'usbip-{host}', daemon=True).start()
-            self._set_up()
+            self._set_up(deadline)
         except BaseException:
             self.close()
             raise
 
-    def _import(self, host: str, busid: str):
+    def _import(self, host: str, busid: str, deadline: float):
         self._socket.sendall(OP.pack(VERSION, OP_REQ_IMPORT, 0) + busid.encode('ascii').ljust(32, b'\0')[:32])
-        _, code, status = OP.unpack(_receive(self._socket, OP.size))
+        _, code, status = OP.unpack(_receive(self._socket, OP.size, deadline=deadline))
         if code != OP_REP_IMPORT:
             raise OSError(errno.EPROTO, f'{host} answered the import with {code:#x}')
         if status in (ST_NA, ST_DEV_BUSY):
             raise OSError(errno.EBUSY, f'The printer at {busid} of {host} is used by another client')
         if status:
             raise OSError(errno.ENODEV, f'{host} shares no device at {busid}')
-        record = DEVICE.unpack(_receive(self._socket, DEVICE.size))
+        record = DEVICE.unpack(_receive(self._socket, DEVICE.size, deadline=deadline))
         self._device = record[2] << 16 | record[3]
         self._configuration = record[11]
 
-    def _set_up(self):
+    def _set_up(self, deadline: float):
         """Find the printer interface, set it up where the host has not, and
         read its IEEE 1284 device ID, which names the model."""
-        head = self._control(0x80, 6, 0x0200, 0, 9)
+        def control(*request):
+            return self._control(*request, timeout=min(CONTROL_TIMEOUT, max(0.0, deadline - time.monotonic())))
+        head = control(0x80, 6, 0x0200, 0, 9)
         if len(head) < 9:
             raise OSError(errno.EPROTO, 'The printer sent no configuration')
-        descriptor = self._control(0x80, 6, 0x0200, 0, struct.unpack_from('<H', head, 2)[0])
+        descriptor = control(0x80, 6, 0x0200, 0, struct.unpack_from('<H', head, 2)[0])
         number, alt, self._out, self._in = _printer_interface(descriptor)
         if not self._configuration:
-            self._control(0x00, 9, descriptor[5], 0, 0)
+            control(0x00, 9, descriptor[5], 0, 0)
         if alt:
-            self._control(0x01, 11, alt, number, 0)
-        answer = self._control(0xA1, GET_DEVICE_ID, 0, number << 8 | alt, 1023)
+            control(0x01, 11, alt, number, 0)
+        answer = control(0xA1, GET_DEVICE_ID, 0, number << 8 | alt, 1023)
         length = int.from_bytes(answer[:2], 'big')
         self.device_id = answer[2:max(2, min(length, len(answer)))].decode('ascii', 'replace')
 
@@ -300,9 +326,10 @@ class SharedPrinter:
         except OSError:
             pass
 
-    def _control(self, request_type: int, request: int, value: int, index: int, length: int) -> bytes:
+    def _control(self, request_type: int, request: int, value: int, index: int, length: int,
+                 timeout: float = CONTROL_TIMEOUT) -> bytes:
         setup = struct.pack('<BBHHH', request_type, request, value, index, length)
-        answer = self._wait(self._submit(0, IN if request_type & 0x80 else OUT, length, setup=setup), CONTROL_TIMEOUT)
+        answer = self._wait(self._submit(0, IN if request_type & 0x80 else OUT, length, setup=setup), timeout)
         if answer is None:
             self._fail(TimeoutError(errno.ETIMEDOUT, 'The printer did not answer a control request'))
             self._check()
@@ -393,9 +420,42 @@ def connect(address: str) -> SharedPrinter:
         if printer is None or printer.broken:
             if printer is not None:
                 printer.close()
-            printer = _printers[name] = SharedPrinter(address)
+            try:
+                printer = _printers[name] = SharedPrinter(address)
+            except (OSError, ValueError):
+                # Its device ID is not asked for again a moment after, see
+                # unreachable(): a request would wait for each import
+                _printers.pop(name, None)
+                _unreachable[name] = time.monotonic() + UNREACHABLE_FOR
+                raise
             _device_ids[name] = printer.device_id
         return printer
+
+
+def connected(address: str) -> bool:
+    """Whether the printer is imported and its connection works."""
+    printer = _printers.get(key(address))
+    return printer is not None and not printer.broken
+
+
+def disconnect(address: str):
+    """Let the printer go, e.g. one that was only asked what it is. The host
+    resets it, as when the label designer stops. While another thread
+    imports it, it is let go once that is done, the caller does not wait."""
+    name = key(address)
+    lock = _lock(name)
+
+    def let_go():
+        try:
+            printer = _printers.pop(name, None)
+            if printer is not None:
+                printer.close()
+        finally:
+            lock.release()
+    if lock.acquire(timeout=LOCK_WAIT):
+        let_go()
+    else:
+        threading.Thread(target=lambda: lock.acquire() and let_go(), name=f'usbip-let-go-{name}', daemon=True).start()
 
 
 def release(printer: SharedPrinter):
@@ -414,11 +474,17 @@ def unreachable(address: str) -> bool:
 
 
 def device_id(address: str) -> str:
-    """The IEEE 1284 device ID of the printer, while it cannot be reached the
-    one it told at its last import, empty if it was never reached."""
+    """The IEEE 1284 device ID of the printer, while it cannot be reached or
+    another thread imports it the one it told at its last import, empty if
+    it was never reached."""
     name = key(address)
-    # Held while it is tried, so that others wait for the answer instead of trying too
-    with _lock(name):
+    lock = _lock(name)
+    # Held while it is tried, so that others wait for the answer instead of
+    # trying too: a moment where it told one before, else for the import,
+    # as the model would be taken from the configuration without it
+    if not lock.acquire(timeout=LOCK_WAIT if name in _device_ids else HANDSHAKE_TIMEOUT + 2 * CONNECT_TIMEOUT):
+        return _device_ids.get(name, '')
+    try:
         if unreachable(address):
             return _device_ids.get(name, '')
         try:
@@ -427,6 +493,13 @@ def device_id(address: str) -> str:
             logger.debug('No device ID of %s: %s', address, e)
             _unreachable[name] = time.monotonic() + UNREACHABLE_FOR
             return _device_ids.get(name, '')
+    finally:
+        lock.release()
+
+
+def known_device_id(address: str) -> str:
+    """The device ID the printer told at its last import, without asking it."""
+    return _device_ids.get(key(address), '')
 
 
 class Socket:

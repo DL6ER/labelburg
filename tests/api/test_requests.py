@@ -316,6 +316,6 @@ def test_label_designer_gets_the_configured_defaults(tmp_path):
     client.application.config.update({'LABEL_DEFAULT_MARGIN_LEFT': 0, 'LABEL_DEFAULT_FONT_SIZE': 55, 'LABEL_DEFAULT_ORIENTATION': 'rotated',
                                       'IMAGE_DEFAULT_MODE': 'black_and_white'})
     html = client.get('/labeldesigner/').get_data(as_text=True)
-    defaults = json.loads(re.search(r'const DESIGNER_CONFIG = (.*);</script>', html).group(1))['defaults']
+    defaults = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))['defaults']
     assert (defaults['margin_left'], defaults['font_size'], defaults['orientation']) == (0, 55, 'rotated')
     assert defaults['image_mode'] == 'black_and_white'

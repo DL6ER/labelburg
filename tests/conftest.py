@@ -1,4 +1,7 @@
+import errno
+import ipaddress
 import os
+import socket
 
 import pytest
 
@@ -6,6 +9,35 @@ from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
+
+
+@pytest.fixture(autouse=True)
+def only_this_host(monkeypatch):
+    """The tests connect to this host only: a connection elsewhere, e.g. to
+    an address a check should have refused, fails and fails the test. The
+    addresses tried are yielded."""
+    tried = []
+    connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
+
+    def elsewhere(sock, address):
+        if sock.family not in (socket.AF_INET, socket.AF_INET6):
+            return False
+        try:
+            return not ipaddress.ip_address(str(address[0]).split('%')[0]).is_loopback
+        except ValueError:
+            return True
+
+    def checked(real):
+        def to(sock, address):
+            if elsewhere(sock, address):
+                tried.append(tuple(address[:2]))
+                raise OSError(errno.ENETUNREACH, f'The tests reach no other host than this one, not {address[0]}')
+            return real(sock, address)
+        return to
+    monkeypatch.setattr(socket.socket, 'connect', checked(connect))
+    monkeypatch.setattr(socket.socket, 'connect_ex', checked(connect_ex))
+    yield tried
+    assert tried == [], f'A test tried to connect to {tried}'
 
 
 @pytest.fixture(autouse=True)
