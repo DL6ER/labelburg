@@ -2,9 +2,8 @@
 // (it types like a keyboard) is sent to the server, which fills the blanks
 // of the label with it and prints it.
 
-import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, UNREACHABLE } from './core.js';
+import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, UNREACHABLE, SOURCE } from './core.js';
 import { camera, cameraBlocked } from './camera.js';
-import { SOURCE } from './settings.js';
 
 // ms: a scanner types faster than FAST between characters; after Enter or
 // Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
