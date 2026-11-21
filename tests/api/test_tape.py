@@ -297,7 +297,7 @@ def test_status_tells_the_label_sizes_each_printer_takes(client, monkeypatch):
 
 def test_label_designer_gets_the_sizes_taken_without_a_known_printer(client):
     html = client.get('/labeldesigner/').get_data(as_text=True)
-    config = json.loads(re.search(r'const DESIGNER_CONFIG = (.*);</script>', html).group(1))
+    config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
     assert config['takes'] == tape.takes(None)
 
 

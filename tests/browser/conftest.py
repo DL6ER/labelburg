@@ -6,7 +6,6 @@ The tests are skipped where Playwright is not installed. Install it with
 chromium". To use a Chromium that is already running instead, set
 BROWSER_CDP_URL, e.g. to http://127.0.0.1:9222.
 """
-import contextlib
 import os
 import shutil
 import threading
@@ -18,9 +17,8 @@ sync_api = pytest.importorskip('playwright.sync_api')
 from werkzeug.serving import make_server  # noqa: E402
 
 from app import create_app  # noqa: E402
-from app.labeldesigner import printer, printer_settings  # noqa: E402
+from app.labeldesigner import printer  # noqa: E402
 from app.labeldesigner.drivers import devices  # noqa: E402
-from tests.browser.helpers import wait_for_preview  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -63,22 +61,3 @@ def browser():
         yield browser
         browser.close()
 
-
-@pytest.fixture
-def designer(browser, server, app):
-    """The label designer in a fresh browser context, in English and without
-    stored labels or settings, showing the editor. Fails the test if the
-    page throws a JavaScript error."""
-    # The settings of the printers are kept on the server, each test starts
-    # without them
-    with contextlib.suppress(FileNotFoundError):
-        os.remove(os.path.join(app.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE))
-    context = browser.new_context(viewport={'width': 1400, 'height': 900}, locale='en-US')
-    page = context.new_page()
-    errors = []
-    page.on('pageerror', lambda error: errors.append(str(error)))
-    page.goto(server + '/labeldesigner/#edit')
-    wait_for_preview(page)
-    yield page
-    context.close()
-    assert errors == []

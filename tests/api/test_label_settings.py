@@ -109,6 +109,20 @@ def test_the_refusal_of_label_settings_is_sent_as_it_is():
     assert refusals.message(ValueError(text), '-') == text
 
 
+def test_the_page_is_given_the_label_settings(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(URL, data={'collate': '0', 'font_family': 'DejaVu Sans'})
+
+    def config(page):
+        html = client.get(page).get_data(as_text=True)
+        return json.loads(re.search(r'DESIGNER_CONFIG = (\{.*\});</script>', html).group(1))
+    assert config('/labeldesigner/')['label_settings'] == {**NONE_SET, 'collate': '0', 'font_family': 'DejaVu Sans'}
+    # The date formats it offers are those the server takes
+    assert config('/labeldesigner/')['date_formats'] == ['%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%m/%d/%Y']
+    # The font menu lists the families, the weight, width and slant of each style
+    assert config('/labeldesigner/')['font_families'] == client.application.extensions['fonts'].families()
+
+
 def _orders(client, tmp_path, **request):
     """The pages of a PDF of two pages printed twice, 0 for the first page
     and 1 for the second, in the order they were printed."""

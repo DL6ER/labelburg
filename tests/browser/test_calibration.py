@@ -1,6 +1,7 @@
-"""Calibrating a Niimbot B1 in the printer panel: the hint after a roll change
-and the calibration dialog, which changes nothing until it is saved. The
-server is stubbed."""
+"""Calibrating a Niimbot B1 at the printer chip and in the Settings of the
+label designer at /labeldesigner/: the hint after a roll change and the
+calibration dialog, which changes nothing until it is saved. The server is
+stubbed."""
 
 import json
 from urllib.parse import parse_qs
@@ -8,9 +9,15 @@ from urllib.parse import parse_qs
 import pytest
 
 from tests.browser.helpers import with_tape
+from tests.browser.test_editor import editor  # noqa: F401
 
 HINT = 'A new roll is in the printer. Calibrate the printer so the labels sit straight on it.'
-GLOWS = '() => document.querySelector("#calOpen").classList.contains("attention")'
+GLOWS = '() => document.querySelector("[data-cal-open]").classList.contains("attention")'
+
+
+@pytest.fixture
+def designer(editor):  # noqa: F811
+    return editor
 
 
 @pytest.fixture
@@ -43,19 +50,26 @@ def _until(designer, condition):
     raise AssertionError('not reached')
 
 
-def _panel(designer, model='Niimbot/B1', roll='PZ1TEST00002', path=None, width=50, length=30):
-    """The printer panel of a printer as the server tells it, by default a
-    B1 with a 50 x 30 mm roll calibrated on another one. One with a path is
-    followed, as the server tells of one on USB."""
-    printer = with_tape({'model': model, 'status_type': 'Reply to status request', 'roll': roll,
-                         'calibration': {'across': 0, 'along': 0, 'roll': 'PZ1TEST00001'}, 'media_width': width, 'media_length': length,
-                         **({'path': path, 'follow': True} if path else {})})
-    designer.evaluate("""p => { S.printers = [Object.assign({}, S.printer, p)]; S.printer = S.printers[0]; detectTape(); openPrinterPanel(); }""", printer)
+def _printer(designer, model='Niimbot/B1', roll='PZ1TEST00002', path='simulation', follow=False, width=50, length=30):
+    """The printer chosen as the server tells it, by default a B1 with a
+    50 x 30 mm roll calibrated on another one. One to follow is asked on its
+    own, as the server tells of one on USB."""
+    printer = with_tape({'path': path, 'name': '', 'model': model, 'status_type': 'Reply to status request', 'errors': [], 'settings': {},
+                         'roll': roll, 'calibration': {'across': 0, 'along': 0, 'roll': 'PZ1TEST00001'},
+                         'media_width': width, 'media_length': length, 'follow': follow})
+    designer.evaluate('p => { labelEditor.S.printers = [p]; labelEditor.S.printer = p; }', printer)
+
+
+def _panel(designer, **printer):
+    """The printers at the printer chip."""
+    _printer(designer, **printer)
+    designer.click('#printerChip')
+    designer.wait_for_selector('.pp .plist')
 
 
 def _dialog(designer, wide=False):
     _panel(designer)
-    designer.click('#calOpen')
+    designer.click('.pp [data-cal-open]')
     designer.wait_for_selector('[data-move="left"]' if wide else '#calLeft')
 
 
@@ -65,16 +79,16 @@ def _sent_without(sent, *names):
 
 def test_calibration_is_offered_only_where_the_printer_has_it(designer, calibration):
     _panel(designer, model='QL-800')
-    assert designer.locator('#calOpen').count() == 0
-    designer.evaluate('() => closeLayer(true)')
+    assert designer.locator('[data-cal-open]').count() == 0
+    designer.keyboard.press('Escape')
     _panel(designer)
-    assert designer.locator('#calOpen').is_visible()
+    assert designer.locator('.pp [data-cal-open]').is_visible()
 
 
 def test_calibrate_printer_is_named_so(designer, calibration):
     _panel(designer)
-    assert designer.inner_text('#calOpen') == 'Calibrate printer'
-    designer.click('#calOpen')
+    assert designer.inner_text('.pp [data-cal-open]') == 'Calibrate printer'
+    designer.click('.pp [data-cal-open]')
     designer.wait_for_selector('#calLeft')
     assert designer.inner_text('#layer h2') == 'Calibrate printer'
 
@@ -85,10 +99,10 @@ def test_a_new_roll_is_pointed_out_and_dismiss_hides_it(designer, calibration):
     # One button to calibrate, which draws the eye
     assert HINT in designer.inner_text('.pp') and designer.evaluate(GLOWS)
     assert designer.locator('.pp .cal button').count() == 2
-    assert designer.inner_text('#calDismiss') == 'Dismiss'
-    designer.click('#calDismiss')
-    designer.wait_for_function('() => !document.querySelector("#calDismiss")')
-    assert sent == [('/calibration', {'printer': designer.evaluate('() => S.printer.path'), 'model': 'Niimbot/B1', 'roll': 'PZ1TEST00002'})]
+    assert designer.inner_text('[data-cal-dismiss]') == 'Dismiss'
+    designer.click('[data-cal-dismiss]')
+    designer.wait_for_function('() => !document.querySelector("[data-cal-dismiss]")')
+    assert sent == [('/calibration', {'printer': 'simulation', 'model': 'Niimbot/B1', 'roll': 'PZ1TEST00002'})]
     assert HINT not in designer.inner_text('.pp') and not designer.evaluate(GLOWS)
 
 
@@ -99,8 +113,8 @@ def test_the_same_roll_is_not_pointed_out(designer, calibration):
 
 def test_calibrate_printer_glows_without_pulsing(designer, calibration):
     _panel(designer)
-    assert designer.eval_on_selector('#calOpen', 'b => getComputedStyle(b).animationName') == 'none'
-    assert designer.eval_on_selector('#calOpen', 'b => getComputedStyle(b).boxShadow') != 'none'
+    assert designer.eval_on_selector('[data-cal-open]', 'b => getComputedStyle(b).animationName') == 'none'
+    assert designer.eval_on_selector('[data-cal-open]', 'b => getComputedStyle(b).boxShadow') != 'none'
 
 
 def test_a_round_roll_compares_the_white_ring(designer, calibration):
@@ -108,7 +122,7 @@ def test_a_round_roll_compares_the_white_ring(designer, calibration):
     answers['GET'] = dict(answers['GET'], kind='round')
     _panel(designer)
     with designer.expect_request('**/calibration/example.png*') as request:
-        designer.click('#calOpen')
+        designer.click('.pp [data-cal-open]')
     assert 'kind=round' in request.value.url
     text = designer.inner_text('#layer')
     assert 'Compare the white ring left and right of the circle.' in text
@@ -119,18 +133,38 @@ def test_a_round_roll_compares_the_white_ring(designer, calibration):
 def test_a_roll_the_designer_does_not_offer_is_not_pointed_out(designer, calibration):
     # No calibration label can be printed on it
     _panel(designer, width=30, length=15)
-    assert 'The printer reports 30 x 15 mm tape, which is not offered here.' in designer.inner_text('.pp')
+    assert 'reports 30 x 15 mm tape' in designer.inner_text('.pp')
     assert HINT not in designer.inner_text('.pp')
 
 
 def test_a_roll_put_in_a_printer_on_usb_is_pointed_out_within_seconds(designer, calibration):
     # Asked on its own every 2 s, without "Look for printers"
-    _panel(designer, roll='PZ1TEST00001', path='usbip://192.0.2.7/1-4.1.3')
-    assert HINT not in designer.inner_text('.pp')
-    swapped = dict(designer.evaluate('() => S.printer'), roll='PZ1TEST00002')
+    swapped = []
     designer.route('**/api/printer_status?printer=*', lambda route: route.fulfill(
-        content_type='application/json', body=json.dumps({'printers': [swapped]})))
+        content_type='application/json', body=json.dumps({'printers': swapped})))
+    _panel(designer, roll='PZ1TEST00001', path='file:///dev/usb/lp9', follow=True)
+    assert HINT not in designer.inner_text('.pp')
+    swapped.append(dict(designer.evaluate('() => labelEditor.S.printer'), roll='PZ1TEST00002'))
     designer.wait_for_function(f'() => document.querySelector(".pp").innerText.includes({json.dumps(HINT)})', timeout=3000)
+
+
+def test_the_settings_of_the_printer_calibrate_it_too(designer, calibration):
+    sent, _ = calibration
+    _printer(designer)
+    designer.click('#tabs [data-tab="settings"]')
+    card = designer.locator('#setPrinters [data-card="0"]')
+    card.locator('[data-cal-open]').wait_for()
+    assert HINT in card.inner_text() and 'Position' in card.inner_text()
+    card.locator('[data-cal-open]').click()
+    designer.click('[data-move="left"]')
+    _until(designer, lambda: len(sent) == 1)
+    designer.wait_for_function('() => !document.querySelector("#calSave").disabled')
+    designer.click('#calSave')
+    designer.wait_for_function('() => document.querySelector("#layer").hidden')
+    # Kept for the roll in the printer, the hint is gone
+    assert sent[1][1]['roll'] == 'PZ1TEST00002'
+    designer.wait_for_function(f'() => !document.querySelector("#setPrinters").innerText.includes({json.dumps(HINT)})')
+    assert card.locator('[data-cal-open]').count() == 1
 
 
 def test_readings_are_applied_and_the_result_is_shown(designer, calibration):
@@ -196,7 +230,7 @@ def test_calibration_label_prints_with_the_working_correction(designer, calibrat
     designer.click('[data-cal-print]')
     _until(designer, lambda: len(sent) == 2)
     assert sent[1][0] == '/calibration/print'
-    assert (sent[1][1]['across'], sent[1][1]['along']) == ('-1', '0')
+    assert (sent[1][1]['across'], sent[1][1]['along'], sent[1][1]['label_size']) == ('-1', '0', 'niimbot50x30')
 
 
 def test_cancel_keeps_what_was_saved(designer, calibration):
@@ -207,7 +241,7 @@ def test_cancel_keeps_what_was_saved(designer, calibration):
     designer.click('#calCancel')
     designer.wait_for_function('() => document.querySelector("#layer").hidden')
     assert all(body.get('save') == '0' for _, body in sent)
-    assert designer.evaluate('() => S.printer.calibration.across') == 0
+    assert designer.evaluate('() => labelEditor.S.printer.calibration.across') == 0
 
 
 def test_save_keeps_the_working_correction(designer, calibration):
@@ -215,11 +249,12 @@ def test_save_keeps_the_working_correction(designer, calibration):
     _dialog(designer)
     designer.click('[data-move="left"]')
     _until(designer, lambda: len(sent) == 1)
+    designer.wait_for_function('() => !document.querySelector("#calSave").disabled')
     designer.click('#calSave')
     _until(designer, lambda: len(sent) == 2)
     designer.wait_for_function('() => document.querySelector("#layer").hidden')
     assert _sent_without(sent[1][1], 'printer') == {'model': 'Niimbot/B1', 'across': '-1', 'along': '0', 'roll': 'PZ1TEST00002'}
-    assert designer.evaluate('() => S.printer.calibration.across') == -1
+    assert designer.evaluate('() => labelEditor.S.printer.calibration.across') == -1
 
 
 def test_example_tells_what_it_shows(designer, calibration):
@@ -245,15 +280,14 @@ def test_one_button_prints_right_under_the_example(designer, calibration):
     _dialog(designer)
     assert designer.locator('#layer [data-cal-print]').count() == 1
     assert designer.evaluate("() => document.querySelector('#layer .cal-example').nextElementSibling.matches('[data-cal-print]')")
-    assert 'btn-print' in designer.get_attribute('#layer [data-cal-print]', 'class')
+    assert 'primary' in designer.get_attribute('#layer [data-cal-print]', 'class')
 
 
 def test_cancel_and_save_end_the_dialog_side_by_side(designer, calibration):
     _dialog(designer)
     cancel, save = designer.locator('#calCancel'), designer.locator('#calSave')
     assert (cancel.inner_text(), save.inner_text()) == ('Cancel', 'Save')
-    assert 'bad' in cancel.get_attribute('class') and cancel.locator('.fa-xmark').count() == 1
-    assert 'ok' in save.get_attribute('class') and save.locator('.fa-floppy-disk').count() == 1
+    assert 'primary' in save.get_attribute('class') and 'primary' not in cancel.get_attribute('class')
     # One row at the bottom, Cancel left of Save
     assert designer.evaluate("""() => {
         const c = document.querySelector('#calCancel'), s = document.querySelector('#calSave');
@@ -262,12 +296,12 @@ def test_cancel_and_save_end_the_dialog_side_by_side(designer, calibration):
 
 def test_buttons_side_by_side_on_the_screen(designer, calibration):
     _dialog(designer)
-    sheet = designer.locator('#layer .sheet').bounding_box()
+    dialog = designer.locator('#layer .dialog').bounding_box()
     for first, second in (('#calCancel', '#calSave'), ('[data-move="left"]', '[data-move="right"]'), ('[data-move="up"]', '[data-move="down"]')):
         a, b = designer.locator(first).bounding_box(), designer.locator(second).bounding_box()
         # One row, the first on the left, neither as wide as the dialog
         assert abs(a['y'] - b['y']) < 2 and a['x'] + a['width'] <= b['x']
-        assert a['width'] < sheet['width'] / 2 and b['width'] < sheet['width'] / 2
+        assert a['width'] < dialog['width'] / 2 and b['width'] < dialog['width'] / 2
 
 
 def test_readings_count_from_the_correction_the_label_was_printed_with(designer, calibration):
@@ -288,7 +322,6 @@ def test_readings_count_from_the_correction_the_label_was_printed_with(designer,
 
 
 def test_steps_wait_for_the_one_before(designer, calibration):
-    sent, _ = calibration
     pending = []
     designer.route('**/api/calibration', lambda route: pending.append(route) if route.request.method == 'POST' else route.fallback())
     _dialog(designer)
@@ -305,7 +338,7 @@ def test_calibration_label_prints_once_at_a_time(designer, calibration):
     pending = []
     designer.route('**/api/calibration/print', lambda route: pending.append(route))
     _panel(designer)
-    designer.click('#calOpen')
+    designer.click('.pp [data-cal-open]')
     designer.click('[data-cal-print]')
     _until(designer, lambda: len(pending) == 1)
     assert designer.eval_on_selector('[data-cal-print]', 'b => b.disabled')

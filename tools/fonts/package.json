@@ -1,8 +1,7 @@
 {
   "private": true,
-  "description": "The icon fonts in app/static, which tools/update_fonts.py copies from these packages",
+  "description": "The icon font in app/static, which tools/update_fonts.py copies from this package",
   "dependencies": {
-    "@fortawesome/fontawesome-free": "7.3.1",
     "@mdi/font": "7.4.47"
   }
 }

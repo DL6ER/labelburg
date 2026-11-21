@@ -186,31 +186,24 @@ def shared():
     return jsonify(stored[1])
 
 
-@bp.route('/classic')
-def classic():
-    """The label designer before the redesign is gone, its bookmarks open
-    the current one."""
-    return redirect(url_for('.index'))
-
-
 def _asset_version() -> int:
-    """Changes when the script or the style sheet of the label designer
-    changes, so browsers load the new files and cache them otherwise."""
+    """Changes when a script or a style sheet of the label designer changes,
+    so browsers load the new files and cache them otherwise."""
     static = os.path.join(current_app.root_path, 'static', 'designer')
-    return int(max(os.path.getmtime(os.path.join(static, name)) for name in ('designer.js', 'designer.css')))
+    return int(max(os.path.getmtime(os.path.join(static, name)) for name in os.listdir(static) if name.endswith(('.js', '.css'))))
 
 
 @bp.route('/')
 def index():
-    """The label designer: an editor, a wizard with the saved and the
-    ready-made labels, and the printer panel. It uses the API below."""
+    """The label designer: the editor, the templates, the printed labels and
+    the settings. It uses the API below."""
+    return render_template('designer.html', config=_designer_config(), version=_asset_version())
+
+
+def _designer_config() -> dict:
+    """What the pages of the label designer are given: label sizes, fonts,
+    the defaults of new labels and what each printer model offers."""
     fonts = get_fonts()
-    # Previews are made one CPU core short of all of them, at most 16 at a
-    # time, so that printing and other users are not slowed down
-    try:
-        cpus = len(os.sched_getaffinity(0))
-    except AttributeError:
-        cpus = os.cpu_count() or 2
     label_sizes = [
         {'id': label.identifier, 'name': label_name(label), 'form': label.form_factor.name.lower(),
          'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
@@ -220,42 +213,41 @@ def index():
          'length': list(limits[:2]) if (limits := length_limits(label)) else None}
         for label in LABELS
     ]
-    return render_template(
-        'designer.html',
-        config={
-            'base': url_for('.index').rstrip('/'),
-            # Instances below one host, e.g. served below different paths
-            # behind a reverse proxy, keep what they store in the browser
-            # apart. The one at the root keeps the names it always had.
-            'storage_prefix': f'{request.script_root}/' if request.script_root else '',
-            'fonts': fonts.fontlist(),
-            'default_font': ','.join(fonts.get_default_font()),
-            'label_sizes': label_sizes,
-            'default_label_size': current_app.config['LABEL_DEFAULT_SIZE'],
-            # The sizes taken without a known printer
-            'takes': tape.takes(None),
-            # New labels start with them
-            'defaults': {
-                'orientation': current_app.config['LABEL_DEFAULT_ORIENTATION'],
-                'font_size': current_app.config['LABEL_DEFAULT_FONT_SIZE'],
-                'line_spacing': current_app.config['LABEL_DEFAULT_LINE_SPACING'],
-                'qrcode_size': current_app.config['LABEL_DEFAULT_QR_SIZE'],
-                'margin_top': current_app.config['LABEL_DEFAULT_MARGIN_TOP'],
-                'margin_bottom': current_app.config['LABEL_DEFAULT_MARGIN_BOTTOM'],
-                'margin_left': current_app.config['LABEL_DEFAULT_MARGIN_LEFT'],
-                'margin_right': current_app.config['LABEL_DEFAULT_MARGIN_RIGHT'],
-                'image_mode': current_app.config['IMAGE_DEFAULT_MODE'],
-                'image_bw_threshold': current_app.config['IMAGE_DEFAULT_BW_THRESHOLD'],
-            },
-            # What the label designer offers for each printer model
-            'models': {model: drivers.for_model(model).capabilities(model) for model in MODELS},
-            # The kinds of codes, as /api/barcodes lists them
-            'codes': _code_kinds(),
-            'datetime_codes': datetime_codes(),
-            'preview_parallel': max(1, min(16, cpus - 1)),
+    return {
+        'base': url_for('.index').rstrip('/'),
+        # Instances below one host, e.g. served below different paths
+        # behind a reverse proxy, keep what they store in the browser
+        # apart. The one at the root keeps the names it always had.
+        'storage_prefix': f'{request.script_root}/' if request.script_root else '',
+        # The font menu: families, the weight, width and slant of each style
+        'font_families': fonts.families(),
+        'default_font': ','.join(fonts.get_default_font()),
+        'label_sizes': label_sizes,
+        'default_label_size': current_app.config['LABEL_DEFAULT_SIZE'],
+        # The sizes taken without a known printer
+        'takes': tape.takes(None),
+        # New labels start with them
+        'defaults': {
+            'orientation': current_app.config['LABEL_DEFAULT_ORIENTATION'],
+            'font_size': current_app.config['LABEL_DEFAULT_FONT_SIZE'],
+            'line_spacing': current_app.config['LABEL_DEFAULT_LINE_SPACING'],
+            'qrcode_size': current_app.config['LABEL_DEFAULT_QR_SIZE'],
+            'margin_top': current_app.config['LABEL_DEFAULT_MARGIN_TOP'],
+            'margin_bottom': current_app.config['LABEL_DEFAULT_MARGIN_BOTTOM'],
+            'margin_left': current_app.config['LABEL_DEFAULT_MARGIN_LEFT'],
+            'margin_right': current_app.config['LABEL_DEFAULT_MARGIN_RIGHT'],
+            'image_mode': current_app.config['IMAGE_DEFAULT_MODE'],
+            'image_bw_threshold': current_app.config['IMAGE_DEFAULT_BW_THRESHOLD'],
         },
-        version=_asset_version(),
-    )
+        # What the label designer offers for each printer model
+        'models': {model: drivers.for_model(model).capabilities(model) for model in MODELS},
+        # The kinds of codes, as /api/barcodes lists them
+        'codes': _code_kinds(),
+        'datetime_codes': datetime_codes(),
+        # Kept on the server for every browser, see /api/settings/labels
+        'label_settings': _label_settings(),
+        'date_formats': list(printer_settings.DATE_FORMATS),
+    }
 
 
 # --- Label repository utilities and API -------------------------------------------------

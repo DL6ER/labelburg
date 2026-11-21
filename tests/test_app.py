@@ -1,3 +1,4 @@
+import json
 import re
 import sys
 from io import BytesIO
@@ -73,13 +74,17 @@ def test_invalid_environment_values(monkeypatch, key, value):
         create_app()
 
 
-def test_navbar_shows_commit_and_build_time(monkeypatch):
+def _build(html: str) -> dict:
+    """What the label designer is told about its build, for Settings, About."""
+    return json.loads(re.search(r'DESIGNER_BUILD = (.*?);</script>', html).group(1))
+
+
+def test_label_designer_tells_commit_and_build_time(monkeypatch):
     monkeypatch.delenv('RELEASE', raising=False)
     monkeypatch.setenv('GIT_COMMIT', '1c0ea1aba5f663c8534b3d44cad4e0ed2af47397')
     monkeypatch.setenv('BUILD_DATE', '2026-10-29T02:37:05Z')
     html = create_app().test_client().get('/labeldesigner/').get_data(as_text=True)
-    assert 'href="https://github.com/DL6ER/labelburg/commit/1c0ea1aba5f663c8534b3d44cad4e0ed2af47397"' in html
-    assert '>1c0ea1a, 2026-10-29 02:37 UTC</a>' in html
+    assert _build(html) == {'release': '', 'commit': '1c0ea1aba5f663c8534b3d44cad4e0ed2af47397', 'date': '2026-10-29 02:37 UTC'}
 
 
 def test_build_info_falls_back_to_the_checkout(monkeypatch):
@@ -91,36 +96,33 @@ def test_build_info_falls_back_to_the_checkout(monkeypatch):
     assert build_info.get_build_info() == {'release': '', 'commit': 'ca2bac4', 'date': ''}
 
 
-def test_navbar_shows_the_release_instead_of_the_commit(monkeypatch):
+def test_label_designer_tells_the_release_and_the_commit(monkeypatch):
     monkeypatch.setenv('RELEASE', 'v1.0')
     monkeypatch.setenv('GIT_COMMIT', '55e8900424aa9314eb99aa8343cbd35de78b7ca2')
     monkeypatch.setenv('BUILD_DATE', '2026-10-30T15:40:32Z')
     html = create_app().test_client().get('/labeldesigner/').get_data(as_text=True)
-    assert 'href="https://github.com/DL6ER/labelburg/releases/tag/v1.0"' in html
-    assert 'title="Release v1.0, commit 55e8900424aa9314eb99aa8343cbd35de78b7ca2, built 2026-10-30 15:40 UTC"' in html
-    assert '>v1.0, 2026-10-30 15:40 UTC</a>' in html
-    assert '/commit/' not in html
+    assert _build(html) == {'release': 'v1.0', 'commit': '55e8900424aa9314eb99aa8343cbd35de78b7ca2', 'date': '2026-10-30 15:40 UTC'}
+    assert re.search(r'href="/static/designer/settings\.css\?v=\d+"', html)
 
 
 @pytest.mark.parametrize('release', ['latest', '1.0', 'v1.0;x', 'v1'])
-def test_navbar_ignores_an_invalid_release(monkeypatch, release):
+def test_label_designer_ignores_an_invalid_release(monkeypatch, release):
     monkeypatch.setenv('RELEASE', release)
     monkeypatch.setenv('GIT_COMMIT', '1c0ea1aba5f663c8534b3d44cad4e0ed2af47397')
     monkeypatch.setenv('BUILD_DATE', '')
     html = create_app().test_client().get('/labeldesigner/').get_data(as_text=True)
-    assert '>1c0ea1a</a>' in html
-    assert '/releases/tag/' not in html
+    assert _build(html) == {'release': '', 'commit': '1c0ea1aba5f663c8534b3d44cad4e0ed2af47397', 'date': ''}
 
 
 @pytest.mark.parametrize('commit, date', [('not a commit', 'yesterday'), ('', '')])
-def test_navbar_without_build_info(monkeypatch, commit, date):
+def test_label_designer_without_build_info(monkeypatch, commit, date):
     from app import build_info
     monkeypatch.delenv('RELEASE', raising=False)
     monkeypatch.setenv('GIT_COMMIT', commit)
     monkeypatch.setenv('BUILD_DATE', date)
     monkeypatch.setattr(build_info, '_checkout_commit', lambda: '')
     html = create_app().test_client().get('/labeldesigner/').get_data(as_text=True)
-    assert 'id="buildInfo"' not in html
+    assert _build(html) == {'release': '', 'commit': '', 'date': ''}
 
 
 def test_label_designer_can_be_installed_as_an_app():
@@ -206,8 +208,19 @@ def test_label_designer_below_a_path_behind_a_proxy(monkeypatch):
     # which keeps the names it always had
     assert '"storage_prefix": "/labels/"' in html
     assert '"storage_prefix": ""' in client.get('/labeldesigner/').get_data(as_text=True)
-    # Bookmarks of the previous designer open this one
-    assert client.get('/labeldesigner/classic', headers=headers).headers['Location'] == '/labels/labeldesigner/'
+
+
+def test_label_designer_is_its_page():
+    client = create_app().test_client()
+    html = client.get('/labeldesigner/').get_data(as_text=True)
+    assert re.search(r'<script type="module" src="/static/designer/main\.js\?v=\d+">', html)
+    assert 'designer/main.css' in html
+    assert 'designer/designer.js' not in html
+    # The font menu takes its families, the server's list went with the page before
+    assert '"font_families":' in html and '"fonts":' not in html
+    # The pages before it are gone
+    assert client.get('/labeldesigner/next').status_code == 404
+    assert client.get('/labeldesigner/classic').status_code == 404
 
 
 def test_unknown_page_leads_to_the_label_designer():
@@ -217,7 +230,7 @@ def test_unknown_page_leads_to_the_label_designer():
     html = response.get_data(as_text=True)
     assert '<h1>Not found</h1>' in html
     assert 'href="/">' in html
-    assert 'designer/designer.css' in html
+    assert 'designer/main.css' in html
 
 
 def test_font_settings_from_environment(monkeypatch):

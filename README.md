@@ -32,8 +32,8 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, and today's date or a date some days ahead, e.g., "best before".
 - **Icons:** 7400 icons, e.g., a light bulb, and symbols of screws, nuts, washers and electronic parts for workshop bins, next to the text, found by name.
 - **Labels:** save your labels, group them by tags and print them again, pass them on as files, or start from one of about 680 ready-made labels in English and German, e.g., addresses, safety signs, hazard labels, name badges, price tags and pictures for kids.
-- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes. Labels that come out off to one side on a Niimbot B1 are lined up with a calibration label: open the printer and choose "Calibrate printer".
-- **Easy to use:** a preview that shows the label as it will come out, a wizard that turns typed text into labels, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
+- **Printing:** copies, cut after every label, only after the last one or not at all, half cuts and chain printing on P-touch printers, labels of a fixed length, borders, round labels, flags that fold around a cable, mirrored for clear tape behind glass, which end of a label comes out first, a sharper slow mode and a faster one. While a job prints, Labelburg shows how long it still takes. Labels that come out off to one side on a Niimbot B1 are lined up with a calibration label: choose "Calibrate printer" at the printer in the Settings.
+- **Easy to use:** a preview that shows the label as it will come out, templates that show the text you type in them, search, undo and dark mode. It works on phones and can be installed like an app, which on Android also takes pictures, PDFs and links from the share menu.
 - **Several printers:** use several printers at once, each with a name of your choice and the same settings in every browser, or try everything without a printer.
 - **Other programs:** e.g., [Grocy](docs/grocy.md) and [Homebox](docs/homebox.md) can print their labels through Labelburg, labels with the next archive serial number for [Paperless-ngx](docs/paperless.md) stick on your paper documents, and [AI assistants](docs/mcp.md) can find, fill in and print your labels for you.
 
@@ -42,8 +42,8 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 | Saved and ready-made labels | Image with text |
 |---|---|
 | ![Saved and ready-made labels](./screenshots/image2.png) | ![Image with text](./screenshots/image3.png) |
-| **Barcodes** | **Wizard in dark mode** |
-| ![Barcodes](./screenshots/image4.png) | ![Wizard in dark mode](./screenshots/image6.png) |
+| **Barcodes** | **Your text in the templates, in dark mode** |
+| ![Barcodes](./screenshots/image4.png) | ![Your text in the templates, in dark mode](./screenshots/image6.png) |
 | **Blanks, filled in when printing** | **Printer settings** |
 | ![Blanks, filled in when printing](./screenshots/image7.png) | ![Printer settings](./screenshots/image8.png) |
 
@@ -154,7 +154,7 @@ The label designer offers all `.ttf` and `.otf` fonts it finds in the system fon
 
 ### Label designer
 
-Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. The Variables button in the label designer explains them all.
+Besides blanks, counters and dates, labels can insert archive serial numbers for [Paperless-ngx](docs/paperless.md) (`{{asn}}`), UUIDs, random strings and the environment variables listed in `LABEL_TEMPLATE_ENV_VARS`, in the text and in codes. Icons are inserted as `{{mdi:<name>}}`, e.g. `{{mdi:lightbulb}}`, with the names of the [Material Design Icons](https://pictogrammers.com/library/mdi/), fasteners as `{{fastener:<name>}}`, e.g. `{{fastener:head-torx}}`, and electronic components as `{{electronic:<name>}}`, e.g. `{{electronic:resistor-iec-standard}}`. In the label designer, `[` offers them all, and "What the variables do" explains them.
 
 Images can be PNG, JPG, WEBP, AVIF, GIF, TIFF, BMP and many more formats. A PDF gives one label per page if you like.
 
@@ -221,7 +221,7 @@ python -m playwright install --with-deps chromium
 pytest -n auto tests/browser
 ```
 
-To build the image yourself, with the commit and build time shown in the navbar:
+To build the image yourself, with the commit and build time shown in the Settings under About:
 
 ```bash
 docker compose build --build-arg GIT_COMMIT=$(git rev-parse HEAD) --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -236,7 +236,6 @@ Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_
 It is published under the terms of the GPLv3, see [LICENSE](./LICENSE). It includes software of third parties under other licenses:
 
 - [Archivo](https://github.com/Omnibus-Type/Archivo), the typeface of the label designer, [SIL Open Font License 1.1](app/static/designer/OFL.txt)
-- [Font Awesome](https://github.com/FortAwesome/Font-Awesome), CC BY 4.0 License
 - [Material Design Icons](https://github.com/Templarian/MaterialDesign-Webfont) 7.4.47 by Pictogrammers, the font under the Apache 2.0 License, see [LICENSE](app/static/mdi/LICENSE)
 - The fasteners drawn as in [gflabel](https://github.com/ndevenish/gflabel) by Nicholas Devenish under the BSD 3-Clause License, and the [electronic symbols](https://github.com/chris-pikul/electronic-symbols) by Chris Pikul under the MIT License, built into one font by `tools/symbols_font.py`, see [LICENSE](app/static/symbols/LICENSE)
 - The pictograms and the photo silhouette of the demo labels from [Wikimedia Commons](app/labeldesigner/demos/images/SOURCES.md), public domain and CC0

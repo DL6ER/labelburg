@@ -67,7 +67,7 @@ def test_every_offered_label_size_can_be_printed():
 def test_label_designer_shows_brother_codes_and_printers(tmp_path):
     client = make_client(tmp_path)
     html = client.get('/labeldesigner/').get_data(as_text=True)
-    config = json.loads(re.search(r'const DESIGNER_CONFIG = (.*);</script>', html).group(1))
+    config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
     sizes = {size['id']: size for size in config['label_sizes']}
     assert sizes['103x164']['name'] == '103 x 164 mm die-cut (DK-11247 / DK-1247)'
     assert sizes['103x164']['models'] == ['QL-1100', 'QL-1110NWB']
@@ -82,7 +82,7 @@ def test_printers_of_a_brother_label_size_share_one_dpi():
 
 def test_label_designer_gets_what_each_printer_offers(tmp_path):
     html = make_client(tmp_path).get('/labeldesigner/').get_data(as_text=True)
-    config = json.loads(re.search(r'const DESIGNER_CONFIG = (.*);</script>', html).group(1))
+    config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
     sizes = {size['id']: size for size in config['label_sizes']}
     assert (sizes['62']['dpi'], sizes['pt12']['dpi'], sizes['vc25']['dpi']) == ([300, 600], [180, 360], [320, 320])
     assert (sizes['pt36']['dpi'], sizes['18']['dpi']) == ([360, 720], [360, 720])

@@ -66,13 +66,51 @@ In `~/.cursor/mcp.json`:
 }
 ```
 
+### Gemini CLI
+
+```bash
+gemini mcp add --transport http labelburg http://labels.local:8013/mcp
+```
+
+### Codex CLI
+
+```bash
+codex mcp add labelburg --url http://labels.local:8013/mcp
+```
+
+### Zed
+
+In its `settings.json`:
+
+```json
+"context_servers": {
+  "labelburg": {"url": "http://labels.local:8013/mcp"}
+}
+```
+
+### LM Studio
+
+In `mcp.json` (Program, Install, Edit mcp.json):
+
+```json
+{
+  "mcpServers": {
+    "labelburg": {"url": "http://labels.local:8013/mcp"}
+  }
+}
+```
+
+### Open WebUI
+
+In the admin settings, Integrations, External Tool Servers: add a connection of the type **MCP (Streamable HTTP)** with the URL of the endpoint. Open WebUI 0.6.31 or later.
+
 ### Home Assistant
 
 Add the integration **Model Context Protocol** with the URL of the endpoint, then turn on its tools for the conversation agent of your assistant. Home Assistant uses only tools and no login here. It does not ask before printing, `MCP_MAX_COUNT` limits how many labels a call prints. It hands each result to its model as text, so it gets only the address of each image, below `/mcp/preview.png`, not the image data. Opened over HTTPS, Home Assistant shows them only if the label designer is reachable over HTTPS too, browsers block images over HTTP there.
 
-### claude.ai and Claude Desktop
+### claude.ai, Claude Desktop, ChatGPT
 
-Their connectors connect from Anthropic's cloud, which cannot reach a server in your home network.
+Their connectors connect from the cloud of Anthropic or OpenAI, which cannot reach a server in your home network.
 
 ## Host names
 
