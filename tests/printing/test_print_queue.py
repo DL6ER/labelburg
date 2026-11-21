@@ -315,10 +315,11 @@ def test_a_worker_starts_with_an_empty_context_on_every_python(monkeypatch, inhe
     monkeypatch.setattr(print_queue, 'THREADS_INHERIT_CONTEXT', inherit)
     contexts, real = [], threading.Thread
 
-    def thread(*args, **kwargs):
-        if 'context' in kwargs and not inherit:
+    def thread(*args, context=None, **kwargs):
+        if context is not None and not inherit:
             raise TypeError("Thread.__init__() got an unexpected keyword argument 'context'")
-        contexts.append(kwargs.get('context'))
+        contexts.append(context)
+        # Started without it, Thread() of Python 3.11-3.13 does not take it
         return real(*args, **kwargs)
     monkeypatch.setattr(threading, 'Thread', thread)
     job = add(USB, recorder([], 1))
