@@ -660,13 +660,11 @@ DRAW.about = box => {
             <span class="k">Appearance</span>
             <div class="set-stack"><div class="seg" role="group" aria-label="Appearance">${[['', 'Like the system', 'screen'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']].map(([v, n, i]) =>
                 `<button type="button" data-theme="${esc(v)}"${v === theme ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>${ic(i)}${esc(n)}</button>`).join('')}</div>
-                <small class="muted">Kept in this browser, also for the current designer.</small></div>
+                <small class="muted">Kept in this browser.</small></div>
             <span class="k">Version</span>
             <div class="set-stack"><span class="set-val" id="setVersion">${version}</span>${b.date ? `<small class="muted">Built ${esc(b.date)}</small>` : ''}</div>
             <span class="k">Source code</span>
             <div class="set-stack"><a href="${esc(SOURCE)}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
-            <span class="k">The current designer</span>
-            <div class="set-stack"><a href="${esc(C.base)}/">Open it</a><small class="muted">With the same labels and printers, to compare both.</small></div>
         </div></section>`;
     $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box); });
 };

@@ -372,6 +372,9 @@ def test_connections_have_the_addresses_of_this_server(designer, server):
         designer.click('[data-clients] [data-copy]')
         designer.wait_for_function('line => navigator.clipboard.readText().then(t => t === line)', arg=line)
     open_settings(designer, 'about')
+    # One label designer, no other one to open or compare
+    assert designer.locator('#setPart .set-grid > .k').all_inner_texts() == ['Appearance', 'Version', 'Source code']
+    assert 'designer' not in designer.inner_text('#setPart .set-card')
     designer.click('button[data-theme="dark"]')
     assert designer.evaluate("() => [document.documentElement.dataset.theme, localStorage.getItem('designer_theme')]") == ['dark', 'dark']
     assert designer.locator('[data-theme="dark"].on').count() == 1
