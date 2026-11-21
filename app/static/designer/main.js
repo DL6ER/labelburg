@@ -3,7 +3,7 @@
 // in field.js, what they share in core.js.
 
 import {
-    $, $$, esc, icon, S, C, API, toast, own, load, storeQuiet, refreshPrinters, tapeState, printerState, printerLabel, printerName, sizeShort,
+    $, $$, esc, icon, S, C, API, toast, own, load, storeQuiet, refreshPrinters, tapeState, printerState, printerLabel, printerName, isDemo, sizeShort,
     sizeName, tapeKnown, tapeLeft, loadDemos, loadSaved, demoItem, savedItem, itemDesign, thumbUrl, drawThumb, detectTape, fitsTape, placed,
     allTags, tagsOf, hasTag, openLayer, closeLayer, layerOpen, entryName, savedAs, thePrinter, L, isEmptyDesign, originOf, carryOverLabelSettings,
     loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter
@@ -105,7 +105,7 @@ function drawPrinters() {
         // A printer that cannot be reached says only that, its tape is unknown
         const gone = p.status_type === 'Error';
         const t = p.tape || {};
-        const tape = gone || !t.id ? '' : t.known ? `${sizeName(t.id)} ${t.manual ? 'set by hand' : 'in the printer'}`
+        const tape = gone || !t.id ? '' : isDemo(p) ? sizeName(t.id) : t.known ? `${sizeName(t.id)} ${t.manual ? 'set by hand' : 'in the printer'}`
             : (t.candidates || []).length ? `measures labels ${t.unknown}` : t.unknown ? `reports ${t.unknown} tape` : 'does not say which tape it has';
         return `<button class="prow${on ? ' on' : ''}" type="button" data-p="${esc(k)}"${gone ? ` title="${esc(st.text)}"` : ''}><span class="d ${esc(st.cls)}"></span>
             <span class="grow"><b>${esc(printerLabel(p))}</b><small>${esc([p.name ? printerName(p) : '', gone ? 'Cannot be reached' : st.text, tape, tapeLeft(p), p.battery != null ? `Battery ${p.battery}%` : ''].filter(Boolean).join(', '))}</small>

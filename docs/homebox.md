@@ -33,7 +33,7 @@ Homebox's other values, such as `Width` and `Height` in pixels, are for its own 
 
 ## The printer
 
-The labels are made for and printed on the printer the label designer starts with: the first one of `PRINTERS`, the one of `PRINTER_PRINTER`, or the first one found. Where none is found, they go to the simulator.
+The labels are made for and printed on the printer the label designer starts with: the first one of `PRINTERS`, the one of `PRINTER_PRINTER`, or the first one found. Where none is found, they go to the demo printer.
 
 ## Trying it
 

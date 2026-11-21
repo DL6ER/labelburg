@@ -5,7 +5,7 @@
 import {
     $, $$, esc, icon, clone, debounce, latest, toast, hideToast, own, load, storeQuiet, forget, S, C, SIZES, L, familyOf, faceOf, familyNamed, isBold, baseDesign, isEmptyDesign, withImage, withCode, labelFiles, codeWithText, textFit, setTextFit, wrapWhy, verticalAlign,
     hasRoom, NO_ROOM, sizeName, isColorTape, isEndless, redTape, isDieCut, runsAlong, setRunsAlong, flagOn, hasLength, hasFixedLength,
-    placeEdit, madeDesign, flagLost, placed, tapeKnown, thePrinter, onTape, preview, dpiOf, dotsToMm, mmToDots, blanksOf, defaults,
+    placeEdit, madeDesign, flagLost, placed, tapeKnown, thePrinter, isDemo, onTape, preview, dpiOf, dotsToMm, mmToDots, blanksOf, defaults,
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, designSig,
@@ -451,7 +451,8 @@ function updateActions() {
 function drawTape() {
     const E = S.edit, d = E.design, who = thePrinter(S.printer, true);
     const measured = !tapeKnown() && S.tapeCandidates.length > 0;
-    const note = !S.printer || tapeKnown() ? '' : measured ? `${who} measures labels ${S.tapeUnknown}.`
+    // The demo printer has any roll of its model, none is missing
+    const note = !S.printer || tapeKnown() || isDemo(S.printer) ? '' : measured ? `${who} measures labels ${S.tapeUnknown}.`
         : S.tapeUnknown ? `${who} reports ${S.tapeUnknown} tape, which is not offered here.` : `${who} does not say which tape it has.`;
     const tn = $('#tapeNote');
     tn.innerHTML = note ? `${icon('warn')}<span>${esc(note)} <a class="custom" href="#settings/printers" id="tapeChange">${measured ? 'Choose which ones' : 'Set the tape'}</a></span>` : '';

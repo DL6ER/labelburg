@@ -86,9 +86,9 @@ def test_the_bottom_leaving_first_and_the_large_preview(editor):  # noqa: F811
 
 
 def test_a_tape_the_printer_does_not_tell_is_noted_with_the_fits(editor):  # noqa: F811
+    status_is(editor, with_tape({'model': 'QL-1100', 'name': 'Office'}))
     type_label(editor, 'Shelf 3')
-    # The simulator does not say which tape it has
-    assert 'does not say which tape it has' in editor.inner_text('#tapeNote')
+    assert 'Office does not say which tape it has' in editor.inner_text('#tapeNote')
     assert editor.inner_text('#tapeChange') == 'Set the tape'
     editor.click('#tapeChange')
     editor.wait_for_selector('#setPart[data-part="printers"]')

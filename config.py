@@ -33,8 +33,8 @@ class Config(object):
     # in the variable "Kitchen:QL-700=usb://...". The label designer shows the
     # name, requests may choose the printer by it.
     # When set, PRINTER_PRINTER, PRINTER_MODEL and the automatic detection are
-    # not used, requests that name no printer go to the first one. The simulator
-    # is listed only when configured, e.g. 'QL-700=simulation'.
+    # not used, requests that name no printer go to the first one. The demo
+    # printer is listed only when configured, e.g. 'QL-700=simulation'.
     PRINTERS = []
 
     # Printers the search does not find, e.g. shared over USB/IP, may be

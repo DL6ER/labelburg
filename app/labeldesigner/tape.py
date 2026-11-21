@@ -111,14 +111,17 @@ def detect(state: dict, manual: str, default_size: str) -> Tape:
         return Tape(found, assumed=False, red_unknown=red_unknown, candidates=candidates, model=model)
     if manual in SIZES:
         return Tape(manual, assumed=False, manual=True, model=model)
-    # Assumed is the default size as the printer's size of its paper, or the
-    # first one the printer takes
+    return Tape(assumed_size(model, default_size), assumed=True, unknown=unknown, candidates=candidates, model=model)
+
+
+def assumed_size(model, default_size: str) -> str:
+    """The label size a printer of the model that does not tell its tape is
+    assumed to have: the default size as the printer's size of its paper,
+    or the first one the printer takes."""
     default_size = same_paper(default_size, model)
     if default_size in SIZES and _takes(default_size, model):
-        fallback = default_size
-    else:
-        fallback = next((s for s in SIZES if _takes(s, model)), default_size)
-    return Tape(fallback, assumed=True, unknown=unknown, candidates=candidates, model=model)
+        return default_size
+    return next((s for s in SIZES if _takes(s, model)), default_size)
 
 
 def hand_set(manual: str, model: str) -> str:
