@@ -8,7 +8,7 @@ import {
     placeEdit, madeDesign, flagLost, placed, tapeKnown, thePrinter, isDemo, onTape, preview, dpiOf, dotsToMm, mmToDots, blanksOf, defaults,
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
-    cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, designSig,
+    cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
     loadSaved, roomFrom
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
@@ -726,7 +726,7 @@ export function drawPrinter() {
     const st = printerState(S.printer);
     for (const el of [$('#slot'), $('#vslot')]) {
         $('.led', el).className = 'led ' + st.cls;
-        $('.model', el).textContent = S.printer ? printerLabel(S.printer) : 'No printer';
+        $('.model', el).textContent = !S.printer ? 'No printer' : isDemo(S.printer) ? `Demo ${printerName(S.printer)}` : printerLabel(S.printer);
         el.title = st.text;
     }
 }

@@ -42,7 +42,8 @@ def test_how_the_label_leaves_the_printer(editor):  # noqa: F811
     # The printer with its name below the label, which comes out of it
     paper, printer = rects(editor, '#paper', '#slot')
     assert printer[1] < paper[3] < printer[3]
-    assert editor.inner_text('#slot .model') == editor.inner_text('#printerChip b')
+    # The demo printer with the model it prints as
+    assert (editor.inner_text('#printerChip b'), editor.inner_text('#slot .model')) == ('Demo printer', 'Demo Brother QL-800')
     assert editor.is_visible('#cutmark')
     # Nothing else on the stage: how copies are cut is in Advanced
     assert editor.locator('#cuts, #tapecap, #flow').count() == 0

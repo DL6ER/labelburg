@@ -34,6 +34,8 @@ def designer(browser, server, app):
 
 def test_the_demo_printer_is_named_so(designer):
     assert designer.inner_text('#printerChip b') == 'Demo printer'
+    # The printer drawn below the label names its model
+    assert designer.text_content('#slot .model') == designer.text_content('#vslot .model') == 'Demo Brother QL-800'
     open_settings(designer)
     card = designer.inner_text('[data-card="0"]')
     assert 'Demo printer' in card and 'Brother QL-800, Ready, prints nothing' in card
@@ -82,6 +84,7 @@ def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
     assert designer.input_value('[data-card="0"] select[data-k="label_size"]') == 'vc9'
     assert 'Any roll this model takes.' in designer.inner_text('[data-card="0"]')
     back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo Brother VC-500W'
     type_label(designer, 'Shelf 3')
     with designer.expect_request('**/api/print') as request:
         designer.click('#print')
