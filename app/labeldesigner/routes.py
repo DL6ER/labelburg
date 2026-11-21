@@ -989,7 +989,7 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label') 
     lines = [line for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)
              for line in str(item.get('text', '')).splitlines()]
     # Icons are drawn with fonts of their own, a title shows them as boxes
-    lines = [''.join(char for char in line if icons.font_of(char) is None) for line in lines]
+    lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
     name = data.get('name')
     for title in (_requested('title'), *lines, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
         if isinstance(title, str) and (title := ' '.join(title.split())):

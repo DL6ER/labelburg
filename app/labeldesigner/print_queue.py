@@ -7,6 +7,7 @@ resumed or nothing waits anymore.
 """
 import contextvars
 import logging
+import sys
 import threading
 import time
 import uuid
@@ -32,6 +33,9 @@ FAILED = 'It was not printed'
 
 # The name of each worker thread starts with it, the key of its line follows
 WORKER_PREFIX = 'print-queue-'
+# Free-threaded builds of Python 3.14+ start a thread in a copy of the context
+# of the one that starts it, the others in an empty one
+THREADS_INHERIT_CONTEXT = bool(getattr(sys.flags, 'thread_inherit_context', 0))
 
 SOURCES = {'designer': '', 'api': 'the API', 'homebox': 'Homebox', 'webhook': 'the webhook', 'mcp': 'MCP', 'calibration': ''}
 
@@ -91,10 +95,10 @@ def _prune():
 
 def _start_worker(key, line):
     if line.worker is None and line.held is None and line.waiting:
-        # Empty, a thread may otherwise inherit the context of the request
-        # that starts it and keep that request
-        worker = threading.Thread(target=_work, args=(key, line), name=f'{WORKER_PREFIX}{key}', daemon=True,
-                                  context=contextvars.Context())
+        # Empty, it would keep the request that starts it otherwise. Before
+        # Python 3.14 Thread() takes no context.
+        empty = {'context': contextvars.Context()} if THREADS_INHERIT_CONTEXT else {}
+        worker = threading.Thread(target=_work, args=(key, line), name=f'{WORKER_PREFIX}{key}', daemon=True, **empty)
         worker.start()
         line.worker = worker
 

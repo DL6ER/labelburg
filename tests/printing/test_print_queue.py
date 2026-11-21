@@ -306,3 +306,21 @@ def test_resume_does_nothing_on_a_line_that_is_not_held():
     release.set()
     assert waiting.done.wait(WAIT)
     print_queue.resume('tcp://192.0.2.5')
+
+
+@pytest.mark.parametrize('inherit', [False, True])
+def test_a_worker_starts_with_an_empty_context_on_every_python(monkeypatch, inherit):
+    # Before Python 3.14 a thread takes no context, it starts in an empty one
+    # unless a free-threaded build has it inherit that of the request
+    monkeypatch.setattr(print_queue, 'THREADS_INHERIT_CONTEXT', inherit)
+    contexts, real = [], threading.Thread
+
+    def thread(*args, **kwargs):
+        if 'context' in kwargs and not inherit:
+            raise TypeError("Thread.__init__() got an unexpected keyword argument 'context'")
+        contexts.append(kwargs.get('context'))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(threading, 'Thread', thread)
+    job = add(USB, recorder([], 1))
+    assert job.done.wait(WAIT) and job.state == 'printed'
+    assert [None if context is None else len(context) for context in contexts] == [0 if inherit else None]

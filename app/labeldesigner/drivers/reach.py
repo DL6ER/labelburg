@@ -111,9 +111,9 @@ def watch(hosts, mode: str):
     _watched = {host.lower(): mode for host in hosts}
 
 
-def check(mode: str) -> contextvars.Token:
+def check(mode: str | None) -> contextvars.Token:
     """Check every connection of this thread in the mode until stop() of
-    what it returns."""
+    what it returns, with None only those to the watched hosts."""
     return _checking.set(mode)
 
 
@@ -128,7 +128,7 @@ def checking_mode() -> str | None:
 
 
 @contextlib.contextmanager
-def checking(mode: str):
+def checking(mode: str | None):
     """Check every connection made within, in the same thread, in the mode."""
     token = check(mode)
     try:
