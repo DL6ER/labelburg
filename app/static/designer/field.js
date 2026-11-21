@@ -249,18 +249,27 @@ function readBack() {
         root.classList.toggle('empty', d.text.length === 1 && !String(d.text[0].text).length);
         return false;
     }
-    const at = caret();
+    const sel = getSelection(), focus = sel.rangeCount ? sel.focusNode : null;
+    let at = caret(), stray = '';
     const used = new Set(), lines = [];
     for (const n of divs) {
         const text = readNode(n);
         const i = n.nodeType === Node.ELEMENT_NODE && n.dataset ? n.dataset.i : undefined;
-        if (i === undefined && n.nodeType !== Node.ELEMENT_NODE && lines.length) { lines[lines.length - 1].text += text; continue; }
+        // Text a browser put outside the lines belongs to the line before it,
+        // before the first one to that, and the caret stays in it
+        if (i === undefined && n.nodeType !== Node.ELEMENT_NODE) {
+            const last = lines[lines.length - 1], typed = n.nodeValue.slice(0, sel.focusOffset).replaceAll(ZW, '').length;
+            if (!at && n === focus) at = last ? { line: lines.length - 1, at: unitsOf(tokensOf(last.text)) + typed } : { line: 0, at: unitsOf(tokensOf(stray)) + typed };
+            if (last) last.text += text; else stray += text;
+            continue;
+        }
         const from = d.text[+i] || lines[lines.length - 1] || d.text[0] || L('', C.defaults.font_size, true);
         const line = used.has(from) ? clone(from) : from;
         used.add(from);
-        line.text = text;
+        line.text = (lines.length ? '' : stray) + text;
         lines.push(line);
     }
+    if (!lines.length && stray) lines.push(Object.assign(d.text[0] || L('', C.defaults.font_size, true), { text: stray }));
     d.text = lines.length ? lines : [L('', C.defaults.font_size, true)];
     renderField(at);
     return true;

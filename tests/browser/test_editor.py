@@ -186,3 +186,28 @@ def test_the_details_shown_in_advanced_belong_to_the_label(editor):
     changed_preview(editor, lambda: editor.click('#adv [data-frame="square"]'))
     assert editor.locator('#adv [data-fcustom].on').count() == 0
 
+
+
+# Text a browser puts into the field outside its lines, e.g. Firefox after
+# the field was drawn anew, with the caret after it
+STRAY = """([where, text]) => {
+    const field = document.querySelector('#field'), lines = field.querySelectorAll('.ln');
+    const node = document.createTextNode(text);
+    if (where === 'before') field.insertBefore(node, lines[0]); else field.appendChild(node);
+    const range = document.createRange();
+    range.setStart(node, text.length);
+    range.collapse(true);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+}"""
+
+
+@pytest.mark.parametrize('where, typed, text, expected', [('before', 'rig', ['Orig'], ['Oarig']), ('after', 'Origi', ['Origin'], ['Origina'])])
+def test_text_outside_the_lines_goes_into_the_next_one(editor, where, typed, text, expected):  # noqa: F811
+    type_label(editor, typed)
+    editor.evaluate(STRAY, [where, 'O' if where == 'before' else 'n'])
+    assert editor.evaluate('() => labelEditor.S.edit.design.text.map(l => l.text)') == text
+    # The caret stays after it, typing goes on in the line
+    editor.keyboard.type('a')
+    editor.wait_for_function('t => JSON.stringify(labelEditor.S.edit.design.text.map(l => l.text)) === t', arg=json.dumps(expected))
