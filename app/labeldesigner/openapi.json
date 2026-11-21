@@ -540,7 +540,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -776,7 +776,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2397,7 +2397,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2792,7 +2792,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2929,7 +2929,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3062,7 +3062,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3214,7 +3214,7 @@
             }
           },
           "503": {
-            "description": "The line of the printer is full, `message` says so. The same request may succeed later.",
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
             "content": {
               "application/json": {
                 "schema": {

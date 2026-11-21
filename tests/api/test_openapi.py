@@ -92,3 +92,12 @@ def test_a_job_tells_where_it_comes_from():
     told = print_queue.Job('id', 'key', 'Label', 1, 'api').told()
     # The routes add the progress and the start of the server
     assert set(json.load(open(SPEC))['components']['schemas']['QueueJob']['properties']) == {*told, 'progress', 'start'}
+
+
+def test_a_busy_printer_names_both_reasons_of_the_refusal():
+    # The line is full, or the waiting jobs hold too many large images
+    spec = json.load(open(SPEC))
+    for path in ('/labeldesigner/api/print', '/labeldesigner/api/repository/print', '/labeldesigner/api/demos/print',
+                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print'):
+        description = spec['paths'][path]['post']['responses']['503']['description']
+        assert 'line of the printer is full' in description and 'large images' in description, path
