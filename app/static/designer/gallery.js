@@ -219,6 +219,7 @@ async function showDetail(item, values = null) {
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
             ${saved ? `<button class="btn ghost" type="button" id="tplLinks">${icon('qr')}Use from anywhere</button>
+                <button class="btn ghost" type="button" id="tplScan">${icon('barcode')}Scan to print</button>
                 <button class="btn ghost" type="button" id="tplTags">${icon('tag')}Tags</button>
                 <button class="btn ghost danger" type="button" id="tplRemove">${icon('trash')}Remove</button>` : ''}
         </div>
@@ -288,6 +289,7 @@ async function showDetail(item, values = null) {
     };
     if (saved) {
         $('#tplLinks').onclick = () => linksPanel(item, work.design);
+        $('#tplScan').onclick = () => { location.hash = 'scan/' + encodeURIComponent(item.id); };
         $('#tplTags').onclick = () => tagsPanel(item);
         $('#tplRemove').onclick = () => removeLabel(item);
     }

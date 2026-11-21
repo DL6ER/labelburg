@@ -14,35 +14,45 @@ import { closePop } from './field.js';
 import { mountGallery, openTemplates, openFill, savedSub } from './gallery.js';
 import { renderSettings, redrawSettings, redrawLabelSettings } from './settings.js';
 import { mountPhone, phone } from './phone.js';
+import { renderScan } from './scan.js';
 
 // Views other parts of the page register, e.g. the settings
 export const views = {};
 views.settings = el => renderSettings(el, { chip: renderChip, refresh, theme: setTheme });
+views.scan = (el, name) => renderScan(el, name);
 
 // --- Routing ---------------------------------------------------------------------
 
 const viewOf = () => (location.hash.replace(/^#/, '').split(/[/?]/)[0]) || 'edit';
+// The scan station listens to the keys only while it is shown
+let station = null;
 function route() {
     closeLayer(true);
     closePop();
+    if (station) { station.stop(); station = null; }
     const view = viewOf();
-    $$('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'settings' ? 'settings' : 'edit')));
+    $$('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'settings' ? 'settings' : view === 'scan' ? '' : 'edit')));
     // On the phone the gear is the way to the settings and back
     $('#gear').classList.toggle('on', view === 'settings');
     $('#gear').href = view === 'settings' ? '#edit' : '#settings';
     $('#gear').title = view === 'settings' ? 'Back to the editor' : 'Settings';
-    document.body.dataset.view = view === 'settings' ? 'settings' : 'edit';
+    document.body.dataset.view = view === 'settings' || view === 'scan' ? view : 'edit';
     if (view === 'settings') {
         $('#view').innerHTML = '';
         views.settings($('#view'));
         return;
     }
-    renderEditor();
-    // #templates/<group> and #fill/<name>?Blank=value
+    // #templates/<group>, #fill/<name>?Blank=value and #scan/<name>
     const [path, query] = location.hash.replace(/^#/, '').split('?');
     const arg = path.split('/').slice(1).join('/');
     let decoded = arg;
     try { decoded = decodeURIComponent(arg); } catch (e) { }
+    if (view === 'scan') {
+        $('#view').innerHTML = '';
+        station = views.scan($('#view'), decoded || null);
+        return;
+    }
+    renderEditor();
     if (view === 'templates') openTemplates(decoded || undefined);
     else if (view === 'fill' && decoded) openFill(decoded, new URLSearchParams(query || ''));
 }
@@ -158,6 +168,7 @@ const COMMANDS = [
     { name: 'Go to the editor', icon: 'type', run: () => { location.hash = 'edit'; } },
     { name: 'Printer and settings', icon: 'printer', run: () => { location.hash = 'settings/printers'; } },
     { name: 'Printed labels', icon: 'clock', run: () => { location.hash = 'settings/printed'; } },
+    { name: 'Scan to print', icon: 'barcode', run: () => { location.hash = 'scan'; } },
     { name: 'Dark mode', icon: 'moon', run: () => themeTo('dark') },
     { name: 'Light mode', icon: 'sun', run: () => themeTo('light') },
     { name: 'Follow the system for dark mode', icon: 'contrast', run: () => themeTo(null) },

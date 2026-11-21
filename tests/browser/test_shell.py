@@ -40,7 +40,7 @@ def test_commands_in_the_search(designer):
     designer.keyboard.press('Control+k')
     designer.keyboard.type('>')
     assert designer.locator('.res.cmd b').all_inner_texts() == [
-        'New label', 'Templates', 'Go to the editor', 'Printer and settings', 'Printed labels',
+        'New label', 'Templates', 'Go to the editor', 'Printer and settings', 'Printed labels', 'Scan to print',
         'Dark mode', 'Light mode', 'Follow the system for dark mode']
     designer.keyboard.type('mode')
     assert designer.locator('.res.cmd').count() == 3
