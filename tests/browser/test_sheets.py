@@ -4,7 +4,8 @@ from tests.browser.helpers import png, with_tape
 from tests.browser.test_editor import editor, type_label, wait_for_preview  # noqa: F401
 from tests.browser.test_gallery import open_saved, save_new
 from tests.browser.test_media import pdf
-from tests.browser.test_stage import status_is
+from tests.browser.test_settings import designer, printers_are  # noqa: F401
+from tests.browser.test_stage import COLOR, status_is, switch_to
 
 # A Niimbot B1 with a roll of 15 x 8 mm labels, 2 across and 3 along a page
 B1 = {'model': 'Niimbot/B1', 'name': 'Labels', 'media_width': 30, 'media_length': 24}
@@ -165,3 +166,20 @@ def test_templates_show_the_note_of_the_copies_asked_last(editor):  # noqa: F811
     editor.wait_for_function('() => window.answered')
     editor.wait_for_timeout(200)
     assert editor.locator('#tplSheet .sheet i.on').count() == 4
+
+
+ROLL = {'path': 'simulation', 'model': 'Niimbot/B1', 'name': 'Labels', 'media_width': 30, 'media_length': 30}
+
+
+def test_copies_filled_for_a_page_go_back_on_another_printer(designer, server):  # noqa: F811
+    printers_are(designer, server, ROLL, COLOR)
+    type_label(designer, 'Spice')
+    designer.click('#sheetNote [data-fill]')
+    designer.wait_for_function("() => document.querySelector('#copies').value === '2'")
+    switch_to(designer, 1)
+    assert designer.input_value('#copies') == '1'
+    # Copies set by hand stay
+    switch_to(designer, 0)
+    set_copies(designer, 3)
+    switch_to(designer, 1)
+    assert designer.input_value('#copies') == '3'

@@ -365,6 +365,8 @@ function bindStage() {
     $('#sheetNote').onclick = e => {
         const fill = e.target.closest('[data-fill]');
         if (!fill) return;
+        // Filled for this page, they go back on a printer without pages
+        if (S.edit && S.edit.filledFrom === undefined) S.edit.filledFrom = copies();
         $('#copies').value = fill.dataset.fill;
         if (S.edit) S.edit.copies = +fill.dataset.fill;
         copiesChanged();
@@ -1256,6 +1258,11 @@ function askReplace(title, replace, asNew) {
 export function printerChanged() {
     if (!S.edit || !$('#stage')) return;
     placeEdit(S.edit);
+    if (S.edit.filledFrom !== undefined && !isSheet(onTape(S.edit.design).label_size)) {
+        S.edit.copies = S.edit.filledFrom;
+        $('#copies').value = S.edit.copies;
+        delete S.edit.filledFrom;
+    }
     drawTape();
     drawPrinter();
     if (ui.adv) renderAdvanced();

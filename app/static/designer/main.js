@@ -349,10 +349,13 @@ function bindTop() {
     $$('.printbtn [data-step]').forEach(b => b.onclick = () => {
         const inp = $('#copies');
         inp.value = Math.min(100, Math.max(1, (parseInt(inp.value, 10) || 1) + +b.dataset.step));
-        if (S.edit) S.edit.copies = +inp.value;
+        if (S.edit) { S.edit.copies = +inp.value; delete S.edit.filledFrom; }
         copiesChanged();
     });
-    $('#copies').addEventListener('input', () => { if (S.edit) S.edit.copies = parseInt($('#copies').value, 10) || 1; copiesChanged(); });
+    $('#copies').addEventListener('input', () => {
+        if (S.edit) { S.edit.copies = parseInt($('#copies').value, 10) || 1; delete S.edit.filledFrom; }
+        copiesChanged();
+    });
     hooks.templates = () => openTemplates();
     mountGallery({ openEditor });
     addEventListener('hashchange', route);
