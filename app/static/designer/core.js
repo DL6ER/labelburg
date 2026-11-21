@@ -1000,37 +1000,71 @@ export async function printJob(job, onDone, printer = S.printer) {
     S.history.unshift(entry);
     saveHistory();
     toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
-    // How far the job is, asked once at a time and not from a tab in the background
-    const followed = printer && printer.path !== 'simulation' ? printer.path : '';
-    let asking = false;
-    const follow = followed && setInterval(async () => {
-        if (asking || document.hidden) return;
-        asking = true;
-        try {
-            const p = printersIn(await (await fetch(API + '/printer_status')).json()).find(x => x.path === followed);
-            const text = p && p.job ? jobText(p.job) : '';
-            if (text && entry.state === 'printing') toast(text, null, 10000);
-        } catch (e) {
-            // The next one shows it
-        } finally {
-            asking = false;
-        }
-    }, 1500);
     try {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
-        const r = await post('/print', formFor(placedOn, entry.copies, true, job.values, false, undefined, printer));
+        const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
+        form.set('title', entryName(entry));
+        form.set('source', 'designer');
+        const r = await post('/print', form);
         let data = {};
         try { data = await r.json(); } catch (e) { }
-        if (r.ok && data.success !== false) entry.state = 'printed';
-        else { entry.state = 'failed'; entry.message = data.message || ('The printer answered ' + r.status); }
+        if (!r.ok || data.success === false) {
+            entry.state = 'failed';
+            entry.message = data.message || ('The printer answered ' + r.status);
+        } else if (data.job && data.state !== 'printed') {
+            // Queued: followed until its outcome is known
+            Object.assign(entry, { job: data.job, start: data.start, seen: data.state });
+            if (data.state === 'failed') { entry.state = 'failed'; entry.message = data.message || 'The label was not printed'; }
+            else { saveHistory(); await followJob(entry); }
+        } else entry.state = 'printed';
     } catch (e) {
         entry.state = 'failed';
         entry.message = UNREACHABLE;
     }
-    if (follow) clearInterval(follow);
     saveHistory();
     if (onDone) onDone(entry);
     return entry;
+}
+
+// Asks for the job of entry ({ job, start, seen }) every 1.5 s, one request
+// at a time and not from a tab in the background, until it is printed,
+// failed or lost. Sets entry.state and entry.message.
+export function followJob(entry) {
+    return new Promise(resolve => {
+        let asking = false;
+        const end = (state, message = '') => {
+            clearInterval(timer);
+            document.removeEventListener('visibilitychange', ask);
+            Object.assign(entry, { state, message });
+            resolve();
+        };
+        const ask = async () => {
+            if (asking || document.hidden) return;
+            asking = true;
+            try {
+                const r = await fetch(API + '/queue/' + encodeURIComponent(entry.job));
+                const data = await r.json();
+                if (r.status === 404 && data.start) {
+                    if (data.start === entry.start) end('unknown', 'Its outcome is no longer known');
+                    else if (entry.seen === 'printing') end('unknown', 'The label designer was restarted while it printed');
+                    else end('failed', 'The label designer was restarted before it printed');
+                } else if (data.state === 'printed') end('printed');
+                else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'The label was not printed');
+                else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); }
+            } catch (e) {
+                // The next one asks again
+            } finally {
+                asking = false;
+            }
+        };
+        const timer = setInterval(ask, 1500);
+        document.addEventListener('visibilitychange', ask);
+    });
+}
+
+// Jobs left printing when the page was closed are followed on
+export function resolvePending() {
+    S.history.filter(h => h.state === 'printing' && h.job).forEach(h => followJob(h).then(saveHistory));
 }
 
 // A label printed before, printed again as it was on the printer chosen, the
@@ -1044,11 +1078,12 @@ export function printAgain(h, onDone = announcePrint) {
 export function announcePrint(entry, again = () => printAgain(entry)) {
     hideToast();
     if (entry.state === 'printed') toast(`Printed ${entry.copies === 1 ? '1 label' : `${entry.copies} labels`}: ${entryName(entry)}`, { label: 'Print again', run: again });
+    else if (entry.state === 'unknown') toast(`Maybe not printed: ${entry.message}`, { label: 'Print again', run: again }, 10000);
     else toast(`Not printed: ${entry.message}`, { label: 'Try again', run: again }, 10000);
 }
 // What a label printed before is listed with: its copies, the values
 // printed, when
-export const printedSub = h => [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
+export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
 
 // --- Overlays ----------------------------------------------------------------
 

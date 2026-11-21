@@ -6,7 +6,7 @@ import {
     $, $$, esc, icon, S, C, API, toast, own, load, storeQuiet, refreshPrinters, tapeState, printerState, printerLabel, printerName, isDemo, sizeShort,
     sizeName, tapeKnown, tapeLeft, loadDemos, loadSaved, demoItem, savedItem, itemDesign, thumbUrl, drawThumb, detectTape, fitsTape, placed,
     allTags, tagsOf, hasTag, openLayer, closeLayer, layerOpen, entryName, savedAs, thePrinter, L, isEmptyDesign, originOf, carryOverLabelSettings,
-    loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter
+    loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending
 } from './core.js';
 import { calibrationHTML, bindCalibration } from './calibration.js';
 import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged } from './editor.js';
@@ -423,7 +423,8 @@ async function receiveShared() {
     renderChip();
     await Promise.all([refresh(true), loadDemos(), loadSaved(), carryOverLabelSettings()]);
     await receiveShared();
-    S.history.forEach(h => { if (h.state === 'printing') { h.state = 'failed'; h.message = 'The page was closed while printing'; } });
+    S.history.forEach(h => { if (h.state === 'printing' && !h.job) { h.state = 'failed'; h.message = 'The page was closed while printing'; } });
+    resolvePending();
     route();
     if (S.edit && S.edit.copies) $('#copies').value = S.edit.copies;
     setInterval(poll, 20000);

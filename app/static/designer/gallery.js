@@ -86,7 +86,7 @@ async function printFirstLook() {
     toast('Printing 1 label...', null, 120000);
     const entry = await printJob({ title, design: look.design, values: {}, copies: 1, source: { kind: 'look', id: look.id } });
     hideToast();
-    toast(entry.state === 'printed' ? `${RESULT.printed} 1 label: ${entryName(entry)}` : `${RESULT.failed}: ${entry.message}`, null, 6000);
+    toast(entry.state === 'printed' ? `${RESULT.printed} 1 label: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
 }
 
 // Templates whose name, group, tags or blanks share words with the text typed
@@ -193,7 +193,7 @@ function drawGrid() {
 
 // --- A label of the gallery ---------------------------------------------------------
 
-const RESULT = { printed: 'Printed', failed: 'Not printed' };
+const RESULT = { printed: 'Printed', failed: 'Not printed', unknown: 'Maybe not printed' };
 async function showDetail(item, values = null) {
     const box = $('#tplDetail');
     if (!box) return;
@@ -253,7 +253,7 @@ async function showDetail(item, values = null) {
         toast(`Printing ${copies} ${copies === 1 ? 'label' : 'labels'}...`, null, 120000);
         const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } });
         hideToast();
-        toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT.failed}: ${entry.message}`, null, 6000);
+        toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
         // Ready for the next one: the first text blank is emptied
         const first = $$('#tplFields [data-blank]').find(inp => fieldType({ design: work.design }, inp.dataset.blank) === 'text');
         if (entry.state === 'printed' && saved && first) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
@@ -337,7 +337,7 @@ function linksPanel(item, design) {
     };
     $('#tplPrintSticker').onclick = async () => {
         const entry = await printJob({ title: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
-        toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT.failed}: ${entry.message}`);
+        toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT[entry.state]}: ${entry.message}`);
     };
 }
 

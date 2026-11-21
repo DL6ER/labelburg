@@ -526,8 +526,8 @@ function drawHistory() {
     if (!box) return;
     const list = S.history.slice(0, 60);
     box.innerHTML = list.length ? list.map(h => {
-        const failed = h.state === 'failed', who = h.printerName || (h.printer ? printerName({ model: h.printer }) : '');
-        const sub = h.state === 'printing' ? 'Printing...' : failed ? `Not printed: ${h.message}` : [`${h.copies} x`, fmtTime(h.time), who].filter(Boolean).join(', ');
+        const failed = h.state === 'failed' || h.state === 'unknown', who = h.printerName || (h.printer ? printerName({ model: h.printer }) : '');
+        const sub = h.state === 'printing' ? 'Printing...' : failed ? `${h.state === 'unknown' ? 'Maybe not printed' : 'Not printed'}: ${h.message}` : [`${h.copies} x`, fmtTime(h.time), who].filter(Boolean).join(', ');
         return `<div class="set-hrow${failed ? ' failed' : ''}"><span class="set-thumb"><img alt="" data-thumb="${esc(h.id)}"></span>
             <div class="grow"><b>${esc(entryName(h))}</b><small class="${failed ? 'set-bad' : 'muted'}">${esc(sub)}</small></div>
             <button class="btn ghost sm" type="button" data-h="${esc(h.id)}" data-open>Open</button>
