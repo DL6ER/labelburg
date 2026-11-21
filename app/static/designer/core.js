@@ -108,8 +108,11 @@ export function sizeName(id) {
     if (isColorTape(id)) return `${s.tape[0]} mm color tape`;
     if (s.form === 'endless') return `${s.tape[0]} mm endless${s.red ? ', black and red' : ''}`;
     if (s.form === 'round_die_cut') return `${s.tape[0]} mm round`;
+    if (isSheet(id)) return `${s.sheet[0]} x ${s.sheet[1]} mm, ${s.pieces[0] * s.pieces[1]} labels of ${s.tape[0]} x ${s.tape[1]}`;
     return `${s.tape[0]} x ${s.tape[1]} mm`;
 }
+// A roll with several labels to a page, of which one is designed
+export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
 export function sizeShort(id) {
     const s = SIZES[id];
@@ -502,8 +505,24 @@ export function partsOf(header) {
 // are dropped by the caller. A cache keeps those of recent states, e.g. for
 // undo and redo.
 const previewCache = new Map();
-export async function preview(design, values) {
+const sheetOf = header => {
+    try { return header ? JSON.parse(header) : null; } catch (e) { return null; }
+};
+// The last page of a roll with several labels to a page where the copies
+// leave it not full: drawn as the label is seen, the labels filled marked
+export function sheetNote(sheet, max = 100) {
+    if (!sheet || sheet.filled >= sheet.labels.length) return '';
+    const k = 44 / Math.max(...sheet.size), px = mm => `${Math.round(mm * k * 10) / 10}px`;
+    const labels = sheet.labels.map(([x, y, w, h], i) => `<i${i < sheet.filled ? ' class="on"' : ''} style="left:${px(x)};top:${px(y)};width:${px(w)};height:${px(h)}"></i>`).join('');
+    return `<b class="sheet" role="img" aria-label="The last page" style="width:${px(sheet.size[0])};height:${px(sheet.size[1])}">${labels}</b>`
+        + '<span>The last page is not full.</span>'
+        + (sheet.fill && sheet.fill <= max ? `<button type="button" class="pill" data-fill="${esc(sheet.fill)}">Fill it</button>` : '');
+}
+
+export async function preview(design, values, copies = 1) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
+    // On a roll with several labels to a page the server tells how the copies fill the last one
+    const sheet = isSheet(asked.label_size), files = labelFiles(design).length;
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -512,7 +531,8 @@ export async function preview(design, values) {
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
-    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format]);
+    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
+        sheet ? [copies, files] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -522,7 +542,9 @@ export async function preview(design, values) {
     const p = (async () => {
         let r;
         try {
-            r = await post('/preview', formFor(asked, 1, false, values, true, blanks), AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
+            const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
+            if (sheet) fd.append('file_count', String(Math.max(1, files)));
+            r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');
         }
@@ -537,7 +559,7 @@ export async function preview(design, values) {
             auto: r.headers.get('X-Label-Orientation') === 'auto', gap: +(r.headers.get('X-Label-Image-Text-Gap') || 0),
             order: r.headers.get('X-Label-Parts-Order') || '', direction: r.headers.get('X-Label-Parts-Direction') || '', faint: r.headers.get('X-Image-Faint') === '1',
             pages: +(r.headers.get('X-PDF-Selected-Pages') || 1), pageCount: +(r.headers.get('X-PDF-Pages') || 0), parts: partsOf(r.headers.get('X-Label-Parts')),
-            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size
+            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet'))
         };
     })();
     previewCache.set(key, p);

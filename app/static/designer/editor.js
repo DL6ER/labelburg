@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom
+    loadSaved, roomFrom, isSheet, sheetNote
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -311,6 +311,7 @@ export function renderEditor() {
                     </div>
                     <div class="printer slot" id="slot" aria-hidden="true"><span class="led"></span><span class="model"></span><span class="mouth"></span></div>
                     <p class="made" id="made" hidden></p>
+                    <p class="mnote sheetnote" id="sheetNote" hidden></p>
                     <div class="fill" id="fill" hidden></div>
                     <div class="composer">
                         <div class="field" id="field" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true" aria-label="Label text" data-ph="Type the label text, [ for blanks and dates"></div>
@@ -361,6 +362,13 @@ function bindStage() {
     $('#templates').onclick = () => hooks.templates && hooks.templates();
     $('#advBtn').onclick = () => toggleAdvanced();
     $('#zoom').onclick = () => toggleLarge();
+    $('#sheetNote').onclick = e => {
+        const fill = e.target.closest('[data-fill]');
+        if (!fill) return;
+        $('#copies').value = fill.dataset.fill;
+        if (S.edit) S.edit.copies = +fill.dataset.fill;
+        copiesChanged();
+    };
     // The label takes the room left once Advanced has moved in or out
     $('#center').addEventListener('transitionend', e => { if (e.target.id === 'center' && e.propertyName === 'margin-right') fitLabel(); });
     // The name the label is saved under, a saved one is renamed when saved
@@ -561,7 +569,7 @@ const drawPreview = latest(async () => {
     const values = previewValues(E);
     let p;
     try {
-        p = await preview(shown, values);
+        p = await preview(shown, values, copies());
     } catch (e) {
         if (me < shownSeq) return;
         shownSeq = me;
@@ -570,6 +578,7 @@ const drawPreview = latest(async () => {
         $('#labelbox').classList.remove('busy');
         $('#labelbox').classList.add('failed');
         $('#picks').innerHTML = '';
+        drawSheet(null);
         fitsNote('', e.message);
         updateActions();
         laidOut(true);
@@ -609,9 +618,22 @@ const drawPreview = latest(async () => {
         renderToolbar();
     }
     fitsNote(empty ? null : p.warning, '');
+    drawSheet(empty ? null : p.sheet);
     updateActions();
     if (!empty && hooks.previewed) hooks.previewed(ui.last, shown);
 });
+
+// Where the copies leave the last page of a roll with several labels to a
+// page not full, as the server tells it
+function drawSheet(sheet) {
+    const note = $('#sheetNote'), html = sheetNote(sheet);
+    note.innerHTML = html;
+    note.hidden = !html;
+}
+// Only a roll with several labels to a page previews the copies
+export function copiesChanged() {
+    if (ui.last && isSheet(ui.last.labelSize)) drawPreview();
+}
 
 function previewValues(E) {
     const item = editItem(E);

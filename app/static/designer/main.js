@@ -9,7 +9,7 @@ import {
     loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter
 } from './core.js';
 import { calibrationHTML, bindCalibration } from './calibration.js';
-import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit } from './editor.js';
+import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged } from './editor.js';
 import { closePop } from './field.js';
 import { mountGallery, openTemplates, openFill, savedSub } from './gallery.js';
 import { renderSettings, redrawSettings, redrawLabelSettings } from './settings.js';
@@ -350,8 +350,9 @@ function bindTop() {
         const inp = $('#copies');
         inp.value = Math.min(100, Math.max(1, (parseInt(inp.value, 10) || 1) + +b.dataset.step));
         if (S.edit) S.edit.copies = +inp.value;
+        copiesChanged();
     });
-    $('#copies').addEventListener('input', () => { if (S.edit) S.edit.copies = parseInt($('#copies').value, 10) || 1; });
+    $('#copies').addEventListener('input', () => { if (S.edit) S.edit.copies = parseInt($('#copies').value, 10) || 1; copiesChanged(); });
     hooks.templates = () => openTemplates();
     mountGallery({ openEditor });
     addEventListener('hashchange', route);
