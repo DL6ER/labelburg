@@ -14,7 +14,7 @@ Most USB and Bluetooth barcode scanners type what they read, like a keyboard. No
 
 The scanner has to type with the keyboard layout of the computer or phone, e.g., German. Most scanners come set to US English; the setup codes in their manual switch the layout. With another layout, characters like `:` and `/` come out wrong. For links and contacts the station notices that and says so instead of printing.
 
-Use one scanner per station. Codes of several lines, e.g., contacts, come in line by line, so two scanners reading at the same moment can end up in one code.
+Use one scanner per station. Codes of several lines, e.g., contacts, come in line by line, so two scanners reading at the same moment can end up in one code. A contact that comes in incomplete is not printed, the station asks to scan it again.
 
 ## The camera
 
@@ -61,14 +61,15 @@ The station sends each scan to `POST /labeldesigner/api/scan`, which scripts can
 | `name` | File name of the saved label, e.g., `Box.json` |
 | `code` | The scanned text |
 | `printer` | The printer, as for the other print requests; without it the configured printer |
+| `model` | The model of the printer, e.g., `QL-800`, as for the other print requests |
 | `preview_only` | `1` returns the image of the label instead of printing it |
 
 ```bash
 curl -X POST http://localhost:8013/labeldesigner/api/scan -F name=Box.json -F code=A-17
 ```
 
-The answer tells which blanks got which value in `filled`, and with `preview_only` the label as a base64 PNG in `image`. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
+The answer tells which blanks got which value in `filled`, and has the label as a base64 PNG in `image`: as it was printed, or with `preview_only` as it would print. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
 
 A scanner ends each code with Enter or Tab; a line that follows within a moment belongs to the same code. A scanner without Enter or Tab at the end is recognized by its speed, the code ends when it stops typing. Codes typed by hand print on Enter.
 
-The camera's picture is read in the browser with [zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded from the label designer when the camera is switched on, nothing is sent elsewhere. It reads the codes Labelburg prints, QR Code, Micro QR, rMQR, DataMatrix, Aztec, PDF417, EAN-13, EAN-8, UPC-A, Code 128, Code 39, PZN, ITF and Codabar, and UPC-E.
+The camera's picture is read in the browser with [zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded from the label designer when the camera is switched on, nothing is sent elsewhere. It reads these kinds of codes: QR Code, Micro QR, rMQR, DataMatrix, Aztec, PDF417, EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, PZN, ITF and Codabar. EAN-14 and GTIN codes as Labelburg draws them, like an EAN-13 with 14 digits, are not read.
