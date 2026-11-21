@@ -42,7 +42,7 @@ The browser allows the camera only over a secure address (https), the address of
 | `Email`, `E-Mail` | The email address |
 | `Address`, `Adresse`, `Anschrift` | The street, the postcode with the city, and the country, each on a line of its own |
 
-Upper and lower case, spaces, `-` and `_` in the names do not matter. A label with several blanks and none named `code` takes only contact codes; for any other code the station asks to name the blank for it `code`.
+Upper and lower case do not matter, and `-`, `_` and a space count the same, e.g., `first_name` and `First-Name` work for `First name`. A label with several blanks and none named `code` takes only contact codes; for any other code the station asks to name the blank for it `code`.
 
 ## Trying a label
 
