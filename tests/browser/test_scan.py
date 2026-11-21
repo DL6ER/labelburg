@@ -359,6 +359,42 @@ def test_a_scan_with_the_code_in_the_card_selected_is_caught(station):
     assert page.evaluate('() => getSelection().toString()') == ''
 
 
+def test_space_presses_a_button_of_the_station(station):
+    page = station.page
+    page.focus('#scanChange')
+    page.keyboard.press(' ')
+    page.wait_for_selector('.scan-pick')
+    page.keyboard.press('Escape')
+    page.wait_for_selector('#scanField:focus')
+    page.focus('#printerChip')
+    page.keyboard.press(' ')
+    page.wait_for_selector('.pp')
+    page.keyboard.press('Escape')
+    page.wait_for_selector('#scanField:focus')
+    assert page.input_value('#scanField') == ''
+    # A scan typed with a button focused lands in the field whole
+    page.focus('#scanChange')
+    station.scan('A-17')
+    station.wait_for(1)
+    assert station.none_for(300) == 1
+    assert station.codes() == ['A-17']
+
+
+def test_a_pointer_released_outside_the_window_does_not_hold_the_focus(station):
+    page = station.page
+    blurred = """() => new Promise(done => {
+        document.querySelector('#scanField').blur();
+        setTimeout(() => done(document.activeElement.id), 50);
+    })"""
+    # Pressed, the focus stays where the press puts it
+    page.evaluate("() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, buttons: 1 }))")
+    assert page.evaluate(blurred) != 'scanField'
+    # Released outside the window: the next move without a button down ends the press
+    page.evaluate("() => document.body.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, buttons: 0 }))")
+    page.evaluate("() => document.querySelector('#scanField').focus()")
+    assert page.evaluate(blurred) == 'scanField'
+
+
 def test_tab_in_the_empty_field_moves_on(station):
     page = station.page
     page.keyboard.press('Tab')

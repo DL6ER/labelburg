@@ -68,14 +68,16 @@ export function scanInput(target, onScan, clock = performance) {
     };
     const onBlur = e => { if (!e.relatedTarget && !pressed) setTimeout(refocus); };
     const onShown = () => { if (!document.hidden) refocus(); };
-    const onPress = e => { pressed = e.type === 'pointerdown'; };
+    // A press released outside the window ends with the next move without a button
+    const onPress = e => { pressed = e.type === 'pointerdown' || (e.type === 'pointermove' && pressed && !!e.buttons); };
     const onTap = () => screenKeys(true);
     // A key typed with the focus nowhere, e.g. with text selected in the
     // card, lands in the field: focused before the key's default action
     const onStray = e => {
         const at = document.activeElement;
         if (at === target || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || !target.isConnected || layerOpen()) return;
-        if (at && at !== document.body && (at.matches('input, textarea, select') || at.isContentEditable)) return;
+        // Space presses a button or link that has the focus
+        if (at && at !== document.body && (at.matches('input, textarea, select') || at.isContentEditable || e.key === ' ')) return;
         getSelection().removeAllRanges();
         target.focus();
     };
@@ -83,7 +85,7 @@ export function scanInput(target, onScan, clock = performance) {
     // The pointer and stray keys are seen before anything else
     const on = [[target, 'input', onInput], [target, 'keydown', onKey], [target, 'focusout', onBlur], [target, 'pointerdown', onTap],
         [document, 'click', refocus], [document, 'visibilitychange', onShown], [window, 'focus', refocus], [window, 'blur', onPress], [document, 'keydown', onStray, true],
-        ...['pointerdown', 'pointerup', 'pointercancel'].map(type => [document, type, onPress, true])];
+        ...['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].map(type => [document, type, onPress, true])];
     on.forEach(([el, type, fn, capture]) => el.addEventListener(type, fn, !!capture));
     layer.observe($('#layer'), { attributes: true, attributeFilter: ['hidden'] });
     screenKeys(false);
