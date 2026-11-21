@@ -540,3 +540,9 @@ def test_the_printer_sheet_is_above_the_queue_on_the_phone(phone):  # noqa: F811
     phone.wait_for_selector('.layer.sheet .pp .plist')
     assert phone.locator('#queue').is_visible()
     assert phone.evaluate(COVERED, '#layer')
+
+
+def test_the_held_line_of_the_panel_is_an_alert(editor):  # noqa: F811
+    answer_lines(editor, {None: line(None, [JAR], 'The tape is used up')})
+    choose(editor, printer(held=True, waiting=1))
+    editor.wait_for_selector('#queue .q-line.held [role=alert]')

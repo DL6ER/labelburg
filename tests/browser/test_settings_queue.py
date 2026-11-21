@@ -113,3 +113,36 @@ def test_the_print_queue_page_on_the_phone(phone):  # noqa: F811
     for box in phone.locator('.q-card').all():
         b = box.bounding_box()
         assert b['x'] >= 0 and b['x'] + b['width'] <= 390
+
+
+def test_a_failed_read_says_so_until_one_works(editor):  # noqa: F811
+    answer_all(editor, [two_lines()])
+    choose(editor, *named())
+    editor.unroute_all()
+    editor.route(lambda url: url.split('?')[0].endswith('/api/queue'), lambda route: route.abort())
+    editor.evaluate("() => { location.hash = 'settings/queue'; }")
+    editor.wait_for_selector('#setQueue p:text-is("The label designer could not be reached")')
+    editor.unroute_all()
+    answer_all(editor, [two_lines()])
+    editor.wait_for_selector('.q-card', timeout=5000)
+    assert editor.locator('#setQueue p:text-is("The label designer could not be reached")').count() == 0
+
+
+def test_rendering_the_settings_again_keeps_one_timer(editor):  # noqa: F811
+    asked = []
+    answer_all(editor, [two_lines()], asked)
+    choose(editor, *named())
+    for part in ('queue', 'labels', 'queue', 'labels', 'queue'):
+        editor.evaluate(f"() => {{ location.hash = 'settings/{part}'; }}")
+        editor.wait_for_timeout(100)
+    editor.wait_for_selector('.q-card')
+    asked.clear()
+    editor.wait_for_timeout(4600)
+    assert 2 <= len(asked) <= 4
+
+
+def test_the_held_line_is_an_alert_in_the_panel_only(editor):  # noqa: F811
+    open_page(editor, two_lines())
+    editor.wait_for_selector('.q-held')
+    assert editor.locator('.q-held [role=alert]').count() == 0
+    assert editor.locator('.q-held span').inner_text() == 'Not printed: The cover is open. 1 waiting.'
