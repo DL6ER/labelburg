@@ -134,6 +134,21 @@ def test_a_code_takes_its_number_with_or_without_the_check_digit(tmp_path, barco
     assert preview(number) == preview(number[:-1])
 
 
+@pytest.mark.parametrize('barcode_type, number, ean', [
+    ('ISBN10', '0-8044-2957-X', '9780804429573'), ('ISBN10', '3-16-148410-X', '9783161484100'),
+    ('ISSN', '0317-8471', '9770317847001'),
+])
+def test_isbn10_and_issn_print_as_the_ean13_of_books_and_magazines(tmp_path, barcode_type, number, ean):
+    client = make_client(tmp_path)
+
+    def preview(kind, code):
+        data = dict(EXAMPLE_FORMDATA, print_type='qrcode', barcode_type=kind, code_text=code, text='[]')
+        response = client.post('/labeldesigner/api/preview', data=data)
+        assert response.status_code == 200, response.get_json()
+        return pixels(response.data)
+    assert preview(barcode_type, number) == preview('EAN13', ean)
+
+
 @pytest.mark.parametrize('barcode_type, code, message', [
     # The right check digit was printed instead of a wrong one, and what
     # followed the digits was left out: a typo made another valid code
