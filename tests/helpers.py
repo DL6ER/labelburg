@@ -125,7 +125,7 @@ def outcome(client: FlaskClient, response) -> tuple[str, str]:
 def printing() -> bool:
     """Whether this thread prints the jobs of the queue, rather than a request
     drawing the first label of its job to check it."""
-    return threading.current_thread().name.startswith('print-queue-')
+    return threading.current_thread().name.startswith(print_queue.WORKER_PREFIX)
 
 
 def sent_raster(monkeypatch) -> list:

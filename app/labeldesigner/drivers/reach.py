@@ -121,6 +121,12 @@ def stop(token: contextvars.Token):
     _checking.reset(token)
 
 
+def checking_mode() -> str | None:
+    """The mode every connection of this thread is checked in, see check(),
+    None where only the watched hosts are checked."""
+    return _checking.get()
+
+
 @contextlib.contextmanager
 def checking(mode: str):
     """Check every connection made within, in the same thread, in the mode."""

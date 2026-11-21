@@ -81,6 +81,8 @@ def test_mcp_adds_to_the_queue(client, tmp_path, monkeypatch):
     result = tool(client, 'print_text', printer='Kitchen', label_size='62', count=1, lines=['Jar'])
     assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
     assert sources == ['mcp', 'mcp'] and printed(tmp_path) == 3
+    tools = {t['name']: t for t in call(client, 'tools/list')[1]['result']['tools']}
+    assert all('added to the queue of the printer' in tools[name]['description'] for name in ('print_label', 'print_text'))
 
     # A filling refused when it is added tells how many were added before it
     def full_after_one(*args, **kwargs):

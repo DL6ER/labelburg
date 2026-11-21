@@ -5,6 +5,7 @@ a second job waits instead of being refused while the printer is busy. A job
 that reports it did not print holds the jobs behind it until the line is
 resumed or nothing waits anymore.
 """
+import contextvars
 import logging
 import threading
 import time
@@ -28,6 +29,9 @@ PRINTING_ALREADY = 'It is printing already'
 NOT_WAITING = 'It is not waiting in the queue anymore'
 
 FAILED = 'It was not printed'
+
+# The name of each worker thread starts with it, the key of its line follows
+WORKER_PREFIX = 'print-queue-'
 
 SOURCES = {'designer': '', 'api': 'the API', 'homebox': 'Homebox', 'webhook': 'the webhook', 'mcp': 'MCP', 'calibration': ''}
 
@@ -87,7 +91,10 @@ def _prune():
 
 def _start_worker(key, line):
     if line.worker is None and line.held is None and line.waiting:
-        worker = threading.Thread(target=_work, args=(key, line), name=f'print-queue-{key}', daemon=True)
+        # Empty, a thread may otherwise inherit the context of the request
+        # that starts it and keep that request
+        worker = threading.Thread(target=_work, args=(key, line), name=f'{WORKER_PREFIX}{key}', daemon=True,
+                                  context=contextvars.Context())
         worker.start()
         line.worker = worker
 
@@ -163,6 +170,14 @@ def add(device: str, run: Callable[[], str], *, title: str, labels: int, source:
             del _jobs[job.id]
             raise
         return job
+
+
+def full(device: str) -> bool:
+    """Whether the line of the device has MAX_WAITING jobs waiting, which
+    add() refuses."""
+    with _lock:
+        current = _lines.get(key_of(device))
+        return current is not None and len(current.waiting) >= MAX_WAITING
 
 
 def get(job_id: str) -> Job | None:

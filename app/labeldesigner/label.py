@@ -798,10 +798,12 @@ class SimpleLabel:
 
     def generate(self):
         """The image of the label, kept as generated where keep_generated is
-        set: of the first label of a print job, which the print routes return."""
+        set, and upright as shown: of the first label of a print job, which
+        the print routes return and the queue shows."""
         image = self._generate()
         if getattr(self, 'keep_generated', False):
             self.generated = image
+            self.shown = image.rotate(180) if self.turned else image
         return image
 
     def _generate(self):

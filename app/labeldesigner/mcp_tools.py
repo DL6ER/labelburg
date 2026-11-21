@@ -536,8 +536,9 @@ def _server(app):
         its blanks, e.g. [{"Name": "Anna"}, {"Name": "Ben"}] prints a badge
         for each, on the label size it is saved for. label_size only as the
         user told it, refused if the printer has another one loaded. Prints
-        nothing where a label is cut off or a filling is refused. Returns
-        the image of each printed."""
+        nothing where a label is cut off or a filling is refused. The labels
+        are added to the queue of the printer, which prints them in turn.
+        Returns the first label of each filling as it will print."""
         return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count))
 
     @server.tool(annotations=printing, meta=confirm)
@@ -549,7 +550,8 @@ def _server(app):
         CODE128) on printer, count labels. label_size, e.g. 62 or 100x30,
         only as the user told it, else the one loaded; refused if the printer
         has another one loaded. Prints nothing where the label is cut off.
-        Returns the image printed."""
+        The labels are added to the queue of the printer, which prints them
+        in turn. Returns the first label as it will print."""
         return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type))
 
     return server

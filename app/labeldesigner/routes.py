@@ -9,14 +9,13 @@ import base64
 import secrets
 import threading
 import contextlib
-import contextvars
 import datetime
 import functools
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, paperless, print_queue, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -26,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -940,47 +939,61 @@ MAX_TITLE_LENGTH = 200
 TOLD_SOURCES = ('designer', 'mcp')
 
 
-def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, preview_image: Image.Image | None = None,
-            in_color: bool = False, return_format=None, extra: dict | None = None):
+def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, drawn: Drawn | None = None,
+            return_format=None, extra: dict | None = None):
     """Add the job run() prints to the line of the printer and answer that it
-    waits there. preview_image is its first label as printer.check() drew
-    it, returned as base64 (image) for return_format png. in_color as the
-    label tells it once drawn."""
+    waits there. drawn is its first label as printer.check() drew it: the
+    queue shows it, return_format png returns it as base64 (image) as the
+    printer gets it."""
     preview = image = None
-    if preview_image is not None:
-        small = preview_image.copy()
+    if drawn is not None:
+        gray = not drawn.label.in_color
+        small = drawn.shown.copy()
         small.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
-        preview = image_to_png_bytes(small, gray=not in_color)
+        preview = image_to_png_bytes(small, gray=gray)
         if return_format == 'png':
-            image = base64.b64encode(image_to_png_bytes(preview_image, gray=not in_color)).decode()
-    # Printed as in this request, e.g. its connections checked where it names
-    # a printer, see _check_named()
-    context = contextvars.copy_context()
+            image = base64.b64encode(image_to_png_bytes(drawn.image, gray=gray)).decode()
     try:
-        job = print_queue.add(printer.device_specifier, lambda: context.run(run), title=title, labels=labels, source=source,
-                              preview=preview, explain=lambda e: refusals.message(e, refusals.PRINT_FAILED))
+        job = print_queue.add(printer.device_specifier, _as_in_this_request(run), title=title, labels=labels, source=source,
+                              preview=preview, explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
     except print_queue.Full:
-        current_app.logger.warning('Not queued, %d jobs wait for %s already', print_queue.MAX_WAITING, printer.device_specifier)
-        return _fail(BUSY, PRINTER_FAILED)
+        return _line_full(printer)
     result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
 
 
-def _job_title(data: dict, fallback: str = 'Label') -> str:
+def _line_full(printer: PrinterQueue):
+    """The answer to a job for a line with MAX_WAITING jobs waiting."""
+    current_app.logger.warning('Not queued, %d jobs wait for %s already', print_queue.MAX_WAITING, printer.device_specifier)
+    return _fail(BUSY, PRINTER_FAILED)
+
+
+def _as_in_this_request(call):
+    """call as made in this request: with its app, and its connections checked
+    as those of the request, see _check_named(). The request itself is not
+    kept, a job may wait long after it."""
+    app, mode = current_app._get_current_object(), reach.checking_mode()
+
+    def called(*args):
+        with app.app_context(), reach.checking(mode):
+            return call(*args)
+    return called
+
+
+def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label') -> str:
     """The title of a print job in the queue: the one of the request, else
-    the first line of the text of the label, else the name it is saved
-    under, else fallback."""
-    try:
-        lines = json.loads(data['text']) if isinstance(data.get('text'), str) else data.get('text')
-    except ValueError:
-        lines = None
-    texts = [line.get('text') for line in lines if isinstance(line, dict)] if isinstance(lines, list) else []
+    the first line of the first label as printer.check() drew it, its icons
+    left out, else the name it is saved under, else fallback."""
+    lines = [line for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)
+             for line in str(item.get('text', '')).splitlines()]
+    # Icons are drawn with fonts of their own, a title shows them as boxes
+    lines = [''.join(char for char in line if icons.font_of(char) is None) for line in lines]
     name = data.get('name')
-    for title in (_requested('title'), *texts, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
-        if isinstance(title, str) and title.strip():
-            return title.strip()[:MAX_TITLE_LENGTH]
+    for title in (_requested('title'), *lines, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
+        if isinstance(title, str) and (title := ' '.join(title.split())):
+            return title[:MAX_TITLE_LENGTH]
     return fallback
 
 
@@ -1199,16 +1212,19 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     """Queue print_count copies of the label, of each of its images, see
     _copies(), to be printed. stored tells where the image of a stored label
     is, see load_label_images()."""
+    # Refused before archive serial numbers are taken for it
+    if print_queue.full(printer.device_specifier):
+        return _line_full(printer)
     try:
         # Decode the image once, all labels of the job share it. Of a PDF
         # each selected page is a label of its own.
         images, _ = load_label_images(data, files, copies=print_count, **stored)
         queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
-        image = printer.check()
+        drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title(data), source=_job_source('api'), labels=len(queued),
-                   preview_image=image, in_color=image is not None and queued[0].in_color, return_format=return_format)
+    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(queued),
+                   drawn=drawn, return_format=return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -2870,12 +2886,12 @@ def webhook_print():
         printer.leaves_first = leaves_first
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
-        image = printer.check()
+        drawn = printer.check()
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
-    return _queued(printer, run=printer.process_queue, title=_job_title({}), source=_job_source('webhook'), labels=len(labels),
-                   preview_image=image, in_color=image is not None and labels[0].in_color, extra={'count': len(labels)})
+    return _queued(printer, run=printer.process_queue, title=_job_title({}, drawn), source=_job_source('webhook'), labels=len(labels),
+                   drawn=drawn, extra={'count': len(labels)})
 
 
 # --- Homebox ------------------------------------------------------------------
@@ -2976,10 +2992,10 @@ def homebox(name: str | None = None):
             orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
         # Printed as it is shown, dithered like the labels made here
         image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
-        label = _image_label(img, label_size, orientation, image_mode, high_res=high_res)
-        printer.add_label_to_queue(label, high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
-        image = printer.check()
+        printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
+                                   high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
+        drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}), source=_job_source('homebox'),
-                   labels=1, preview_image=image, in_color=image is not None and label.in_color)
+    return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}, drawn), source=_job_source('homebox'),
+                   labels=1, drawn=drawn)

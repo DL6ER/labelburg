@@ -8,6 +8,7 @@ import json
 import os
 
 import pytest
+from flask import has_app_context, has_request_context
 
 from app.labeldesigner import adding, printer, printer_settings, routes
 from app.labeldesigner.drivers import BROTHER, reach
@@ -154,6 +155,17 @@ def test_each_connection_to_a_named_printer_is_checked(tmp_path, names, monkeypa
     assert answer.status_code == 200 and told_state == 'failed' and told.endswith(reach.NOT_ALLOWED)
     # Only in that request
     assert reach._checking.get() is None
+
+
+def test_a_job_prints_with_the_app_and_the_checks_of_its_request_only(client, monkeypatch):
+    client.application.config['ADD_PRINTERS'] = 'local'
+    seen = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue',
+                        lambda self: seen.append((reach.checking_mode(), has_request_context(), has_app_context())) or '')
+    assert outcome(client, print_on(client, 'tcp://192.168.1.60')) == ('printed', '')
+    assert outcome(client, print_on(client, 'simulation')) == ('printed', '')
+    # The request is not kept for it
+    assert seen == [('local', False, True), (None, False, True)]
 
 
 def test_saved_and_ready_made_labels_name_printers_alike(client, sent):

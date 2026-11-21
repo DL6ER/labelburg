@@ -10,6 +10,7 @@ import logging
 import os
 import threading
 import time
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from flask import Config
@@ -97,6 +98,16 @@ class _Simulator:
         logger.info('Saved simulated label to %s', path)
 
 
+class Drawn(NamedTuple):
+    """The first label of a queue as PrinterQueue.check() drew it: its image
+    as the printer gets it, as the label designer shows it (upright, a page
+    of several labels laid out as sheets.page_view() does), and the label
+    with its templates filled in."""
+    image: Image.Image
+    shown: Image.Image
+    label: object
+
+
 class PrinterQueue:
     def __init__(self, model, device_specifier, label_size, resolved=False):
         # A printer known by its address or device ID is that model, a model
@@ -167,10 +178,10 @@ class PrinterQueue:
         last = len(self._print_queue) - 1
         return [self.cut == 'each' or (self.cut == 'last' and i == last) for i in range(last + 1)]
 
-    def check(self) -> Image.Image | None:
-        """The image of the first label of the queue, drawn as printing
-        draws it, which raises what printing would raise for it. None
-        without labels. It is drawn again when it prints."""
+    def check(self) -> Drawn | None:
+        """The first label of the queue, drawn as printing draws it, which
+        raises what printing would raise for it. None without labels. It is
+        drawn again when it prints."""
         if not self._print_queue:
             return None
         size = label_of(self.label_size)
@@ -184,11 +195,11 @@ class PrinterQueue:
             [first] = self._grouped(page)
             cut = self.cut == 'each' or self.cut == 'last' and len(page) == len(self._print_queue)
             self.driver.render(self, [dict(first, cut=cut)], None)
-            return getattr(made[0], 'generated', None)
+            return Drawn(made[0].generated, made[0].shown, made[0])
         finally:
             for each, (turned, keep) in zip(made, kept):
                 each.turned, each.keep_generated = turned, keep
-            made[0].generated = None
+            made[0].generated = made[0].shown = None
 
     def process_queue(self) -> str:
         """Print the labels of the queue as one job."""
