@@ -32,7 +32,7 @@ Printing makes paper, so both print tools:
 - count each page of a saved PDF as a label,
 - return the image of what they added to the queue, and its address.
 
-Like every print, they are answered once the labels are in the queue of the printer, not when they are printed. A label that fails to print is told at `GET /labeldesigner/api/queue/<id>` and in the label designer. Errors are those of the API, e.g. "EAN-13 takes 12 digits, or 13 with the check digit". Claude Code asks before each print, also in its auto mode, other clients as they are set up.
+Like every print, they are answered once the labels are in the queue of the printer, not when they are printed. A label that fails to print is told at `GET /labeldesigner/api/queue/<id>` and in the label designer, and holds the labels behind it until someone presses Continue there. Errors are those of the API, e.g. "EAN-13 takes 12 digits, or 13 with the check digit". Claude Code asks before each print, also in its auto mode, other clients as they are set up.
 
 ## Clients
 
