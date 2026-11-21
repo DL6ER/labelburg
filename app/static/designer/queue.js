@@ -2,7 +2,7 @@
 // job printing, those waiting behind it, a line held by a job that did not
 // print. Read while it has jobs or this browser waits for one of its own.
 
-import { $, API, S, QUEUE, esc, icon, jobText, lineBusy, post, toast, queueBack, printerLabel, UNREACHABLE } from './core.js';
+import { $, API, S, QUEUE, esc, icon, jobText, lineBusy, followsLine, post, toast, queueBack, printerLabel, UNREACHABLE } from './core.js';
 
 // --- As markup, for this panel and the list of every printer -------------------
 
@@ -12,10 +12,12 @@ export function printingText(job) {
     return `Printing ${job.title}${how ? ', ' + how.charAt(0).toLowerCase() + how.slice(1) : ''}`;
 }
 export const heldText = line => `Not printed: ${line.held.replace(/\.$/, '')}. ${line.waiting.length} waiting.`;
-// A job waiting: its first label, title, labels, where it came from
+// A job waiting: its first label, title, labels, where it came from in plain
+// words, how it was sent on hover
 export function jobRow(job) {
+    const from = !job.from ? '' : job.from_detail ? `, from <span title="${esc(job.from_detail)}">${esc(job.from)}</span>` : `, from ${esc(job.from)}`;
     return `<div class="q-row"><span class="q-img">${job.preview ? `<img alt="" src="${esc(job.preview)}">` : ''}</span>
-        <span class="grow"><b>${esc(job.title)}</b><small>${esc(labels(job.labels) + (job.from ? `, from ${job.from}` : ''))}</small></span>
+        <span class="grow"><b>${esc(job.title)}</b><small>${esc(labels(job.labels))}${from}</small></span>
         <button class="iconbtn" type="button" data-remove="${esc(job.id)}" title="Remove from the queue" aria-label="Remove from the queue">${icon('x')}</button></div>`;
 }
 export const listHTML = line => `<div class="q-list">${line.waiting.map(jobRow).join('')}</div>`;
@@ -37,20 +39,23 @@ let reading = null, again = null, open = false, drawn = '', changed = () => { };
 
 export const queueBusy = () => lineBusy(S.printer);
 
+// The line as read, null where it could not be read
 async function readOnce() {
     const p = S.printer;
-    if (!p || !p.path || document.hidden) return;
+    if (!p || !p.path || document.hidden) return null;
     try {
         const r = await fetch(`${API}/queue?printer=${encodeURIComponent(p.path)}`);
         const data = r.ok ? await r.json() : null;
         if (data && S.printer && S.printer.path === p.path) {
             Object.assign(QUEUE, { path: p.path, status: p, line: { printing: data.printing || null, waiting: data.waiting || [], held: data.held || null } });
         }
+        return data;
     } catch (e) {
         // The next one reads it
+        return null;
     }
 }
-// One read at a time; asked while one runs, another follows it
+// One read at a time; asked while one runs, another follows it. The line it read.
 export function readQueue() {
     if (reading) return again || (again = reading.then(() => { again = null; return readQueue(); }));
     reading = readOnce().finally(() => { reading = null; drawQueue(); });
@@ -79,10 +84,11 @@ export function drawQueue() {
     changed();
 }
 
-// While it has jobs or holds, or this browser waits for one of its own
+// While it has jobs or holds, or this browser waits for one of its own; the
+// jobs of this browser on it are followed by the same reads
 export function followQueue() {
     drawQueue();
-    if (!reading && queueBusy()) readQueue();
+    if (!reading && queueBusy() && !followsLine(S.printer.path)) readQueue();
 }
 
 async function send(path, body) {
@@ -208,7 +214,7 @@ export function queuePage(box) {
     lines = null;
     failed = false;
     pageDrawn = null;
-    box.innerHTML = `<header class="set-h"><div class="grow"><h2>Print queue</h2><p class="muted">What the printers print and what waits, from this browser, other devices and the API. A waiting label can be removed.</p></div></header>
+    box.innerHTML = `<header class="set-h"><div class="grow"><h2>Print queue</h2><p class="muted">What the printers print and what waits, from this browser, other devices and other programs. A waiting label can be removed.</p></div></header>
         <div class="set-list" id="setQueue"></div>`;
     $('#setQueue', box).addEventListener('click', async e => {
         const b = e.target.closest('button'), card = b && b.closest('[data-queue]');

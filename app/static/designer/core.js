@@ -1011,18 +1011,23 @@ export function lineBusy(p = S.printer) {
     return !!(read && (read.printing || read.waiting.length || read.held)) || !!(told && (told.printing || told.waiting || told.held)) || pendingOn(p.path);
 }
 // Whether the outcome of a print of this browser goes without a message of
-// its own: printed while others of this browser have none yet, taken out of
-// the queue here, or told by the held queue of the printer chosen
+// its own: printed while others of this browser on its printer have none
+// yet, taken out of the queue here, or told by the held queue of the printer
+// chosen
 export function untold(entry) {
-    if (entry.state === 'printed') return S.history.some(h => h !== entry && h.state === 'printing');
+    if (entry.state === 'printed') return S.history.some(h => h !== entry && h.state === 'printing' && h.path === entry.path);
     if (entry.job && QUEUE.removed.has(entry.job)) return true;
     return !!S.printer && entry.path === S.printer.path && QUEUE.path === entry.path && !!(QUEUE.line && QUEUE.line.held);
 }
 
+// Sent one after the other, so that the server queues them in the order
+// they were printed
+let sending = Promise.resolve();
 // job: { title, design, values, copies, source }. Kept in the history of
 // this browser, Settings list it under Printed labels. Printed on printer,
-// the one chosen unless another is given.
-export async function printJob(job, onDone, printer = S.printer) {
+// the one chosen unless another is given. onAccepted(entry) once the server
+// took it, onDone(entry) with its outcome.
+export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
     const behind = lineBusy(printer), path = (printer && printer.path) || '';
     const entry = {
@@ -1040,7 +1045,9 @@ export async function printJob(job, onDone, printer = S.printer) {
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
         form.set('title', entryName(entry));
         form.set('source', 'designer');
-        const r = await post('/print', form);
+        const sent = sending.then(() => post('/print', form));
+        sending = sent.catch(() => { });
+        const r = await sent;
         let data = {};
         try { data = await r.json(); } catch (e) { }
         if (!r.ok || data.success === false) {
@@ -1049,12 +1056,16 @@ export async function printJob(job, onDone, printer = S.printer) {
         } else if (data.job && data.state !== 'printed') {
             // Queued: followed until its outcome is known. The server answers
             // waiting also for one about to print, so behind says which waits.
-            Object.assign(entry, { job: data.job, start: data.start, seen: data.state });
+            Object.assign(entry, { job: data.job, start: data.start, seen: data.state, seenAt: Date.now() });
             saveHistory();
+            if (onAccepted) onAccepted(entry);
             if (behind && data.state === 'waiting') toast(`Added ${entryName(entry)} to the queue`);
             else if (shown()) QUEUE.read().then(() => hideToast(printing));
             await followJob(entry);
-        } else entry.state = 'printed';
+        } else {
+            entry.state = 'printed';
+            if (onAccepted) onAccepted(entry);
+        }
     } catch (e) {
         entry.state = 'failed';
         entry.message = UNREACHABLE;
@@ -1069,45 +1080,96 @@ export async function printJob(job, onDone, printer = S.printer) {
     return entry;
 }
 
-// Asks for the job of entry ({ job, start, seen }) every 1.5 s, one request
-// at a time and not from a tab in the background, until it is printed,
-// failed or lost, calling changed when its state moves on. Sets entry.state
-// and entry.message.
+// The jobs of this browser without an outcome, with what to call as each
+// moves on and ends; followJobs() reads them all
+const followed = new Map();
+let followTimer = 0, followReading = false;
+// A job read longer ago may have printed since, e.g. while the tab was hidden
+const SEEN_FRESH = 5000;
+export const followsLine = path => [...followed.keys()].some(e => e.path === path);
+
+// Follows the job of entry ({ job, start, seen, seenAt, path }) until it is
+// printed, failed or lost, calling changed when its state moves on. Sets
+// entry.state and entry.message.
 export function followJob(entry, changed = () => { }) {
     return new Promise(resolve => {
-        let asking = false;
-        const end = (state, message = '') => {
-            clearInterval(timer);
-            document.removeEventListener('visibilitychange', ask);
-            Object.assign(entry, { state, message });
-            resolve();
-        };
-        const ask = async () => {
-            if (asking || document.hidden) return;
-            asking = true;
-            try {
-                const r = await fetch(API + '/queue/' + encodeURIComponent(entry.job));
-                const data = await r.json().catch(() => ({}));
-                if (r.status === 404) {
-                    if (!data.start || data.start === entry.start) end('unknown', 'Its outcome is no longer known');
-                    else if (entry.seen === 'printing') end('unknown', 'The label designer was restarted while it printed');
-                    else end('failed', 'The label designer was restarted before it printed');
-                } else if (data.state === 'printed') end('printed');
-                else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'It was not printed');
-                else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); changed(); }
-                else if (!data.state && entry.seen === 'failed') end('failed', 'It was not printed');
-            } catch (e) {
-                // The next one asks again, unless the answer told the outcome already
-                if (entry.seen === 'failed') end('failed', 'It was not printed');
-            } finally {
-                asking = false;
-            }
-        };
-        const timer = setInterval(ask, 1500);
-        document.addEventListener('visibilitychange', ask);
+        followed.set(entry, { changed, resolve });
+        if (!followTimer) {
+            followTimer = setInterval(followJobs, 1500);
+            document.addEventListener('visibilitychange', followJobs);
+        }
         // A job the answer already calls failed is read at once for its message
-        if (entry.seen === 'failed') ask();
+        if (entry.seen === 'failed') followJobs();
     });
+}
+function endJob(entry, state, message = '') {
+    const f = followed.get(entry);
+    followed.delete(entry);
+    if (!followed.size) {
+        clearInterval(followTimer);
+        followTimer = 0;
+        document.removeEventListener('visibilitychange', followJobs);
+    }
+    Object.assign(entry, { state, message });
+    f.resolve();
+}
+function sawJob(entry, state) {
+    entry.seenAt = Date.now();
+    if (state === entry.seen) return;
+    entry.seen = state;
+    saveHistory();
+    followed.get(entry).changed();
+}
+// A job its line does not list (anymore)
+async function askJob(entry) {
+    try {
+        const r = await fetch(API + '/queue/' + encodeURIComponent(entry.job));
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 404) {
+            const stale = !(Date.now() - (entry.seenAt || 0) < SEEN_FRESH);
+            if (!data.start || data.start === entry.start) endJob(entry, 'unknown', 'Its outcome is no longer known');
+            else if (entry.seen === 'printing' || stale) endJob(entry, 'unknown', 'The label designer was restarted while it printed');
+            else endJob(entry, 'failed', 'The label designer was restarted before it printed');
+        } else if (data.state === 'printed') endJob(entry, 'printed');
+        else if (data.state === 'failed' || data.state === 'removed') endJob(entry, 'failed', data.message || 'It was not printed');
+        else if (data.state) sawJob(entry, data.state);
+        else if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
+    } catch (e) {
+        // The next one asks again, unless the answer told the outcome already
+        if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
+    }
+}
+// The line of the printer at path, that of the one chosen as its panel reads it
+async function readLine(path) {
+    if (S.printer && S.printer.path === path) return QUEUE.read();
+    try {
+        const r = await fetch(`${API}/queue?printer=${encodeURIComponent(path)}`);
+        return r.ok ? await r.json() : null;
+    } catch (e) {
+        return null;
+    }
+}
+// Every 1.5 s, one request at a time and not from a tab in the background:
+// the line of each printer the jobs are on, a job itself only where its line
+// does not list it
+async function followJobs() {
+    if (followReading || document.hidden || !followed.size) return;
+    followReading = true;
+    try {
+        const entries = [...followed.keys()];
+        for (const path of new Set(entries.map(e => e.path || ''))) {
+            const line = path ? await readLine(path) : null;
+            const listed = line ? [line.printing, ...(line.waiting || [])].filter(Boolean) : [];
+            for (const entry of entries.filter(e => (e.path || '') === path)) {
+                if (!followed.has(entry)) continue;
+                const job = listed.find(j => j.id === entry.job);
+                if (job) sawJob(entry, job.state);
+                else await askJob(entry);
+            }
+        }
+    } finally {
+        followReading = false;
+    }
 }
 
 // Jobs left printing when the page was closed are followed on

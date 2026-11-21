@@ -197,7 +197,7 @@ def line(printing=None, waiting=(), held=None):
 
 
 def queued(job_id, title, labels=1, source='', state='waiting', **more):
-    return dict({'id': job_id, 'title': title, 'labels': labels, 'from': source, 'state': state, 'message': '',
+    return dict({'id': job_id, 'title': title, 'labels': labels, 'from': source, 'from_detail': '', 'state': state, 'message': '',
                  'preview': f'/labeldesigner/api/queue/{job_id}/preview.png'}, **more)
 
 
@@ -273,6 +273,18 @@ def test_the_queue_shows_what_prints_and_what_waits(editor):  # noqa: F811
     # Opened, it stays open as the queue is read again
     editor.wait_for_timeout(1700)
     assert editor.locator('#queue .q-row').count() == 2
+
+
+def test_a_row_says_where_its_label_comes_from_in_plain_words(editor):  # noqa: F811
+    # How it was sent shows on hover
+    sent = queued('j4', 'Returns', source='another program', from_detail='Sent over the <API>')
+    answer_lines(editor, {None: line(SHELF, [sent, BOX])})
+    choose(editor, printer(printing=True, waiting=2))
+    editor.click('#queue [aria-expanded]')
+    editor.wait_for_selector('#queue .q-row >> nth=1')
+    assert editor.locator('#queue .q-row small').all_inner_texts() == ['1 label, from another program', '2 labels, from Homebox']
+    hover = editor.locator('#queue .q-row small [title]')
+    assert (hover.count(), hover.inner_text(), hover.get_attribute('title')) == (1, 'another program', 'Sent over the <API>')
 
 
 def test_a_waiting_label_is_removed_with_its_button(editor):  # noqa: F811
@@ -453,6 +465,7 @@ def test_the_queue_of_the_chosen_printer(editor, outcome):  # noqa: F811
     assert editor.locator('#queue [aria-expanded]').count() == 0
     if outcome == 'printed':
         states['j2'] = job('printed', id='j2')
+        lines[LP9] = line(SHELF)
     else:
         states['j2'] = job('failed', id='j2', message='The tape is used up')
         lines[LP9] = line(None, [queued('j3', 'Jar 2')], 'The tape is used up')
@@ -503,8 +516,8 @@ def test_a_label_removed_here_is_not_announced(editor):  # noqa: F811
     assert editor.evaluate('() => labelEditor.S.history[0].message') == 'Removed from the queue'
 
 
-def test_the_demo_printer_leaves_no_queue_behind(editor):  # noqa: F811
-    # The server prints on the demo printer at once and answers after it
+def test_the_demo_printer_leaves_no_queue_behind(editor, queued):  # noqa: F811
+    # The demo printer prints each label as soon as it is in the queue
     type_label(editor, 'Shelf')
     watch_toasts(editor)
     editor.evaluate("() => { const print = document.querySelector('#print'); print.click(); print.click(); }")
@@ -546,3 +559,79 @@ def test_the_held_line_of_the_panel_is_an_alert(editor):  # noqa: F811
     answer_lines(editor, {None: line(None, [JAR], 'The tape is used up')})
     choose(editor, printer(held=True, waiting=1))
     editor.wait_for_selector('#queue .q-line.held [role=alert]')
+
+
+def test_a_restart_after_a_while_without_a_read_may_have_printed(editor):  # noqa: F811
+    # E.g. the tab was in the background: the job may have printed meanwhile
+    type_label(editor, 'Shelf')
+    answer_print(editor)
+    answer_queue(editor, [{'status': 404, 'success': False, 'message': 'No such print job', 'start': 'start-2'}])
+    editor.click('#print')
+    # Read 1.5 s after the answer at the earliest
+    editor.wait_for_function("() => labelEditor.S.history[0].job === 'j1'")
+    editor.evaluate('() => { labelEditor.S.history[0].seenAt -= 6000; }')
+    text = 'The label designer was restarted while it printed'
+    editor.wait_for_selector(f'[role=alertdialog]:has-text("{text}")', timeout=15000)
+    assert history(editor) == [['unknown', text, 'waiting']]
+
+
+def test_jobs_are_followed_by_the_reads_of_their_line(editor):  # noqa: F811
+    # One read of the line tells them all, a job is asked for once it left it
+    lines = {None: line()}
+    answer_lines(editor, lines)
+    choose(editor, printer())
+    ids = iter(['j1', 'j2', 'j3'])
+    editor.route('**/api/print', lambda route: route.fulfill(json={'success': True, 'queued': True, 'job': next(ids), 'state': 'waiting', 'start': START}))
+    states = {'j1': 'printing', 'j2': 'waiting', 'j3': 'waiting'}
+    editor.route('**/api/queue/j*', lambda route: route.fulfill(json=job(states[route.request.url.rsplit('/', 1)[1]], start=START)))
+    asked = []
+    editor.on('request', lambda request: '/api/queue' in request.url and not request.url.endswith('.png')
+              and asked.append(request.url.split('/api/', 1)[1]))
+    lines[None] = line(queued('j1', 'Jar', state='printing'), [queued('j2', 'Jar'), queued('j3', 'Jar')])
+    type_label(editor, 'Jar')
+    for _ in range(3):
+        editor.click('#print')
+    editor.wait_for_function('() => labelEditor.S.history.filter(h => h.job).length === 3')
+    asked.clear()
+    editor.wait_for_timeout(3200)
+    assert [url for url in asked if url.startswith('queue/')] == []
+    assert 1 <= len(asked) <= 3
+    states['j1'] = 'printed'
+    lines[None] = line(queued('j2', 'Jar', state='printing'), [queued('j3', 'Jar')])
+    editor.wait_for_function("() => labelEditor.S.history.find(h => h.job === 'j1').state === 'printed'", timeout=15000)
+    editor.wait_for_function("() => labelEditor.S.history.find(h => h.job === 'j2').seen === 'printing'", timeout=15000)
+    assert sorted({url for url in asked if url.startswith('queue/')}) == ['queue/j1']
+
+
+def _title(request):
+    return parse_qs(request.post_data)['title'][0]
+
+
+def test_prints_are_sent_one_after_the_other(editor):  # noqa: F811
+    # The server queues them in the order they were printed
+    held, sent = [], []
+
+    def answer(route):
+        sent.append(_title(route.request))
+        # The first one waits for its answer
+        if held:
+            route.fulfill(json={'success': True})
+        else:
+            held.append(route)
+    editor.route('**/api/print', answer)
+    type_label(editor, 'Jar 1')
+    with editor.expect_request('**/api/print'):
+        editor.click('#print')
+    editor.click('#field')
+    editor.keyboard.press('End')
+    editor.keyboard.press('Backspace')
+    editor.keyboard.type('2')
+    editor.wait_for_function('() => labelEditor.S.edit.design.text[0].text === "Jar 2"')
+    wait_for_preview(editor)
+    editor.click('#print')
+    editor.wait_for_function('() => labelEditor.S.history.length === 2')
+    editor.wait_for_timeout(500)
+    assert sent == ['Jar 1']
+    held[0].fulfill(json={'success': True})
+    editor.wait_for_function("() => labelEditor.S.history.every(h => h.state === 'printed')")
+    assert sent == ['Jar 1', 'Jar 2']

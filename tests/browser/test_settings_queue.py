@@ -22,7 +22,8 @@ def answer_all(page, printers, asked=None):
 
 def two_lines():
     return [{'printer': LP9, 'printing': SHELF, 'waiting': [JAR, BOX], 'held': None},
-            {'printer': LP8, 'printing': None, 'waiting': [queued('j4', 'Returns', labels=4, source='the webhook')], 'held': 'The cover is open.'}]
+            {'printer': LP8, 'printing': None, 'held': 'The cover is open.',
+             'waiting': [queued('j4', 'Returns', labels=4, source='another program', from_detail='Sent over the webhook')]}]
 
 
 def named(*paths):
@@ -41,6 +42,8 @@ def test_the_print_queue_page_lists_every_printer_that_prints_or_waits(editor): 
     editor.wait_for_selector('.q-card >> nth=1')
     assert editor.inner_text('.set-nav a.on') == 'Print queue'
     assert editor.inner_text('#setPart h2') == 'Print queue'
+    assert editor.inner_text('#setPart .set-h p') == ('What the printers print and what waits, from this browser, other devices and other programs. '
+                                                       'A waiting label can be removed.')
     cards = editor.locator('.q-card')
     assert cards.locator('.set-card-h small').all_inner_texts() == ['Printing', 'Stopped']
     assert cards.nth(0).locator('.q-row b').all_inner_texts() == ['Printing Shelf 12, label 2 of 3', 'Spice jar', 'Box 7']
@@ -48,7 +51,8 @@ def test_the_print_queue_page_lists_every_printer_that_prints_or_waits(editor): 
     assert cards.locator('img[src$="/preview.png"]').count() == 4
     assert cards.nth(1).locator('.q-held span').inner_text() == 'Not printed: The cover is open. 1 waiting.'
     assert cards.nth(1).locator('.q-held button').inner_text() == 'Continue'
-    assert cards.nth(1).locator('.q-row small').inner_text() == '4 labels, from the webhook'
+    assert cards.nth(1).locator('.q-row small').inner_text() == '4 labels, from another program'
+    assert cards.nth(1).locator('.q-row small [title]').get_attribute('title') == 'Sent over the webhook'
     assert editor.locator('.set-card-h b').all_inner_texts() == ['Shelf printer', 'Returns printer']
     assert editor.inner_text('#setQueue > p') == 'Cable printer: nothing printing or waiting.'
 

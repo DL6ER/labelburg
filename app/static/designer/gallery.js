@@ -238,21 +238,27 @@ async function showDetail(item, values = null) {
     };
     shot();
     const later = debounce(shot, 250);
-    // One print at a time: a key held down or a second click waits for it
+    // One print at a time until the server took it: a key held down or a
+    // second click waits for that, the next name may follow while it waits
     let printing = false;
     const print = async () => {
         if (printing) return;
         printing = true;
-        try { await printOnce(); } finally { printing = false; }
+        let taken = false;
+        const free = () => { if (!taken) { taken = true; printing = false; } };
+        try { await printOnce(free); } finally { free(); }
     };
-    const printOnce = async () => {
+    const printOnce = async accepted => {
         const copies = copiesNow();
         const now = valuesNow(work.values, starts, { design: work.design });
-        const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } });
-        if (!untold(entry)) toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
-        // Ready for the next one: the first text blank is emptied
         const first = $$('#tplFields [data-blank]').find(inp => fieldType({ design: work.design }, inp.dataset.blank) === 'text');
-        if (entry.state === 'printed' && saved && first) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
+        const typed = first && first.value;
+        const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } }, null, undefined, () => {
+            accepted();
+            // Ready for the next one: the first text blank is emptied, unless typed into meanwhile
+            if (saved && first && first.isConnected && first.value === typed) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
+        });
+        if (!untold(entry)) toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
         if (G.cat === 'printed') drawTemplates();
     };
     $$('#tplFields [data-blank]').forEach(inp => {

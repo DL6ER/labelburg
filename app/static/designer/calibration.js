@@ -70,7 +70,7 @@ async function printCalibration(p, shown, working, told) {
         if (!r.ok) shown(j.message || 'The calibration label could not be printed');
         else if (!j.job) return true;
         else {
-            const entry = { job: j.job, start: j.start, seen: j.state };
+            const entry = { job: j.job, start: j.start, seen: j.state, seenAt: Date.now(), path: p.path };
             if (behind && j.state === 'waiting') told('The calibration label waits in the queue.');
             await followJob(entry, () => { if (entry.seen === 'printing') told('Printing the calibration label.'); });
             if (entry.state === 'printed') return true;
