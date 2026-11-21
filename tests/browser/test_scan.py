@@ -173,6 +173,28 @@ def test_enter_inside_a_fast_scan_is_a_line_break(station):
     assert station.codes() == ['BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD']
 
 
+def test_lines_a_scanner_sends_after_a_short_stop_belong_to_the_code(station):
+    # e.g. a Bluetooth scanner that sends a contact in bursts
+    station.page.evaluate("""async () => {
+        const field = document.querySelector('#scanField');
+        const send = text => {
+            for (const ch of text) {
+                if (ch === '\\n') field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+                else {
+                    field.value += ch;
+                    field.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ch, bubbles: true }));
+                }
+            }
+        };
+        send('BEGIN:VCARD\\nFN:Erika Muster\\n');
+        await new Promise(done => setTimeout(done, 120));
+        send('END:VCARD\\n');
+    }""")
+    station.wait_for(1)
+    assert station.none_for(400) == 1
+    assert station.codes() == ['BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD']
+
+
 def test_scans_while_printing_wait_their_turn(station):
     page = station.page
     station.hold = True

@@ -8,7 +8,7 @@ import { camera, cameraBlocked } from './camera.js';
 // ms: a scanner types faster than FAST between characters; after Enter or
 // Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
 // Typing that starts after IDLE is a run of its own.
-export const END_WAIT = 80, PAUSE = 200, FAST = 35, IDLE = 2000;
+export const END_WAIT = 200, PAUSE = 200, FAST = 35, IDLE = 2000;
 const TEXT_ENTRY = 'textarea, select, input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=image], [type=file], [type=range], [type=color])';
 
 // Reads what is typed into target, a textarea, and calls onScan(text) at the
