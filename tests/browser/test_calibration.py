@@ -276,6 +276,30 @@ def test_printing_waits_for_the_printer(designer, calibration):
     designer.wait_for_function('() => !document.querySelector("[data-cal-print]").disabled')
 
 
+def test_the_calibration_label_waits_in_the_queue(designer, calibration):
+    replies = [{'state': 'printing'}, {'state': 'printed'}]
+    designer.route('**/api/calibration/print', lambda route: route.fulfill(
+        json={'success': True, 'queued': True, 'job': 'c1', 'state': 'waiting', 'start': 's1'}))
+    designer.route('**/api/queue/c1', lambda route: route.fulfill(json=dict({'start': 's1'}, **(replies.pop(0) if len(replies) > 1 else replies[0]))))
+    _dialog(designer)
+    designer.click('[data-cal-print]')
+    _until(designer, lambda: len(replies) == 1)
+    assert designer.eval_on_selector('[data-cal-print]', 'b => b.disabled')
+    assert designer.inner_text('#calResult') == 'Printing the calibration label.'
+    designer.wait_for_function('() => !document.querySelector("[data-cal-print]").disabled')
+    assert designer.inner_text('#calResult') == ''
+
+
+def test_a_calibration_label_that_fails_in_the_queue_says_why(designer, calibration):
+    designer.route('**/api/calibration/print', lambda route: route.fulfill(
+        json={'success': True, 'queued': True, 'job': 'c1', 'state': 'waiting', 'start': 's1'}))
+    designer.route('**/api/queue/c1', lambda route: route.fulfill(json={'start': 's1', 'state': 'failed', 'message': 'The cover is open'}))
+    _dialog(designer)
+    designer.click('[data-cal-print]')
+    designer.wait_for_function('() => !document.querySelector("[data-cal-print]").disabled')
+    assert designer.inner_text('#calResult') == 'The cover is open'
+
+
 def test_one_button_prints_right_under_the_example(designer, calibration):
     _dialog(designer)
     assert designer.locator('#layer [data-cal-print]').count() == 1

@@ -30,9 +30,9 @@ Printing makes paper, so both print tools:
 - need the printer, and take the label size it has loaded, else the one set in its printer settings. Where neither tells or it may have several loaded, they print nothing and tell the assistant to ask the user. A label size given is refused if the printer has another one loaded or set,
 - check every label before the first is printed, and print none where one is refused or the label designer warns about it, e.g. text cut off, a blank the label does not have or a date blank without a date. A font that is not installed is the exception: the label prints with the fallback font, as in the label designer, and the result says so,
 - count each page of a saved PDF as a label,
-- return the image of what they printed, and its address.
+- return the image of what they added to the queue, and its address.
 
-Errors are those of the API, e.g. "EAN-13 takes 12 digits, or 13 with the check digit". Claude Code asks before each print, also in its auto mode, other clients as they are set up.
+Like every print, they are answered once the labels are in the queue of the printer, not when they are printed. A label that fails to print is told at `GET /labeldesigner/api/queue/<id>` and in the label designer. Errors are those of the API, e.g. "EAN-13 takes 12 digits, or 13 with the check digit". Claude Code asks before each print, also in its auto mode, other clients as they are set up.
 
 ## Clients
 

@@ -2,7 +2,7 @@
 // prints off to one side by how the roll sits, the server keeps how far its
 // labels are moved. Offered at the printer chip and in the Settings.
 
-import { $, $$, esc, icon, S, C, API, post, capsOf, toast, openLayer, closeLayer, UNREACHABLE } from './core.js';
+import { $, $$, esc, icon, S, C, API, post, capsOf, toast, followJob, openLayer, closeLayer, UNREACHABLE } from './core.js';
 
 const svg = paths => `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
 const RULER = svg('<path d="M3 15 15 3l6 6L9 21z"/><path d="m7 11 2 2M10 8l2 2M13 5l2 2"/>');
@@ -60,13 +60,21 @@ async function postCalibration(p, extra, shown = toast, trying = false) {
     }
 }
 
-// Whether it printed, else the reason shown. Moved as in the open dialog,
+// Whether it printed, else the reason shown. Followed in the queue until
+// printed. Moved as in the open dialog,
 // which is not saved yet.
 async function printCalibration(p, shown, working) {
     try {
         const r = await post('/calibration/print', form(p, { label_size: tapeOf(p), ...working }, false));
-        if (r.ok) return true;
-        shown((await r.json().catch(() => ({}))).message || 'The calibration label could not be printed');
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) shown(j.message || 'The calibration label could not be printed');
+        else if (!j.job) return true;
+        else {
+            const entry = { job: j.job, start: j.start, seen: j.state };
+            await followJob(entry);
+            if (entry.state === 'printed') return true;
+            shown(entry.message || 'The calibration label could not be printed');
+        }
     } catch (e) {
         shown(UNREACHABLE);
     }
