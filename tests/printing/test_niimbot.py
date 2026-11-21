@@ -883,3 +883,10 @@ def test_b1_that_stays_silent_does_not_answer(b1, fake, monkeypatch):
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['errors'] == ['The printer does not answer']
 
+
+
+def test_device_id_names_the_b1():
+    from app.labeldesigner import drivers
+    assert drivers.told_model(B1_DEVICE_ID) == 'Niimbot/B1'
+    assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL: K9;') is None
+    assert niimbot.DRIVER.model_in('MFG:Brother;CMD:PT-CBP;MDL:QL-800;') is None
