@@ -110,7 +110,12 @@ def _work(key, line):
                 line.worker = None
                 # Jobs added while this worker was stopping still need one
                 if _lines.get(key) is line:
-                    _start_worker(key, line)
+                    try:
+                        _start_worker(key, line)
+                    except Exception:
+                        logger.exception('No print worker for %s could be started', key)
+                        while line.waiting:
+                            _end(line.waiting.popleft(), 'failed', FAILED)
 
 
 def _print_all(key, line):

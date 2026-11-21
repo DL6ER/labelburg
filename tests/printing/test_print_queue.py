@@ -1,4 +1,5 @@
 import threading
+
 import pytest
 
 from app.labeldesigner import print_queue
@@ -244,6 +245,28 @@ def test_a_worker_that_cannot_start_leaves_no_job_behind(monkeypatch):
     later = add(USB, recorder([], 2))
     assert later.done.wait(WAIT)
     assert later.state == 'printed'
+
+
+def test_jobs_fail_when_the_worker_that_stopped_cannot_be_replaced(monkeypatch):
+    started, release = threading.Event(), threading.Event()
+
+    def exits():
+        started.set()
+        release.wait(WAIT)
+        raise SystemExit
+    first = add(USB, exits)
+    assert started.wait(WAIT)
+    behind = add(USB, recorder([], 2))
+
+    def refuses(thread):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(threading.Thread, 'start', refuses)
+    release.set()
+    assert first.done.wait(WAIT)
+    assert behind.done.wait(WAIT)
+    assert behind.state == 'failed'
+    assert behind.message == print_queue.FAILED
+    assert print_queue.line(USB)['waiting'] == []
 
 
 def test_an_ended_job_frees_its_functions():
