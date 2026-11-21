@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import bp, codes, demos, paperless, printer_settings, refusals, tape
+from . import adding, bp, codes, demos, paperless, printer_settings, refusals, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -23,9 +23,9 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, devices, progress, resolution_problem
+from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, PrinterQueue, configured_printers, device_state, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -1406,15 +1406,16 @@ def get_printer_status():
     # when asked, see devices.note_answer()
     if request.args.get('look') == '1':
         look_again()
+    added = _added_printers()
     # One printer, e.g. on USB, which the label designer asks every 2 s
     if 'printer' in request.args:
-        one = status_of_printer(current_app.config, request.args['printer'])
+        one = status_of_printer(current_app.config, request.args['printer'], added)
         if one is None:
             return {'message': 'No such printer'}, 404
         status = {'printers': [one]}
         told = [one]
     else:
-        status = get_ptr_status(current_app.config)
+        status = get_ptr_status(current_app.config, added)
         told = [status] + status.get('printers', [])
     kept = _kept_settings()
     # The VC-500W prints in color, the label designer then offers colors
@@ -1450,20 +1451,29 @@ def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
 
 def _kept_settings(changing: bool = False) -> dict:
     """The settings of the printers kept on the server, see printer_settings.
-    A file that cannot be read raises OSError when changing: it is kept with
-    the settings of the other printers."""
+    A file that cannot be read raises OSError when changing, one that holds
+    no settings printer_settings.Broken: it is kept with the settings of the
+    other printers."""
     try:
         with open(os.path.join(_get_repo_dir(), printer_settings.FILE), encoding='utf-8') as fh:
-            return printer_settings.parsed(fh.read())
+            content = fh.read()
     except FileNotFoundError:
         return {'printers': {}}
     except UnicodeDecodeError:
-        return printer_settings.parsed('')
+        content = None
     except OSError as e:
         if changing:
             raise
         current_app.logger.warning('Cannot read the settings of the printers: %s', e)
         return {'printers': {}}
+    if changing and (content is None or not printer_settings.readable(content)):
+        raise printer_settings.Broken()
+    return printer_settings.parsed(content or '')
+
+
+def _broken():
+    current_app.logger.warning('The settings of the printers in %s are not valid, they were left as they are', printer_settings.FILE)
+    return _fail(printer_settings.BROKEN, 500)
 
 
 def _settings_of(device: str) -> dict:
@@ -1540,6 +1550,8 @@ def printer_settings_route():
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
     except LabelsBusy:
         return _busy()
+    except printer_settings.Broken:
+        return _broken()
     except OSError as e:
         current_app.logger.warning('Cannot save the settings of the printers: %s', e)
         return _fail(refusals.SETTINGS_NOT_SAVED, 500)
@@ -1585,12 +1597,169 @@ def label_settings_route():
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
     except LabelsBusy:
         return _busy()
+    except printer_settings.Broken:
+        return _broken()
     except OSError as e:
         current_app.logger.warning('Cannot save the label settings: %s', e)
         return _fail(refusals.LABEL_SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
         return _refused('Saving the label settings', e, refusals.INVALID_INPUT)
     return jsonify({'success': True, 'settings': printer_settings.label_settings(data, get_fonts().family_names())})
+
+
+def _add_mode() -> str:
+    """ADD_PRINTERS: local, any or off, off for a value it does not know."""
+    mode = current_app.config.get('ADD_PRINTERS')
+    if isinstance(mode, str) and mode.strip().lower() in reach.MODES:
+        return mode.strip().lower()
+    current_app.logger.warning('ADD_PRINTERS is local, any or off, not %r: adding printers is off', mode)
+    return 'off'
+
+
+def _added(kept: dict | None = None) -> list[dict]:
+    """The printers added in the Settings, see printer_settings.added(),
+    without those at an address that cannot be added, e.g. edited by hand."""
+    def addable(address):
+        try:
+            return adding.address_of(address) == address
+        except ValueError:
+            return False
+    return [entry for entry in printer_settings.added(_kept_settings() if kept is None else kept) if addable(entry['address'])]
+
+
+def _configured_devices() -> list[tuple[str, str]]:
+    """(device, name) of each printer the configuration names."""
+    configured = [(device, name) for _, device, name in configured_printers(current_app.config)]
+    if not configured and current_app.config['PRINTER_PRINTER'] not in ('?', 'simulation'):
+        configured.append((current_app.config['PRINTER_PRINTER'], ''))
+    return configured
+
+
+def _added_printers() -> list[tuple[str, str, str]]:
+    """The printers added in the Settings as (model, device, name), none while
+    ADD_PRINTERS is off. Every connection to their hosts is checked from now
+    on, but to hosts the configuration names too: they are its choice."""
+    mode = _add_mode()
+    printers = [] if mode == 'off' else [(e['model'], e['address'], e['name']) for e in _added()]
+    configured = {adding.host_of(device) for device, _ in _configured_devices()}
+    reach.watch({adding.host_of(device) for _, device, _ in printers} - configured - {None}, mode)
+    return printers
+
+
+def _listed_as(address: str, added: list[dict]) -> str | None:
+    """The name, else the address, of the configured or added printer at
+    address, None if there is none."""
+    key = devices.lock_key(address)
+    every = _configured_devices() + [(entry['address'], entry['name']) for entry in added]
+    return next((name or device for device, name in every if devices.lock_key(device) == key), None)
+
+
+@bp.route('/api/printers/added', methods=['GET'])
+def added_printers():
+    """The printers added in the Settings, whether they are used, and what
+    ADD_PRINTERS allows."""
+    mode = _add_mode()
+    return jsonify({'mode': mode, 'allows': adding.ALLOWS[mode],
+                    'printers': [dict(entry, used=mode != 'off') for entry in _added()]})
+
+
+@bp.route('/api/printers/identify', methods=['POST'])
+def identify_printer():
+    """What answers at an address, without keeping it: the printer, its tape
+    and state, and whether it is listed already."""
+    try:
+        found = adding.identify({**request.values.to_dict(), **_json_body()}.get('address') or '', _add_mode())
+    except Exception as e:
+        return _refused('Identifying a printer', e, adding.NOT_ASKED)
+    state = found.pop('state')
+    found.update(errors=state.get('errors') or [], status_type=state.get('status_type') or '',
+                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()))
+    return jsonify({'success': True, 'printer': found})
+
+
+@bp.route('/api/printers/add', methods=['POST'])
+def add_printer():
+    """Add the printer at an address, with a name, once it is known what it
+    is. It is kept with the printer settings."""
+    values = {**request.values.to_dict(), **_json_body()}
+
+    def checked(added: list[dict], address: str, name: str) -> str:
+        """The name, ValueError where another printer has it or the address."""
+        if _listed_as(address, added) is not None:
+            raise ValueError(adding.ALREADY)
+        return adding.name_of(name, [n for _, n in _configured_devices()] + [e['name'] for e in added])
+    try:
+        if _add_mode() == 'off':
+            raise ValueError(adding.OFF)
+        # Before the printer is asked
+        kept = _kept_settings(changing=True)
+    except printer_settings.Broken:
+        return _broken()
+    except OSError as e:
+        current_app.logger.warning('Cannot read the settings of the printers: %s', e)
+        return _fail(refusals.SETTINGS_NOT_SAVED, 500)
+    except ValueError as e:
+        return _refused('Adding a printer', e, refusals.INVALID_INPUT)
+    try:
+        address = adding.address_of(values.get('address') or '')
+        name = checked(_added(kept), address, values.get('name'))
+        imported = usbip.is_address(address) and usbip.connected(address)
+        found = adding.identify(address, _add_mode(), keep=True)
+    except Exception as e:
+        return _refused('Adding a printer', e, adding.NOT_ASKED)
+    repo = _get_repo_dir()
+    try:
+        with _saving(repo):
+            data = _kept_settings(changing=True)
+            # Again, another request may have added it meanwhile; a VC-500W
+            # given as tcp:// is kept as vc500w://
+            checked(_added(data), found['address'], name)
+            data = printer_settings.with_added(data, found['address'], found['model'], name)
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except Exception as e:
+        # It was imported only to be added
+        if usbip.is_address(found['address']) and not imported:
+            usbip.disconnect(found['address'])
+        if isinstance(e, LabelsBusy):
+            return _busy()
+        if isinstance(e, printer_settings.Broken):
+            return _broken()
+        if isinstance(e, ValueError):
+            return _refused('Adding a printer', e, refusals.INVALID_INPUT)
+        current_app.logger.warning('Cannot save the added printer: %s', e)
+        return _fail(refusals.SETTINGS_NOT_SAVED, 500)
+    return jsonify({'success': True, 'printer': {'address': found['address'], 'model': found['model'], 'name': name}})
+
+
+@bp.route('/api/printers/remove', methods=['POST'])
+def remove_printer():
+    """Remove a printer added in the Settings, named by its address or its
+    name. Configured printers stay."""
+    wanted = str({**request.values.to_dict(), **_json_body()}.get('printer') or '').strip()
+    repo = _get_repo_dir()
+    try:
+        with _saving(repo):
+            data = _kept_settings(changing=True)
+            entry = next((e for e in _added(data) if e['address'] == wanted or e['name'] and e['name'].casefold() == wanted.casefold()), None)
+            if entry is None:
+                raise ValueError(adding.NOT_ADDED)
+            data = printer_settings.without_added(data, entry['address'])
+            _write_atomically(os.path.join(repo, printer_settings.FILE),
+                              json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except LabelsBusy:
+        return _busy()
+    except printer_settings.Broken:
+        return _broken()
+    except OSError as e:
+        current_app.logger.warning('Cannot remove the added printer: %s', e)
+        return _fail(refusals.SETTINGS_NOT_SAVED, 500)
+    except ValueError as e:
+        return _refused('Removing a printer', e, refusals.INVALID_INPUT)
+    # Let go, unless the configuration names it too
+    if usbip.is_address(entry['address']) and _listed_as(entry['address'], []) is None:
+        usbip.disconnect(entry['address'])
+    return jsonify({'success': True})
 
 
 def _millimeters(value) -> float:
@@ -1644,6 +1813,8 @@ def calibration_route():
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
     except LabelsBusy:
         return _busy()
+    except printer_settings.Broken:
+        return _broken()
     except OSError as e:
         current_app.logger.warning('Cannot save the calibration of the printer: %s', e)
         return _fail(refusals.SETTINGS_NOT_SAVED, 500)
@@ -1771,23 +1942,52 @@ def _told_model(device: str) -> str:
     return told
 
 
-def _printer(requested_device, requested_model, ask: bool = False) -> tuple[str, str]:
+# Where the connections a request makes are checked, see _check_named()
+CHECKED = 'labelburg.checked'
+
+
+def _check_named(device: str):
+    """A printer on the network a request names that the server was not told
+    about: refused unless ADD_PRINTERS allows its address, else every
+    connection of the request is checked as for an added one."""
+    mode = _add_mode()
+    adding.check_named(device, mode)
+    if adding.host_of(device) is not None and has_request_context():
+        request.environ.setdefault(CHECKED, []).append(reach.check(mode))
+
+
+@bp.teardown_request
+def _stop_checking(error=None):
+    # The threads of the server take one request after another
+    for token in reversed(request.environ.pop(CHECKED, [])):
+        reach.stop(token)
+
+
+def _printer(requested_device, requested_model, ask: bool = False, shown: bool = False) -> tuple[str, str]:
     """Return the device and model selected by a request, or the configured
     ones. With PRINTERS, the model of a listed device is the configured one,
     and a request may name the printer instead of its device. With ask, a
-    printer requested as model Unknown is asked for its model."""
+    printer requested as model Unknown is asked for its model. A printer on
+    the network that is neither configured, added nor found by the search,
+    nor shown, one the status of the printers lists, is checked by
+    ADD_PRINTERS."""
     printers = configured_printers(current_app.config)
     if printers:
         configured, model = printers[0][1], printers[0][0]
     else:
         configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
+    # And the printers added in the Settings, a name of the configuration first
+    printers += _added_printers()
     device = requested_device or configured
-    named = {n.casefold(): d for _, d, n in printers if n}
+    named = {n.casefold(): d for _, d, n in reversed(printers) if n}
     device = named.get(device.casefold(), device)
     listed = [d for _, d, _ in printers]
     if device not in (configured, 'simulation', '?', *listed) and \
             not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
         raise ValueError(f"Unsupported printer: {device}")
+    # By the same spelling only, another one could name any host
+    if not shown and device not in (configured, *listed) and device not in found_devices():
+        _check_named(device)
     if requested_model:
         model = drivers.canonical(requested_model)
     else:
@@ -2514,7 +2714,8 @@ def webhook_print():
         requested['label_size'] = stored_label_size(requested['label_size'])
         # Validate label_size, before the printer is asked for its tape
         if requested['label_size'] is not None and label_of(requested['label_size']) is None:
-            return _fail(f"Unknown label_size: {requested['label_size']}", 400)
+            current_app.logger.warning('Webhook print job refused: unknown label_size %r', requested['label_size'])
+            return _fail('Unknown label_size', 400)
         loaded = _loaded_tape(device, model, settings)
         # The quality and which end leaves first the request leaves out as set in the printer settings
         given = printer_settings.for_printing(settings, model, _sized(requested, loaded))
@@ -2547,6 +2748,8 @@ def webhook_print():
 
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
 
+    except ValueError as e:
+        return _refused('Webhook print job', e, refusals.INVALID_INPUT)
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Invalid request parameters', 400)
@@ -2603,7 +2806,7 @@ def _homebox_printer() -> tuple[str, str, dict, tape.Tape]:
     """The printer labels for Homebox are made for, the first one as in the
     label designer: its device, its model as prints resolve it, its
     settings and the tape loaded in it, as its status tells it."""
-    status = get_ptr_status(current_app.config)
+    status = get_ptr_status(current_app.config, _added_printers())
     printers = status.get('printers') or [status]
     chosen = next((p for p in printers if p.get('path') == status.get('selected')), printers[0])
     device = chosen.get('path')
@@ -2677,7 +2880,7 @@ def homebox(name: str | None = None):
         _log_refused_request('Homebox label', e)
         return _fail(HOMEBOX_NO_IMAGE, 400)
     try:
-        device, model = _printer(device, model)
+        device, model = _printer(device, model, shown=True)
         printer = _queue(model, device, label_size)
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)

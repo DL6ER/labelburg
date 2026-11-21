@@ -130,4 +130,4 @@ def test_webhook_takes_a_label_size_as_a_json_number(tmp_path, monkeypatch):
     assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 1}
     assert sizes == ['62']
     response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, label_size=63))
-    assert (response.status_code, response.get_json()['message']) == (400, 'Unknown label_size: 63')
+    assert (response.status_code, response.get_json()['message']) == (400, 'Unknown label_size')

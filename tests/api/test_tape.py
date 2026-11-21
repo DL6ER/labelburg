@@ -21,10 +21,16 @@ STATUS = {'errors': [], 'path': 'simulation', 'model': 'QL-800', 'media_width': 
 SETTINGS = '/labeldesigner/api/settings'
 
 
+@pytest.fixture(autouse=True)
+def found(monkeypatch):
+    # The network printers these tests name are known, as if the search found them
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://192.0.2.10', 'vc500w://192.0.2.20'})
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**STATUS, 'printers': [dict(STATUS)], 'selected': 'simulation'})
+                        lambda config, added=(): {**STATUS, 'printers': [dict(STATUS)], 'selected': 'simulation'})
     # Its own label folder, else the client writes into labels/ of the working tree
     return make_client(tmp_path, empty_repo=True, model='QL-800')
 
@@ -48,7 +54,7 @@ def untold(client, monkeypatch):
     """The simulator, which does not tell its tape."""
     state = {**STATUS, 'media_width': None, 'media_length': 0}
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**state, 'printers': [dict(state)], 'selected': 'simulation'})
+                        lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': 'simulation'})
     return client
 
 
@@ -87,7 +93,11 @@ def test_broken_settings_file_counts_as_no_tape_set_by_hand(untold, content):
     assert (tape_of(untold)['known'], tape_of(untold)['manual']) == (False, False)
     assert not loaded(untold, 'simulation', 'QL-800').known
     r = untold.post(SETTINGS, data={'printer': 'simulation', 'cut': 'last'})
-    assert r.status_code == 200 and not r.get_json()['tape']['known']
+    if content in ('not json', '[1]', '{"printers": [1]}'):
+        # Not replaced by a change, it holds no settings
+        assert (r.status_code, r.get_json()['message']) == (500, printer_settings.BROKEN)
+    else:
+        assert r.status_code == 200 and not r.get_json()['tape']['known']
 
 
 def test_loaded_tape_of_auto_detection_is_the_one_set_for_the_simulator(client):
@@ -117,7 +127,7 @@ def network(client, monkeypatch):
         return dict(state, path=device)
     monkeypatch.setattr('app.labeldesigner.routes.device_state', device_state)
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**state, 'printers': [dict(state)], 'selected': NETWORK})
+                        lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': NETWORK})
     client.application.config['PRINTER_PRINTER'] = NETWORK
     client.application.config['PRINTER_MODEL'] = 'QL-800'
     client.asked = asked
@@ -216,7 +226,7 @@ def hand_set(client, device, size, model):
 def test_status_tells_the_tape_a_label_prints_on(client, monkeypatch, state, manual, expected):
     state = {'errors': [], **state}
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**state, 'printers': [dict(state)], 'selected': state['path']})
+                        lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': state['path']})
     monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
     if manual:
         hand_set(client, state['path'], *manual)
@@ -231,7 +241,7 @@ def zpl(client, monkeypatch):
     which labels of two widths are."""
     state = {'errors': [], 'path': NETWORK, 'model': 'Zebra/ZPL', 'media_width': None, 'media_length': 50}
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**state, 'printers': [dict(state)], 'selected': NETWORK})
+                        lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': NETWORK})
     monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
     client.application.config.update(PRINTER_PRINTER=NETWORK, PRINTER_MODEL='Zebra/ZPL')
     return client
@@ -256,7 +266,7 @@ SERIAL = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
 
 def test_tape_set_by_hand_for_a_usb_printer_is_found_by_its_serial(client, monkeypatch):
     device_id = SERIAL
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: device_id)
     monkeypatch.setattr('app.labeldesigner.routes.device_state',
                         lambda device, model: {**STATUS, 'path': device, 'media_width': None, 'media_length': 0})
     hand_set(client, 'file:///dev/usb/lp0', '62', 'QL-800')
@@ -267,7 +277,7 @@ def test_tape_set_by_hand_for_a_usb_printer_is_found_by_its_serial(client, monke
         assert (t.id, t.manual) == ('62', True), device
         state = {**STATUS, 'path': device, 'media_width': None, 'media_length': 0}
         monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                            lambda config: {**state, 'printers': [dict(state)], 'selected': device})
+                            lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': device})
         assert (tape_of(client)['id'], tape_of(client)['manual']) == ('62', True), device
     # Switched off it tells no device ID, the printer last seen there
     device_id = ''
@@ -278,7 +288,7 @@ def test_tape_set_by_hand_for_a_usb_printer_is_found_by_its_serial(client, monke
 def test_status_tells_the_label_sizes_each_printer_takes(client, monkeypatch):
     printers = [dict(STATUS), {**STATUS, 'path': NETWORK, 'model': 'Unknown'}]
     monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status',
-                        lambda config: {**STATUS, 'printers': printers, 'selected': 'simulation'})
+                        lambda config, added=(): {**STATUS, 'printers': printers, 'selected': 'simulation'})
     ql, unknown = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert '62' in ql['takes'] and 'pt12' not in ql['takes']
     # A model no label size names takes every size that has printers
@@ -598,7 +608,7 @@ def test_printer_that_did_not_answer_is_asked_for_its_tape_again_after_a_moment(
 
 
 def test_label_prints_on_the_tape_set_for_a_usb_printer_by_its_serial(client, monkeypatch):
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: SERIAL)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: SERIAL)
     monkeypatch.setattr('app.labeldesigner.routes.device_state',
                         lambda device, model: {**STATUS, 'path': device, 'media_width': None, 'media_length': 0})
     client.application.config['PRINTER_PRINTER'] = 'file:///dev/usb/lp0'

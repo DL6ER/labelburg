@@ -5,6 +5,7 @@ driver (drivers/)."""
 import concurrent.futures
 import contextlib
 import datetime
+import ipaddress
 import logging
 import os
 import threading
@@ -14,7 +15,7 @@ from urllib.parse import urlsplit
 from flask import Config
 
 from . import bluetooth, drivers, mdns
-from .drivers import devices, progress
+from .drivers import devices, progress, reach, usbip
 from .drivers.backends import NoLibusb
 from .drivers.base import network_status
 from .label_names import check_label_size
@@ -22,6 +23,7 @@ from .label_names import check_label_size
 SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'simulated_labels')
 
 BUSY = 'Printer is busy with another print job, please try again'
+WRONG_MODEL = 'The printer is another model than the label was made for, print it again'
 
 # Number of simulated labels kept in SIMULATED_LABELS_DIR, older ones are
 # deleted so that printing to the simulator cannot fill up the disk
@@ -129,6 +131,23 @@ class PrinterQueue:
             'fast': fast
         })
 
+    def _model_problem(self) -> str:
+        """Why the job cannot go to a printer shared over USB/IP: it cannot
+        be reached, or the device ID of its import names another model than
+        the job was made for, e.g. one taken from the configuration before
+        it told its own."""
+        if not usbip.is_address(self.device_specifier):
+            return ''
+        try:
+            told = drivers.told_model(usbip.connect(self.device_specifier).device_id)
+        except (OSError, ValueError) as e:
+            logger.warning('Printing on %s failed: %s', self.device_specifier, e)
+            return devices.not_sent(e)
+        if told and told != self.model:
+            logger.warning('Not sent to %s, it is a %s, not a %s', self.device_specifier, told, self.model)
+            return WRONG_MODEL
+        return ''
+
     def label_cuts(self) -> list[bool]:
         """Whether the printer cuts after each label of the queue, as
         self.cut says: after each one, the last one or none."""
@@ -152,6 +171,9 @@ class PrinterQueue:
             if not acquired:
                 logger.warning('Printer %s is busy with another job', self.device_specifier)
                 return BUSY
+            problem = '' if simulation else self._model_problem()
+            if problem:
+                return problem
             logger.info('Printing %d labels', len(entries))
             job = self.driver.render(self, entries, _Simulator() if simulation else None)
             if simulation:
@@ -189,6 +211,25 @@ class PrinterQueue:
             return self._send(self.driver.calibration_job(self), 1, (False, False, False))
 
 
+def _local_address(addresses: list[str]) -> str | None:
+    """The first address of the local network, else one of the local link,
+    of a printer without DHCP; never one of a cloud metadata service."""
+    def ip(address):
+        try:
+            return ipaddress.ip_address(address)
+        except ValueError:
+            return None
+    told = [(address, ip(address)) for address in addresses if ip(address)]
+    local = [address for address, _ in told if reach.allowed(address, 'local')]
+    on_link = [address for address, told_ip in told if told_ip.is_link_local and told_ip not in reach.METADATA]
+    return (local + on_link + [None])[0]
+
+
+def found_devices() -> set[str]:
+    """The devices of the printers the search found last."""
+    return {state.get('path') for state in _cached_printers}
+
+
 def _discovered_label_printers() -> list[tuple[str, str]]:
     """Label printers that announce themselves on the network, as (address,
     model), e.g. tcp://<address>[:<port>] or vc500w://<address>. Kept for
@@ -200,6 +241,11 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
         return _discovered[1]
     printers = []
     for service in mdns.discover():
+        # Anyone on the network may answer, the search is a local one
+        address = _local_address(service.get('addresses') or [service['address']])
+        if address is None:
+            continue
+        service = dict(service, address=address)
         found = next((found for driver in drivers.DRIVERS if (found := driver.announced(service))), None)
         if found and all(urlsplit(known).hostname != service['address'] for known, _ in printers):
             printers.append(found)
@@ -265,8 +311,18 @@ _status_queries_lock = threading.Lock()
 _last_states = {}
 
 
+def _told(device: str, model: str):
+    """The driver and model of a printer, see drivers.resolve(). A printer
+    shared over USB/IP that never told its device ID, e.g. as its import
+    failed a moment ago, is imported first, so that it gets the commands of
+    its own model."""
+    if usbip.is_address(device) and not usbip.known_device_id(device):
+        usbip.connect(device)
+    return drivers.resolve(device, model)
+
+
 def _query_configured(model: str, device: str) -> dict:
-    driver, known = drivers.resolve(device, model)
+    driver, known = _told(device, model)
     return driver.status(device, known)
 
 
@@ -312,15 +368,25 @@ def _configured_states(printers) -> list[dict]:
     return states
 
 
-def status_of_printer(config: Config, path: str) -> dict | None:
+def _added_states(added) -> list[dict]:
+    """The status of each printer added in the Settings, (model, device,
+    name), as of a configured one."""
+    states = _configured_states([(model, device) for model, device, _ in added])
+    return [dict(state, path=device, model=model, name=name, added=True, red_support=_red_support(model))
+            for (model, device, name), state in zip(added, states)]
+
+
+def status_of_printer(config: Config, path: str, added=()) -> dict | None:
     """The status of one printer the label designer lists, asked again, e.g.
-    one on USB it follows closely; None for a printer it does not list."""
+    one on USB it follows closely; None for a printer it does not list.
+    added as for get_ptr_status()."""
     if config.get('PRINTERS'):
         listed = {device: (model, name) for model, device, name in configured_printers(config)}
     elif config['PRINTER_PRINTER'] == '?':
         listed = {p['path']: (p.get('model', 'Unknown'), '') for p in _cached_printers}
     else:
         listed = {config['PRINTER_PRINTER']: (drivers.canonical(config['PRINTER_MODEL']), '')}
+    listed.update({device: (model, name) for model, device, name in added})
     # The path as listed goes on to the driver and into the answer, not the one asked for
     path = next((device for device in listed if device == path), None)
     if path is None or is_simulation(path):
@@ -335,6 +401,8 @@ def status_of_printer(config: Config, path: str) -> dict | None:
     state.setdefault('path', path)
     if name:
         state['name'] = name
+    if any(device == path for _, device, _ in added):
+        state.update(model=model, added=True, red_support=_red_support(model))
     state.setdefault('red_support', _red_support(state.get('model', model)))
     return state
 
@@ -345,6 +413,8 @@ def device_state(device: str, model: str) -> dict:
     answer."""
     driver = drivers.for_model(model)
     try:
+        if usbip.is_address(device):
+            driver, model = _told(device, model)
         state = driver.status(device, model)
     except driver.errors as e:
         logger.info('Status query of %s failed: %s', device, e)
@@ -354,7 +424,9 @@ def device_state(device: str, model: str) -> dict:
     return state
 
 
-def get_ptr_status(config: Config):
+def get_ptr_status(config: Config, added=()):
+    """The status of the printers: the configured or detected ones, then the
+    ones added in the Settings, added as (model, device, name)."""
     # Simple in-memory cache for detected printers
     global _last_scan_ts, _cached_printers, _cached_hints
 
@@ -376,6 +448,7 @@ def get_ptr_status(config: Config):
                 state.update({'path': device, 'model': model, 'name': name})
                 state['red_support'] = _red_support(model)
                 printers.append(state)
+            printers += _added_states(added)
             return {
                 **status,
                 **printers[0],
@@ -474,7 +547,10 @@ def get_ptr_status(config: Config):
             # Prepare response: include list of printers and a top-level status for the first one (compatibility)
             # Ensure simulator printer is always present
             sim = SIMULATOR_PRINTER.copy()
-            printers = list(_cached_printers)
+            # An added printer the search finds too is listed as added
+            extra = _added_states(added)
+            taken = {devices.lock_key(p['path']) for p in extra}
+            printers = [p for p in _cached_printers if devices.lock_key(p.get('path') or '') not in taken] + extra
             # append simulator if not present
             if not any(p.get('path') == 'simulation' for p in printers):
                 printers.append(sim)
@@ -504,13 +580,13 @@ def get_ptr_status(config: Config):
                 }
         if device_specifier == 'simulation':
             status.update(SIMULATOR_PRINTER)
-            status['printers'] = [SIMULATOR_PRINTER.copy()]
+            status['printers'] = [SIMULATOR_PRINTER.copy(), *_added_states(added)]
             status['selected'] = device_specifier
             return status
         # The label designer offers only the printers of the list
         printer = device_state(device_specifier, drivers.resolve(device_specifier, default_model)[1])
         status.update(printer)
-        status['printers'] = [printer, SIMULATOR_PRINTER.copy()]
+        status['printers'] = [printer, *_added_states(added), SIMULATOR_PRINTER.copy()]
         status['selected'] = device_specifier
         return status
     except Exception as e:

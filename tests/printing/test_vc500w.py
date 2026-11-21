@@ -28,7 +28,7 @@ from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.vc500w import image as vc_image
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from app.labeldesigner.drivers.vc500w import status as vc_status
-from tests.helpers import make_client
+from tests.helpers import Answering, make_client, within
 from tests.printing.usbip_host import VC500W_ID, FakeHost, SharedDevice
 
 CONFIG = b'''<?xml version="1.0" encoding="UTF-8"?>
@@ -1059,3 +1059,94 @@ def test_quality_is_the_vivid_mode_of_the_printer(fake):
     assert vc500w.print_image(fake.target, IMAGE, 'quality', 'none', fake.port) == ''
     command = next(c for c in fake.commands if '<print>' in c)
     assert '<mode>vivid</mode>\n<speed>0</speed>\n<lpi>317</lpi>' in command and '<cutmode>none</cutmode>' in command
+
+
+def endless_status(connection):
+    connection.sendall(b'<?xml version="1.0"?><status>')
+    while True:
+        connection.sendall(b'x' * 65536)
+
+
+def trickling_status(connection):
+    connection.sendall(b'<?xml version="1.0"?><status>')
+    while True:
+        connection.sendall(b'x')
+        time.sleep(0.05)
+
+
+def huge_data(connection):
+    connection.sendall(b'<status><code>0</code><datasize>999999999</datasize></status>\n\0')
+    while True:
+        connection.sendall(b'x' * 65536)
+
+
+def trickling_data(connection):
+    connection.sendall(b'<status><code>0</code><datasize>1000</datasize></status>\n\0')
+    while True:
+        connection.sendall(b'x')
+        time.sleep(0.05)
+
+
+@pytest.mark.parametrize('send', [endless_status, trickling_status, huge_data, trickling_data])
+def test_answers_without_end_are_given_up(send):
+    printer = Answering(send)
+    try:
+        started = time.monotonic()
+
+        def ask():
+            with vc500w.Connection('127.0.0.1', printer.port, timeout=0.5) as connection:
+                return connection.command('<read>\n<path>/status.xml</path>\n</read>')
+        with pytest.raises((vc500w.VC500WError, OSError)):
+            within(5, ask)
+        assert time.monotonic() - started < 2
+    finally:
+        printer.close()
+
+
+def test_a_printer_that_never_stops_sending_is_given_up():
+    # Shared over USB/IP, its host answers every read
+    device = SharedDevice(product=0x2112, device_id=VC500W_ID, interfaces=((7, 4), (7, 2)))
+    host = FakeHost(device)
+
+    def babble():
+        try:
+            while True:
+                device.printer.sendall(b'<status>' * 512)
+        except OSError:
+            pass
+    threading.Thread(target=babble, daemon=True).start()
+    try:
+        started = time.monotonic()
+        with pytest.raises((vc500w.VC500WError, OSError)):
+            within(10, lambda: vc500w.Connection(host.address()))
+        assert time.monotonic() - started < 3
+    finally:
+        host.close()
+
+
+def test_a_device_that_never_stops_sending_is_closed(monkeypatch):
+    master, slave = os.openpty()
+    tty.setraw(slave)
+    os.set_blocking(master, False)
+    closed = []
+    real = vc500w._Device.close
+    monkeypatch.setattr(vc500w._Device, 'close', lambda self: closed.append(self) or real(self))
+    stop = threading.Event()
+
+    def babble():
+        while not stop.is_set():
+            try:
+                os.write(master, b'x' * 4096)
+            except BlockingIOError:
+                time.sleep(0.001)
+            except OSError:
+                return
+    threading.Thread(target=babble, daemon=True).start()
+    try:
+        with pytest.raises(vc500w.VC500WError):
+            within(5, lambda: vc500w.Connection(os.ttyname(slave)))
+        assert len(closed) == 1
+    finally:
+        stop.set()
+        os.close(master)
+        os.close(slave)

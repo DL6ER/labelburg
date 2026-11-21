@@ -32,11 +32,12 @@ class VC500W(Driver):
         # It must never get the commands of a QL printer
         if not isinstance(device, str) or device == 'simulation':
             return None
-        if device_id is None:
-            device_id = devices.usb_device_id(device)
-        if device.startswith('vc500w://') or protocol.device_id_is_vc500w(device_id):
+        if device.startswith('vc500w://') or self.model_in(devices.usb_device_id(device) if device_id is None else device_id):
             return tapes.MODEL
         return None
+
+    def model_in(self, device_id):
+        return tapes.MODEL if protocol.device_id_is_vc500w(device_id) else None
 
     def fits(self, label, model):
         return label in tapes.LABELS

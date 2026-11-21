@@ -26,6 +26,12 @@ HOMEBOX_HEADERS = {'User-Agent': 'Homebox-LabelMaker/1.0', 'Accept': 'image/*'}
 NETWORK = 'tcp://192.0.2.10'
 
 
+@pytest.fixture(autouse=True)
+def found(monkeypatch):
+    # The network printers these tests name are known, as if the search found them
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://192.0.2.10'})
+
+
 def _status(model='QL-800', path=NETWORK, **status):
     state = {'errors': [], 'path': path, 'model': model, 'media_width': None, 'media_length': 0, **status}
     return {**state, 'printers': [state], 'selected': path}
@@ -33,7 +39,7 @@ def _status(model='QL-800', path=NETWORK, **status):
 
 def _reports(monkeypatch, status):
     """The printer of the status is the one of the label designer."""
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: status)
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): status)
 
 
 @pytest.fixture
@@ -139,7 +145,7 @@ def test_homebox_prints_on_the_tape_in_the_printer(client, queued, monkeypatch):
 def test_homebox_asks_the_printer_once_per_request(client, queued, monkeypatch):
     # Its status tells the tape as well
     status, asked = _status(media_width=29, media_length=90), []
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: asked.append('status') or status)
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): asked.append('status') or status)
     monkeypatch.setattr(routes, 'device_state', lambda device, model: asked.append(device) or dict(status['printers'][0]))
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306) and asked == ['status']
@@ -214,7 +220,7 @@ def _printed(label) -> bytes:
 
 def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
     # The simulator reports no tape, the one set in the printer settings counts
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: _status(path='simulation'))
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): _status(path='simulation'))
     assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'label_size': '29x90'}).status_code == 200
     image = client.get(URL, query_string=HOMEBOX_QUERY).data
     assert _size(image) == (991, 306)

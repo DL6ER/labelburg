@@ -157,7 +157,7 @@ def _told(monkeypatch, *devices_, serial='TEST000001', device_id=''):
     """The status of the devices told the printer's serial number."""
     from app.labeldesigner.drivers import devices
     # Not asked over the network for a device ID
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: device_id)
     monkeypatch.setattr(devices, 'status_cache', {devices.lock_key(d): {'serial': serial, 'model': 'Niimbot/B1'} for d in devices_})
 
 
@@ -192,7 +192,7 @@ def test_printer_status_tells_the_calibration(b1, monkeypatch):
     from app.labeldesigner import routes
     b1.post(URL, data={**B1, 'across': '0.5', 'roll': 'PZ1TEST00001'})
     state = {'errors': [], 'path': B1['printer'], 'model': 'Niimbot/B1', 'roll': 'PZ1TEST00002'}
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: {**state, 'printers': [dict(state)], 'selected': B1['printer']})
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**state, 'printers': [dict(state)], 'selected': B1['printer']})
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['calibration'] == {'across': 0.5, 'along': 0.0, 'roll': 'PZ1TEST00001'}
     # Only where the model offers it
@@ -287,6 +287,13 @@ def test_calibration_tried_with_save_false_is_not_kept(b1, save):
     r = b1.post(URL, json={**B1, 'across': 0.5, 'save': save})
     assert r.get_json()['calibration']['across'] == 0.5
     assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
+
+
+def test_a_broken_settings_file_is_left_as_it_is(b1, tmp_path):
+    _keep(tmp_path, '{"printers": [')
+    answer = b1.post(URL, data={**B1, 'left': '-1', 'right': '1'})
+    assert (answer.status_code, answer.get_json()['message']) == (500, printer_settings.BROKEN)
+    assert (tmp_path / 'label_repo' / printer_settings.FILE).read_text(encoding='utf-8') == '{"printers": ['
 
 
 @pytest.mark.parametrize('kind', ['narrow', 'wide', 'round'])

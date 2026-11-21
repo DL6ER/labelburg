@@ -65,6 +65,15 @@ def test_blanks_are_described_once():
     assert all(list(schema) == ['$ref'] for schema in found)
 
 
+def test_settings_not_saved_are_documented():
+    # Each of these answers 500 for a file it cannot write or does not trust
+    spec = json.load(open(SPEC))
+    for path in ('settings', 'settings/labels', 'printers/add', 'printers/remove', 'calibration'):
+        answer = spec['paths'][f'/labeldesigner/api/{path}']['post']['responses'].get('500')
+        assert answer == {'description': 'Not saved: the file could not be written, or it is not valid and was left as it is.',
+                          'content': {'application/json': {'schema': {'$ref': '#/components/schemas/Result'}}}}, path
+
+
 def test_spec_is_served(tmp_path):
     client = create_app().test_client()
     response = client.get('/labeldesigner/api/openapi.json')

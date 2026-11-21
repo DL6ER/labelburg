@@ -12,6 +12,12 @@ from tests.helpers import make_client
 URL = '/labeldesigner/api/settings'
 
 
+@pytest.fixture(autouse=True)
+def found(monkeypatch):
+    # The network printers these tests name are known, as if the search found them
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://a', 'tcp://b', 'tcp://A:9100', 'tcp://192.0.2.10'})
+
+
 def test_settings_are_kept_per_printer_and_common(tmp_path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
@@ -63,8 +69,10 @@ def test_a_broken_file_is_no_settings(tmp_path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     (tmp_path / 'label_repo' / printer_settings.FILE).write_text('{"printers": [')
     assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
-    client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
-    assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
+    # A change does not replace it, it may be fixed by hand
+    answer = client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
+    assert (answer.status_code, answer.get_json()['message']) == (500, printer_settings.BROKEN)
+    assert (tmp_path / 'label_repo' / printer_settings.FILE).read_text() == '{"printers": ['
 
 
 def test_a_file_that_is_no_utf_8_is_no_settings(tmp_path):
@@ -73,14 +81,22 @@ def test_a_file_that_is_no_utf_8_is_no_settings(tmp_path):
     assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
     text = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
     assert client.post('/labeldesigner/api/preview', data={'printer': 'simulation', 'text': text}).status_code == 200
-    client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
+    answer = client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'})
+    assert (answer.status_code, answer.get_json()['message']) == (500, printer_settings.BROKEN)
+    assert (tmp_path / 'label_repo' / printer_settings.FILE).read_bytes() == b'\xff\xfe\x00broken'
+
+
+def test_an_empty_file_is_no_settings_yet(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_text('\n')
+    assert client.post(URL, data={'printer': 'tcp://a', 'cut': 'none'}).status_code == 200
     assert json.loads((tmp_path / 'label_repo' / printer_settings.FILE).read_text()) == {'printers': {'tcp://a:9100': {'cut': 'none'}}}
 
 
 def test_a_usb_printer_is_kept_by_its_serial(monkeypatch):
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother;MDL:QL-800;SN:000F1Z123;')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: 'MFG:Brother;MDL:QL-800;SN:000F1Z123;')
     assert printer_settings.key('/dev/usb/lp1') == 'usb:QL-800/000F1Z123'
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother;MDL:QL-800;')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: 'MFG:Brother;MDL:QL-800;')
     assert printer_settings.key('file:///dev/usb/lp1') == '/dev/usb/lp1'
 
 
@@ -106,7 +122,7 @@ def test_a_usb_printer_switched_off_keeps_its_settings(tmp_path, monkeypatch):
     # printer last seen on its device
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: device_id)
     lp0 = {'printer': 'file:///dev/usb/lp0'}
     client.post(URL, data={**lp0, 'label_size': '62'})
     device_id = ''
@@ -122,7 +138,7 @@ def test_the_settings_of_a_usb_printer_read_its_device_id_once(monkeypatch, devi
     data = {'printers': {'usb:QL-800/000F1Z123': {'label_size': '62'}},
             'seen': {lock_key('file:///dev/usb/lp0'): 'usb:QL-800/000F1Z123'}}
     read = []
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: read.append(device) or device_id)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: read.append(device) or device_id)
     assert printer_settings.of_printer(data, 'file:///dev/usb/lp0') == {'label_size': '62'}
     assert read == ['file:///dev/usb/lp0']
 
@@ -132,7 +148,7 @@ def test_a_printer_last_seen_that_is_no_printer_key_is_left_out(monkeypatch):
     # server started tells no device ID
     device = 'usbip://192.0.2.1/1-1'
     data = {'printers': {}, 'quality': 'fast', 'seen': {lock_key(device): ['not', 'a', 'printer']}}
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: '')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: '')
     assert printer_settings.of_printer(data, device) == {'quality': 'fast'}
     printer_settings.changed(data, device, {'cut': 'none'})
     assert printer_settings.of_printer(data, device) == {'quality': 'fast', 'cut': 'none'}
@@ -195,7 +211,7 @@ def test_another_usb_printer_without_a_serial_has_settings_of_its_own(tmp_path, 
     # seen on its device
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     device_id = 'MFG:Brother;MDL:QL-800;SN:000F1Z123;'
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: device_id)
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: device_id)
     lp0 = {'printer': 'file:///dev/usb/lp0'}
     client.post(URL, data={**lp0, 'label_size': '62'})
     device_id = 'MFG:Brother;CMD:PT-CBP;MDL:QL-1100;CLS:PRINTER;'
@@ -309,7 +325,7 @@ def test_print_requests_that_leave_out_which_end_leaves_first_take_it_as_set(tmp
 
 
 def test_a_usb_printer_is_kept_by_its_serial_also_with_spaces_in_its_device_id(monkeypatch):
-    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device: 'MFG:Brother; MDL:QL-800; SN:000F1Z123;')
+    monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: 'MFG:Brother; MDL:QL-800; SN:000F1Z123;')
     assert printer_settings.key('/dev/usb/lp1') == 'usb:QL-800/000F1Z123'
 
 

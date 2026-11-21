@@ -192,3 +192,52 @@ def _receive(connection, size):
             raise OSError('closed')
         data += chunk
     return data
+
+
+class TricklingHost:
+    """A host on localhost that answers slowly and without end, a byte every
+    'pause' seconds: its device list after the number of devices (stage
+    'devlist'), or its answer to the import of the printer it lists (stage
+    'import')."""
+
+    def __init__(self, stage='devlist', pause=0.05):
+        self.stage, self.pause = stage, pause
+        self.closed = threading.Event()
+        self.server = socket.create_server(('127.0.0.1', 0))
+        self.port = self.server.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def address(self):
+        return f'usbip://127.0.0.1:{self.port}'
+
+    def _serve(self):
+        while True:
+            try:
+                connection, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._answer, args=(connection,), daemon=True).start()
+
+    def _answer(self, connection):
+        with connection:
+            try:
+                _, code, _ = usbip.OP.unpack(_receive(connection, usbip.OP.size))
+                if code == usbip.OP_REQ_DEVLIST and self.stage == 'devlist':
+                    connection.sendall(usbip.OP.pack(usbip.VERSION, usbip.OP_REP_DEVLIST, 0) + struct.pack('>I', 256))
+                elif code == usbip.OP_REQ_DEVLIST:
+                    device = SharedDevice()
+                    connection.sendall(usbip.OP.pack(usbip.VERSION, usbip.OP_REP_DEVLIST, 0) + struct.pack('>I', 1) + device.record()
+                                       + b''.join(usbip.INTERFACE.pack(cls, 1, protocol) for cls, protocol in device.listed()))
+                    return
+                else:
+                    _receive(connection, 32)
+                    connection.sendall(usbip.OP.pack(usbip.VERSION, usbip.OP_REP_IMPORT, 0))
+                while not self.closed.is_set():
+                    connection.sendall(b'\0')
+                    time.sleep(self.pause)
+            except OSError:
+                pass
+
+    def close(self):
+        self.closed.set()
+        self.server.close()

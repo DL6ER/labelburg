@@ -93,6 +93,13 @@ def _bool(value: str) -> bool:
     raise ValueError(value)
 
 
+def _add_printers(value: str) -> str:
+    mode = value.strip().lower()
+    if mode not in ('local', 'any', 'off'):
+        raise ValueError(value)
+    return mode
+
+
 def _log_level(value: str) -> str:
     level = value.strip().upper()
     if level not in logging.getLevelNamesMapping():
@@ -109,6 +116,7 @@ ENV_OVERRIDES = {
     'PRINTER_MODEL': _model,
     'PRINTER_PRINTER': str,
     'PRINTERS': _printer_list,
+    'ADD_PRINTERS': _add_printers,
     'LABEL_DEFAULT_SIZE': str,
     'LABEL_DEFAULT_ORIENTATION': str,
     'LOG_LEVEL': _log_level,
@@ -143,6 +151,14 @@ def create_app(config_class=Config) -> Flask:
                 raise ValueError(f'Invalid value for the environment variable {key}: {value!r}') from None
 
     app.logger.setLevel(app.config.get('LOG_LEVEL', 'INFO'))
+
+    # Also as set in instance/application.py, an unknown value adds nothing
+    mode = app.config.get('ADD_PRINTERS')
+    if isinstance(mode, str) and mode.strip().lower() in ('local', 'any', 'off'):
+        app.config['ADD_PRINTERS'] = mode.strip().lower()
+    else:
+        app.logger.warning('ADD_PRINTERS is local, any or off, not %r: adding printers is off', mode)
+        app.config['ADD_PRINTERS'] = 'off'
 
     app.extensions['fonts'] = init_fonts(app)
 

@@ -14,7 +14,7 @@ import time
 
 from werkzeug.security import safe_join
 
-from . import usbip
+from . import reach, usbip
 from .backends import NoLibusb
 
 try:
@@ -173,12 +173,13 @@ def unreachable(device_specifier: str) -> bool:
     return usbip.is_address(device_specifier) and usbip.unreachable(device_specifier)
 
 
-def usb_device_id(device_specifier: str) -> str:
+def usb_device_id(device_specifier: str, connect: bool = True) -> str:
     """The IEEE 1284 device ID of a printer on USB, /dev/usb/lp<N>, usb://...
     or usbip://..., e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., empty for
-    other printers or when it does not tell."""
+    other printers or when it does not tell. Without connect, of a printer
+    shared over USB/IP the one it told last, it is not imported for it."""
     if usbip.is_address(device_specifier):
-        return usbip.device_id(device_specifier)
+        return usbip.device_id(device_specifier) if connect else usbip.known_device_id(device_specifier)
     if device_specifier.startswith('usb://'):
         key = _usb_key(device_specifier)
         if key not in _usb_device_ids:
@@ -338,6 +339,8 @@ def unanswered_reason(error: Exception) -> str:
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
         return NO_LIBUSB
+    if isinstance(error, reach.NotAllowed):
+        return reach.NOT_ALLOWED
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -354,7 +357,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 

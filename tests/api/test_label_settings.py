@@ -36,8 +36,10 @@ def test_label_settings_are_kept_for_every_browser(tmp_path):
     assert client.post(URL, data={'font_family': '', 'collate': ''}).get_json()['settings'] == {**NONE_SET, 'date_format': '%d.%m.%Y'}
 
 
-def test_label_settings_are_kept_with_the_printer_settings(tmp_path):
-    # In the same file, a change of the one keeps the other
+def test_label_settings_are_kept_with_the_printer_settings(tmp_path, monkeypatch):
+    # In the same file, a change of the one keeps the other; tcp://a is
+    # known as if the search found it
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://a'})
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     client.post(URL, data={'collate': '0'})
     client.post('/labeldesigner/api/settings', data={'printer': 'tcp://a', 'cut': 'last', 'quality': 'fast'})

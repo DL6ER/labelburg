@@ -22,7 +22,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
-Labelburg finds printers plugged in with USB by itself, most network printers too. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
+Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
 
 ## Features
 
@@ -84,6 +84,7 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `PRINTER_PRINTER` | The printer, see [Printer addresses](#printer-addresses) | `?` |
 | `PRINTER_MODEL` | Model of a printer that does not report it, e.g. a network printer. Models of other makers than Brother are named with their maker, e.g. `PUQU/Q00` or `Epson/ESC-POS` (`Epson/ESC-POS-180` for a receipt printer with a 180 dpi head, e.g. a TM-T88), Brother ones with or without it (`Brother/QL-800`). | `QL-800` |
 | `PRINTERS` | Several printers of different models instead of `PRINTER_PRINTER` and `PRINTER_MODEL`, as `<model>=<printer>`, comma-separated, e.g., `QL-700=usb://0x04f9:0x2042,QL-1100=file:///dev/usb/lp1,PUQU/Q00=bt://<MAC>`, the models as for `PRINTER_MODEL`. A name in front, e.g., `Kitchen:QL-700=usb://0x04f9:0x2042`, is shown in the label designer, and requests may choose the printer by it (`printer=Kitchen`). There is no detection, each printer keeps its model and its own printer settings, requests that name no printer go to the first one. The simulator is offered only when listed, e.g., `QL-700=simulation`. | none |
+| `ADD_PRINTERS` | Where printers the search does not find may be added in the Settings of the label designer: `local` only in your own network (private addresses, `localhost`, 100.64.0.0/10 as on Tailscale, which also holds the carrier-grade NAT of your provider, and names like `printer.local` that lead there), `any` also elsewhere, `off` not at all, printers added before are then not used. The same holds for network printers that requests name by their address, e.g., `tcp://<host>`, and that are neither configured, added nor found by the search. Anyone who can open Labelburg can add printers, there is no login, and the answers of Identify show them which hosts and ports exist there, the refusals of requests whether a name exists and is local. | `local` |
 | `LABEL_DEFAULT_SIZE` | Label size the label designer starts with when the printer does not report its roll, e.g., the simulator. The name tells the kind: `62` or `102` is endless tape, `62x29` or `103x164` die-cut labels, `d24` round ones. | `62` |
 | `LABEL_DEFAULT_ORIENTATION` | `standard` or `rotated` | `standard` |
 | `LABEL_TEMPLATE_ENV_VARS` | Environment variables labels may insert with `{{env:<var>}}`, comma-separated. All others stay empty, so that nobody can read secrets of the server through a label. | none |
@@ -145,7 +146,7 @@ Address each printer in one way only (e.g. always `file:///dev/usb/lp0`). Two ad
 
 ### Network printers
 
-Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others with `tcp://<IP address>` and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing.
+Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others in the Settings of the label designer, or with `tcp://<IP address>` in `PRINTER_PRINTER` or `PRINTERS`, and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing.
 
 ### Fonts
 
@@ -196,7 +197,7 @@ curl -X POST http://localhost:8013/labeldesigner/api/webhook/print \
   -H "Authorization: Bearer $WEBHOOK_PASSWORD" -F label_size=62 -F images=@label.png
 ```
 
-- A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses).
+- A request selects a printer with the `printer` parameter: the configured printer, `simulation`, or a printer given as in [Printer addresses](#printer-addresses). A network printer that is neither configured, added in the Settings nor found by the search prints only at an address `ADD_PRINTERS` allows.
 - Labels are printed on the tape in the printer, as in the label designer: a label made for another tape is placed on it.
 - The printer settings of the label designer (the label size set by hand, cutting, which end of the labels leaves first and quality) are kept on the server in `.printers.json` in the folder of the labels, the same for every browser; `/labeldesigner/api/settings` reads and changes them, `printer_status` tells them with each printer, and print requests and previews of the API take what they leave out from them. A label size left out is that of the tape the printer reports, else the label size set by hand, else `LABEL_DEFAULT_SIZE`.
 - The label settings (how dates are written, the order of copies of several files and the font of new labels) are kept in the same file; `/labeldesigner/api/settings/labels` reads and changes them. Requests that leave out `collate`, lines without a font and date blanks without a format take them from there, else the order as sets, the default font and `%Y-%m-%d`.

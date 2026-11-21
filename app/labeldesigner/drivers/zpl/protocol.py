@@ -4,10 +4,9 @@ ZPL emulation printed labels sent so before."""
 
 import os
 import select
-import socket
 import time
 
-from .. import backends, devices
+from .. import backends, devices, reach
 
 DPI = 203
 # Port of raw printing on the network, and how long connecting may take
@@ -45,7 +44,7 @@ def write(device: str, data: bytes):
         finally:
             printer.dispose()
     elif device.startswith('tcp://'):
-        with socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
+        with reach.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
             s.sendall(data)
     else:
         with open(device.removeprefix('file://'), 'wb') as f:
@@ -70,7 +69,7 @@ def _read_answer(read) -> bytes:
 def host_status(device: str) -> bytes:
     """The answer of the printer to ~HS, empty if it gave none."""
     if device.startswith('tcp://'):
-        with socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
+        with reach.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT) as s:
             s.sendall(HOST_STATUS)
 
             def read(left):

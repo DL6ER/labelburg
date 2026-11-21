@@ -48,6 +48,12 @@ def resolution_problem(model: str, high_res: bool) -> str:
     return for_model(model).resolution_problem(model, high_res)
 
 
+def told_model(device_id: str) -> str | None:
+    """The model an IEEE 1284 device ID names, None if it is no printer of
+    a driver."""
+    return next((model for driver in DRIVERS if (model := driver.model_in(device_id))), None)
+
+
 def resolve(device: str, model: str) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
     ID tells, else the configured or requested model."""

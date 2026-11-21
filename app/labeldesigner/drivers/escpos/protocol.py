@@ -4,10 +4,9 @@ and the status the printer tells at once (DLE EOT)."""
 
 import os
 import select
-import socket
 import time
 
-from .. import backends, devices, usbip
+from .. import backends, devices, reach, usbip
 from ..backends import discard as _discard
 
 # Rows per raster image, the printer takes them in pieces
@@ -133,7 +132,7 @@ class TcpConnection(Connection):
     out, an IPv6 address in brackets."""
 
     def __init__(self, device: str):
-        self.socket = socket.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT)
+        self.socket = reach.create_connection(devices.tcp_address(device, PORT), timeout=CONNECT_WAIT)
 
     def __exit__(self, *args):
         self.socket.close()

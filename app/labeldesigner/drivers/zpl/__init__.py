@@ -118,13 +118,18 @@ class Zpl(Driver):
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
+    # Its jobs go to usblp, PyUSB or the network only
+    takes_usbip = False
 
     def model_of(self, device, device_id=None):
         # By the IEEE 1284 device ID on USB, e.g. MFG:Zebra Technologies;
         # CMD:ZPL;MDL:GK420t;... A Datamax-O'Neil tells CMD:DPL, its ZPL
         # emulation is configured.
-        if device_id is None:
-            device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        if not isinstance(device, str):
+            return None
+        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+
+    def model_in(self, device_id):
         return MODELS[0] if ZPL_DEVICE_ID.search(device_id) else None
 
     def fits(self, label, model):

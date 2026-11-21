@@ -16,6 +16,12 @@ from tests.helpers import make_client
 HEADERS = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'}
 
 
+@pytest.fixture(autouse=True)
+def found(monkeypatch):
+    # The network printers these tests name are known, as if the search found them
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://192.0.2.10'})
+
+
 @pytest.fixture
 def client(tmp_path):
     client = make_client(tmp_path)
@@ -318,7 +324,7 @@ def reports(monkeypatch, **state):
     """Kitchen on the network with the status it reports, the server adds
     its tape and the sizes it takes."""
     state = {'errors': [], 'name': 'Kitchen', 'path': 'tcp://192.0.2.10', 'media_width': None, 'media_length': 0, **state}
-    monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status', lambda config: {**state, 'printers': [dict(state)]})
+    monkeypatch.setattr('app.labeldesigner.routes.get_ptr_status', lambda config, added=(): {**state, 'printers': [dict(state)]})
 
 
 def test_the_user_is_asked_with_the_names_of_the_label_sizes(client, tmp_path, monkeypatch):

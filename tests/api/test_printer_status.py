@@ -3,8 +3,16 @@ size it prints on."""
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.labeldesigner import printer, routes
 from tests.helpers import make_client
+
+
+@pytest.fixture(autouse=True)
+def found(monkeypatch):
+    # The network printers these tests name are known, as if the search found them
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://192.0.2.1'})
 
 
 def _printer(path, model, **status):
@@ -15,7 +23,7 @@ def test_tape_is_reported_or_assumed(tmp_path, monkeypatch):
     printers = [_printer('file:///dev/usb/lp0', 'QL-800', media_width=29, media_length=90),
                 _printer('tcp://192.0.2.1', 'PUQU/Q00'),
                 _printer('simulation', 'QL-800')]
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: {**printers[0], 'printers': printers})
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**printers[0], 'printers': printers})
     client = make_client(tmp_path)
     client.application.config['LABEL_DEFAULT_SIZE'] = '62'
     status = client.get('/labeldesigner/api/printer_status').get_json()
@@ -30,7 +38,7 @@ def test_label_size_is_the_tape_labels_are_placed_on(tmp_path, monkeypatch):
     printers = [_printer('file:///dev/usb/lp0', 'QL-800', media_width=62),
                 _printer('tcp://192.0.2.1', 'QL-800'),
                 _printer('simulation', 'QL-800')]
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: {**printers[0], 'printers': printers})
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**printers[0], 'printers': printers})
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['LABEL_DEFAULT_SIZE'] = '62x29'
     client.post('/labeldesigner/api/settings', data={'printer': 'tcp://192.0.2.1', 'model': 'QL-800', 'label_size': '29'})
@@ -46,7 +54,7 @@ def test_tape_of_each_printer(tmp_path, monkeypatch):
     printers = [_printer('file:///dev/usb/lp0', 'QL-800', media_width=29, media_length=90),
                 _printer('tcp://192.0.2.1', 'PUQU/Q00'),
                 _printer('simulation', 'QL-800')]
-    monkeypatch.setattr(routes, 'get_ptr_status', lambda config: {**printers[0], 'printers': printers})
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**printers[0], 'printers': printers})
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['LABEL_DEFAULT_SIZE'] = '62'
     client.post('/labeldesigner/api/settings', data={'printer': 'simulation', 'model': 'QL-800', 'label_size': '29'})

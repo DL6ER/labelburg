@@ -4,6 +4,8 @@ label and the comparison with reference images."""
 import io
 import json
 import os
+import socket
+import threading
 from typing import Union
 
 from PIL import Image
@@ -131,3 +133,54 @@ def without_status(monkeypatch):
     """Prints do not ask the printer for its tape, which a fake printer
     counting its traffic would see."""
     monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: {})
+
+
+def within(seconds: float, action):
+    """What action() returns or raises, failing the test where it takes
+    longer than seconds instead of waiting for it."""
+    result = {}
+
+    def run():
+        try:
+            result['value'] = action()
+        except BaseException as e:
+            result['error'] = e
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(seconds)
+    assert not thread.is_alive(), f'Still running after {seconds} s'
+    if 'error' in result:
+        raise result['error']
+    return result.get('value')
+
+
+class Answering:
+    """A server on localhost that answers each connection with send(connection)
+    once it has read the request, until it is closed."""
+
+    def __init__(self, send):
+        self.send, self.closed = send, threading.Event()
+        self.server = socket.create_server(('127.0.0.1', 0))
+        self.port = self.server.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                connection, _ = self.server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._answer, args=(connection,), daemon=True).start()
+
+    def _answer(self, connection):
+        with connection:
+            try:
+                connection.settimeout(2)
+                connection.recv(65536)
+                self.send(connection)
+            except OSError:
+                pass
+
+    def close(self):
+        self.closed.set()
+        self.server.close()
