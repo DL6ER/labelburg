@@ -153,3 +153,13 @@ def test_a_server_error_keeps_asking(editor):  # noqa: F811
     editor.route('**/api/queue/**', lambda route: (replies.pop(0) if len(replies) > 1 else replies[0])(route))
     editor.click('#print')
     editor.wait_for_selector('#toast:has-text("Printed 1 label")', timeout=15000)
+
+
+@pytest.mark.parametrize('reply', ['error', 'abort'])
+def test_a_failed_answer_with_an_unreadable_job_read_ends_as_failed(editor, reply):  # noqa: F811
+    type_label(editor, 'Shelf')
+    answer_print(editor, 'failed')
+    editor.route('**/api/queue/**', lambda route: route.fulfill(status=500, body='oops') if reply == 'error' else route.abort())
+    editor.click('#print')
+    editor.wait_for_selector('[role=alertdialog]:has-text("It was not printed")', timeout=15000)
+    assert history(editor) == [['failed', 'It was not printed', 'failed']]

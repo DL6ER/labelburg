@@ -1051,8 +1051,10 @@ export function followJob(entry) {
                 } else if (data.state === 'printed') end('printed');
                 else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'It was not printed');
                 else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); }
+                else if (!data.state && entry.seen === 'failed') end('failed', 'It was not printed');
             } catch (e) {
-                // The next one asks again
+                // The next one asks again, unless the answer told the outcome already
+                if (entry.seen === 'failed') end('failed', 'It was not printed');
             } finally {
                 asking = false;
             }
