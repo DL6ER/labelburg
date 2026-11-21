@@ -635,3 +635,33 @@ def test_prints_are_sent_one_after_the_other(editor):  # noqa: F811
     held[0].fulfill(json={'success': True})
     editor.wait_for_function("() => labelEditor.S.history.every(h => h.state === 'printed')")
     assert sent == ['Jar 1', 'Jar 2']
+
+
+def test_prints_are_sent_in_order_per_printer(editor):  # noqa: F811
+    held = []
+    editor.route('**/api/print', lambda route: held.append(route))
+
+    def until(count):
+        while len(held) < count:
+            editor.wait_for_timeout(10)
+
+    def asked(title):
+        return lambda r: r.url.endswith('/api/print') and f'title={title}&'.encode() in r.post_data_buffer
+    with editor.expect_request(asked('A1')), editor.expect_request(asked('B1')):
+        editor.evaluate("""async () => {
+            const core = await import('/static/designer/core.js');
+            const on = path => Object.assign({}, core.S.printer, { path });
+            const job = title => ({ title, design: core.S.edit.design, values: {}, copies: 1 });
+            window.sent = [core.printJob(job('A1'), null, on('file:///dev/usb/lp8')), core.printJob(job('A2'), null, on('file:///dev/usb/lp8')),
+                core.printJob(job('B1'), null, on('file:///dev/usb/lp9'))];
+        }""")
+    # The first of printer 8 and the one of printer 9 are out, the second of 8 waits for the first
+    until(2)
+    held[1].fulfill(json={'success': True})
+    editor.evaluate('() => new Promise(done => setTimeout(done))')
+    assert len(held) == 2
+    with editor.expect_request(asked('A2')):
+        held[0].fulfill(json={'success': True})
+    until(3)
+    held[2].fulfill(json={'success': True})
+    editor.evaluate('() => Promise.all(window.sent)')

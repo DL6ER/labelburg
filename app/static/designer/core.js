@@ -1020,9 +1020,9 @@ export function untold(entry) {
     return !!S.printer && entry.path === S.printer.path && QUEUE.path === entry.path && !!(QUEUE.line && QUEUE.line.held);
 }
 
-// Sent one after the other, so that the server queues them in the order
-// they were printed
-let sending = Promise.resolve();
+// Sent one after the other per printer, so that its queue gets them in the
+// order they were printed; a slow printer holds back no other
+const sending = new Map();
 // job: { title, design, values, copies, source }. Kept in the history of
 // this browser, Settings list it under Printed labels. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
@@ -1045,8 +1045,9 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
         form.set('title', entryName(entry));
         form.set('source', 'designer');
-        const sent = sending.then(() => post('/print', form));
-        sending = sent.catch(() => { });
+        const sent = (sending.get(path) || Promise.resolve()).then(() => post('/print', form));
+        const settled = sent.catch(() => { }).then(() => { if (sending.get(path) === settled) sending.delete(path); });
+        sending.set(path, settled);
         const r = await sent;
         let data = {};
         try { data = await r.json(); } catch (e) { }
