@@ -1417,8 +1417,11 @@ def get_printer_status():
         status = get_ptr_status(current_app.config, added)
         told = [status] + status.get('printers', [])
     kept = _kept_settings()
+    demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors
     for printer in told:
+        if printer.get('path') == 'simulation':
+            printer.update(model=demo, red_support=drivers.for_model(demo).colors(demo) == 'red')
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         # Asked by the label designer every 2 s where that costs nothing
@@ -1541,10 +1544,13 @@ def printer_settings_route():
             return jsonify(printer_settings.of_printer(_kept_settings(), _printer(*requested)[0]))
         # Checked against the model the prints use
         device, model = _resolved_printer(*requested)
-        changes = printer_settings.checked(values, model)
+        changes = printer_settings.checked(values, model, is_simulation(device))
         repo = _get_repo_dir()
         with _saving(repo):
             data = printer_settings.changed(_kept_settings(changing=True), device, changes)
+            if printer_settings.DEMO_MODEL in changes:
+                model = _demo_model(data)
+                data = printer_settings.fitted(data, device, model, current_app.config['LABEL_DEFAULT_SIZE'])
             _write_atomically(os.path.join(repo, printer_settings.FILE),
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
     except LabelsBusy:
@@ -1992,12 +1998,22 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     else:
         # The model a printer tells, e.g. in its device ID, else the configured one
         model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
+        if is_simulation(device):
+            model = _demo_model(_kept_settings())
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
     if model not in MODELS:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
+
+
+def _demo_model(kept: dict) -> str:
+    """The model of the demo printer: the one chosen in the Settings, else
+    the one configured for it, else the configured model."""
+    printers = configured_printers(current_app.config)
+    configured = printers[0][0] if printers else drivers.canonical(current_app.config['PRINTER_MODEL'])
+    return printer_settings.demo_model(kept) or next((m for m, d, _ in printers if d == 'simulation'), configured)
 
 
 def _resolved_printer(requested_device, requested_model, ask: bool = False) -> tuple[str, str]:
@@ -2814,7 +2830,7 @@ def _homebox_printer() -> tuple[str, str, dict, tape.Tape]:
     printers = status.get('printers') or [status]
     chosen = next((p for p in printers if p.get('path') == status.get('selected')), printers[0])
     device = chosen.get('path')
-    model = drivers.resolve(device, chosen.get('model'))[1]
+    model = _demo_model(_kept_settings()) if is_simulation(device) else drivers.resolve(device, chosen.get('model'))[1]
     settings = _settings_of(device)
     return device, model, settings, _tape_of(chosen, model, settings)
 

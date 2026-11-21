@@ -97,6 +97,8 @@ export const printerCaps = (p = S.printer) => capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 export const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 export const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
+// The demo printer, the simulator of the server, prints as any model
+export const isDemo = p => !!p && /simulat/i.test(p.status_type || p.phase_type || '');
 export const thePrinter = (p, start = false) => p && p.name ? p.name : `${start ? 'The' : 'the'} ${(p && printerName(p)) || 'printer'}`;
 
 export function sizeName(id) {
@@ -840,7 +842,7 @@ export function printerState(p) {
     if (p.status_type === 'Asking the printer') return { cls: 'off', text: 'Asking the printer...' };
     if (p.job) return { cls: '', text: jobText(p.job) };
     if (p.status_type === 'Printing') return { cls: '', text: 'Printing' };
-    if (/simulat/i.test(p.status_type || p.phase_type || '')) return { cls: '', text: 'Ready (simulated)' };
+    if (isDemo(p)) return { cls: '', text: 'Ready, prints nothing' };
     return { cls: '', text: 'Ready' };
 }
 

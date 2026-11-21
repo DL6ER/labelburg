@@ -28,6 +28,8 @@ WRONG_MODEL = 'The printer is another model than the label was made for, print i
 # Number of simulated labels kept in SIMULATED_LABELS_DIR, older ones are
 # deleted so that printing to the simulator cannot fill up the disk
 MAX_SIMULATED_LABELS = 100
+# The simulator as the label designer lists it
+DEMO_NAME = 'Demo printer'
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +436,7 @@ def get_ptr_status(config: Config, added=()):
     default_model = drivers.canonical(config['PRINTER_MODEL'])
 
     SIMULATOR_PRINTER = dict(network_status('simulation', default_model, _red_support(default_model)),
-                             phase_type='Simulator', status_type='Simulator')
+                             name=DEMO_NAME, phase_type='Simulator', status_type='Simulator')
     status = dict(network_status(device_specifier, 'Unknown'), phase_type='Unknown', status_type='Unknown')
     try:
         if config.get('PRINTERS'):
@@ -444,6 +446,11 @@ def get_ptr_status(config: Config, added=()):
             printers = []
             listed = configured_printers(config)
             for (model, device, name), state in zip(listed, _configured_states([(m, d) for m, d, _ in listed])):
+                if device == 'simulation':
+                    # Configured several times, it is one demo printer
+                    if any(p['path'] == device for p in printers):
+                        continue
+                    name = name or DEMO_NAME
                 state = state or SIMULATOR_PRINTER.copy()
                 state.update({'path': device, 'model': model, 'name': name})
                 state['red_support'] = _red_support(model)

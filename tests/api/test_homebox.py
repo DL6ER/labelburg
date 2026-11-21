@@ -230,6 +230,15 @@ def test_homebox_prints_on_the_tape_set_by_hand(client, queued, monkeypatch):
     assert pixels(_printed(label)) == pixels(image)
 
 
+def test_homebox_prints_on_the_demo_printer_as_its_model(client, queued):
+    # Where nothing else is found, the demo printer of the model chosen for it
+    assert client.post(SETTINGS_URL, data={'printer': 'simulation', 'demo_model': 'VC-500W'}).status_code == 200
+    image = client.get(URL, query_string=HOMEBOX_QUERY).data
+    assert client.post(URL, data=image, headers={'Content-Type': 'image/png'}).get_json() == {'success': True}
+    [(label_size, label)] = queued
+    assert (label_size, label.job.model) == ('vc9', 'VC-500W')
+
+
 def test_homebox_prints_on_the_tape_the_printer_reports_over_one_set_by_hand(client, queued, monkeypatch):
     _reports(monkeypatch, _status(media_width=62))
     assert client.post(SETTINGS_URL, data={'printer': NETWORK, 'label_size': '29x90'}).status_code == 200

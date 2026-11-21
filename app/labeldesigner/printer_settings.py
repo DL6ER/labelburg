@@ -17,6 +17,7 @@ import re
 from .drivers import MODELS, devices, for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
 from .label_names import check_cut, check_label_size
+from .tape import assumed_size, hand_set
 
 # In the folder of the labels, hidden: saved labels never start with a dot
 FILE = '.printers.json'
@@ -34,9 +35,13 @@ MAX_PRINTERS = 200
 NAMED_BY = {'cut': ('cut', 'cut_once'), 'half_cut': ('cut', 'cut_once', 'half_cut'),
             'chain': ('cut', 'cut_once', 'chain'), 'quality': ('high_res', 'fast_printing')}
 
+# The demo printer, the simulator, prints as the model chosen for it
+DEMO_MODEL = 'demo_model'
+DEMO = 'simulation'
+
 SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1) and '
-                    'leaves_first (top or bottom) of a printer and quality (quality, high or fast), '
-                    'an empty value removes one')
+                    'leaves_first (top or bottom) of a printer, demo_model (a supported model) of the demo printer '
+                    'simulation, and quality (quality, high or fast), an empty value removes one')
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # The printers added in the Settings, each with its address, model and name
 ADDED = 'added'
@@ -123,19 +128,35 @@ def _key(data: dict, device: str) -> str:
     return last if not device_id or (printer == lock_key(device) and last.startswith('serial:')) else printer
 
 
+def demo_model(data: dict) -> str | None:
+    """The model chosen for the demo printer, None where none is."""
+    own = data['printers'].get(DEMO)
+    model = own.get(DEMO_MODEL) if isinstance(own, dict) else None
+    return model if model in MODELS else None
+
+
 def of_printer(data: dict, device: str) -> dict:
     """The settings of a printer, the common ones with its own."""
-    own = data['printers'].get(_key(data, device))
+    printer = _key(data, device)
+    own = data['printers'].get(printer)
+    model = demo_model(data) if printer == DEMO else None
     return {**{name: data[name] for name in COMMON if name in data},
+            **({DEMO_MODEL: model} if model else {}),
             **{name: own[name] for name in OWN if isinstance(own, dict) and name in own}}
 
 
-def checked(changes: dict, model: str) -> dict:
-    """The changes as kept, ValueError for one the printer model cannot take."""
-    if not changes or any(name not in COMMON + OWN or not isinstance(value, str) for name, value in changes.items()):
+def checked(changes: dict, model: str, demo: bool = False) -> dict:
+    """The changes as kept, ValueError for one the printer model cannot take.
+    The demo printer takes a model too, the others are checked for it."""
+    named = COMMON + OWN + ((DEMO_MODEL,) if demo else ())
+    if not changes or any(name not in named or not isinstance(value, str) for name, value in changes.items()):
         raise ValueError(SETTINGS_MESSAGE)
+    if changes.get(DEMO_MODEL):
+        if changes[DEMO_MODEL] not in MODELS:
+            raise ValueError(SETTINGS_MESSAGE)
+        model = changes[DEMO_MODEL]
     for name, value in changes.items():
-        if not value:
+        if not value or name == DEMO_MODEL:
             continue
         if name == 'label_size':
             check_label_size(value, model)
@@ -183,6 +204,21 @@ def changed(data: dict, device: str, changes: dict) -> dict:
         data['printers'].pop(printer, None)
     if len(data['printers']) > MAX_PRINTERS:
         raise ValueError(TOO_MANY_PRINTERS)
+    return data
+
+
+def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
+    """data with the printer set to a tape of its model, e.g. after another
+    model was chosen for the demo printer: the one kept if the model takes
+    it or its paper, else the one it is assumed to have, see
+    tape.assumed_size(). A cutting the model cannot do is left out."""
+    printer = _key(data, device)
+    own = data['printers'].get(printer)
+    own = dict(own) if isinstance(own, dict) else {}
+    own['label_size'] = hand_set(own.get('label_size', ''), model) or assumed_size(model, default_size)
+    if own.get('cut') and for_model(model).cut_problem(own['cut'], model):
+        own.pop('cut')
+    data['printers'][printer] = own
     return data
 
 

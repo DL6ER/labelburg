@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
-    printerLabel, printerName, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
+    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
 } from './core.js';
@@ -107,13 +107,25 @@ function tapeHTML(p) {
     const t = tapeOf(p);
     if (t.known && !t.manual) return `<div class="row"><span class="set-val">${esc(sizeName(t.id))}</span><small class="set-ok">${icon('check')}read from the printer</small></div>`;
     const chosen = tapesSaving[p.path] > 0 ? kept(p).label_size || '' : t.manual ? t.id : '';
-    const note = t.manual ? 'Set by hand, the printer does not report its tape.'
+    const note = isDemo(p) ? 'Any roll this model takes.' : t.manual ? 'Set by hand, the printer does not report its tape.'
         : !t.known && (t.candidates || []).length ? `The printer measures labels ${t.unknown}, choose which ones.`
         : t.unknown ? `The printer reports ${t.unknown} tape, which is not offered here.`
         : `This printer does not report its tape, new labels are ${sizeName(t.id)}.`;
     return `<div class="set-stack"><select class="in set-sel" data-k="label_size" aria-label="Tape in ${esc(printerLabel(p))}">
             <option value="">Automatic${t.manual ? '' : `: ${esc(sizeName(t.id))}`}</option>${sizeOptions(p, chosen)}</select>
-        <small class="${t.manual ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
+        <small class="${t.manual || isDemo(p) ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
+}
+
+// The demo printer prints as any model, grouped by maker, e.g. QL-500 before QL-1100
+function modelHTML(p) {
+    const groups = new Map();
+    Object.keys(C.models).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+        .forEach(m => groups.set(C.models[m].vendor, [...(groups.get(C.models[m].vendor) || []), m]));
+    const chosen = kept(p).demo_model || p.model;
+    return `<div class="set-stack"><select class="in set-sel" data-k="demo_model" aria-label="Model of ${esc(printerLabel(p))}">${[...groups]
+        .sort(([a], [b]) => a.localeCompare(b, 'en')).map(([vendor, models]) => `<optgroup label="${esc(vendor)}">${models.map(m =>
+            `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(m.split('/').pop())}</option>`).join('')}</optgroup>`).join('')}</select>
+        <small class="muted">Try the label designer as with this printer: labels are made for it, nothing is printed.</small></div>`;
 }
 
 const seg = (k, opts, on, label) => `<div class="seg" role="group" aria-label="${esc(label)}">${opts.map(([v, n, off]) =>
@@ -149,7 +161,7 @@ function cardHTML(p, i) {
             <span class="d bad"></span><b>${esc(name)}</b><span class="muted grow" title="${esc(st.text)}">cannot be reached</span>
             ${removeHTML(p)}<button class="btn ghost sm" type="button" data-show>Show settings</button></div></section>`;
     }
-    const where = p.path === 'simulation' ? 'simulator' : (p.path || '').replace('file://', '');
+    const where = isDemo(p) ? '' : (p.path || '').replace('file://', '');
     const sub = [p.name ? printerName(p) : '', where, st.text, tapeLeft(p), p.battery != null ? `Battery ${p.battery}%` : ''].filter(Boolean).join(', ');
     const warns = (p.weak_connection ? '<small class="set-warn">The Wi-Fi connection seems weak, try moving the printer closer to the Wi-Fi router.</small>' : '')
         + (p.battery_low ? '<small class="set-warn">The battery is low, charge the printer.</small>' : '');
@@ -161,6 +173,7 @@ function cardHTML(p, i) {
             ${unreachable(p) ? '<button class="btn ghost sm" type="button" data-hide>Hide settings</button>' : ''}
             ${removeHTML(p)}<button class="btn soft sm" type="button" data-test${unreachable(p) ? ' disabled title="The printer cannot be reached"' : ' title="A label that shows which end leaves the printer first"'}>${icon('printer')}Print a test label</button></div>
         <div class="set-grid">
+            ${isDemo(p) ? `<span class="k">Model</span>${modelHTML(p)}` : ''}
             <span class="k">Tape</span>${tapeHTML(p)}
             <span class="k">Quality</span>${qualityHTML(p)}
             <span class="k">Cutting</span>${cuttingHTML(p)}
@@ -399,10 +412,14 @@ function saveSettings(p, changes) {
         const answer = await r.json().catch(() => ({}));
         answered();
         if (!r.ok) throw new Error(answer.message || 'The settings could not be saved');
-        if (!tape) return;
-        // The tape the server finds now, the status of all printers follows
+        const model = 'demo_model' in changes;
+        if (!tape && !model) return;
+        // The tape the server finds now, the status of all printers follows.
+        // Another model comes with a roll and cutting it takes.
         settingsSaves.tapes++;
-        [S.printer, ...S.printers].forEach(o => { if (o && o.path === path) o.tape = answer.tape; });
+        [S.printer, ...S.printers].forEach(o => {
+            if (o && o.path === path) Object.assign(o, { tape: answer.tape }, model ? { settings: answer.settings } : {});
+        });
         shown();
         host.refresh();
     }).catch(e => {

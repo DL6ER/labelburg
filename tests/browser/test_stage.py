@@ -42,7 +42,8 @@ def test_how_the_label_leaves_the_printer(editor):  # noqa: F811
     # The printer with its name below the label, which comes out of it
     paper, printer = rects(editor, '#paper', '#slot')
     assert printer[1] < paper[3] < printer[3]
-    assert editor.inner_text('#slot .model') == editor.inner_text('#printerChip b')
+    # The demo printer with the model it prints as
+    assert (editor.inner_text('#printerChip b'), editor.inner_text('#slot .model')) == ('Demo printer', 'Demo Brother QL-800')
     assert editor.is_visible('#cutmark')
     # Nothing else on the stage: how copies are cut is in Advanced
     assert editor.locator('#cuts, #tapecap, #flow').count() == 0
@@ -86,9 +87,9 @@ def test_the_bottom_leaving_first_and_the_large_preview(editor):  # noqa: F811
 
 
 def test_a_tape_the_printer_does_not_tell_is_noted_with_the_fits(editor):  # noqa: F811
+    status_is(editor, with_tape({'model': 'QL-1100', 'name': 'Office'}))
     type_label(editor, 'Shelf 3')
-    # The simulator does not say which tape it has
-    assert 'does not say which tape it has' in editor.inner_text('#tapeNote')
+    assert 'Office does not say which tape it has' in editor.inner_text('#tapeNote')
     assert editor.inner_text('#tapeChange') == 'Set the tape'
     editor.click('#tapeChange')
     editor.wait_for_selector('#setPart[data-part="printers"]')

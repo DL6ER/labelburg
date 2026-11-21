@@ -763,7 +763,7 @@
     "/labeldesigner/api/printer_status": {
       "get": {
         "summary": "Status of the printers",
-        "description": "With automatic detection (`PRINTER_PRINTER` not set), `printers` lists the detected printers and the simulator, the top-level fields describe the first one.",
+        "description": "With automatic detection (`PRINTER_PRINTER` not set), `printers` lists the detected printers and the demo printer (`simulation`, named `Demo printer`), the top-level fields describe the first one.",
         "operationId": "printerStatus",
         "parameters": [
           {
@@ -3036,6 +3036,10 @@
           "label_size": {
             "type": "string",
             "description": "The label size set by hand, used where the printer does not report its media."
+          },
+          "demo_model": {
+            "type": "string",
+            "description": "Of the demo printer (`simulation`) only: the model it prints as, one the drivers know, e.g. `VC-500W` or `Niimbot/B1`. Choosing one sets `label_size` too: the one set if the model takes it, else the one it is assumed to have. Empty: its configured model."
           },
           "cut": {
             "type": "string",
