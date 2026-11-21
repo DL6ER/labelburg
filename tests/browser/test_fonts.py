@@ -4,6 +4,7 @@ the toolbar of a line, the same menu for all lines and in the Settings."""
 import json
 import logging
 import re
+import shutil
 import struct
 
 import pytest
@@ -35,6 +36,11 @@ SAMPLES = [
     ('DejaVu Sans,Book', 'Sample Wide Extra Expanded', 'Regular', 400, 8),
 ]
 FAMILIES = ['DejaVu Sans', 'DejaVu Sans Mono', 'DejaVu Serif', 'Sample Mono', 'Sample Sans', 'Sample Serif', 'Sample Wide']
+# The DejaVu fonts of the test image and of fonts-dejavu-core in CI, the only
+# fonts of the server besides the samples: hosts have others, e.g. DejaVu
+# Sans Condensed
+DEJAVU = ['DejaVu Sans,Book', 'DejaVu Sans,Bold', 'DejaVu Sans,Mono / Book', 'DejaVu Sans,Mono / Bold', 'DejaVu Sans,Mono / Oblique',
+          'DejaVu Sans,Mono / Bold Oblique', 'DejaVu Serif,Book', 'DejaVu Serif,Bold']
 
 
 def font_copy(source: str, family: str, style: str, weight: int, width: int) -> bytes:
@@ -69,14 +75,16 @@ def sample_fonts(tmp_path_factory):
     system = Fonts(logging.getLogger('test'))
     for i, (source, family, style, weight, width) in enumerate(SAMPLES):
         (folder / f'sample{i}.ttf').write_bytes(font_copy(system.get_path(source), family, style, weight, width))
+    for name in DEJAVU:
+        shutil.copy(system.get_path(name), folder)
     return str(folder)
 
 
 @pytest.fixture
 def fonts(app, sample_fonts):
-    """The server with the sample fonts besides those of the system"""
+    """The server with the sample fonts and DEJAVU only"""
     before = app.extensions['fonts']
-    app.extensions['fonts'] = Fonts(app.logger, before.default_family, before.default_style, sample_fonts)
+    app.extensions['fonts'] = Fonts(app.logger, before.default_family, before.default_style, sample_fonts, system_fonts=False)
     yield
     app.extensions['fonts'] = before
 
