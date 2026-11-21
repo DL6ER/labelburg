@@ -148,7 +148,10 @@ def test_decode_reads_a_qr_and_a_datamatrix(camera_station, server):
     (lambda: barcode_png('ean8', '9638507'), '96385074'),
     (lambda: barcode_png('isbn13', '978316148410'), '9783161484100'),
     (lambda: barcode_png('gs1_128', '0101234567890128'), '(01)01234567890128'),
-], ids=['microqr', 'rmqr', 'aztec', 'pdf417', 'itf', 'codabar', 'pzn', 'code128', 'code39', 'ean13', 'ean8', 'isbn13', 'gs1_128'])
+    # Drawn in the shape of an EAN-13 with 14 digits, which no reader takes
+    (lambda: barcode_png('ean14', '1234567890123'), None),
+    (lambda: barcode_png('gtin', '4006381333931'), None),
+], ids=['microqr', 'rmqr', 'aztec', 'pdf417', 'itf', 'codabar', 'pzn', 'code128', 'code39', 'ean13', 'ean8', 'isbn13', 'gs1_128', 'ean14', 'gtin'])
 def test_decode_reads_the_codes_labelburg_prints(camera_station, picture, text):
     page, _, _ = camera_station()
     src = 'data:image/png;base64,' + base64.b64encode(picture()).decode()
@@ -268,6 +271,12 @@ def test_a_hidden_page_lets_go_of_the_camera(camera_station):
         Object.defineProperty(document, 'hidden', { value: false, configurable: true });
         document.dispatchEvent(new Event('visibilitychange'));
     }""")
+    # The keyboard scanner goes on as before
+    page.wait_for_selector('#scanField:focus')
+    station.scan('B-42')
+    station.wait_for(2)
+    assert station.none_for(300) == 2
+    assert station.codes() == [LINK, 'B-42']
     # Started again by a press
     assert page.evaluate('() => window.cameraAsked') == 1
     page.click('#scanCamera')

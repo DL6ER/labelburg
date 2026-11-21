@@ -3,7 +3,7 @@
 
 const READER = new URL('./vendor/zxing-wasm/reader/index.js', import.meta.url).href;
 const WASM = new URL('./vendor/zxing-wasm/zxing_reader.wasm', import.meta.url).href;
-// The codes Labelburg prints (PZN is a Code 39), and UPC-E of products
+// These kinds of codes; EAN-14 and GTIN, drawn like an EAN-13 with 14 digits, are not read
 const FORMATS = ['QRCode', 'MicroQRCode', 'RMQRCode', 'DataMatrix', 'Aztec', 'PDF417', 'EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128', 'Code39', 'PZN', 'ITF', 'Codabar'];
 
 export const REFUSED = 'The browser did not allow the camera. Allow it in the address bar and try again.';
@@ -47,12 +47,8 @@ function problem(e) {
 const openStream = () => navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
 const ended = stream => { if (stream) stream.getTracks().forEach(track => track.stop()); };
 
-// The camera's picture in video and each code read in it passed to
-// onCode(text), a frame about every `every` ms. A code still in view is
-// taken once: the same text seen less than `again` ms before is left out.
-// No frame is read while paused() is true, and the time paused does not
-// count for the codes seen before. onError(message) when the camera or the
-// reader cannot start, or the camera ends, e.g. unplugged.
+// A code in view is taken once: the same text seen less than `again` ms
+// before is left out; paused time does not count.
 export function camera(video, onCode, { clock = performance, again = 3000, every = 150, open = openStream, read = null, paused = () => false, onError = () => { } } = {}) {
     let stopped = false, timer = null, pausedAt = null;
     const seen = new Map(), canvas = document.createElement('canvas');
