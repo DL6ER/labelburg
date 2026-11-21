@@ -1,5 +1,4 @@
 """Values for the blanks of a label from a text read by a barcode scanner."""
-import codecs
 import quopri
 import re
 
@@ -67,13 +66,14 @@ def _parts(value: str, sep: str, count: int = 0, decode=str) -> list[str]:
 
 
 def _quoted_printable(charset: str):
-    """Decoder of quoted-printable text in charset (UTF-8 if unknown)."""
-    try:
-        if not codecs.lookup(charset)._is_text_encoding:
-            charset = 'UTF-8'
-    except LookupError:
-        charset = 'UTF-8'
-    return lambda part: quopri.decodestring(part.encode('utf-8')).decode(charset, 'replace')
+    """Decoder of quoted-printable text in charset (UTF-8 if it is no text encoding)."""
+    def decode(part: str) -> str:
+        raw = quopri.decodestring(part.encode('utf-8'))
+        try:
+            return raw.decode(charset, 'replace')
+        except (LookupError, ValueError):
+            return raw.decode('utf-8', 'replace')
+    return decode
 
 
 def _vcard_lines(text: str) -> list[tuple[str, str, object]]:

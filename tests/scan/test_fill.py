@@ -77,7 +77,7 @@ def test_unknown_charset_falls_back_to_utf8():
 
 
 def test_charset_that_is_no_text_encoding_falls_back_to_utf8():
-    for charset in ('BASE64', 'HEX', 'ROT13'):
+    for charset in ('BASE64', 'HEX', 'ROT13', 'IDNA', 'undefined', 'UTF\x008'):
         text = f'BEGIN:VCARD\nN;CHARSET={charset};ENCODING=QUOTED-PRINTABLE:M=C3=BCller;J=C3=BCrgen\nEND:VCARD'
         assert scan.fill_blanks(['First name', 'Last name'], {}, text) == {'First name': 'Jürgen', 'Last name': 'Müller'}
 

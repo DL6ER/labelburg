@@ -76,13 +76,50 @@ def test_vcard_fills_name_and_address_blanks(printed):
     assert _lines(printed.queued[0]) == ['Erika Muster', 'Hauptstr. 5', '53111 Bonn', 'Deutschland']
 
 
+ROOM = {'name': 'Room', 'print_type': 'text', 'code_text': '', 'blanks': {'Room': 'Stored'}, 'text': [
+    {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:code}}'},
+    {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Room}}'}]}
+
+
 def test_request_fields_do_not_fill_blanks(printed):
-    _save(printed, name='Two.json', print_type='text', code_text='', text=[
-        {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:name}}'},
-        {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Text}}'}])
-    response = _scan(printed, name='Two.json', code='x')
-    assert response.status_code == 400 and response.get_json()['message'] == scan.SEVERAL_BLANKS
+    _save(printed, **{**ROOM, 'name': 'Room.json'})
+    response = printed.post(SCAN_URL, json={'name': 'Room.json', 'code': 'A-17', 'Room': 'Kitchen', 'blanks': {'Room': 'X'}}, headers=AJAX)
+    assert response.status_code == 200 and response.get_json()['filled'] == {'code': 'A-17'}
+    assert _lines(printed.queued[0]) == ['A-17', 'Stored']
+
+
+def test_request_fields_do_not_fill_blanks_of_the_preview(printed, monkeypatch):
+    from app.labeldesigner import routes
+    _save(printed, **{**ROOM, 'name': 'Room.json'})
+    made = []
+    create = routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda data, *args, **kwargs: made.append(data['blanks']) or create(data, *args, **kwargs))
+    response = printed.post(SCAN_URL, json={'name': 'Room.json', 'code': 'A-17', 'Room': 'Kitchen', 'blanks': {'Room': 'X'}, 'preview_only': 1}, headers=AJAX)
+    assert response.status_code == 200
+    assert made == [{'Room': 'Stored', 'code': 'A-17'}]
+
+
+def test_preview_only_is_read_like_other_flags(printed):
+    for value in (0, '0', None):
+        assert _scan(printed, name='Box.json', code='A-17', preview_only=value).get_json()['printed'] is True
+    assert len(printed.queued) == 3
+    printed.queued.clear()
+    for value in (1, '1', 'true'):
+        assert _scan(printed, name='Box.json', code='A-17', preview_only=value).get_json()['printed'] is False
+    for value in ('on', 'yes', [1]):
+        response = _scan(printed, name='Box.json', code='A-17', preview_only=value)
+        assert response.status_code == 400 and response.get_json()['success'] is False
     assert printed.queued == []
+
+
+def test_refused_preview_answers_like_a_refused_print(printed, monkeypatch):
+    from app.labeldesigner import routes
+    for error, status in ((routes.TextTooLong('too long'), 413), (ValueError('bad'), 400)):
+        monkeypatch.setattr(routes, '_preview_label', lambda *args, error=error: (_ for _ in ()).throw(error))
+        response = _scan(printed, name='Box.json', code='x', preview_only=1)
+        assert response.status_code == status
+        result = response.get_json()
+        assert result['success'] is False and result['message']
 
 
 def test_refusals_are_sent_as_they_are(printed):

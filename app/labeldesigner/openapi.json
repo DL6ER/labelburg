@@ -2239,7 +2239,7 @@
             }
           },
           "400": {
-            "description": "The request was refused, `message` says why: nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, or a scanner with another keyboard layout.",
+            "description": "The request was refused, `message` says why: no name, nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, a scanner with another keyboard layout, a value of the request that is invalid, or a label that cannot be printed or previewed as asked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2249,7 +2249,17 @@
             }
           },
           "404": {
-            "description": "The request was refused, `message` says why.",
+            "description": "No saved label has that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "With `preview_only`, the text does not fit on the label, `message` says why.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2259,7 +2269,7 @@
             }
           },
           "500": {
-            "description": "The request was refused, `message` says why.",
+            "description": "The saved label could not be read, `message` says why.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2269,7 +2279,7 @@
             }
           },
           "503": {
-            "description": "Not printed, the printer could not print the label, `message` says why. The same request may succeed later.",
+            "description": "Not printed, the printer could not print the label, `message` says why. The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3132,7 +3142,7 @@
           },
           "code": {
             "type": "string",
-            "description": "The scanned text."
+            "description": "The scanned text, a text and no list or number."
           },
           "printer": {
             "type": "string",
@@ -3145,7 +3155,8 @@
           "preview_only": {
             "type": "integer",
             "enum": [0, 1],
-            "description": "1 prints nothing and only returns the image."
+            "default": 0,
+            "description": "1 (also `true`) prints nothing and only returns the image. 0 (also `false`) or left out prints. Any other value is refused."
           }
         }
       },

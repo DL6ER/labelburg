@@ -1116,10 +1116,10 @@ def scan_print():
     # Print a saved label with the blanks filled from a scanned code, or only
     # preview it with preview_only.
     code = _requested('code')
-    preview_only = str(_requested('preview_only')).lower() in ('1', 'true')
 
     def respond(data, image_bytes):
         try:
+            preview_only = _whole_or(_requested('preview_only'), 0) != 0
             filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), code if isinstance(code, str) else '')
         except ValueError as e:
             return _refused('Scan', e, refusals.INVALID_INPUT)
@@ -1128,7 +1128,8 @@ def scan_print():
             try:
                 label, im, _ = _preview_label(data, _get_repo_dir(), image_bytes, False, True, filled)
             except Exception as e:
-                return _preview_refused(e)
+                _log_refused_request('Preview', e)
+                return _fail(refusals.message(e, refusals.PREVIEW_FAILED), 413 if isinstance(e, TextTooLong) else 400)
             return {**result, 'image': base64.b64encode(image_to_png_bytes(im, gray=not label.in_color)).decode()}
         printed = _print_stored_label(data, _get_repo_dir(), image_bytes, filled, 'png')
         return {**result, **printed} if isinstance(printed, dict) else printed
