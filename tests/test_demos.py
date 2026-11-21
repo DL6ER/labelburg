@@ -210,7 +210,7 @@ def test_sticker_of_this_project(client, label_id, tagline):
     assert 135 < preview.width / 320 * 25.4 < 145
     margin_top, margin_bottom, margin_left, margin_right = (int(data[f'margin_{side}']) for side in ('top', 'bottom', 'left', 'right'))
     high = 617 - margin_top - margin_bottom
-    top = (617 - high) // 2 + (margin_top - margin_bottom) // 2
+    top = margin_top
     # The icon left, filling the tape between the margins
     icon = preview.crop((margin_left, top, margin_left + high, top + high))
     with Image.open(os.path.join(demos.IMAGE_DIR, 'labelburg.png')) as original:

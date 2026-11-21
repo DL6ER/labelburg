@@ -139,7 +139,7 @@
                 }
               },
               "X-Label-Image-Position": {
-                "description": "Where the image or code is next to the text, for labels with both: `above`, `below`, `left` or `right`, as given in `image_position` or chosen without it.",
+                "description": "Where the image or code is next to the text, for labels with both: `above`, `below`, `left` or `right`, as given in `image_position`, as `parts_order` places it or chosen without them.",
                 "schema": {
                   "type": "string",
                   "enum": [
@@ -147,6 +147,22 @@
                     "below",
                     "left",
                     "right"
+                  ]
+                }
+              },
+              "X-Label-Parts-Order": {
+                "description": "The parts of a label with at least two of them as laid out, e.g. `image,code,text`: as given in `parts_order`, else as at `image_position` or chosen without it. Left out for a label of one part.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Label-Parts-Direction": {
+                "description": "How the parts in `X-Label-Parts-Order` follow each other: `row` or `column`.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "row",
+                    "column"
                   ]
                 }
               },
@@ -3248,6 +3264,20 @@
               "right"
             ],
             "description": "Where the image or code is next to the text, for labels with both. Left out or empty: above it across the tape, left of it along the tape (`orientation` `rotated`). With `image_qrcode_text` the image is there, left of the text if left out, and the code on the other side. An endless label grows along the tape to hold both. Fitted to the label (`image_fit`), it takes at most half of the label along the side of the text, the text the rest, where the label does not grow with the text, with `image_qrcode_text` the image and the code a third each. Where it is follows the lines of text as written, also those of blanks left empty."
+          },
+          "parts_order": {
+            "type": "string",
+            "pattern": "^(?!.*\\b(image|code|text)\\b.*\\b\\1\\b)\\s*(image|code|text)\\s*(,\\s*(image|code|text)\\s*){0,2}$",
+            "example": "image,code,text",
+            "description": "The image, the code and the text in any order, one after the other in `parts_direction`, e.g. `image,code,text` for the text right of a code that is right of the image. Each part named once, spaces around the names are left out; parts the label does not have are skipped, parts it has that are left out follow in the order of `image_position`. The text is in the middle of the room left between its neighbors. Fitted (`image_fit`), the image and the code take a part of the side along the direction as next to `image_position`. A label of two parts in an order is laid out as at the matching `image_position`. Left out or empty: as at `image_position`, which it overrides."
+          },
+          "parts_direction": {
+            "type": "string",
+            "enum": [
+              "row",
+              "column"
+            ],
+            "description": "How the parts of `parts_order` follow each other: `row` side by side as the text reads, also along the tape, `column` one below the other. Left out or empty: as at `image_position`, left and right a row, above and below a column."
           },
           "vertical_align": {
             "type": "string",
