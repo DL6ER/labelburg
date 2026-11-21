@@ -152,7 +152,7 @@ def test_decode_reads_a_qr_and_a_datamatrix(camera_station, server):
     (lambda: barcode_png('ean14', '1234567890123'), None),
     (lambda: barcode_png('gtin', '4006381333931'), None),
 ], ids=['microqr', 'rmqr', 'aztec', 'pdf417', 'itf', 'codabar', 'pzn', 'code128', 'code39', 'ean13', 'ean8', 'isbn13', 'gs1_128', 'ean14', 'gtin'])
-def test_decode_reads_the_codes_labelburg_prints(camera_station, picture, text):
+def test_decode_reads_the_kinds_of_codes_it_names(camera_station, picture, text):
     page, _, _ = camera_station()
     src = 'data:image/png;base64,' + base64.b64encode(picture()).decode()
     assert page.evaluate("""async src => {
