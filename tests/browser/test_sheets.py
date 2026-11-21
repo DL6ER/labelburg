@@ -2,6 +2,7 @@
 designed, the stage tells when the copies leave the last page not full."""
 from tests.browser.helpers import with_tape
 from tests.browser.test_editor import editor, type_label, wait_for_preview  # noqa: F401
+from tests.browser.test_gallery import open_saved, save_new
 from tests.browser.test_stage import status_is
 
 # A Niimbot B1 with a roll of 15 x 8 mm labels, 2 across and 3 along a page
@@ -16,11 +17,12 @@ def on_roll(page, **printer):
 def set_copies(page, n):
     page.fill('#copies', str(n))
     page.dispatch_event('#copies', 'input')
-    wait_for_preview(page)
 
 
 def note_shown(page) -> bool:
-    page.wait_for_function("() => labelEditor.S.edit && document.querySelector('#labelbox').dataset.laid === '1'")
+    """Whether the note shows once the label is drawn. Copies changed later
+    do not mark the stage busy, wait for the note itself then."""
+    wait_for_preview(page)
     return page.is_visible('#sheetNote')
 
 
@@ -42,11 +44,10 @@ def test_the_last_page_not_full_is_told(editor):  # noqa: F811
 def test_fill_it_fills_the_page(editor):  # noqa: F811
     on_roll(editor)
     editor.click('#sheetNote [data-fill]')
-    wait_for_preview(editor)
+    editor.wait_for_selector('#sheetNote', state='hidden')
     assert editor.input_value('#copies') == '6'
-    assert not note_shown(editor)
     set_copies(editor, 7)
-    assert note_shown(editor)
+    editor.wait_for_selector('#sheetNote:not([hidden])')
     assert editor.locator('#sheetNote .sheet i.on').count() == 1
 
 
@@ -63,5 +64,22 @@ def test_single_label_rolls_tell_nothing(editor):  # noqa: F811
     asked = []
     editor.on('request', lambda r: asked.append(r.url) if r.url.endswith('/api/preview') else None)
     set_copies(editor, 5)
-    assert not note_shown(editor)
+    # Nothing to wait for: no request is the point
+    editor.wait_for_timeout(500)
+    assert not editor.is_visible('#sheetNote')
     assert asked == []
+
+
+def test_templates_tell_the_last_page(editor):  # noqa: F811
+    status_is(editor, with_tape(B1))
+    save_new(editor, 'Spice tin', 'Paprika')
+    open_saved(editor, 'Spice tin')
+    editor.wait_for_selector('#tplSheet:not([hidden])')
+    assert 'The last page is not full.' in editor.inner_text('#tplSheet')
+    assert editor.locator('#tplSheet .sheet i.on').count() == 1
+    editor.click('#tplSheet [data-fill]')
+    editor.wait_for_selector('#tplSheet', state='hidden')
+    assert editor.input_value('#tplCopies') == '6'
+    editor.click('#tplDetail [data-cp="1"]')
+    editor.wait_for_selector('#tplSheet:not([hidden])')
+    assert editor.locator('#tplSheet .sheet i.on').count() == 1
