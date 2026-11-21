@@ -34,17 +34,20 @@ class _Job:
         self.counted = False
         self.stage = None
         self.percent = None
+        self.unit = 'label'
 
 
-def start(device: str, lengths: list[float], speed: tuple[float, float], mode=None):
+def start(device: str, lengths: list[float], speed: tuple[float, float], mode=None, unit: str = 'label'):
     """A job starts on the printer: labels of lengths in mm along the paper,
     printed at speed, mm/s and the seconds each label takes besides, e.g. to
-    feed and cut it. A speed of 0 gives no estimate."""
+    feed and cut it. A speed of 0 gives no estimate. unit is page where each
+    is a page of several labels."""
     mm_per_second, besides = speed
     seconds = [besides + length / mm_per_second for length in lengths] if mm_per_second > 0 else [0.0] * len(lengths)
     key = devices.lock_key(device)
     with _guard:
         _jobs[key] = _Job(seconds, mm_per_second > 0, _factors.get((key, mode), 1.0), mode)
+        _jobs[key].unit = unit
 
 
 def counting(device: str):
@@ -112,6 +115,8 @@ def state(device: str) -> dict | None:
                 result['percent'] = job.percent
         if job.estimated:
             result['seconds_left'] = round(_seconds_left(job))
+        if job.unit != 'label':
+            result['unit'] = job.unit
         return result
 
 

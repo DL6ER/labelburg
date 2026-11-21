@@ -215,3 +215,11 @@ def test_paper_set_by_hand_for_the_other_model_is_the_same_paper():
     design = {'label_size': 'escpos58', 'orientation': 'standard'}
     assert tape.on_tape(design, t) == {'label_size': 'escpos58-180', 'orientation': 'standard'}
     assert not tape.placed('escpos58', t) and tape.placed('escpos80', t)
+
+
+def test_labels_of_a_page_tell_which_side_runs_along(monkeypatch):
+    # Two 20 x 30 mm labels side by side: a 40 x 30 mm page of labels longer than wide
+    from app.labeldesigner.drivers.labels import FormFactor, Label
+    page = Label('test20x30-2x1', (40, 30), FormFactor.DIE_CUT, (320, 240), (320, 240), 0, pieces=(2, 1, 0))
+    monkeypatch.setitem(tape.SIZES, page.identifier, page)
+    assert tape._long_along_tape(page.identifier)

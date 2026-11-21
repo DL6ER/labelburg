@@ -335,6 +335,9 @@ class Niimbot(Driver):
         """Print each label as a job of its own, the way the script this
         came from prints one, with the label type of the roll."""
         device, model = queue.device_specifier, queue.model
+        # A page of several labels is printed as one
+        size = next((size for size in LABELS if size.identifier == queue.label_size), None)
+        what = 'page' if size and size.pieces[0] * size.pieces[1] > 1 else 'label'
         # It asks the printer itself, and may read the answer owed
         _owed.pop(device, None)
         try:
@@ -364,8 +367,8 @@ class Niimbot(Driver):
             if isinstance(e, protocol.NoTag):
                 return 'The printer prints only on Niimbot rolls with their RFID tag'
             if isinstance(e, protocol.NotPrinted):
-                return 'The printer did not tell that it printed the label'
-            return protocol.reason(e) or 'The printer refused the label, the log of the server names the reason'
+                return f'The printer did not tell that it printed the {what}'
+            return protocol.reason(e) or f'The printer refused the {what}, the log of the server names the reason'
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             # Asked again at the next status query, which then tells why

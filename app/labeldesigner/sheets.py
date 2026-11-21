@@ -42,7 +42,7 @@ def lying(label: Label, image: Image.Image) -> bool:
     return image.width != piece(label).dots_printable[0]
 
 
-def spots(label: Label, lying: bool) -> list[tuple[int, int]]:
+def spots(label: Label, is_lying: bool) -> list[tuple[int, int]]:
     """The top left of each label on the sheet in dots, across and along
     from the end printed first, in the order the copies fill them: as read
     with the label upright, lying labels with the sheet turned clockwise."""
@@ -50,7 +50,7 @@ def spots(label: Label, lying: bool) -> list[tuple[int, int]]:
     width, length = piece(label).dots_printable
     step = width + _gap_dots(label)
     cells = [(col * step, row * length) for row in range(along) for col in range(across)]
-    return sorted(cells, key=(lambda spot: (spot[0], -spot[1])) if lying else (lambda spot: (spot[1], spot[0])))
+    return sorted(cells, key=(lambda spot: (spot[0], -spot[1])) if is_lying else (lambda spot: (spot[1], spot[0])))
 
 
 def compose(label: Label, images: list[Image.Image]) -> Image.Image:
@@ -96,7 +96,7 @@ def _mm(value: float) -> int | float:
     return _whole(round(value, 1))
 
 
-def fill_state(label: Label, lying: bool, copies: int, per_copy: int, limit: int) -> dict | None:
+def fill_state(label: Label, is_lying: bool, copies: int, per_copy: int, limit: int) -> dict | None:
     """How the copies fill the last sheet, for the label designer to draw:
     the sheet and its labels in mm as the label is seen upright, in the
     order they are filled, how many of them are filled, and the copies that
@@ -108,8 +108,8 @@ def fill_state(label: Label, lying: bool, copies: int, per_copy: int, limit: int
     width, length = piece(label).tape_size
     sheet = label.tape_size
     scale = sheet[0] / label.dots_total[0]
-    boxes = [(x * scale, y * scale, width, length) for x, y in spots(label, lying)]
-    if lying:
+    boxes = [(x * scale, y * scale, width, length) for x, y in spots(label, is_lying)]
+    if is_lying:
         # Turned clockwise, the end printed first is on the right
         boxes = [(sheet[1] - y - h, x, h, w) for x, y, w, h in boxes]
         sheet = sheet[::-1]

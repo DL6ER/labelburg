@@ -569,7 +569,7 @@ const drawPreview = latest(async () => {
     const values = previewValues(E);
     let p;
     try {
-        p = await preview(shown, values, copies());
+        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0);
     } catch (e) {
         if (me < shownSeq) return;
         shownSeq = me;

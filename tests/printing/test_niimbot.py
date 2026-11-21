@@ -906,3 +906,23 @@ def test_b1_that_stays_silent_does_not_answer(b1, fake, monkeypatch):
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['errors'] == ['The printer does not answer']
 
+
+
+def test_pages_are_counted_while_printing(b1, fake, monkeypatch):
+    without_status(monkeypatch)
+    seen = []
+    send = fake.sendall
+    fake.sendall = lambda data: (data[2] == 0x01 and seen.append(progress.state(B1_DEVICE))) or send(data)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot15x8-2x3', 'print_type': 'text', 'text': TEXT, 'print_count': '8'})
+    assert response.get_json() == {'success': True}
+    assert [(state['label'], state['labels'], state['unit']) for state in seen] == [(1, 2, 'page'), (2, 2, 'page')]
+
+
+def test_page_that_is_not_told_printed(b1, fake, monkeypatch):
+    without_status(monkeypatch)
+    monkeypatch.setitem(REPLIES, 0xa3, (0xb3, struct.pack('>H', 0)))
+    monkeypatch.setattr(protocol, 'PRINT_WAIT', 0)
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot15x8-2x3', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json()['message'] == 'The printer did not tell that it printed the page'

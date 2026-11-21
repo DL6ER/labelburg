@@ -1307,16 +1307,27 @@ def preview_from_image():
         # and shows how the selected ones print
         response.headers.set('X-PDF-Selected-Pages', str(len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count))))
     # On a roll with several labels to a page, how the copies fill the last one
-    copies, files = max(1, _whole_or(values.get('print_count'), 1)), max(1, _whole_or(values.get('file_count'), 1))
-    per_copy = files if files > 1 else len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
     size = label_of(values.get('label_size', DEFAULT_LABEL_SIZE))
-    if state := sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT']):
+    if sheets.per_sheet(size) > 1:
+        pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
+        state = sheets.fill_state(size, sheets.lying(size, im), _count(values.get('print_count')),
+                                  _count(values.get('labels_per_copy'), pages), current_app.config['PRINT_MAX_COUNT'])
         response.headers.set('X-Label-Sheet', json.dumps(state, separators=(',', ':')))
     # It suggests stronger contrast for a light image on the tapes of the VC-500W
     if (images[0] is not None and _palette(values.get('label_size', DEFAULT_LABEL_SIZE)) == 'color'
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _count(value, default: int = 1) -> int:
+    """A count the preview only tells about, default where it is no whole
+    number of at least 1."""
+    try:
+        count = _whole_or(value, default)
+    except (TypeError, ValueError):
+        return default
+    return count if count >= 1 else default
 
 
 def _length_problem(values: dict, im, model: str | None = None) -> str:

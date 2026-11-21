@@ -519,10 +519,10 @@ export function sheetNote(sheet, max = 100) {
         + (sheet.fill && sheet.fill <= max ? `<button type="button" class="pill" data-fill="${esc(sheet.fill)}">Fill it</button>` : '');
 }
 
-export async function preview(design, values, copies = 1) {
+export async function preview(design, values, copies = 1, perCopy = 0) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
     // On a roll with several labels to a page the server tells how the copies fill the last one
-    const sheet = isSheet(asked.label_size), files = labelFiles(design).length;
+    const sheet = isSheet(asked.label_size);
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -532,7 +532,7 @@ export async function preview(design, values, copies = 1) {
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
     const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
-        sheet ? [copies, files] : 0]);
+        sheet ? [copies, perCopy] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -543,7 +543,8 @@ export async function preview(design, values, copies = 1) {
         let r;
         try {
             const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
-            if (sheet) fd.append('file_count', String(Math.max(1, files)));
+            // Each copy prints all files and PDF pages, the preview shows one
+            if (sheet && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
             r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');
@@ -848,7 +849,7 @@ export async function followPrinter() {
 export function jobText(job) {
     const parts = [];
     if (job.stage) parts.push(job.stage + (job.percent !== undefined ? ` ${job.percent} %` : ''));
-    if (job.label !== undefined && job.labels > 1) parts.push(`label ${job.label} of ${job.labels}`);
+    if (job.label !== undefined && job.labels > 1) parts.push(`${job.unit === 'page' ? 'page' : 'label'} ${job.label} of ${job.labels}`);
     if (job.seconds_left !== undefined) parts.push(job.seconds_left < 10 ? 'a few seconds left' : job.seconds_left < 60 ? `about ${Math.round(job.seconds_left / 5) * 5} s left` : `about ${Math.round(job.seconds_left / 60)} min left`);
     const text = parts.join(', ');
     return text.charAt(0).toUpperCase() + text.slice(1);

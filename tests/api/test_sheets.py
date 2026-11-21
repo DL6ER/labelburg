@@ -193,14 +193,14 @@ def test_full_sheet_has_no_fill(client):
     assert sheet_header(client, 'niimbot15x8-2x3', print_count=6) | {'labels': None} == {'size': [30, 24], 'labels': None, 'filled': 6, 'fill': None}
 
 
-def test_files_count_per_copy(client):
-    state = sheet_header(client, 'niimbot15x8-2x3', file_count=4)
+def test_labels_per_copy_count(client):
+    state = sheet_header(client, 'niimbot15x8-2x3', labels_per_copy=4)
     assert (state['filled'], state['fill']) == (4, 3)
 
 
 def test_fill_above_the_limit_is_left_out(client):
     client.application.config['PRINT_MAX_COUNT'] = 10
-    state = sheet_header(client, 'niimbot15x8-2x3', file_count=5)
+    state = sheet_header(client, 'niimbot15x8-2x3', labels_per_copy=5)
     assert (state['filled'], state['fill']) == (5, None)
 
 
@@ -216,3 +216,21 @@ def test_copies_below_one_count_as_one(client):
 
 def test_single_sizes_tell_no_sheet(client):
     assert sheet_header(client, 'niimbot50x30', print_count=3) is None
+
+
+@pytest.mark.parametrize('label_size', ['62', 'niimbot50x30'])
+def test_counts_that_are_no_number_leave_other_sizes_alone(client, label_size):
+    response = client.post(f'{API}/preview', data={'label_size': label_size, 'text': COUNTER, **B1,
+                                                   'print_count': 'abc', 'labels_per_copy': '2.5'})
+    assert response.status_code == 200
+    assert 'X-Label-Sheet' not in response.headers
+
+
+def test_counts_that_are_no_number_count_one(client):
+    assert sheet_header(client, 'niimbot15x8-2x3', print_count='abc', labels_per_copy='1e3')['filled'] == 1
+
+
+def test_log_counts_labels_not_pages(client, printed, caplog):
+    caplog.set_level('INFO', logger='app.labeldesigner.printer')
+    _print(client, print_count=8)
+    assert 'Printing 8 labels' in caplog.text

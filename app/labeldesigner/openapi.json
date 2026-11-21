@@ -59,11 +59,10 @@
                         "default": 1,
                         "description": "Number of labels to be printed, for `X-Label-Sheet`."
                       },
-                      "file_count": {
+                      "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "default": 1,
-                        "description": "Number of files to be printed, each a label of its own, for `X-Label-Sheet`. The preview shows the first."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -105,11 +104,10 @@
                         "default": 1,
                         "description": "Number of labels to be printed, for `X-Label-Sheet`."
                       },
-                      "file_count": {
+                      "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "default": 1,
-                        "description": "Number of files to be printed, each a label of its own, for `X-Label-Sheet`. The preview shows the first."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -129,7 +127,7 @@
                 }
               },
               "X-Label-Sheet": {
-                "description": "On a roll of several labels to a page, how the labels `print_count` and `file_count` (or the pages `pdf_pages` selects) fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. Not set for other label sizes.",
+                "description": "On a roll of several labels to a page, how `print_count` copies of `labels_per_copy` labels fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. Not set for other label sizes.",
                 "schema": {
                   "type": "string"
                 }
@@ -3799,7 +3797,14 @@
               },
               "labels": {
                 "type": "integer",
-                "description": "The labels of the job."
+                "description": "The labels of the job, its pages where `unit` is `page`."
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "page"
+                ],
+                "description": "`page` where the printer prints pages of several labels, e.g. a Niimbot B1 on such a roll: `label` and `labels` count pages. Left out otherwise."
               },
               "seconds_left": {
                 "type": "integer",

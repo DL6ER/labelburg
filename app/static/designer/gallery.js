@@ -9,6 +9,7 @@ import {
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
     printedSub, NO_IMAGE, sheetNote
 } from './core.js';
+import { perCopyOf } from './media.js';
 
 let ctx = null;
 const G = { cat: 'saved', fitsOnly: true, typed: '', typedCat: false, sel: null };
@@ -224,13 +225,19 @@ async function showDetail(item, values = null) {
         <div id="tplMore"></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
     const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
-    const shot = () => preview(work.design, work.values, copiesNow()).then(p => {
+    // Only the answer to the last preview asked is shown, earlier ones may come later
+    let asked = 0;
+    const shot = () => {
+        const mine = ++asked;
+        return perCopyOf(work.design).then(n => preview(work.design, work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
+    };
+    const shotDone = (p, mine) => {
         const img = $('#tplShot'), note = $('#tplSheet');
-        if (!img || G.sel !== item) return;
+        if (!img || G.sel !== item || mine !== asked) return;
         img.src = p.url;
         note.innerHTML = sheetNote(p.sheet);
         note.hidden = !note.innerHTML;
-    }, () => { });
+    };
     shot();
     const later = debounce(shot, 250);
     // One print at a time: a key held down or a second click waits for it
