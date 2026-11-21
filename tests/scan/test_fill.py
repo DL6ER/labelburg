@@ -57,6 +57,27 @@ def test_refusals():
             scan.fill_blanks(names, {}, text)
 
 
+def test_advice_names_the_label_and_its_blanks():
+    assert scan.advice(scan.NO_BLANKS, 'Box', []) == (
+        'Open "Box" in the editor, type [code where the code goes, choose Blank "code" and save the label.')
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Envelope', ['Name', 'Address']) == (
+        'Open "Envelope" in the editor, click the blank "Name", change its name to code and save the label. '
+        'Contact codes, e.g., from a business card, fill "Name" and "Address" as they are.')
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Room', 'Shelf', 'Name']) == (
+        'Open "Shelf" in the editor, click the blank "Room", change its name to code and save the label. '
+        'Contact codes, e.g., from a business card, fill "Name" as it is.')
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Room', 'Shelf']) == (
+        'Open "Shelf" in the editor, click the blank "Room", change its name to code and save the label.')
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Shelf', ['Room', 'Shelf', 'Box']) == (
+        'Open "Shelf" in the editor, click the blank "Room" and change its name to Name, click the blank "Shelf" and '
+        'change its name to Address, and save the label. Contacts fill the blanks Name, Address, Company, Phone and Email.')
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Room', ['Room']) == (
+        'Open "Room" in the editor, click the blank "Room" and change its name to Name, and save the label. '
+        'Contacts fill the blanks Name, Address, Company, Phone and Email.')
+    for problem in (scan.NOTHING_SCANNED, scan.WRONG_LAYOUT, scan.INCOMPLETE, 'Text is too long'):
+        assert scan.advice(problem, 'Box', ['code']) is None
+
+
 def test_a_vcard_cut_in_parts_is_refused():
     # A pause of the scanner within the card splits it into scans of their own
     head, tail = VCARD[:60], VCARD[60:]

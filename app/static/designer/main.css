@@ -619,6 +619,7 @@ textarea.scan-field { width: 100%; min-height: 96px; resize: none; padding: 14px
 .scan-state.warn { align-items: flex-start; color: var(--warn); font-weight: 500; }
 .scan-state.warn .ic { margin-top: 2px; }
 .scan-filled { margin: -4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.scan-hint { margin: -4px 0 0 23px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .scan-list { display: flex; flex-direction: column; max-height: 60vh; overflow: auto; }
 
 @media (max-width: 1100px) {

@@ -209,7 +209,8 @@ function drawResult() {
     const code = shown.code.length > 200 ? shown.code.slice(0, 200) + '...' : shown.code;
     let state;
     if (shown === sending) state = `<p class="scan-state">${esc(shown.previewOnly ? 'Showing' : 'Printing')}${esc(queue.length ? ', the next scans wait their turn' : '...')}</p>`;
-    else if (shown.message) state = `<p class="scan-state warn">${icon('warn')}<span>${esc(shown.message)}</span></p>`;
+    else if (shown.message) state = `<p class="scan-state warn">${icon('warn')}<span>${esc(shown.message)}</span></p>
+        ${shown.hint ? `<p class="scan-hint">${esc(shown.hint)}</p>` : ''}`;
     else state = `${shown.image ? `<div class="scan-shot"><img alt="The label" src="data:image/png;base64,${esc(shown.image)}"></div>` : ''}
         <p class="scan-state ok">${icon('check')}<span>${esc(shown.printed ? `Printed: ${titleOf(shown.name)}` : 'Shown, not printed')}</span></p>
         ${shown.filled.length ? `<p class="scan-filled muted">${esc(`Filled: ${shown.filled.join(', ')}`)}</p>` : ''}`;
@@ -233,7 +234,10 @@ async function send() {
             try { data = await r.json(); } catch (e) { }
             if (r.status === 404) scan.message = GONE(scan.name);
             // Only an answer that says so is a success, e.g. not a sign-in page in between
-            else if (!r.ok || data.success !== true) scan.message = data.message || (r.ok ? UNREACHABLE : 'The printer answered ' + r.status);
+            else if (!r.ok || data.success !== true) {
+                scan.message = data.message || (r.ok ? UNREACHABLE : 'The printer answered ' + r.status);
+                scan.hint = typeof data.hint === 'string' ? data.hint : '';
+            }
             else Object.assign(scan, { printed: !!data.printed, image: data.image || '', filled: Object.keys(data.filled || {}) });
         } catch (e) {
             scan.message = e.message;

@@ -1122,7 +1122,10 @@ def scan_print():
             preview_only = _whole_or(_requested('preview_only'), 0) != 0
             filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), code if isinstance(code, str) else '')
         except ValueError as e:
-            return _refused('Scan', e, refusals.INVALID_INPUT)
+            _log_refused_request('Scan', e)
+            message = refusals.message(e, refusals.INVALID_INPUT)
+            hint = scan.advice(message, _title_of(data, _requested_name()), _blank_names(data))
+            return make_response(jsonify({'success': False, 'message': message, **({'hint': hint} if hint else {})}), 400)
         result = {'success': True, 'printed': not preview_only, 'label': _requested_name(), 'filled': filled}
         if preview_only:
             try:
@@ -1133,6 +1136,12 @@ def scan_print():
         printed = _print_stored_label(data, _get_repo_dir(), image_bytes, filled, 'png')
         return {**result, **printed} if isinstance(printed, dict) else printed
     return _saved_response(respond, 'Failed to load file')
+
+
+def _title_of(data: dict, name: str) -> str:
+    """The name a stored label was saved under, else its file name."""
+    title = data.get('title')
+    return title.strip() if isinstance(title, str) and title.strip() else name.removesuffix('.json')
 
 
 def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]:

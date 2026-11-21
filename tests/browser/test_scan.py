@@ -258,11 +258,13 @@ def test_show_only_sends_preview_only(station):
 
 def test_refusal_is_shown_without_an_image(station):
     page = station.page
-    message = 'The label has several blanks, so it is not clear which one the code fills. Name the blank for the code "code".'
-    station.answer = (400, {'success': False, 'message': message})
+    message = 'The label has several blanks, so it is not clear which one the code fills.'
+    hint = 'Open "Box" in the editor, click the blank "Room", change its name to code and save the label.'
+    station.answer = (400, {'success': False, 'message': message, 'hint': '<b>' + hint + '</b>'})
     station.scan('A-17')
     page.wait_for_selector('#scanResult .warn')
     assert message in card(page)
+    assert page.inner_text('#scanResult .scan-hint') == '<b>' + hint + '</b>'
     assert page.locator('#scanResult img').count() == 0
 
 

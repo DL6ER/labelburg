@@ -5,9 +5,9 @@ import re
 from .label import MAX_TEXT_LENGTH, check_blank_choice
 
 NOTHING_SCANNED = 'Nothing was scanned'
-NO_BLANKS = 'The label has no blank for the scanned code. Add one in the editor, e.g., a blank named "code".'
-SEVERAL_BLANKS = 'The label has several blanks, so it is not clear which one the code fills. Name the blank for the code "code".'
-NO_CONTACT_MATCH = 'The code holds a contact, but none of its details fits a blank of the label. Name the blanks e.g., "Name" and "Address".'
+NO_BLANKS = 'The label has no blank for the scanned code.'
+SEVERAL_BLANKS = 'The label has several blanks, so it is not clear which one the code fills.'
+NO_CONTACT_MATCH = 'The code holds a contact, but none of its details fits a blank of the label.'
 WRONG_LAYOUT = ('The scanner types with another keyboard layout than this computer. '
                 'Set the scanner to the layout of the computer with the setup code in its manual.')
 INCOMPLETE = 'The code came in incomplete. Scan it again.'
@@ -34,6 +34,35 @@ _WRONG_LAYOUT_PREFIXES = ('https>&&', 'http>&&', 'httpsö--', 'httpö--', 'begin
 
 def blank_key(name: str) -> str:
     return re.sub(r'[_\- ]+', ' ', name.casefold()).strip()
+
+
+def _contact_blank(name: str) -> bool:
+    return any(blank_key(name) == blank_key(blank) for blanks in CONTACT_FIELDS.values() for blank in blanks)
+
+
+def _listed(names: list[str]) -> str:
+    quoted = [f'"{name}"' for name in names]
+    return quoted[0] if len(quoted) == 1 else ', '.join(quoted[:-1]) + ' and ' + quoted[-1]
+
+
+def advice(problem: str, title: str, names: list[str]) -> str | None:
+    """What to change in the label title with the blanks names so that a scan
+    refused with problem fits, None where the label is not the problem."""
+    edit = f'Open "{title}" in the editor, '
+    if problem == NO_BLANKS:
+        return edit + 'type [code where the code goes, choose Blank "code" and save the label.'
+    if problem == SEVERAL_BLANKS:
+        # The blank for the code is most likely one a contact would not fill
+        target = next((name for name in names if not _contact_blank(name)), names[0])
+        text = edit + f'click the blank "{target}", change its name to code and save the label.'
+        contact = [name for name in names if _contact_blank(name)]
+        if contact:
+            text += f' Contact codes, e.g., from a business card, fill {_listed(contact)} as {"it is" if len(contact) == 1 else "they are"}.'
+        return text
+    if problem == NO_CONTACT_MATCH:
+        steps = ', '.join(f'click the blank "{name}" and change its name to {new}' for name, new in zip(names, ('Name', 'Address')))
+        return edit + steps + ', and save the label. Contacts fill the blanks Name, Address, Company, Phone and Email.'
+    return None
 
 
 def wrong_layout(text: str) -> bool:

@@ -42,7 +42,7 @@ The browser allows the camera only over a secure address (https), the address of
 | `Email`, `E-Mail` | The email address |
 | `Address`, `Adresse`, `Anschrift` | The street, the postcode with the city, and the country, each on a line of its own |
 
-Upper and lower case do not matter, and `-`, `_` and a space count the same, e.g., `first_name` and `First-Name` work for `First name`. A label with several blanks and none named `code` takes only contact codes; for any other code the station asks to name the blank for it `code`.
+Upper and lower case do not matter, and `-`, `_` and a space count the same, e.g., `first_name` and `First-Name` work for `First name`. A label with several blanks and none named `code` takes only contact codes; for any other code the station says which blank to name `code`. Where a label does not fit a code, the station says what to change in it, with the name of the label and its blanks.
 
 ## Trying a label
 
@@ -68,7 +68,7 @@ The station sends each scan to `POST /labeldesigner/api/scan`, which scripts can
 curl -X POST http://localhost:8013/labeldesigner/api/scan -F name=Box.json -F code=A-17
 ```
 
-The answer tells which blanks got which value in `filled`, and has the label as a base64 PNG in `image`: as it was printed, or with `preview_only` as it would print. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
+The answer tells which blanks got which value in `filled`, and has the label as a base64 PNG in `image`: as it was printed, or with `preview_only` as it would print. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`, and where the label does not fit the code `hint` says what to change in it; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
 
 A scanner ends each code with Enter or Tab; a line that follows within a moment belongs to the same code. A scanner without Enter or Tab at the end is recognized by its speed, the code ends when it stops typing. Codes typed by hand print on Enter.
 

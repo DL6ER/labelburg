@@ -133,10 +133,25 @@ def test_refusals_are_sent_as_they_are(printed):
                           ({'name': 'Box.json', 'code': 'TEL:+49 228 1234\nEND:VCARD'}, scan.INCOMPLETE)):
         response = _scan(printed, **body)
         assert (response.status_code, response.get_json()['message']) == (400, message)
+        assert ('hint' in response.get_json()) == (message in (scan.NO_BLANKS, scan.SEVERAL_BLANKS))
     response = _scan(printed, name='Gone', code='x')
     assert (response.status_code, response.get_json()['message']) == (404, 'Not found')
     response = _scan(printed, code='x')
     assert (response.status_code, response.get_json()['message']) == (400, 'No name specified')
+    assert printed.queued == []
+
+
+def test_refusals_tell_what_to_change_in_the_label(printed):
+    _save(printed, name='Envelope.json', title='Envelope', print_type='text', code_text='', text=[
+        {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Name}}'}, {'font': 'DejaVu Sans,Book', 'size': '30', 'text': '{{blank:Address}}'}])
+    result = _scan(printed, name='Envelope.json', code='A-17').get_json()
+    assert result['message'] == scan.SEVERAL_BLANKS
+    assert result['hint'] == scan.advice(scan.SEVERAL_BLANKS, 'Envelope', ['Name', 'Address'])
+    _save(printed, name='Shelf.json', print_type='text', code_text='', text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:Room}}'}])
+    result = _scan(printed, name='Shelf.json', code='BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD').get_json()
+    assert result['message'] == scan.NO_CONTACT_MATCH
+    # Named after the file where the label has no title of its own
+    assert result['hint'] == scan.advice(scan.NO_CONTACT_MATCH, 'Shelf', ['Room'])
     assert printed.queued == []
 
 
