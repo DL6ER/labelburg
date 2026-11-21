@@ -6,6 +6,7 @@ import math
 import aztec_code_generator
 import barcode
 import segno
+from barcode.ean import EuropeanArticleNumber13
 from barcode.writer import ImageWriter
 from pdf417gen import encode as pdf417_encode
 from pdf417gen.compaction import compact as pdf417_compact
@@ -164,10 +165,31 @@ def image(rows: list, ratio: int, box_size: int, fill_color: str) -> Image.Image
     return ImageOps.colorize(dots, black=fill_color, white='white')
 
 
+class _Isbn10(EuropeanArticleNumber13):
+    """ISBN-10 as books carry it, the EAN-13 978 and its first 9 digits. The
+    class of python-barcode 0.16.1 cuts that EAN-13 to 10 digits."""
+    name = 'ISBN-10'
+
+    def __init__(self, isbn: str, writer=None):
+        super().__init__('978' + isbn.replace('-', '')[:9], writer)
+
+
+class _Issn(EuropeanArticleNumber13):
+    """ISSN as magazines carry it, the EAN-13 977, its first 7 digits and 00.
+    The class of python-barcode 0.16.1 cuts that EAN-13 to 8 digits."""
+    name = 'ISSN'
+
+    def __init__(self, issn: str, writer=None):
+        super().__init__('977' + issn.replace('-', '')[:7] + '00', writer)
+
+
+_OWN_CLASSES = {'isbn10': _Isbn10, 'issn': _Issn}
+
+
 def barcode_class(barcode_type: str):
     """The python-barcode class of a barcode type, BarcodeNotFoundError for an
     unknown one."""
-    return barcode.get_barcode_class(barcode_type)
+    return _OWN_CLASSES.get(barcode_type.lower()) or barcode.get_barcode_class(barcode_type)
 
 
 def barcode_image(kind, value: str, color: tuple = (0, 0, 0)) -> Image.Image:
