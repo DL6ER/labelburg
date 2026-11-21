@@ -210,6 +210,10 @@ def answer_lines(page, lines):
     page.route('**/api/queue/*/preview.png', lambda route: route.fulfill(body=png(120, 40), content_type='image/png'))
 
 
+# Whether what is at the middle of the queue belongs to selector, i.e. is above it
+COVERED = """sel => { const r = document.querySelector('#queue').getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && !!hit.closest(sel); }"""
 SHELF = queued('j1', 'Shelf 12', labels=3, state='printing', progress={'labels': 3, 'label': 2})
 JAR, BOX = queued('j2', 'Spice jar'), queued('j3', 'Box 7', labels=2, source='Homebox')
 
@@ -225,7 +229,6 @@ def test_the_print_button_reads_queue_while_the_printer_is_busy(editor):  # noqa
     assert editor.get_attribute('#print use', 'href') == '#i-printer'
 
 
-
 @pytest.mark.parametrize('hidden', [False, True])
 def test_the_queue_is_read_while_it_has_jobs_from_a_tab_that_is_shown(editor, hidden):  # noqa: F811
     asked = []
@@ -239,6 +242,7 @@ def test_the_queue_is_read_while_it_has_jobs_from_a_tab_that_is_shown(editor, hi
     editor.evaluate("() => { const S = labelEditor.S; S.printer = Object.assign({}, S.printer, { queue: { printing: true, waiting: 0, held: false } }); }")
     editor.wait_for_timeout(3200)
     assert bool(asked) is not hidden
+
 
 def test_printing_on_a_busy_printer_adds_the_label_to_the_queue(editor):  # noqa: F811
     answer_lines(editor, {None: line(SHELF)})
@@ -304,6 +308,54 @@ def test_a_held_queue_continues(editor):  # noqa: F811
         ('POST', [LP9], 'XMLHttpRequest')]
 
 
+def test_a_waiting_label_is_removed_from_a_held_line(editor):  # noqa: F811
+    # Removing the last one ends the hold, as the server does
+    lines = {None: line(None, [JAR, BOX], 'The tape is used up')}
+    answer_lines(editor, lines)
+    editor.route('**/api/queue/*/remove', lambda route: route.fulfill(json={'success': True}))
+    choose(editor, printer(waiting=2, held=True))
+    editor.wait_for_selector('#queue .held [aria-expanded="false"]:text-is("2 waiting")')
+    editor.eval_on_selector('#queue [role=alert]', 'e => { e.dataset.kept = "1"; }')
+    editor.click('#queue [aria-expanded]')
+    editor.wait_for_selector('#queue .q-row >> nth=1')
+    # Opened in place: the hold is not told again
+    assert editor.eval_on_selector('#queue [role=alert]', 'e => e.dataset.kept') == '1'
+    assert editor.locator('#queue button:text-is("Continue")').count() == 1
+    lines[None] = line(None, [BOX], 'The tape is used up')
+    editor.click('#queue [data-remove="j2"]')
+    editor.wait_for_selector('#queue [role=alert]:text-is("Not printed: The tape is used up. 1 waiting.")')
+    assert editor.locator('#queue .q-row b').all_inner_texts() == ['Box 7']
+    lines[None] = line()
+    editor.click('#queue [data-remove="j3"]')
+    editor.wait_for_selector('#queue', state='hidden')
+    assert editor.locator('#print:text-is("Print")').count() == 1
+
+
+def test_a_print_on_another_printer_reads_no_queue(editor):  # noqa: F811
+    # The queue shown is of the printer chosen, which has nothing to do
+    asked = []
+    answer_lines(editor, {})
+    editor.on('request', lambda request: '/api/queue?' in request.url and asked.append(request.url))
+    editor.route('**/api/print', lambda route: route.fulfill(json={'success': True}))
+    choose(editor, printer(LP9), printer(LP8))
+    editor.evaluate("() => { location.hash = 'settings/printers'; }")
+    editor.click('[data-card="1"] [data-test]')
+    editor.wait_for_selector('#toast:has-text("Printed 1 label: Which end first")')
+    editor.wait_for_timeout(1700)
+    assert asked == []
+
+
+def test_the_not_printed_dialog_is_above_the_queue(editor):  # noqa: F811
+    answer_lines(editor, {None: line(SHELF, [JAR])})
+    choose(editor, printer(printing=True, waiting=1))
+    type_label(editor, 'Jar 1')
+    editor.wait_for_selector('#queue:not([hidden])')
+    editor.route('**/api/print', lambda route: route.fulfill(status=500, json={'success': False, 'message': 'The printer is out of tape'}))
+    editor.click('#print')
+    editor.wait_for_selector('[role=alertdialog]:has-text("The printer is out of tape")')
+    assert editor.locator('#queue').is_visible()
+    assert editor.evaluate(COVERED, '#layer')
+
 
 def test_a_remove_refused_says_why(editor):  # noqa: F811
     answer_lines(editor, {None: line(SHELF, [JAR])})
@@ -325,6 +377,7 @@ def test_continue_works_again_after_it_did_not_reach_the_server(editor):  # noqa
     with editor.expect_request('**/api/queue/continue'):
         editor.click('#queue button:text-is("Continue")', timeout=8000)
     assert len(continued) == 2
+
 
 def watch_toasts(page):
     page.evaluate("""() => { window.toasts = [];
@@ -424,6 +477,8 @@ def test_a_failed_label_is_told_by_the_held_queue_shown(editor):  # noqa: F811
     editor.wait_for_selector('#queue .q-line > span:text-is("Not printed: The tape is used up. 1 waiting.")')
     editor.wait_for_timeout(300)
     assert editor.locator('[role=alertdialog]').count() == 0
+    # Told to screen readers as the dialog would have been
+    assert editor.inner_text('#queue [role=alert]') == 'Not printed: The tape is used up. 1 waiting.'
 
 
 def test_a_label_removed_here_is_not_announced(editor):  # noqa: F811
@@ -474,3 +529,13 @@ def test_the_queue_on_the_phone(phone):  # noqa: F811
     # Where the messages show
     assert phone.evaluate("() => getComputedStyle(document.querySelector('#queue')).bottom") == \
         phone.evaluate("() => getComputedStyle(document.querySelector('#toast')).bottom")
+
+
+def test_the_printer_sheet_is_above_the_queue_on_the_phone(phone):  # noqa: F811
+    answer_lines(phone, {None: line(SHELF, [JAR, BOX])})
+    choose(phone, printer(printing=True, waiting=2))
+    phone.wait_for_selector('#queue:not([hidden])')
+    phone.tap('#printerChip')
+    phone.wait_for_selector('.layer.sheet .pp .plist')
+    assert phone.locator('#queue').is_visible()
+    assert phone.evaluate(COVERED, '#layer')

@@ -18,15 +18,17 @@ export function jobRow(job) {
         <span class="grow"><b>${esc(job.title)}</b><small>${esc(labels(job.labels) + (job.from ? `, from ${job.from}` : ''))}</small></span>
         <button class="iconbtn" type="button" data-remove="${esc(job.id)}" title="Remove from the queue" aria-label="Remove from the queue">${icon('x')}</button></div>`;
 }
+export const listHTML = line => `<div class="q-list">${line.waiting.map(jobRow).join('')}</div>`;
 // A line ({ printing, waiting, held }): one line, the jobs waiting below it
-// where open; empty where nothing prints, waits or holds
+// where open; empty where nothing prints, waits or holds. A hold is told to
+// screen readers too, it stands for the "Not printed" message.
 export function lineHTML(line, open = false) {
     const n = line.waiting.length;
-    if (line.held) return `<div class="q-line held"><span>${esc(heldText(line))}</span><button class="tbtn" type="button" data-continue>Continue</button></div>`;
-    if (!line.printing && !n) return '';
+    if (!line.printing && !n && !line.held) return '';
     const more = n ? `<button class="q-more" type="button" data-more aria-expanded="${open}">${esc(n)} waiting${icon('down')}</button>` : '';
-    return `<div class="q-line"><span>${line.printing ? esc(printingText(line.printing)) : ''}</span>${more}</div>`
-        + (open && n ? `<div class="q-list">${line.waiting.map(jobRow).join('')}</div>` : '');
+    const head = line.held ? `<div class="q-line held"><span role="alert">${esc(heldText(line))}</span>${more}<button class="tbtn" type="button" data-continue>Continue</button></div>`
+        : `<div class="q-line"><span>${line.printing ? esc(printingText(line.printing)) : ''}</span>${more}</div>`;
+    return head + (open && n ? listHTML(line) : '');
 }
 
 // --- Reading ---------------------------------------------------------------------
@@ -57,10 +59,12 @@ export function readQueue() {
 
 // --- The panel -------------------------------------------------------------------
 
+const shownLine = () => !!S.printer && QUEUE.path === S.printer.path && QUEUE.line;
+
 export function drawQueue() {
-    const el = $('#queue'), p = S.printer;
-    const line = p && QUEUE.path === p.path && QUEUE.line;
-    if (!line || !line.waiting.length || line.held) open = false;
+    const el = $('#queue');
+    const line = shownLine();
+    if (!line || !line.waiting.length) open = false;
     const html = line ? lineHTML(line, open) : '';
     if (html !== drawn) {
         drawn = html;
@@ -95,12 +99,23 @@ async function send(path, body) {
     }
 }
 
+// Opened and closed in place: the line stays, a hold is not told again
+function toggle(b) {
+    const el = $('#queue'), line = shownLine();
+    if (!line) return;
+    open = !open;
+    b.setAttribute('aria-expanded', open);
+    el.classList.toggle('open', open);
+    if (open) el.insertAdjacentHTML('beforeend', listHTML(line));
+    else if ($('.q-list', el)) $('.q-list', el).remove();
+    drawn = lineHTML(line, open);
+}
+
 async function clicked(e) {
     const b = e.target.closest('button');
     if (!b || !S.printer) return;
     if ('more' in b.dataset) {
-        open = !open;
-        drawQueue();
+        toggle(b);
         return;
     }
     if (b.dataset.remove) {
@@ -114,7 +129,7 @@ async function clicked(e) {
         await send('/queue/continue', new URLSearchParams({ printer: S.printer.path }));
     } else return;
     // Drawn anew, also where the line stays as it was: its buttons work again
-    drawn = '';
+    drawn = null;
     readQueue();
 }
 
@@ -122,6 +137,7 @@ async function clicked(e) {
 export function mountQueue(onChange) {
     changed = onChange;
     QUEUE.read = () => { drawQueue(); return readQueue(); };
+    QUEUE.follow = followQueue;
     $('#queue').addEventListener('click', clicked);
     setInterval(followQueue, 1500);
     document.addEventListener('visibilitychange', followQueue);

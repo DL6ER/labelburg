@@ -81,7 +81,7 @@ export function toast(text, action, ms = 0) {
     toastTimer = setTimeout(() => { el.hidden = true; queueBack(); }, ms || (action ? 6000 : 3500));
     return ++toastId;
 }
-// The message shown, or the one toast() returned id for while it is shown
+// Given an id, a message shown after that one stays
 export function hideToast(id = toastId) {
     if (id !== toastId) return;
     clearTimeout(toastTimer);
@@ -998,11 +998,9 @@ export function entryName(e) {
     return line || e.title || 'Label';
 }
 
-// The queue of the printer chosen as queue.js read it last: the path of the
-// printer, its line ({ printing, waiting, held }) and the status of the
-// printer then; the jobs taken out of it here. read() draws it and reads it
-// anew.
-export const QUEUE = { path: '', line: null, status: null, removed: new Set(), read: () => Promise.resolve() };
+// The queue of the printer chosen as queue.js last read it, shared with the
+// prints here; jobs removed here are told by its list, not by a message
+export const QUEUE = { path: '', line: null, status: null, removed: new Set(), read: () => Promise.resolve(), follow: () => { } };
 const pendingOn = path => S.history.some(h => h.state === 'printing' && h.path === path);
 // Whether a print on printer p waits behind others: its line as last read
 // has a job or a hold, its status says so where it was not read since, or a
@@ -1036,7 +1034,7 @@ export async function printJob(job, onDone, printer = S.printer) {
     saveHistory();
     const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
     const shown = () => !!S.printer && S.printer.path === path;
-    QUEUE.read();
+    QUEUE.follow();
     try {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
@@ -1064,8 +1062,9 @@ export async function printJob(job, onDone, printer = S.printer) {
     hideToast(printing);
     saveHistory();
     // Read before it is told: a job that did not print may hold the queue shown
-    const read = QUEUE.read();
-    if (entry.state !== 'printed' && shown()) await read;
+    if (!shown()) QUEUE.follow();
+    else if (entry.state === 'printed') QUEUE.read();
+    else await QUEUE.read();
     if (onDone) onDone(entry);
     return entry;
 }

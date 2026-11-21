@@ -591,9 +591,9 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
 .layer.sheet .pop-card::before { content: ""; width: 40px; height: 4px; border-radius: 4px; background: var(--line-2); margin: 0 auto 4px; flex: none; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--on-ink); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; box-shadow: var(--sh-pop); display: flex; gap: 12px; align-items: center; z-index: 50; max-width: calc(100% - 32px); }
 .tbtn { border: 0; background: transparent; color: inherit; text-decoration: underline; font-weight: 600; }
-/* The queue of the printer chosen in place of the message: one line, the
-   jobs waiting below it where opened */
-.queue { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(400px, calc(100% - 32px)); border-radius: 12px; box-shadow: var(--sh-pop); font-size: 13.5px; z-index: 50; }
+/* The queue of the printer chosen in place of the message, under menus,
+   sheets and dialogs: one line, the jobs waiting below it where opened */
+.queue { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(400px, calc(100% - 32px)); border-radius: 12px; box-shadow: var(--sh-pop); font-size: 13.5px; z-index: 19; }
 .q-line { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--on-ink); }
 .q-line > span { flex: 1; min-width: 0; }
 .q-line.held { background: var(--bad); }
