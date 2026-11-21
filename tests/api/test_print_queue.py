@@ -77,7 +77,7 @@ def test_every_print_route_answers_with_its_job(client, monkeypatch):
                ('webhook', webhook),
                ('homebox', client.post(f'{API}/homebox', data=image.getvalue(), headers={'Content-Type': 'image/png'})),
                ('calibration', calibration)]
-    named_from = {'api': 'the API', 'webhook': 'the webhook', 'homebox': 'Homebox', 'calibration': ''}
+    named_from = {'api': 'another program', 'webhook': 'another program', 'homebox': 'Homebox', 'calibration': ''}
     for source, response in answers:
         answer = response.get_json()
         assert response.status_code == 200, (source, answer)
@@ -246,3 +246,33 @@ def test_a_job_explains_its_failure_with_the_app(client, monkeypatch):
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', fail)
     response = client.post(PRINT, data=EXAMPLE_FORMDATA)
     assert _ended(response) == [('failed', 'A print job must not have more than 100 labels')]
+
+
+def _photo() -> bytes:
+    image = io.BytesIO()
+    Image.new('RGB', (400, 300), (200, 30, 30)).save(image, 'PNG')
+    return image.getvalue()
+
+
+def test_jobs_waiting_with_large_images_make_the_printer_busy(client, tmp_path, queued, monkeypatch):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
+    started, release = _held(monkeypatch)
+    photo = dict(EXAMPLE_FORMDATA, print_type='image', image_mode='grayscale')
+
+    def send(**more):
+        return client.post(PRINT, data=dict(photo, image=(io.BytesIO(_photo()), 'photo.png'), **more),
+                           content_type='multipart/form-data')
+    first = send()
+    assert started.wait(10)
+    one, three = send(), send(print_count='3')
+    # The copies of a job share its image
+    assert _job(one).size == _job(three).size > 0
+    monkeypatch.setattr(print_queue, 'MAX_WAITING_BYTES', 2 * _job(one).size)
+    refused = send(text=json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'ASN{{asn:5}}', 'size': '40'}]))
+    text = client.post(PRINT, data=EXAMPLE_FORMDATA)
+    release.set()
+    assert (refused.status_code, refused.get_json()) == (503, {'success': False, 'message': printer.BUSY})
+    # Refused before an archive serial number is taken for it
+    assert paperless.next_asn(client.application.config, str(tmp_path)) == 1
+    assert text.status_code == 200
+    assert _ended(first, one, three, text) == [('printed', '')] * 4

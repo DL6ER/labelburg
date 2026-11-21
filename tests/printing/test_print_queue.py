@@ -1,11 +1,17 @@
+import os
+import subprocess
+import sys
+import textwrap
 import threading
 
 import pytest
+from PIL import Image
 
 from app.labeldesigner import print_queue
 
 USB = 'file:///dev/usb/lp0'
 WAIT = 10
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Added jobs are not waited for, conftest.py empties the queue around each test
 pytestmark = pytest.mark.usefixtures('queued')
@@ -177,10 +183,10 @@ def test_line_tells_the_printing_job_and_the_waiting_ones():
     waiting = add(USB, recorder([], 2), title='Second', source='homebox', preview=b'png')
     told = print_queue.line(USB)
     assert told['held'] is None
-    assert told['printing'] == {'id': printing.id, 'title': 'First', 'labels': 1, 'from': '', 'state': 'printing',
-                                'message': '', 'preview': False}
-    assert told['waiting'] == [{'id': waiting.id, 'title': 'Second', 'labels': 1, 'from': 'Homebox', 'state': 'waiting',
-                                'message': '', 'preview': True}]
+    assert told['printing'] == {'id': printing.id, 'title': 'First', 'labels': 1, 'from': '', 'from_detail': '',
+                                'state': 'printing', 'message': '', 'preview': False}
+    assert told['waiting'] == [{'id': waiting.id, 'title': 'Second', 'labels': 1, 'from': 'Homebox', 'from_detail': '',
+                                'state': 'waiting', 'message': '', 'preview': True}]
     assert print_queue.line('tcp://192.0.2.5') == {'printing': None, 'waiting': [], 'held': None}
     release.set()
 
@@ -350,3 +356,146 @@ def test_a_worker_starts_with_an_empty_context_on_every_python(monkeypatch, inhe
     job = add(USB, recorder([], 1))
     assert job.done.wait(WAIT) and job.state == 'printed'
     assert [None if context is None else len(context) for context in contexts] == [0 if inherit else None]
+
+
+NET = 'tcp://192.0.2.5'
+
+
+def test_a_line_is_told_by_the_spelling_it_was_last_added_under():
+    run, started, release = blocked()
+    add('/dev/usb/lp0', run)
+    assert started.wait(WAIT)
+    add(USB, recorder([], 2))
+    assert [told['printer'] for told in print_queue.lines()] == [USB]
+    release.set()
+
+
+def test_the_line_of_the_demo_printer_is_told_as_its_path():
+    # The status lists the demo printer as simulation, never as ?
+    run, started, release = blocked()
+    add('?', run)
+    assert started.wait(WAIT)
+    assert [told['printer'] for told in print_queue.lines()] == ['simulation']
+    release.set()
+
+
+def test_the_memory_of_images_counts_each_image_once():
+    photo, gray = Image.new('RGB', (100, 50)), Image.new('L', (10, 10))
+    assert print_queue.image_bytes([photo, photo, None, gray]) == 100 * 50 * 4 + 10 * 10
+    assert print_queue.image_bytes([]) == 0
+
+
+def test_the_images_of_the_jobs_waiting_have_a_limit(monkeypatch):
+    monkeypatch.setattr(print_queue, 'MAX_WAITING_BYTES', 1000)
+    run, started, release = blocked()
+    # A job whose images are larger than all may hold waits alone
+    printing = add(USB, run, size=5000)
+    assert started.wait(WAIT)
+    other, other_started, other_release = blocked()
+    add(NET, other)
+    assert other_started.wait(WAIT)
+    waiting = add(USB, recorder([], 2), size=600)
+    assert waiting.size == 600
+    # Counted over the lines of all printers
+    assert print_queue.full(NET, 600)
+    with pytest.raises(print_queue.Full):
+        add(NET, recorder([], 3), size=600)
+    # Jobs without images, and those that fit, still wait
+    assert not print_queue.full(NET)
+    add(NET, recorder([], 4))
+    add(NET, recorder([], 5), size=400)
+    release.set()
+    other_release.set()
+    assert printing.done.wait(WAIT)
+
+
+def test_only_the_newest_outcomes_are_kept(monkeypatch):
+    monkeypatch.setattr(print_queue, 'MAX_ENDED', 3)
+    jobs = [add(USB, recorder([], number), preview=b'png') for number in range(5)]
+    assert all(job.done.wait(WAIT) for job in jobs)
+    assert [print_queue.get(job.id) is not None for job in jobs] == [False, False, True, True, True]
+    assert len(print_queue._jobs) == 3
+
+
+def test_pruning_looks_only_at_the_oldest_outcomes(monkeypatch):
+    read = []
+
+    class Counted(print_queue.Job):
+        def __getattribute__(self, name):
+            if name == 'ended':
+                read.append(self)
+            return super().__getattribute__(name)
+    monkeypatch.setattr(print_queue, 'Job', Counted)
+    jobs = []
+    for number in range(50):
+        jobs.append(add(USB, recorder([], number), preview=b'png'))
+        assert jobs[-1].done.wait(WAIT)
+    read.clear()
+    assert print_queue.get(jobs[0].id) is jobs[0]
+    # The oldest outcome and the oldest preview, none of them due
+    assert len(read) <= 2
+
+
+def test_at_exit_the_job_that_prints_ends_and_no_other_starts():
+    started, exiting = threading.Event(), threading.Event()
+
+    def run():
+        started.set()
+        exiting.wait(WAIT)
+        return ''
+    printing = add(USB, run)
+    assert started.wait(WAIT)
+    order = []
+    waiting = add(USB, recorder(order, 2))
+    # The job ends while the exit waits for it
+    wait = printing.done.wait
+    printing.done.wait = lambda timeout=None: exiting.set() or wait(timeout)
+    print_queue.stop()
+    assert printing.state == 'printed'
+    for worker in [t for t in threading.enumerate() if t.name.startswith(print_queue.WORKER_PREFIX)]:
+        worker.join(WAIT)
+    assert (waiting.state, order) == ('waiting', [])
+    # Neither does a job added after it
+    later = add(NET, recorder(order, 3))
+    assert (later.state, order) == ('waiting', [])
+
+
+def test_at_exit_the_job_that_prints_is_waited_for_a_while(monkeypatch):
+    monkeypatch.setattr(print_queue, 'STOP_WAIT', 0.2)
+    run, started, release = blocked()
+    printing = add(USB, run)
+    assert started.wait(WAIT)
+    try:
+        print_queue.stop()
+        assert printing.state == 'printing'
+    finally:
+        release.set()
+
+
+def test_the_process_exits_once_the_job_that_prints_ended(tmp_path):
+    printed = tmp_path / 'printed'
+    script = textwrap.dedent(f"""
+        import threading
+        from app.labeldesigner import print_queue
+        started = threading.Event()
+
+        def run():
+            started.set()
+            threading.Event().wait(0.5)
+            open({str(printed)!r}, 'w').close()
+            return ''
+        print_queue.add('simulation', run, title='Label', labels=1, source='api', explain=str)
+        started.wait(10)
+    """)
+    subprocess.run([sys.executable, '-c', script], check=True, timeout=60, cwd=ROOT)
+    assert printed.exists()
+
+
+@pytest.mark.parametrize('source, told, detail', [
+    ('designer', '', ''), ('calibration', '', ''), ('homebox', 'Homebox', ''),
+    ('api', 'another program', 'Sent over the API'), ('webhook', 'another program', 'Sent over the webhook'),
+    ('mcp', 'an AI assistant', 'Sent over MCP')])
+def test_where_a_job_comes_from_in_plain_words(source, told, detail):
+    # The technical word is told apart, for a hover text
+    job = add(USB, recorder([], 1), source=source)
+    assert (job.told()['from'], job.told()['from_detail']) == (told, detail)

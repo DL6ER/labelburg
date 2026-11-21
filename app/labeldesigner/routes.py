@@ -955,18 +955,19 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
             image = base64.b64encode(image_to_png_bytes(drawn.image, gray=gray)).decode()
     try:
         job = print_queue.add(printer.device_specifier, _as_in_this_request(run), title=title, labels=labels, source=source,
-                              preview=preview, explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
-    except print_queue.Full:
-        return _line_full(printer)
+                              preview=preview, size=print_queue.image_bytes(printer.images()),
+                              explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
+    except print_queue.Full as full:
+        return _line_full(printer, str(full))
     result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
 
 
-def _line_full(printer: PrinterQueue):
-    """The answer to a job for a line with MAX_WAITING jobs waiting."""
-    current_app.logger.warning('Not queued, %d jobs wait for %s already', print_queue.MAX_WAITING, printer.device_specifier)
+def _line_full(printer: PrinterQueue, why: str):
+    """The answer to a job print_queue.add() refuses, why as it tells it."""
+    current_app.logger.warning('Not queued for %s, %s', printer.device_specifier, why)
     return _fail(BUSY, PRINTER_FAILED)
 
 
@@ -1213,12 +1214,14 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     _copies(), to be printed. stored tells where the image of a stored label
     is, see load_label_images()."""
     # Refused before archive serial numbers are taken for it
-    if print_queue.full(printer.device_specifier):
-        return _line_full(printer)
+    if full := print_queue.full(printer.device_specifier):
+        return _line_full(printer, full)
     try:
         # Decode the image once, all labels of the job share it. Of a PDF
         # each selected page is a label of its own.
         images, _ = load_label_images(data, files, copies=print_count, **stored)
+        if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
+            return _line_full(printer, full)
         queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
         drawn = printer.check()
     except Exception as e:
@@ -1968,12 +1971,21 @@ def _no_such_job():
     return make_response(jsonify({'success': False, 'message': print_queue.NO_SUCH_JOB, 'start': print_queue.START}), 404)
 
 
+def _queue_device(requested: str) -> str:
+    """The device of the printer a request of the queue names, by its device
+    or its name as the print requests take them. Never asks a printer."""
+    return _named_device(requested, *_known_printers()[:2])
+
+
 @bp.route('/api/queue', methods=['GET'])
 def queue_of_printers():
     """The jobs of the line of the printer, or of every line with a job or
     a hold. Never asks a printer."""
-    device = request.args.get('printer')
-    if device:
+    if request.args.get('printer'):
+        try:
+            device = _queue_device(request.args['printer'])
+        except ValueError as e:
+            return _refused('Reading the print queue', e, refusals.INVALID_INPUT)
         return jsonify({**_line_told(print_queue.line(device), device), 'start': print_queue.START})
     return jsonify(printers=[{'printer': told['printer'], **_line_told(told, told['printer'])} for told in print_queue.lines()],
                    start=print_queue.START)
@@ -2018,7 +2030,11 @@ def queue_continue():
     values = {**request.values.to_dict(), **_json_body()}
     if not values.get('printer'):
         return _fail(print_queue.PRINTER_REQUIRED, 400)
-    print_queue.resume(values['printer'])
+    try:
+        device = _queue_device(values['printer'])
+    except ValueError as e:
+        return _refused('Continuing the print queue', e, refusals.INVALID_INPUT)
+    print_queue.resume(device)
     return jsonify(success=True)
 
 
@@ -2139,20 +2155,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     the network that is neither configured, added nor found by the search,
     nor shown, one the status of the printers lists, is checked by
     ADD_PRINTERS."""
-    printers = configured_printers(current_app.config)
-    if printers:
-        configured, model = printers[0][1], printers[0][0]
-    else:
-        configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
-    # And the printers added in the Settings, a name of the configuration first
-    printers += _added_printers()
-    device = requested_device or configured
-    named = {n.casefold(): d for _, d, n in reversed(printers) if n}
-    device = named.get(device.casefold(), device)
+    printers, configured, model = _known_printers()
+    device = _named_device(requested_device or configured, printers, configured)
     listed = [d for _, d, _ in printers]
-    if device not in (configured, 'simulation', '?', *listed) and \
-            not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
-        raise ValueError(f"Unsupported printer: {device}")
     # By the same spelling only, another one could name any host
     if not shown and device not in (configured, *listed) and device not in found_devices():
         _check_named(device)
@@ -2169,6 +2174,29 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
+
+
+def _known_printers() -> tuple[list, str, str]:
+    """The printers of the configuration and those added in the Settings as
+    (model, device, name), with the device and model configured."""
+    printers = configured_printers(current_app.config)
+    if printers:
+        configured, model = printers[0][1], printers[0][0]
+    else:
+        configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
+    # A name of the configuration first
+    return printers + _added_printers(), configured, model
+
+
+def _named_device(requested: str, printers: list, configured: str) -> str:
+    """The device a request names by its device or by the name of one of
+    printers, refused where it is neither listed nor taken by a driver."""
+    named = {n.casefold(): d for _, d, n in reversed(printers) if n}
+    device = named.get(requested.casefold(), requested)
+    if device not in (configured, 'simulation', '?', *(d for _, d, _ in printers)) and \
+            not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
+        raise ValueError(f"Unsupported printer: {device}")
+    return device
 
 
 def _demo_model(kept: dict) -> str:

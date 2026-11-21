@@ -798,7 +798,7 @@
             "name": "printer",
             "in": "query",
             "required": false,
-            "description": "The `path` of a listed printer. Left out, every line with a printing job, waiting jobs or a hold is listed, the others are left out.",
+            "description": "The device or name of the printer, as a print request takes it, e.g. the `path` of a listed printer. Left out, every line with a printing job, waiting jobs or a hold is listed, the others are left out.",
             "schema": {
               "type": "string"
             }
@@ -818,6 +818,16 @@
                       "$ref": "#/components/schemas/QueueLines"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The printer is not supported, `message` says so.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -973,7 +983,7 @@
                 "properties": {
                   "printer": {
                     "type": "string",
-                    "description": "The `path` of a listed printer."
+                    "description": "The device or name of the printer, as a print request takes it, e.g. the `path` of a listed printer."
                   }
                 }
               }
@@ -992,7 +1002,7 @@
             }
           },
           "400": {
-            "description": "No printer named.",
+            "description": "No printer named, or one that is not supported, `message` says which.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3263,9 +3273,12 @@
             "type": "string",
             "enum": [
               "waiting",
-              "printing"
+              "printing",
+              "printed",
+              "failed",
+              "removed"
             ],
-            "description": "Where the job is when the request is answered."
+            "description": "Where the job is when the request is answered. One that prints at once, e.g. on the demo printer, may have ended already."
           },
           "start": {
             "type": "string",
@@ -3293,7 +3306,11 @@
           },
           "from": {
             "type": "string",
-            "description": "Where the job came from, e.g. `the API` or `Homebox`. Empty for the label designer."
+            "description": "Where the job came from in plain words: `another program` (the API or the webhook), `an AI assistant` (MCP) or `Homebox`. Empty for the label designer."
+          },
+          "from_detail": {
+            "type": "string",
+            "description": "How the job was sent, e.g. `Sent over the API`, `Sent over the webhook` or `Sent over MCP`, which the label designer shows as a hover text. Empty where `from` says it all."
           },
           "state": {
             "type": "string",
@@ -3373,7 +3390,7 @@
                   "properties": {
                     "printer": {
                       "type": "string",
-                      "description": "The device path the line was added under."
+                      "description": "The device the last job of the line was added under, `simulation` for the demo printer."
                     }
                   }
                 }

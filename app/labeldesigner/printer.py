@@ -145,6 +145,11 @@ class PrinterQueue:
             'fast': fast
         })
 
+    def images(self) -> list:
+        """The images of the labels queued, e.g. uploaded photos, which the
+        job holds until it prints. Copies share theirs."""
+        return [entry['label'].image for entry in self._print_queue]
+
     def _model_problem(self) -> str:
         """Why the job cannot go to a printer shared over USB/IP: it cannot
         be reached, or the device ID of its import names another model than

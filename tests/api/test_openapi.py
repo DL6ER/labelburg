@@ -79,3 +79,16 @@ def test_spec_is_served(tmp_path):
     response = client.get('/labeldesigner/api/openapi.json')
     assert response.status_code == 200
     assert response.get_json()['openapi'] == '3.1.0'
+
+
+def test_the_answer_of_a_print_request_tells_every_state_of_a_job():
+    # A job may print, fail or be removed before its request is answered
+    schemas = json.load(open(SPEC))['components']['schemas']
+    assert schemas['QueuedAnswer']['properties']['state']['enum'] == schemas['QueueJob']['properties']['state']['enum']
+
+
+def test_a_job_tells_where_it_comes_from():
+    from app.labeldesigner import print_queue
+    told = print_queue.Job('id', 'key', 'Label', 1, 'api').told()
+    # The routes add the progress and the start of the server
+    assert set(json.load(open(SPEC))['components']['schemas']['QueueJob']['properties']) == {*told, 'progress', 'start'}

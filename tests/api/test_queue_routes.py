@@ -150,3 +150,24 @@ def test_printer_status_tells_the_queue(client, queued, monkeypatch):
     status = client.get(f'{API}/printer_status').get_json()
     release.set()
     assert status['printers'][0]['queue'] == {'printing': True, 'waiting': 1, 'held': False}
+
+
+def test_the_queue_of_a_printer_by_its_name(client, queued):
+    client.application.config['PRINTERS'] = [('QL-800', DEVICE, 'Kitchen')]
+    release = threading.Event()
+    first = print_queue.add(DEVICE, lambda: release.wait(10) and 'The cover is open', title='A', labels=1, source='api',
+                            explain=str)
+    behind = print_queue.add(DEVICE, lambda: '', title='B', labels=1, source='api', explain=str)
+    release.set()
+    assert first.done.wait(10)
+    told = client.get(QUEUE, query_string={'printer': 'kitchen'}).get_json()
+    assert (told['held'], [job['id'] for job in told['waiting']]) == ('The cover is open', [behind.id])
+    answer = client.post(f'{QUEUE}/continue', data={'printer': 'Kitchen'})
+    assert (answer.status_code, answer.get_json()) == (200, {'success': True})
+    assert behind.done.wait(10)
+    assert behind.state == 'printed'
+
+
+def test_an_unsupported_printer_has_no_queue(client):
+    for answer in (client.get(QUEUE, query_string={'printer': 'Nowhere'}), client.post(f'{QUEUE}/continue', data={'printer': 'Nowhere'})):
+        assert (answer.status_code, answer.get_json()) == (400, {'success': False, 'message': 'Unsupported printer'})

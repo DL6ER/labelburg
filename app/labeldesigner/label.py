@@ -515,6 +515,11 @@ class SimpleLabel:
         return gap
 
     @property
+    def image(self) -> Optional[Image.Image]:
+        """The image of the label as it was given, e.g. an uploaded photo."""
+        return self._image
+
+    @property
     def in_color(self) -> bool:
         """Whether red or color is chosen for a part of the label: its text,
         code or frame, or its image in red and black or in color."""
