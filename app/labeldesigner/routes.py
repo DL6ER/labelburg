@@ -204,11 +204,12 @@ def _designer_config() -> dict:
     """What the pages of the label designer are given: label sizes, fonts,
     the defaults of new labels and what each printer model offers."""
     fonts = get_fonts()
-    # Of a roll with several labels to a page, one label is designed
+    # Of a roll with several labels to a page, the page is shown and one of
+    # its labels (piece) designed
     label_sizes = [
         {'id': label.identifier, 'name': label_name(label), 'form': label.form_factor.name.lower(),
-         'tape': list(sheets.piece(label).tape_size), 'dots': list(sheets.piece(label).dots_printable), 'red': label.color == 1,
-         'pieces': list(label.pieces), 'sheet': list(label.tape_size),
+         'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
+         'pieces': list(label.pieces), 'piece': list(sheets.piece(label).tape_size),
          'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set
@@ -1288,12 +1289,23 @@ def preview_from_image():
         images, page_count = load_label_images(values, files, first_only=True)
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=_whole_or(values.get('mark_blanks'), 0) != 0,
-                                          asn=_next_asn(values))
+        marks, asn = _whole_or(values.get('mark_blanks'), 0) != 0, _next_asn(values)
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im, model):
             label.warnings.append(f'{too_long}.')
+        # On a roll with several labels to a page: how the copies fill the
+        # last page, and the first page with them, each with its counter
+        size, state = label_of(values.get('label_size', DEFAULT_LABEL_SIZE)), None
+        if sheets.per_sheet(size) > 1:
+            pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
+            copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
+            state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
+            layouts = {}
+            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
+                    for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
+            im = sheets.page_view(size, [im] + more)
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
@@ -1306,12 +1318,7 @@ def preview_from_image():
         response.headers.set('X-PDF-Pages', str(page_count))
         # and shows how the selected ones print
         response.headers.set('X-PDF-Selected-Pages', str(len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count))))
-    # On a roll with several labels to a page, how the copies fill the last one
-    size = label_of(values.get('label_size', DEFAULT_LABEL_SIZE))
-    if sheets.per_sheet(size) > 1:
-        pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
-        state = sheets.fill_state(size, sheets.lying(size, im), _count(values.get('print_count')),
-                                  _count(values.get('labels_per_copy'), pages), current_app.config['PRINT_MAX_COUNT'])
+    if state:
         response.headers.set('X-Label-Sheet', json.dumps(state, separators=(',', ':')))
     # It suggests stronger contrast for a light image on the tapes of the VC-500W
     if (images[0] is not None and _palette(values.get('label_size', DEFAULT_LABEL_SIZE)) == 'color'

@@ -4,7 +4,7 @@ from PIL import Image
 
 from app.labeldesigner.label import LabelContent
 from app.labeldesigner.label_names import SIZES
-from app.labeldesigner.sheets import Sheet, compose, lying, per_sheet, piece, spots
+from app.labeldesigner.sheets import Sheet, compose, lying, page_view, per_sheet, piece, spots
 
 
 class Made:
@@ -102,3 +102,13 @@ def test_sheet_is_kept_as_the_first_labels_image():
     assert image.size == (240, 192)
     assert sheet.labels == labels
     assert sheet.label_content == LabelContent.TEXT_ONLY and sheet.in_color is False
+
+
+def test_page_shown_upright_with_the_first_label_top_left():
+    # Lying 13 x 35 mm labels: the sheet turned back, the lanes one above the other
+    page = page_view(SIZES['niimbot13x35-2x1'], [dotted(280, 104), dotted(280, 104)])
+    assert page.size == (280, 224)
+    assert page.getpixel((0, 0)) == 0 and page.getpixel((0, 120)) == 0
+    assert page.histogram()[0] == 2
+    upright = [dotted(120, 64)] * 3
+    assert page_view(SIZES['niimbot15x8-2x3'], upright).tobytes() == compose(SIZES['niimbot15x8-2x3'], upright).tobytes()

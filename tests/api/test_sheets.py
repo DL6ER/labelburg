@@ -61,20 +61,49 @@ def _b1_with_tape(client, monkeypatch, label_size='niimbot15x8-2x3'):
     assert response.status_code == 200, response.get_json()
 
 
-def test_preview_of_a_sheet_is_one_label(client):
-    response = client.post(f'{API}/preview', data={'label_size': 'niimbot15x8-2x3', 'text': COUNTER, **B1})
-    assert response.status_code == 200
-    assert Image.open(io.BytesIO(response.data)).size == (120, 64)
+def preview(client, label_size='niimbot15x8-2x3', **values):
+    response = client.post(f'{API}/preview', data={'label_size': label_size, 'text': COUNTER, **B1, **values})
+    assert response.status_code == 200, response.get_json()
+    return Image.open(io.BytesIO(response.data)), response
 
 
-def test_config_gives_one_label_and_its_sheet(client):
+def test_preview_of_a_sheet_is_its_first_page(client):
+    image, _ = preview(client)
+    assert image.size == (240, 192)
+    assert [_inked(cell) for cell in _cells(image)] == [True, False, False, False, False, False]
+
+
+def test_preview_shows_the_copies_with_their_counters(client):
+    image, _ = preview(client, print_count=3)
+    cells = _cells(image)
+    assert [_inked(cell) for cell in cells] == [True, True, True, False, False, False]
+    assert len({cell.tobytes() for cell in cells[:3]}) == 3
+
+
+def test_preview_of_lying_labels_shows_the_page_upright(client):
+    # The lanes of 13 x 35 mm labels one above the other, the first on top
+    image, response = preview(client, 'niimbot13x35-2x1')
+    assert image.size == (280, 224)
+    assert _inked(image.crop((0, 0, 280, 104))) and not _inked(image.crop((0, 120, 280, 224)))
+    assert all(part['box'][3] <= 104 for part in json.loads(response.headers['X-Label-Parts']))
+
+
+def test_parts_are_where_the_first_label_is_shown(client):
+    # Text along the 30 x 15 mm labels: the first label is on the left
+    image, response = preview(client, 'niimbot30x15-1x2', orientation='rotated')
+    assert image.size == (240, 240)
+    assert _inked(image.crop((0, 0, 120, 240))) and not _inked(image.crop((120, 0, 240, 240)))
+    assert all(part['box'][2] <= 120 for part in json.loads(response.headers['X-Label-Parts']))
+
+
+def test_config_gives_the_sheet_and_its_label(client):
     html = client.get('/labeldesigner/').get_data(as_text=True)
     config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
     sizes = {size['id']: size for size in config['label_sizes']}
     page = sizes['niimbot15x8-2x3']
-    assert (page['tape'], page['dots'], page['pieces'], page['sheet']) == ([15, 8], [120, 64], [2, 3, 0], [30, 24])
-    assert sizes['niimbot13x35-2x1']['tape'] == [13, 35] and sizes['niimbot13x35-2x1']['sheet'] == [28, 35]
-    assert sizes['niimbot50x30']['sheet'] == sizes['niimbot50x30']['tape'] == [50, 30]
+    assert (page['tape'], page['dots'], page['pieces'], page['piece']) == ([30, 24], [240, 192], [2, 3, 0], [15, 8])
+    assert sizes['niimbot13x35-2x1']['tape'] == [28, 35] and sizes['niimbot13x35-2x1']['piece'] == [13, 35]
+    assert sizes['niimbot50x30']['piece'] == sizes['niimbot50x30']['tape'] == [50, 30]
     assert sizes['niimbot50x30']['pieces'] == [1, 1, 0]
 
 

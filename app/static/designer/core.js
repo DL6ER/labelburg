@@ -108,7 +108,7 @@ export function sizeName(id) {
     if (isColorTape(id)) return `${s.tape[0]} mm color tape`;
     if (s.form === 'endless') return `${s.tape[0]} mm endless${s.red ? ', black and red' : ''}`;
     if (s.form === 'round_die_cut') return `${s.tape[0]} mm round`;
-    if (isSheet(id)) return `${s.sheet[0]} x ${s.sheet[1]} mm, ${s.pieces[0] * s.pieces[1]} labels of ${s.tape[0]} x ${s.tape[1]}`;
+    if (isSheet(id)) return `${s.tape[0]} x ${s.tape[1]} mm, ${s.pieces[0] * s.pieces[1]} labels of ${s.piece[0]} x ${s.piece[1]}`;
     return `${s.tape[0]} x ${s.tape[1]} mm`;
 }
 // A roll with several labels to a page, of which one is designed
@@ -686,7 +686,8 @@ export function setWide(d, wide) {
     d.orientation = wide === isDieCut(d.label_size) ? 'standard' : 'rotated';
     return d;
 }
-const longAlongTape = id => !!SIZES[id] && SIZES[id].tape[1] > SIZES[id].tape[0];
+// Of a page of several labels, the label designed
+const longAlongTape = id => !!SIZES[id] && (SIZES[id].piece || SIZES[id].tape)[1] > (SIZES[id].piece || SIZES[id].tape)[0];
 export const runsAlong = d => (d.orientation !== 'rotated') === longAlongTape(d.label_size);
 export function setRunsAlong(d, along) {
     d.orientation = along === longAlongTape(d.label_size) ? 'standard' : 'rotated';

@@ -63,6 +63,13 @@ def compose(label: Label, images: list[Image.Image]) -> Image.Image:
     return sheet
 
 
+def page_view(label: Label, images: list[Image.Image]) -> Image.Image:
+    """The sheet as the label designer shows it: as the labels are seen
+    upright, the first one top left."""
+    sheet = compose(label, images)
+    return sheet.rotate(-90, expand=True) if lying(label, images[0]) else sheet
+
+
 class Sheet:
     """Labels of a sheet as the drivers print them, like a single label. It
     is turned as a whole, so that the labels keep their order."""

@@ -27,11 +27,27 @@ def note_shown(page) -> bool:
     return page.is_visible('#sheetNote')
 
 
-def test_a_page_roll_shows_one_label(editor):  # noqa: F811
+def test_a_page_roll_shows_the_whole_page(editor):  # noqa: F811
     on_roll(editor)
-    assert editor.inner_text('#dimW b') == '15 mm'
-    assert editor.inner_text('#dimL b') == '8 mm'
+    assert editor.inner_text('#dimW b') == '30 mm'
+    assert editor.inner_text('#dimL b') == '24 mm'
+    assert editor.eval_on_selector('#labelImg', 'img => [img.naturalWidth, img.naturalHeight]') == [240, 192]
     assert '30 x 24 mm, 6 labels of 15 x 8' in editor.get_attribute('#printerChip', 'title')
+    # Where it is cut into its labels, over the page
+    assert editor.locator('#pagecuts rect').count() == 6
+    # The copies fill it as printed
+    set_copies(editor, 3)
+    editor.wait_for_function("() => labelEditor.editorUI.last.sheet.filled === 3")
+
+
+def test_the_first_label_is_picked_on_the_page(editor):  # noqa: F811
+    on_roll(editor, media_width=28, media_length=35)
+    # The lanes one above the other, the gap between them hatched
+    image = editor.eval_on_selector('#labelImg', 'img => [img.naturalWidth, img.naturalHeight]')
+    assert image == [280, 224]
+    assert editor.locator('#pagecuts path.gap').count() == 1
+    line = editor.evaluate("() => labelEditor.editorUI.last.parts.find(p => p.part === 'line').box")
+    assert line[3] <= 104
 
 
 def test_the_last_page_not_full_is_told(editor):  # noqa: F811

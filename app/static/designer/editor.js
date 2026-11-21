@@ -303,7 +303,7 @@ export function renderEditor() {
                     <div class="labelbox" id="labelbox">
                         <span class="printer vslot" id="vslot" aria-hidden="true"><span class="led"></span><span class="model"></span><span class="mouth"></span></span>
                         <div class="lead" id="lead" hidden></div>
-                        <div class="paper" id="paper"><img id="labelImg" alt="Label preview"><div class="picks" id="picks"></div></div>
+                        <div class="paper" id="paper"><img id="labelImg" alt="Label preview"><svg class="pagecuts" id="pagecuts" aria-hidden="true"></svg><div class="picks" id="picks"></div></div>
                         <span class="cutmark" id="cutmark" aria-hidden="true" hidden>${icon('scissors')}</span>
                         <span class="dim" id="dimW" title="Width of the tape"><b></b><i></i></span>
                         <span class="dim" id="dimL" title="Length as cut"><b></b><i></i></span>
@@ -623,6 +623,21 @@ const drawPreview = latest(async () => {
     if (!empty && hooks.previewed) hooks.previewed(ui.last, shown);
 });
 
+// Where a page of several labels is cut into them and the gap between lanes,
+// over the page as the server tells it: shown, never printed
+function drawCuts(w, h) {
+    const box = $('#pagecuts'), sheet = ui.last && ui.last.sheet;
+    if (!box) return;
+    if (!sheet) { box.innerHTML = ''; return; }
+    const kx = w / sheet.size[0], ky = h / sheet.size[1], r = n => Math.round(n * 10) / 10;
+    const rects = sheet.labels.map(([x, y, bw, bh]) => [r(x * kx), r(y * ky), r(bw * kx), r(bh * ky)]);
+    const holes = rects.map(([x, y, rw, rh]) => `M${x} ${y}h${rw}v${rh}h${-rw}z`).join('');
+    box.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    box.innerHTML = '<defs><pattern id="gapHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5"/></pattern></defs>'
+        + `<path class="gap" d="M0 0H${w}V${h}H0z${holes}"/>`
+        + rects.map(([x, y, rw, rh]) => `<rect x="${x + .5}" y="${y + .5}" width="${rw - 1}" height="${rh - 1}"/>`).join('');
+}
+
 // Where the copies leave the last page of a roll with several labels to a
 // page not full, as the server tells it
 function drawSheet(sheet) {
@@ -700,6 +715,7 @@ export function fitLabel() {
     $('#slot').style.width = `${w + 72}px`;
     $('#vslot').style.height = `${h + 24}px`;
     drawDims(g);
+    drawCuts(w, h);
     const zoom = $('#zoom');
     zoom.setAttribute('aria-pressed', String(large));
     zoom.title = large ? 'Smaller preview' : 'Larger preview';
