@@ -505,12 +505,12 @@ function drawFill() {
 
 function fillField(item, name, value, i) {
     const kind = fieldType(item, name), id = 'fill' + i;
-    const head = `<label class="k" for="${id}">${esc(name)}</label>`;
+    const head = `<label class="k" for="${esc(id)}">${esc(name)}</label>`;
     if (kind === 'choice') {
         const choices = blankChoices(item, name);
-        return `<div>${head}<select class="in" id="${id}" data-blank="${esc(name)}"${choices.length ? '' : ' disabled'}>${choices.length ? choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('') : '<option value="">No choices yet</option>'}</select></div>`;
+        return `<div>${head}<select class="in" id="${esc(id)}" data-blank="${esc(name)}"${choices.length ? '' : ' disabled'}>${choices.length ? choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('') : '<option value="">No choices yet</option>'}</select></div>`;
     }
-    if (kind !== 'text') return `<div>${head}<input class="in" id="${id}" type="${kind}" data-blank="${esc(name)}" value="${esc(value)}"></div>`;
+    if (kind !== 'text') return `<div>${head}<input class="in" id="${esc(id)}" type="${esc(kind)}" data-blank="${esc(name)}" value="${esc(value)}"></div>`;
     // Saved labels offer the values printed with them before
     const used = [];
     if (item.kind === 'saved') {
@@ -521,7 +521,7 @@ function fillField(item, name, value, i) {
             if (used.length === 4) break;
         }
     }
-    return `<div>${head}<input class="in" id="${id}" data-blank="${esc(name)}" value="${esc(value)}" placeholder="Fill in ${esc(name)}" autocomplete="off">
+    return `<div>${head}<input class="in" id="${esc(id)}" data-blank="${esc(name)}" value="${esc(value)}" placeholder="Fill in ${esc(name)}" autocomplete="off">
         ${used.length ? `<div class="reuse">${used.map(v => `<button class="pill" type="button" data-reuse="${esc(name)}" title="Printed before">${esc(v)}</button>`).join('')}</div>` : ''}</div>`;
 }
 
@@ -756,8 +756,8 @@ function drawPicks(k) {
         const w = b[2] - b[0] + pad[0] + pad[2], h = b[3] - b[1] + pad[1] + pad[3];
         const ow = b[2] - b[0] + gap[0] + gap[2], oh = b[3] - b[1] + gap[1] + gap[3];
         const what = p.part === 'line' ? `Line ${p.index + 1}` : p.part === 'code' ? 'The code' : 'The image';
-        return `<button type="button" class="pk" data-part="${esc(p.part)}"${p.index !== undefined ? ` data-i="${p.index}"` : ''} title="${what}" aria-label="${what}" aria-pressed="false"
-            style="left:${b[0] - pad[0]}px;top:${b[1] - pad[1]}px;width:${w}px;height:${h}px"><svg class="ants" width="${ow}" height="${oh}" aria-hidden="true" style="left:${pad[0] - gap[0]}px;top:${pad[1] - gap[1]}px"><rect x=".75" y=".75" width="${Math.max(0, ow - 1.5)}" height="${Math.max(0, oh - 1.5)}" rx="3"/></svg></button>`;
+        return `<button type="button" class="pk" data-part="${esc(p.part)}"${p.index !== undefined ? ` data-i="${esc(p.index)}"` : ''} title="${esc(what)}" aria-label="${esc(what)}" aria-pressed="false"
+            style="left:${esc(b[0] - pad[0])}px;top:${esc(b[1] - pad[1])}px;width:${esc(w)}px;height:${esc(h)}px"><svg class="ants" width="${esc(ow)}" height="${esc(oh)}" aria-hidden="true" style="left:${esc(pad[0] - gap[0])}px;top:${esc(pad[1] - gap[1])}px"><rect x=".75" y=".75" width="${esc(Math.max(0, ow - 1.5))}" height="${esc(Math.max(0, oh - 1.5))}" rx="3"/></svg></button>`;
     }).join('');
     markPicks();
 }
@@ -871,17 +871,17 @@ export function renderToolbar() {
     const full = ui.full === i;
     bar.hidden = false;
     bar.className = 'float';
-    bar.innerHTML = `${fontButton(`data-font title="Font of this line" aria-label="Font of line ${i + 1}: ${esc(name)}"`, face ? name : `${name}, not installed`)}
+    bar.innerHTML = `${fontButton(`data-font title="Font of this line" aria-label="Font of line ${esc(i + 1)}: ${esc(name)}"`, face ? name : `${name}, not installed`)}
         <span class="sep"></span>
         <span class="az"><button type="button" class="azb" data-size="-1" title="Smaller" aria-label="Smaller">${icon('minus', '')}</button>
-            <input class="anum num" data-sizein value="${auto ? '' : esc(l.size)}" placeholder="${auto ? 'Auto' : ''}" inputmode="numeric" title="${auto ? 'Auto: the label decides, the lines keep the ratio of their sizes' : 'Size of the line'}" aria-label="Size of line ${i + 1}">
+            <input class="anum num" data-sizein value="${auto ? '' : esc(l.size)}" placeholder="${auto ? 'Auto' : ''}" inputmode="numeric" title="${auto ? 'Auto: the label decides, the lines keep the ratio of their sizes' : 'Size of the line'}" aria-label="Size of line ${esc(i + 1)}">
             <button type="button" class="azb" data-size="1" title="${full ? 'Fills the label' : 'Larger'}" aria-label="Larger"${full ? ' disabled' : ''}>${icon('plus', '')}</button></span>
         <span class="sep"></span>
         <button type="button" class="tb${bold ? ' on' : ''}" data-bold aria-pressed="${bold}" title="${fam && fam.bold ? 'Bold' : esc(noStyle('bold'))}" aria-label="Bold"${fam && fam.bold ? '' : ' disabled'}>${icon('bold')}</button>
         <button type="button" class="tb${italic ? ' on' : ''}" data-italic aria-pressed="${italic}" title="${hasItalic(fam) ? 'Italic' : esc(noStyle('italic'))}" aria-label="Italic"${hasItalic(fam) ? '' : ' disabled'}>${icon('italic')}</button>
         <button type="button" class="tb${l.underline ? ' on' : ''}" data-underline aria-pressed="${!!l.underline}" title="Underline" aria-label="Underline">${icon('underline')}</button>
         <span class="sep"></span>
-        <button type="button" class="tb" data-align title="Alignment: ${al[1]}" aria-label="Alignment: ${al[1]}">${icon(al[0])}</button>
+        <button type="button" class="tb" data-align title="Alignment: ${esc(al[1])}" aria-label="Alignment: ${esc(al[1])}">${icon(al[0])}</button>
         ${swatchHTML('data-lcolor', l.color, onTape(d), 'the line')}
         <span class="sep"></span>
         <button type="button" class="tb${l.inverted || l.checkbox || +l.line_spacing !== 100 ? ' dot' : ''}" data-more aria-expanded="false" title="More for this line" aria-label="More for this line">${icon('more')}</button>`;
@@ -932,7 +932,7 @@ function lineMenu(btn, i) {
     const spacing = +(l.line_spacing || 100);
     el.innerHTML = `<button type="button" data-act="invert" class="${l.inverted ? 'on' : ''}">${icon('contrast')}<span>White on black</span>${l.inverted ? icon('check') : ''}</button>
         <button type="button" data-act="todo" class="${l.checkbox ? 'on' : ''}">${icon('todo')}<span>To-do box</span><small>in front</small>${l.checkbox ? icon('check') : ''}</button>
-        <div class="mi">${icon('spacing')}<span>Line spacing</span><span class="az sm"><button type="button" class="azb" data-sp="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-spv>${spacing} %</span><button type="button" class="azb" data-sp="1" aria-label="More">${icon('plus', '')}</button></span></div>
+        <div class="mi">${icon('spacing')}<span>Line spacing</span><span class="az sm"><button type="button" class="azb" data-sp="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-spv>${esc(spacing)} %</span><button type="button" class="azb" data-sp="1" aria-label="More">${icon('plus', '')}</button></span></div>
         <button type="button" data-act="remove" class="danger"${d.text.length > 1 || String(l.text).length ? '' : ' disabled'}>${icon('trash')}<span>Remove the line</span></button>`;
     $('#center').appendChild(el);
     const r = btn.getBoundingClientRect(), c = $('#center').getBoundingClientRect();
@@ -1019,7 +1019,7 @@ function toggleAdvanced(open = !ui.adv) {
 }
 
 function seg(attr, options, on, extra = '') {
-    return `<span class="seg"${extra}>${options.map(([v, label, title, off]) => `<button type="button" data-${attr}="${v}" class="${on === v ? 'on' : ''}"${title ? ` title="${esc(title)}" aria-label="${esc(title)}"` : ''}${off ? ' disabled' : ''}>${label}</button>`).join('')}</span>`;
+    return `<span class="seg"${extra}>${options.map(([v, label, title, off]) => `<button type="button" data-${esc(attr)}="${esc(v)}" class="${on === v ? 'on' : ''}"${title ? ` title="${esc(title)}" aria-label="${esc(title)}"` : ''}${off ? ' disabled' : ''}>${label}</button>`).join('')}</span>`;
 }
 
 export function renderAdvanced() {
@@ -1039,24 +1039,24 @@ export function renderAdvanced() {
     box.innerHTML = `<div class="adv-h"><h4>Advanced</h4><button type="button" class="iconbtn" data-close-adv aria-label="Close">${icon('x', '')}</button></div>
         <div class="ft">
             <span class="k">Font</span><span class="row">${fontButton('data-afont aria-label="Font of all lines"', !fam ? 'Several fonts' : familyNamed(fam) ? fam : `${fam}, not installed`, 'fsel field-like')}<small>all lines</small></span>
-            <span class="k">Text size</span><span class="row"><span class="az"><button type="button" class="azb" data-all="-1" aria-label="Smaller">${icon('minus', '')}</button><input class="anum num" data-allin value="${largest(d)}" inputmode="numeric" aria-label="Text size of all lines"><button type="button" class="azb" data-all="1" aria-label="Larger">${icon('plus', '')}</button></span>
+            <span class="k">Text size</span><span class="row"><span class="az"><button type="button" class="azb" data-all="-1" aria-label="Smaller">${icon('minus', '')}</button><input class="anum num" data-allin value="${esc(largest(d))}" inputmode="numeric" aria-label="Text size of all lines"><button type="button" class="azb" data-all="1" aria-label="Larger">${icon('plus', '')}</button></span>
                 <button type="button" class="auto${auto ? ' on' : ''}" data-auto aria-pressed="${auto}" title="As large as fits on the label, the lines keep the ratio of their sizes">Auto</button><small>all lines</small></span>
             <span class="k">Direction</span><span class="row">${seg('dir', [['across', icon('type') + 'Across'], ['along', `<svg class="ic s rot" aria-hidden="true"><use href="#i-type"/></svg>Along`]], runsAlong(d) ? 'along' : 'across')}
                 <button type="button" class="tb${d.mirror === '1' ? ' on' : ''}" data-mirror aria-pressed="${d.mirror === '1'}" title="Mirrored, to be read through clear tape behind glass" aria-label="Mirrored">${icon('mirror')}</button></span>
             <span class="k${room ? '' : ' off'}">Position</span>${seg('valign', [['top', icon('vtop'), 'Top', !room], ['center', icon('vpos'), 'Middle', !room], ['bottom', icon('vbottom'), 'Bottom', !room]], verticalAlign(d), room ? '' : ` title="${esc(NO_ROOM)}"`)}
             <span class="k">Long lines</span>${seg('long', [['shrink', 'Shrink', 'Smaller where they do not fit'], ['wrap', 'Wrap', why || 'Wrapped into several lines', !!why], ['keep', 'Keep size', 'The lines keep their size, also where they do not fit']], longLines)}
             <span class="k">Frame</span><span class="row wrap">${seg('frame', [['none', 'None'], ['square', 'Square'], ['rounded', 'Rounded']], frame)}${frame !== 'none' ? swatchHTML('data-fcolor', d.border_color, onTape(d), 'the frame') : ''}<button type="button" class="custom${frameMore ? ' on' : ''}" data-fcustom aria-expanded="${!!frameMore}">Custom</button></span>
-            ${frameMore ? `<span class="k"></span><span class="mm4 frame4">${FRAME_KEYS.map(([k, n]) => `<label${k === 'border_roundness' && frame !== 'rounded' ? ' class="off" title="Only for rounded frames"' : ''}><small>${n}</small><input class="in num" type="number" min="${k === 'border_thickness' ? '0.1' : '0'}" max="${k === 'border_thickness' ? '5' : '20'}" step="${k === 'border_thickness' ? '0.1' : '0.5'}" data-fk="${k}" value="${dotsToMm(d[k], dpi)}"${k === 'border_roundness' && frame !== 'rounded' ? ' disabled' : ''} aria-label="${n} of the frame in mm"></label>`).join('')}<small class="unit">mm</small></span>
+            ${frameMore ? `<span class="k"></span><span class="mm4 frame4">${FRAME_KEYS.map(([k, n]) => `<label${k === 'border_roundness' && frame !== 'rounded' ? ' class="off" title="Only for rounded frames"' : ''}><small>${esc(n)}</small><input class="in num" type="number" min="${k === 'border_thickness' ? '0.1' : '0'}" max="${k === 'border_thickness' ? '5' : '20'}" step="${k === 'border_thickness' ? '0.1' : '0.5'}" data-fk="${esc(k)}" value="${esc(dotsToMm(d[k], dpi))}"${k === 'border_roundness' && frame !== 'rounded' ? ' disabled' : ''} aria-label="${esc(n)} of the frame in mm"></label>`).join('')}<small class="unit">mm</small></span>
             <span class="k"></span><small class="muted fnote">Sides, top and bottom: the distance from the edge of the label. The margins grow so that the text stays inside.</small>` : ''}
             <span class="k">Margins</span><span class="row wrap">${seg('margins', [['none', 'None'], ['tight', 'Tight'], ['normal', 'Normal'], ['roomy', 'Roomy']], custom ? '' : preset)}<button type="button" class="custom${custom ? ' on' : ''}" data-custom>Custom</button></span>
-            ${custom ? `<span class="k"></span><span class="mm4">${SIDES.map(side => `<label><small>${side[0].toUpperCase() + side.slice(1)}</small><input class="in num" type="number" min="0" max="20" step="0.5" data-margin="${side}" value="${dotsToMm(d['margin_' + side], dpi)}"></label>`).join('')}<small class="unit">mm</small></span>` : ''}
+            ${custom ? `<span class="k"></span><span class="mm4">${SIDES.map(side => `<label><small>${esc(side[0].toUpperCase() + side.slice(1))}</small><input class="in num" type="number" min="0" max="20" step="0.5" data-margin="${esc(side)}" value="${esc(dotsToMm(d['margin_' + side], dpi))}"></label>`).join('')}<small class="unit">mm</small></span>` : ''}
             <span class="k${hasLength(d) ? '' : ' off'}">Length</span><span class="row">${hasLength(d)
-                ? `${seg('len', [['auto', 'Auto'], ['fixed', 'Fixed']], hasFixedLength(d) || ui.fixedLength ? 'fixed' : 'auto')}${hasFixedLength(d) || ui.fixedLength ? `<input class="in num" type="number" min="${s.length[0]}" max="${s.length[1]}" step="0.5" data-length value="${esc(d.label_length)}" placeholder="mm" aria-label="Length in mm"><small>mm</small>` : ''}`
+                ? `${seg('len', [['auto', 'Auto'], ['fixed', 'Fixed']], hasFixedLength(d) || ui.fixedLength ? 'fixed' : 'auto')}${hasFixedLength(d) || ui.fixedLength ? `<input class="in num" type="number" min="${esc(s.length[0])}" max="${esc(s.length[1])}" step="0.5" data-length value="${esc(d.label_length)}" placeholder="mm" aria-label="Length in mm"><small>mm</small>` : ''}`
                 : `<small>${isDieCut(d.label_size) ? 'Die-cut labels have their own length' : flagOn(d) ? 'Cable flags are as long as their content' : 'As long as the content'}</small>`}</span>
             ${endless ? `<span class="k">Cable flag</span><span class="row"><button type="button" class="auto${flagOn(d) ? ' on' : ''}" data-flag aria-pressed="${flagOn(d)}">${flagOn(d) ? 'On' : 'Off'}</button>${flagOn(d) ? `<input class="in num" type="number" min="1" max="50" step="0.5" data-cable value="${esc(d.cable_diameter)}" placeholder="6.5" aria-label="Diameter of the cable in mm"><small>mm cable</small>` : ''}</span>
                 ${flagOn(d) ? '<span class="k"></span><small class="muted fnote" id="flagHint">Place the cable on the triangles, fold both ends together and press them firmly.</small>' : ''}` : ''}
             <span class="k">Cutting</span><span class="row cutrow">${noCutter(caps) ? `<small>${esc(noCutterWhy(caps))}</small>`
-                : own ? `<select class="in" data-cut aria-label="Cutting of this label"><option value="">Like the printer: ${esc(cutShort(pc, printerCaps()).toLowerCase())}</option>${CUTS.map(([v, n]) => `<option value="${v}"${d.cut === v ? ' selected' : ''}${v === 'none' && neverWhy(caps) ? ' disabled' : ''}>${n}</option>`).join('')}</select>`
+                : own ? `<select class="in" data-cut aria-label="Cutting of this label"><option value="">Like the printer: ${esc(cutShort(pc, printerCaps()).toLowerCase())}</option>${CUTS.map(([v, n]) => `<option value="${esc(v)}"${d.cut === v ? ' selected' : ''}${v === 'none' && neverWhy(caps) ? ' disabled' : ''}>${esc(n)}</option>`).join('')}</select>`
                 : `<small>Like the printer</small><button type="button" class="custom" data-cutchange>Change</button>`}</span>
             ${cutsHTML(d, caps)}
             ${own && !noCutter(caps) && (caps.half_cut || caps.chain) ? `<span class="k"></span><span class="row">${caps.half_cut ? `<button type="button" class="auto${halfOf(cutOf(d), caps) ? ' on' : ''}" data-half>Half cuts</button>` : ''}${caps.chain ? `<button type="button" class="auto${chainOf(cutOf(d), caps) ? ' on' : ''}" data-chain${d.cut === 'none' ? ' disabled' : ''}>Chain printing</button>` : ''}</span>` : ''}

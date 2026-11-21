@@ -89,15 +89,15 @@ export async function openCalibration(p, changed) {
     // from the correction the last calibration label was printed with.
     let working = { across: kept.across, along: kept.along }, printed = { ...working };
     const readings = ['<option value=""></option>', ...Array.from({ length: 25 }, (_, i) => -3 + i / 4)
-        .map(v => `<option value="${v}">${v > 0 ? '+' : ''}${v}</option>`)].join('');
-    const move = (dir, label) => `<button class="btn sm" type="button" data-move="${dir}">${svg(`<path d="${ARROWS[dir]}"/>`)}${label}</button>`;
+        .map(v => `<option value="${esc(v)}">${v > 0 ? '+' : ''}${esc(v)}</option>`)].join('');
+    const move = (dir, label) => `<button class="btn sm" type="button" data-move="${esc(dir)}">${svg(`<path d="${esc(ARROWS[dir])}"/>`)}${esc(label)}</button>`;
     const alt = narrow ? 'A calibration label printed 1 mm too far right: read where the black starts at each edge of the label'
         : round ? 'A calibration label printed 1 mm too far right: the white ring is wider left of the circle than right of it'
             : 'A calibration label printed 1 mm too far right: the white strip left of the frame is wider than the one right of it';
     openLayer(`<div class="dialog narrow cal-dialog" role="dialog" aria-label="Calibrate printer">
         <div class="dialog-h"><div><h2>Calibrate printer</h2><p class="muted">Print a calibration label, then look at it as the picture shows.</p></div><span class="sp"></span>
             <button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
-        <img class="cal-example" alt="${esc(alt)}" src="${API}/calibration/example.png?${new URLSearchParams({ printer: p.path, model: p.model, kind })}">
+        <img class="cal-example" alt="${esc(alt)}" src="${esc(`${API}/calibration/example.png?${new URLSearchParams({ printer: p.path, model: p.model, kind })}`)}">
         <button class="btn primary" type="button" data-cal-print>${icon('printer')}Print calibration label</button>
         ${narrow ? `<p>Where does the black start at the edge of the label? Enter the number next to that point, on each side.</p>
         <div class="row"><label class="cal-read">Left <select class="in" id="calLeft">${readings}</select></label>

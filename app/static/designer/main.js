@@ -52,7 +52,7 @@ function route() {
 function renderChip() {
     const st = printerState(S.printer);
     const chip = $('#printerChip');
-    chip.innerHTML = `<span class="d ${st.cls}"></span><b>${esc(S.printer ? printerLabel(S.printer) : 'No printer')}</b>${S.printer ? `<small>${esc(sizeShort(S.tape))}</small>` : ''}`;
+    chip.innerHTML = `<span class="d ${esc(st.cls)}"></span><b>${esc(S.printer ? printerLabel(S.printer) : 'No printer')}</b>${S.printer ? `<small>${esc(sizeShort(S.tape))}</small>` : ''}`;
     chip.title = `${S.printer ? printerLabel(S.printer) + ': ' : ''}${st.text}, ${sizeName(S.tape)}${tapeKnown() ? '' : ', the printer does not say'}`;
 }
 
@@ -107,7 +107,7 @@ function drawPrinters() {
         const t = p.tape || {};
         const tape = gone || !t.id ? '' : t.known ? `${sizeName(t.id)} ${t.manual ? 'set by hand' : 'in the printer'}`
             : (t.candidates || []).length ? `measures labels ${t.unknown}` : t.unknown ? `reports ${t.unknown} tape` : 'does not say which tape it has';
-        return `<button class="prow${on ? ' on' : ''}" type="button" data-p="${k}"${gone ? ` title="${esc(st.text)}"` : ''}><span class="d ${st.cls}"></span>
+        return `<button class="prow${on ? ' on' : ''}" type="button" data-p="${esc(k)}"${gone ? ` title="${esc(st.text)}"` : ''}><span class="d ${esc(st.cls)}"></span>
             <span class="grow"><b>${esc(printerLabel(p))}</b><small>${esc([p.name ? printerName(p) : '', gone ? 'Cannot be reached' : st.text, tape, tapeLeft(p), p.battery != null ? `Battery ${p.battery}%` : ''].filter(Boolean).join(', '))}</small>
                 ${p.weak_connection ? '<small class="warn">The Wi-Fi connection seems weak, try moving the printer closer to the Wi-Fi router.</small>' : ''}
                 ${p.battery_low ? '<small class="warn">The battery is low, charge the printer.</small>' : ''}</span>
@@ -134,7 +134,7 @@ function openPrinters() {
     if (phone()) openLayer('<div class="pp pop-card" role="dialog" aria-label="Printers"></div>', 'sheet');
     else {
         const r = $('#printerChip').getBoundingClientRect();
-        openLayer(`<div class="pp pop-card" role="dialog" aria-label="Printers" style="top:${r.bottom + 8}px;right:${Math.max(8, innerWidth - r.right)}px"></div>`, 'clear');
+        openLayer(`<div class="pp pop-card" role="dialog" aria-label="Printers" style="top:${esc(r.bottom + 8)}px;right:${esc(Math.max(8, innerWidth - r.right))}px"></div>`, 'clear');
     }
     drawPrinters();
 }
@@ -188,11 +188,11 @@ function openSearch() {
             for (const it of list) {
                 const i = results.push(it) - 1;
                 if (it.kind === 'command') {
-                    html += `<button class="res cmd" type="button" data-r="${i}"><span class="ico">${icon(it.command.icon, '')}</span><span class="grow"><b>${esc(it.title)}</b></span><span class="act">run</span></button>`;
+                    html += `<button class="res cmd" type="button" data-r="${esc(i)}"><span class="ico">${icon(it.command.icon, '')}</span><span class="grow"><b>${esc(it.title)}</b></span><span class="act">run</span></button>`;
                     continue;
                 }
                 const sub = it.kind === 'saved' ? savedSub(it) : (it.sub || '') + (placed(it.size) ? ', made for ' + sizeName(it.size) : '');
-                html += `<button class="res" type="button" data-r="${i}"><span class="ico">${it.kind === 'printed' ? icon('refresh') : it.kind === 'saved' ? `<img alt="" data-thumb="${i}">` : `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">`}</span><span class="grow"><b>${esc(it.title)}</b><small>${esc(sub)}</small></span><span class="act">${it.kind === 'printed' ? 'print again' : 'open'}</span></button>`;
+                html += `<button class="res" type="button" data-r="${esc(i)}"><span class="ico">${it.kind === 'printed' ? icon('refresh') : it.kind === 'saved' ? `<img alt="" data-thumb="${esc(i)}">` : `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">`}</span><span class="grow"><b>${esc(it.title)}</b><small>${esc(sub)}</small></span><span class="act">${it.kind === 'printed' ? 'print again' : 'open'}</span></button>`;
             }
         }
         $('#palRes').innerHTML = html || '<p class="muted pad">Nothing found. Try another word, or &gt; for commands.</p>';

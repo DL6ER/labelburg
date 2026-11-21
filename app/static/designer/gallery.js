@@ -133,7 +133,7 @@ function drawTemplates() {
     const demos = S.demoList.filter(d => d.language === S.lang);
     const counted = list => G.fitsOnly ? list.filter(d => fitsTape(d.label_size_id)).length : list.length;
     const on = id => !G.typedCat && G.cat === id;
-    const btn = (id, name, n, cls = '') => `<button type="button" data-cat="${esc(id)}" class="${on(id) ? 'on' : ''}${cls}"><span>${esc(name)}</span><small>${n}</small></button>`;
+    const btn = (id, name, n, cls = '') => `<button type="button" data-cat="${esc(id)}" class="${on(id) ? 'on' : ''}${esc(cls)}"><span>${esc(name)}</span><small>${esc(n)}</small></button>`;
     nav.innerHTML = (G.typedCat ? `<button type="button" class="on" data-cat="typed"><span>For your text</span></button>` : '')
         + btn('saved', 'Your labels', S.saved.length)
         + allTags().map(t => btn('tag:' + t, t, S.saved.filter(s => hasTag(s, t)).length, ' tag')).join('')
@@ -182,7 +182,7 @@ function drawGrid() {
     if (!grid) return;
     if ($('#tplNav [data-cat="typed"]') ? !G.typedCat : G.typedCat) { drawTemplates(); return; }
     const items = shownItems = gridItems(), typed = typedLines().length > 0;
-    grid.innerHTML = items.length ? items.map((it, i) => `<button type="button" class="thumb${G.sel && G.sel.kind === it.kind && G.sel.id === it.id ? ' sel' : ''}" data-i="${i}"><span class="bed">${it.kind === 'demo' && !typed ? `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">` : `<img alt="" data-thumb="${i}">`}</span>
+    grid.innerHTML = items.length ? items.map((it, i) => `<button type="button" class="thumb${G.sel && G.sel.kind === it.kind && G.sel.id === it.id ? ' sel' : ''}" data-i="${esc(i)}"><span class="bed">${it.kind === 'demo' && !typed ? `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">` : `<img alt="" data-thumb="${esc(i)}">`}</span>
         <b>${esc(it.title)}</b><small>${esc(it.kind === 'saved' ? savedSub(it) : placed(it.size) ? 'Made for ' + sizeName(it.size) : it.sub || '')}</small></button>`).join('')
         : `<p class="muted pad">${G.typedCat ? 'No template matches the text.' : G.cat === 'saved' ? 'Labels you save show up here.' : G.cat === 'printed' ? 'Labels you print show up here.' : 'No labels here.'}</p>`;
     grid.scrollTop = 0;
@@ -212,8 +212,8 @@ async function showDetail(item, values = null) {
         <div class="tpl-shot"><img alt="Preview" id="tplShot"></div>
         ${placed(work.design.label_size) ? `<p class="mnote">${icon('warn')}<span>Made for ${esc(sizeName(work.design.label_size))}, prints on the ${esc(sizeName(S.tape))}</span></p>` : ''}
         ${blanks.length ? `<div class="tpl-fields" id="tplFields">${blanks.map((b, i) => blankField({ design: work.design }, b, work.values[b], i)).join('')}</div>` : ''}
-        <div class="tpl-print"><span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${before ? before.copies : 1}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>
-            <button class="btn primary" type="button" id="tplPrint"${before && before.noImage ? ` disabled title="${NO_IMAGE}"` : ''}>${icon('printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        <div class="tpl-print"><span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(before ? before.copies : 1)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>
+            <button class="btn primary" type="button" id="tplPrint"${before && before.noImage ? ` disabled title="${esc(NO_IMAGE)}"` : ''}>${icon('printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
             ${saved ? `<button class="btn ghost" type="button" id="tplLinks">${icon('qr')}Use from anywhere</button>
@@ -283,12 +283,12 @@ function hideDetail() {
 
 function blankField(item, name, value, i) {
     const kind = fieldType(item, name), id = 'tplF' + i;
-    const head = `<label class="k" for="${id}">${esc(name)}</label>`;
+    const head = `<label class="k" for="${esc(id)}">${esc(name)}</label>`;
     if (kind === 'choice') {
         const choices = blankChoices(item, name);
-        return `<div>${head}<select class="in" id="${id}" data-blank="${esc(name)}">${choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`;
+        return `<div>${head}<select class="in" id="${esc(id)}" data-blank="${esc(name)}">${choices.map(c => `<option${c === value ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>`;
     }
-    return `<div>${head}<input class="in" id="${id}" type="${kind === 'text' ? 'text' : kind}" data-blank="${esc(name)}" value="${esc(value)}" placeholder="Fill in ${esc(name)}" autocomplete="off"></div>`;
+    return `<div>${head}<input class="in" id="${esc(id)}" type="${esc(kind)}" data-blank="${esc(name)}" value="${esc(value)}" placeholder="Fill in ${esc(name)}" autocomplete="off"></div>`;
 }
 
 // --- Links, tags and removing a saved label --------------------------------------------

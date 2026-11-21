@@ -286,7 +286,7 @@ function stepperHTML() {
     const n = M.units.length, u = unitNow();
     return `<span class="unit-step"${n > 1 ? '' : ' hidden'}><span class="sep"></span>
         <button type="button" class="tb" data-unit="-1" title="Previous" aria-label="Previous">${icon('prev')}</button>
-        <span class="unit-of" data-unitof title="${esc(unitName(u))}">${n > 1 ? `${Math.min(M.unit, n - 1) + 1} of ${n}` : ''}</span>
+        <span class="unit-of" data-unitof title="${esc(unitName(u))}">${n > 1 ? esc(`${Math.min(M.unit, n - 1) + 1} of ${n}`) : ''}</span>
         <button type="button" class="tb" data-unit="1" title="Next" aria-label="Next">${icon('next')}</button></span>`;
 }
 // Changed in place, the buttons keep the focus
@@ -365,7 +365,7 @@ function moveTo(name, to) {
     const d = S.edit.design, parts = orderOf(d), from = parts.indexOf(name);
     if (from < 0 || to < 0 || to >= parts.length || to === from) return;
     parts.splice(to, 0, parts.splice(from, 1)[0]);
-    setOrder(parts, directionOf(d), `[data-opart="${name}"]`);
+    setOrder(parts, directionOf(d), `[data-opart="${CSS.escape(name)}"]`);
 }
 
 // The parts as chips in their order, a button between two to swap them,
@@ -377,14 +377,14 @@ function drawOrder() {
     const d = S.edit.design, parts = orderOf(d), dir = directionOf(d), sig = `${parts}|${dir}`;
     if (box.dataset.sig === sig) return;
     const focused = box.contains(document.activeElement) ? document.activeElement : null;
-    const refocus = focused && (focused.dataset.opart ? `[data-opart="${focused.dataset.opart}"]` : focused.dataset.oswap ? `[data-oswap="${focused.dataset.oswap}"]` : `[data-odir="${focused.dataset.odir}"]`);
+    const refocus = focused && (focused.dataset.opart ? `[data-opart="${CSS.escape(focused.dataset.opart)}"]` : focused.dataset.oswap ? `[data-oswap="${CSS.escape(focused.dataset.oswap)}"]` : `[data-odir="${CSS.escape(focused.dataset.odir || '')}"]`);
     box.dataset.sig = sig;
     box.hidden = parts.length < 2;
     const name = p => PART_NAMES[p].toLowerCase();
     box.innerHTML = box.hidden ? '' : `<span class="sep"></span><span class="olabel" aria-hidden="true">Order</span>
         <span class="ochips" role="group" aria-label="Order on the label" title="Drag a part to change the order, or move it with the arrow keys">${parts.map((p, i) =>
-            `${i ? `<button type="button" class="oswap" data-oswap="${i - 1}" title="Swap ${name(parts[i - 1])} and ${name(p)}" aria-label="Swap ${name(parts[i - 1])} and ${name(p)}">${icon('swap', '')}</button>` : ''}`
-            + `<button type="button" class="ochip" data-opart="${p}" aria-label="${PART_NAMES[p]}, ${i + 1} of ${parts.length}">${icon('grip')}${PART_NAMES[p]}</button>`).join('')}</span>
+            `${i ? `<button type="button" class="oswap" data-oswap="${esc(i - 1)}" title="Swap ${esc(name(parts[i - 1]))} and ${esc(name(p))}" aria-label="Swap ${esc(name(parts[i - 1]))} and ${esc(name(p))}">${icon('swap', '')}</button>` : ''}`
+            + `<button type="button" class="ochip" data-opart="${esc(p)}" aria-label="${esc(PART_NAMES[p])}, ${esc(i + 1)} of ${esc(parts.length)}">${icon('grip')}${esc(PART_NAMES[p])}</button>`).join('')}</span>
         <span class="seg" title="How the parts follow each other"><button type="button" data-odir="row" class="${dir === 'row' ? 'on' : ''}" title="Side by side, as the text reads">Row</button><button type="button" data-odir="column" class="${dir === 'column' ? 'on' : ''}" title="One below the other">Column</button></span>`;
     // Each reads the order the label has when used
     $$('[data-opart]', box).forEach(chip => {
@@ -399,9 +399,9 @@ function drawOrder() {
     $$('[data-oswap]', box).forEach(b => b.onclick = () => {
         const i = +b.dataset.oswap, swapped = orderOf(S.edit.design);
         [swapped[i], swapped[i + 1]] = [swapped[i + 1], swapped[i]];
-        setOrder(swapped, directionOf(S.edit.design), `[data-oswap="${i}"]`);
+        setOrder(swapped, directionOf(S.edit.design), `[data-oswap="${CSS.escape(String(i))}"]`);
     });
-    $$('[data-odir]', box).forEach(b => b.onclick = () => setOrder(orderOf(S.edit.design), b.dataset.odir, `[data-odir="${b.dataset.odir}"]`));
+    $$('[data-odir]', box).forEach(b => b.onclick = () => setOrder(orderOf(S.edit.design), b.dataset.odir, `[data-odir="${CSS.escape(b.dataset.odir)}"]`));
     const back = refocus && $(refocus, box);
     if (back) back.focus();
 }
@@ -443,7 +443,7 @@ function gapRow(d) {
     const on = paired(d);
     const auto = M.gap ? `Automatic, ${dotsToMm(M.gap, dpiOf(d.label_size, M.highRes))}` : 'Automatic';
     return `<label class="mi${on ? '' : ' off'}" title="${on ? 'Leave it empty for a distance that suits the size of the text' : 'Only with text on the label'}">${icon('gap')}<span>Distance to the text</span>
-        <input class="in num" type="number" min="0" max="50" step="0.5" data-gap value="${d.image_text_gap === '' ? '' : dotsToMm(d.image_text_gap, dpiOf(d.label_size))}" placeholder="${on ? esc(auto) : ''}"${on ? '' : ' disabled'} aria-label="Distance to the text in mm"><small>mm</small></label>`;
+        <input class="in num" type="number" min="0" max="50" step="0.5" data-gap value="${d.image_text_gap === '' ? '' : esc(dotsToMm(d.image_text_gap, dpiOf(d.label_size)))}" placeholder="${on ? esc(auto) : ''}"${on ? '' : ' disabled'} aria-label="Distance to the text in mm"><small>mm</small></label>`;
 }
 function bindGap(el) {
     const gap = $('[data-gap]', el);
@@ -506,9 +506,9 @@ function codeBar(bar) {
     const shownText = displayed(d.code_text).text;
     bar.className = 'float media';
     bar.innerHTML = `<label class="fsel" title="Kind of code"><select data-kind aria-label="Kind of code">${[['2D codes', true], ['Barcodes', false]].map(([group, twoD]) =>
-        `<optgroup label="${group}">${S.codes.filter(c => !!c.two_d === twoD).map(c => `<option value="${esc(c.type)}"${c.type === d.barcode_type ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}
+        `<optgroup label="${esc(group)}">${S.codes.filter(c => !!c.two_d === twoD).map(c => `<option value="${esc(c.type)}"${c.type === d.barcode_type ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</optgroup>`).join('')}
             ${S.codes.some(c => c.type === d.barcode_type) ? '' : `<option selected>${esc(d.barcode_type)}</option>`}</select>${icon(kind.two_d ? 'qr' : 'barcode')}<span>${esc(kind.name)}</span>${icon('down')}</label>
-        <textarea class="cin" data-ctext rows="${codeRows(shownText)}" wrap="off" spellcheck="false" placeholder="${hasTextLines(d) ? 'Empty: the text of the label' : 'Link or text'}" aria-label="Content of the code">${esc(shownText)}</textarea>
+        <textarea class="cin" data-ctext rows="${esc(codeRows(shownText))}" wrap="off" spellcheck="false" placeholder="${hasTextLines(d) ? 'Empty: the text of the label' : 'Link or text'}" aria-label="Content of the code">${esc(shownText)}</textarea>
         ${sizing ? `<span class="sep"></span><span class="az" title="${esc(sizeTitle)}"><button type="button" class="azb" data-csize="-1" aria-label="Smaller"${withImg && fit ? ' disabled' : ''}>${icon('minus', '')}</button>
             <input class="anum num" data-csizein value="${fit ? '' : esc(value)}" placeholder="Fit" inputmode="numeric" aria-label="${esc(sizeTitle)}"${withImg && fit ? ' disabled' : ''}>
             <button type="button" class="azb" data-csize="1" aria-label="Larger"${withImg && fit ? ' disabled' : ''}>${icon('plus', '')}</button></span>` : ''}
@@ -563,7 +563,7 @@ function codeMenu(el) {
         ${kind.two_d ? `<label class="mi${fit ? ' off' : ''}"${fit ? ' title="The code fits the label"' : ''}>${icon('grid')}<span>Size of a dot</span><input class="in num" type="number" min="1" max="40" data-dot value="${esc(d.qrcode_size)}"${fit ? ' disabled' : ''} aria-label="Size of a dot"></label>`
             : withImg ? '' : `<label class="mi${fit ? ' off' : ''}"${fit ? ' title="The code fits the label"' : ''}>${icon('grid')}<span>Scale</span><input class="in num" type="number" min="1" max="500" data-cscale value="${esc(d.image_scaling_factor)}"${fit ? ' disabled' : ''} aria-label="Scale in %"><small>%</small></label>`}
         ${kind.corrections.length ? `<div class="mi">${icon('shield')}<span>Error correction</span><span class="seg">${LEVELS.filter(([v]) => kind.corrections.includes(v)).map(([v, n]) =>
-            `<button type="button" data-level="${v}" class="${d.qrcode_correction === v ? 'on' : ''}" title="${esc(n)}">${v}</button>`).join('')}</span></div>`
+            `<button type="button" data-level="${esc(v)}" class="${d.qrcode_correction === v ? 'on' : ''}" title="${esc(n)}">${esc(v)}</button>`).join('')}</span></div>`
             : `<p class="mnote">${icon('shield')}<span>${kind.two_d ? `${esc(kind.name)} codes set their own error correction. It` : 'Barcodes have no error correction. It'} can be chosen for ${esc(choosable)} codes.</span></p>`}
         ${withImg ? '' : gapRow(d)}
         <button type="button" class="danger" data-cremove>${icon('trash')}<span>Remove the code</span></button>`;
@@ -603,13 +603,13 @@ function imageBar(bar) {
     const colors = color
         ? `<span class="tnote" title="Images print in full color on this tape">Full color</span>
            <button type="button" class="tb${d.image_contrast === '1' ? ' on' : ''}" data-contrast aria-pressed="${d.image_contrast === '1'}" title="Stronger contrast, for light drawings" aria-label="Stronger contrast">${icon('contrast')}</button>`
-        : `<span class="seg" title="Colors">${MODES.map(([v, n, title]) => `<button type="button" data-imode="${v}" class="${d.image_mode === v ? 'on' : ''}" title="${needsRed(v) ? 'Needs black and red tape' : title}"${needsRed(v) ? ' disabled' : ''}>${n}</button>`).join('')}</span>`;
+        : `<span class="seg" title="Colors">${MODES.map(([v, n, title]) => `<button type="button" data-imode="${esc(v)}" class="${d.image_mode === v ? 'on' : ''}" title="${esc(needsRed(v) ? 'Needs black and red tape' : title)}"${needsRed(v) ? ' disabled' : ''}>${esc(n)}</button>`).join('')}</span>`;
     bar.innerHTML = `${colors}
         <span class="sep"></span>
         <span class="seg" title="Size"><button type="button" data-fit="1" class="${fit ? 'on' : ''}" title="The image fits the label">Fit</button><button type="button" data-fit="0" class="${fit ? '' : 'on'}" title="Scaled in %">%</button></span>
         ${fit ? '' : `<span class="az"><button type="button" class="azb" data-scale="-1" aria-label="Smaller">${icon('minus', '')}</button><input class="anum num" data-scalein value="${esc(d.image_scaling_factor)}" inputmode="numeric" aria-label="Scale in %"><button type="button" class="azb" data-scale="1" aria-label="Larger">${icon('plus', '')}</button></span>`}
         <span class="sep"></span>
-        <button type="button" class="tb wide" data-turn title="A quarter turn" aria-label="A quarter turn, now ${rot} degrees">${icon('rotate')}<span>${rot}&deg;</span></button>
+        <button type="button" class="tb wide" data-turn title="A quarter turn" aria-label="A quarter turn, now ${esc(rot)} degrees">${icon('rotate')}<span>${esc(rot)}&deg;</span></button>
         ${orderHTML()}
         <span class="sep"></span>
         <button type="button" class="tb${more ? ' dot' : ''}" data-more aria-expanded="${!!menu}" title="More for the image" aria-label="More for the image">${icon('more')}</button>
@@ -658,10 +658,10 @@ function imageMenu(el) {
         ${gapRow(d)}
         ${pdfs.length ? `<label class="mi" title="For example 1-3, 5 or all. Each page prints as a label of its own.">${icon('file')}<span>PDF pages</span>
             <input class="in" data-pages value="${esc(d.pdf_pages || '')}" placeholder="1" aria-label="PDF pages"></label>
-            ${pageCount > 1 ? `<p class="mnote"><span>This PDF has ${pageCount} pages, each one chosen prints as a label of its own.</span>${String(d.pdf_pages).trim().toLowerCase() === 'all' ? '' : '<button type="button" class="custom" data-allpages>All pages</button>'}</p>` : ''}` : ''}
+            ${pageCount > 1 ? `<p class="mnote"><span>This PDF has ${esc(pageCount)} pages, each one chosen prints as a label of its own.</span>${String(d.pdf_pages).trim().toLowerCase() === 'all' ? '' : '<button type="button" class="custom" data-allpages>All pages</button>'}</p>` : ''}` : ''}
         <div class="sepl"></div>
         <ul class="flist">${files.map((f, i) => `<li class="${files.length > 1 && unitNow() && unitNow().file === i ? 'on' : ''}">${icon(isPdf(f) ? 'file' : 'image')}<span title="${esc(f.name)}">${esc(f.name)}</span>
-            <button type="button" class="tb" data-unfile="${i}" title="Remove ${esc(f.name)}" aria-label="Remove ${esc(f.name)}">${icon('x')}</button></li>`).join('')}</ul>
+            <button type="button" class="tb" data-unfile="${esc(i)}" title="Remove ${esc(f.name)}" aria-label="Remove ${esc(f.name)}">${icon('x')}</button></li>`).join('')}</ul>
         ${files.length > 1 ? '<p class="mnote"><span>Each file prints as a label of its own with these settings. Saving the label keeps the first one only.</span></p>' : ''}
         ${several ? `<p class="mnote">${icon('copies')}<span>Copies print ${collated() ? 'as sets: ABC ABC' : 'grouped: AA BB CC'}, as set in <a href="#settings">Settings</a>.</span></p>` : ''}
         <button type="button" data-choose>${icon('upload')}<span>Choose other files</span><small>or drop, paste</small></button>

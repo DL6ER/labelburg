@@ -26,7 +26,7 @@ const PATHS = {
     screen: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
     robot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V5M2 13v3M22 13v3M9 13v1M15 13v1M9.5 17h5"/><circle cx="12" cy="4" r="1"/>',
 };
-const ic = name => PATHS[name] ? `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>` : icon(name);
+const ic = name => Object.hasOwn(PATHS, name) ? `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>` : icon(name);
 const SOURCE = 'https://github.com/DL6ER/labelburg';
 
 // main.js hands over the printer chip, the status refresh and the theme
@@ -37,9 +37,11 @@ const shownAnyway = new Set();
 // the one chosen until the server tells whether it takes it
 const tapesSaving = {};
 
+// The part of the Settings the address names, as PARTS has it
 const partOf = () => {
-    const part = location.hash.replace(/^#/, '').split(/[/?]/)[1];
-    return PARTS.some(([id]) => id === part) ? part : 'printers';
+    const named = location.hash.replace(/^#/, '').split(/[/?]/)[1];
+    const found = PARTS.find(([id]) => id === named);
+    return found ? found[0] : 'printers';
 };
 const settingsShown = () => document.body.dataset.view === 'settings' && !!$('#setPart');
 
@@ -48,9 +50,9 @@ export function renderSettings(el, hooks) {
     const part = partOf();
     el.innerHTML = `<div class="set">
         <nav class="set-nav" aria-label="Settings">${PARTS.map(([id, name, i]) =>
-            `<a href="#settings/${id}" data-part="${id}"${id === part ? ' class="on" aria-current="page"' : ''}>${ic(i)}<span>${esc(name)}</span></a>`).join('')}</nav>
-        <div class="set-main"><div class="set-inner" id="setPart" data-part="${part}"></div></div></div>`;
-    DRAW[part]($('#setPart'));
+            `<a href="#settings/${esc(id)}" data-part="${esc(id)}"${id === part ? ' class="on" aria-current="page"' : ''}>${ic(i)}<span>${esc(name)}</span></a>`).join('')}</nav>
+        <div class="set-main"><div class="set-inner" id="setPart" data-part="${esc(part)}"></div></div></div>`;
+    (Object.hasOwn(DRAW, part) ? DRAW[part] : DRAW.printers)($('#setPart'));
 }
 
 // After each status of the printers: the cards follow it, drawn again only
@@ -97,7 +99,7 @@ function sizeOptions(p, chosen) {
         ['Round', s => s.form === 'round_die_cut'], ['P-touch tape', s => isPtouch(s.id)], ['Color tape', s => isColorTape(s.id)]];
     return groups.map(([group, inGroup], i) => {
         const sizes = C.label_sizes.filter(s => inGroup(s) && offered(s) && (i === 0 || !measured(s)));
-        return sizes.length ? `<optgroup label="${group}">${sizes.map(s => `<option value="${esc(s.id)}"${s.id === chosen ? ' selected' : ''}>${esc(sizeName(s.id))}</option>`).join('')}</optgroup>` : '';
+        return sizes.length ? `<optgroup label="${esc(group)}">${sizes.map(s => `<option value="${esc(s.id)}"${s.id === chosen ? ' selected' : ''}>${esc(sizeName(s.id))}</option>`).join('')}</optgroup>` : '';
     }).join('');
 }
 
@@ -115,7 +117,7 @@ function tapeHTML(p) {
 }
 
 const seg = (k, opts, on, label) => `<div class="seg" role="group" aria-label="${esc(label)}">${opts.map(([v, n, off]) =>
-    `<button type="button" data-k="${k}" data-v="${v}"${v === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}${off ? ` disabled title="${esc(off)}"` : ''}>${esc(n)}</button>`).join('')}</div>`;
+    `<button type="button" data-k="${esc(k)}" data-v="${esc(v)}"${v === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}${off ? ` disabled title="${esc(off)}"` : ''}>${esc(n)}</button>`).join('')}</div>`;
 
 function qualityHTML(p) {
     const caps = capsOf(p.model);
@@ -143,7 +145,7 @@ function cuttingHTML(p) {
 function cardHTML(p, i) {
     const st = printerState(p), name = printerLabel(p);
     if (unreachable(p) && !shownAnyway.has(cardKey(p))) {
-        return `<section class="set-card off" data-card="${i}"><div class="set-collapsed">
+        return `<section class="set-card off" data-card="${esc(i)}"><div class="set-collapsed">
             <span class="d bad"></span><b>${esc(name)}</b><span class="muted grow" title="${esc(st.text)}">cannot be reached</span>
             ${removeHTML(p)}<button class="btn ghost sm" type="button" data-show>Show settings</button></div></section>`;
     }
@@ -153,8 +155,8 @@ function cardHTML(p, i) {
         + (p.battery_low ? '<small class="set-warn">The battery is low, charge the printer.</small>' : '');
     // Simulators and printers named twice in PRINTERS are one device
     const same = S.printers.filter(o => o !== p && o.path === p.path).map(printerLabel);
-    return `<section class="set-card" data-card="${i}">
-        <div class="set-card-h"><span class="d ${st.cls}"></span>
+    return `<section class="set-card" data-card="${esc(i)}">
+        <div class="set-card-h"><span class="d ${esc(st.cls)}"></span>
             <div class="grow"><b>${esc(name)}</b><small class="muted">${esc(sub)}</small>${warns}</div>
             ${unreachable(p) ? '<button class="btn ghost sm" type="button" data-hide>Hide settings</button>' : ''}
             ${removeHTML(p)}<button class="btn soft sm" type="button" data-test${unreachable(p) ? ' disabled title="The printer cannot be reached"' : ' title="A label that shows which end leaves the printer first"'}>${icon('printer')}Print a test label</button></div>
@@ -187,7 +189,8 @@ function drawCards(force = false) {
     const focus = card && box.contains(a) ? [card.dataset.card, a.dataset.k, a.dataset.v, Object.keys(a.dataset).join()] : null;
     box.replaceChildren(...fresh.childNodes);
     if (!focus) return;
-    const again = $$(`[data-card="${focus[0]}"] button, [data-card="${focus[0]}"] input, [data-card="${focus[0]}"] select`, box)
+    const at = CSS.escape(focus[0]);
+    const again = $$(`[data-card="${at}"] button, [data-card="${at}"] input, [data-card="${at}"] select`, box)
         .find(el => el.dataset.k === focus[1] && el.dataset.v === focus[2] && Object.keys(el.dataset).join() === focus[3]);
     if (again) again.focus();
 }
@@ -511,7 +514,7 @@ function drawHistory() {
         return `<div class="set-hrow${failed ? ' failed' : ''}"><span class="set-thumb"><img alt="" data-thumb="${esc(h.id)}"></span>
             <div class="grow"><b>${esc(entryName(h))}</b><small class="${failed ? 'set-bad' : 'muted'}">${esc(sub)}</small></div>
             <button class="btn ghost sm" type="button" data-h="${esc(h.id)}" data-open>Open</button>
-            <button class="btn soft sm" type="button" data-h="${esc(h.id)}" data-again${h.noImage ? ` disabled title="${NO_IMAGE}"` : ''}>${icon('refresh')}Print again</button></div>`;
+            <button class="btn soft sm" type="button" data-h="${esc(h.id)}" data-again${h.noImage ? ` disabled title="${esc(NO_IMAGE)}"` : ''}>${icon('refresh')}Print again</button></div>`;
     }).join('') : '<p class="set-empty muted">Nothing printed yet. Labels you print show up here.</p>';
     watchThumbs(box);
 }
@@ -607,14 +610,14 @@ DRAW.connections = box => {
     const list = connections();
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>Connections</h2><p class="muted">Addresses for other programs, with this server's address filled in.</p></div></header>
         ${list.map((c, i) => `<section class="set-card set-conn">
-            <div class="set-conn-h">${c.icon ? ic(c.icon) : ''}<h3>${esc(c.name)}</h3><span class="sp"></span><a class="btn ghost sm" href="${SOURCE}/blob/master/${c.doc}" target="_blank" rel="noopener">How to set it up${ic('out')}</a></div>
+            <div class="set-conn-h">${c.icon ? ic(c.icon) : ''}<h3>${esc(c.name)}</h3><span class="sp"></span><a class="btn ghost sm" href="${esc(`${SOURCE}/blob/master/${c.doc}`)}" target="_blank" rel="noopener">How to set it up${ic('out')}</a></div>
             <p class="muted">${esc(c.what)}</p>
             ${c.lead ? `<p class="set-note small">${esc(c.lead)}</p>` : ''}
-            ${c.rows.map(([k, v], j) => `<div class="set-copy"><span class="k">${esc(k)}</span><div class="set-copy-v"><code id="conn${i}-${j}">${esc(v)}</code>
-                <button class="btn soft sm" type="button" data-copy="conn${i}-${j}" aria-label="Copy ${esc(k)}">${ic('copy')}Copy</button></div></div>`).join('')}
-            ${c.clients ? `<div class="set-clients" data-clients="${i}"><span class="seg" role="group" aria-label="Clients">${c.clients.map(([n], j) => `<button type="button" data-client="${j}" class="${j ? '' : 'on'}" aria-pressed="${!j}">${esc(n)}</button>`).join('')}</span>
-                <div class="set-copy"><span class="k" id="conn${i}-k">${esc(c.clients[0][1])}</span><div class="set-copy-v"><code id="conn${i}-client">${esc(c.clients[0][2])}</code>
-                <button class="btn soft sm" type="button" data-copy="conn${i}-client" aria-label="Copy the setup">${ic('copy')}Copy</button></div></div></div>` : ''}
+            ${c.rows.map(([k, v], j) => `<div class="set-copy"><span class="k">${esc(k)}</span><div class="set-copy-v"><code id="conn${esc(i)}-${esc(j)}">${esc(v)}</code>
+                <button class="btn soft sm" type="button" data-copy="conn${esc(i)}-${esc(j)}" aria-label="Copy ${esc(k)}">${ic('copy')}Copy</button></div></div>`).join('')}
+            ${c.clients ? `<div class="set-clients" data-clients="${esc(i)}"><span class="seg" role="group" aria-label="Clients">${c.clients.map(([n], j) => `<button type="button" data-client="${esc(j)}" class="${j ? '' : 'on'}" aria-pressed="${!j}">${esc(n)}</button>`).join('')}</span>
+                <div class="set-copy"><span class="k" id="conn${esc(i)}-k">${esc(c.clients[0][1])}</span><div class="set-copy-v"><code id="conn${esc(i)}-client">${esc(c.clients[0][2])}</code>
+                <button class="btn soft sm" type="button" data-copy="conn${esc(i)}-client" aria-label="Copy the setup">${ic('copy')}Copy</button></div></div></div>` : ''}
             ${c.note || c.open ? `<p class="set-note small">${esc(c.note || '')}${c.open ? ` <button class="custom" type="button" data-tpl="${esc(c.open.id)}">Open the template</button>` : ''}</p>` : ''}
         </section>`).join('')}`;
     $$('[data-copy]', box).forEach(b => b.onclick = () => copy($('#' + b.dataset.copy)));
@@ -650,18 +653,18 @@ async function copy(code) {
 DRAW.about = box => {
     const b = window.DESIGNER_BUILD || {};
     const theme = document.documentElement.getAttribute('data-theme') || '';
-    const version = b.release ? `<a href="${SOURCE}/releases/tag/${esc(b.release)}" target="_blank" rel="noopener">${esc(b.release)}</a>${b.commit ? `, commit ${esc(b.commit.slice(0, 7))}` : ''}`
-        : b.commit ? `<a href="${SOURCE}/commit/${esc(b.commit)}" target="_blank" rel="noopener">Commit ${esc(b.commit.slice(0, 7))}</a>` : 'A development version';
+    const version = b.release ? `<a href="${esc(SOURCE)}/releases/tag/${esc(b.release)}" target="_blank" rel="noopener">${esc(b.release)}</a>${b.commit ? `, commit ${esc(b.commit.slice(0, 7))}` : ''}`
+        : b.commit ? `<a href="${esc(SOURCE)}/commit/${esc(b.commit)}" target="_blank" rel="noopener">Commit ${esc(b.commit.slice(0, 7))}</a>` : 'A development version';
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>About</h2><p class="muted">Labelburg makes and prints labels on label printers in your home network.</p></div></header>
         <section class="set-card"><div class="set-grid">
             <span class="k">Appearance</span>
             <div class="set-stack"><div class="seg" role="group" aria-label="Appearance">${[['', 'Like the system', 'screen'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']].map(([v, n, i]) =>
-                `<button type="button" data-theme="${v}"${v === theme ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>${ic(i)}${n}</button>`).join('')}</div>
+                `<button type="button" data-theme="${esc(v)}"${v === theme ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"'}>${ic(i)}${esc(n)}</button>`).join('')}</div>
                 <small class="muted">Kept in this browser, also for the current designer.</small></div>
             <span class="k">Version</span>
             <div class="set-stack"><span class="set-val" id="setVersion">${version}</span>${b.date ? `<small class="muted">Built ${esc(b.date)}</small>` : ''}</div>
             <span class="k">Source code</span>
-            <div class="set-stack"><a href="${SOURCE}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
+            <div class="set-stack"><a href="${esc(SOURCE)}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
             <span class="k">The current designer</span>
             <div class="set-stack"><a href="${esc(C.base)}/">Open it</a><small class="muted">With the same labels and printers, to compare both.</small></div>
         </div></section>`;

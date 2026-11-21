@@ -87,7 +87,7 @@ function chipHTML(tpl, at) {
     const c = chipInfo(tpl);
     const glyph = c.glyph ? `<span class="glyph ${c.set === 'mdi' ? 'mdi' : 'sx'}">${esc(c.glyph)}</span>` : icon(c.icon);
     const name = [KIND_NAMES[c.kind], c.label].filter(Boolean).join(': ');
-    return `<span class="chip ${c.kind}" contenteditable="false" role="button" tabindex="0" aria-label="${esc(name)}" data-tpl="${esc(tpl)}" data-at="${at}"${c.title ? ` title="${esc(c.title)}"` : ''}>${glyph}${c.label ? `<span>${esc(c.label)}</span>` : ''}</span>`;
+    return `<span class="chip ${esc(c.kind)}" contenteditable="false" role="button" tabindex="0" aria-label="${esc(name)}" data-tpl="${esc(tpl)}" data-at="${esc(at)}"${c.title ? ` title="${esc(c.title)}"` : ''}>${glyph}${c.label ? `<span>${esc(c.label)}</span>` : ''}</span>`;
 }
 
 function lineHTML(text, i, on) {
@@ -105,7 +105,7 @@ function lineHTML(text, i, on) {
             at += t.s.length;
         }
     });
-    return `<div class="ln${on ? ' on' : ''}" data-i="${i}">${html || '<br>'}</div>`;
+    return `<div class="ln${on ? ' on' : ''}" data-i="${esc(i)}">${html || '<br>'}</div>`;
 }
 
 // --- Reading the field ---------------------------------------------------------
@@ -422,7 +422,7 @@ function showMenu(line, start, query) {
         menu.el.addEventListener('click', e => { const b = e.target.closest('[data-m]'); if (b) pickMenu(+b.dataset.m); });
     }
     Object.assign(menu, { line, start, query, items, sel: Math.min(menu.sel, items.length - 1) });
-    menu.el.innerHTML = items.map((m, k) => `<button type="button" role="option" data-m="${k}" class="${k === menu.sel ? 'on' : ''}">${icon(m.icon)}<span>${esc(m.name)}</span>${m.note ? `<small>${esc(m.note)}</small>` : ''}</button>`).join('');
+    menu.el.innerHTML = items.map((m, k) => `<button type="button" role="option" data-m="${esc(k)}" class="${k === menu.sel ? 'on' : ''}">${icon(m.icon)}<span>${esc(m.name)}</span>${m.note ? `<small>${esc(m.note)}</small>` : ''}</button>`).join('');
     const r = caretRect();
     if (r) placePop(menu.el, r);
 }
@@ -535,7 +535,7 @@ function openPop(place, html, cls = '') {
 }
 function chipEl(place) {
     const div = $$('.ln', root)[place.line];
-    return div && $(`.chip[data-at="${place.at}"]`, div);
+    return div && $(`.chip[data-at="${CSS.escape(place.at)}"]`, div);
 }
 function anchor() {
     if (!pop) return;
@@ -567,7 +567,7 @@ function removeChip(place) {
     renderField(place);
     ctx.changed(true);
 }
-const tplAt = place => { const div = $$('.ln', root)[place.line]; const c = div && $(`.chip[data-at="${place.at}"]`, div); return c ? c.dataset.tpl : null; };
+const tplAt = place => { const div = $$('.ln', root)[place.line]; const c = div && $(`.chip[data-at="${CSS.escape(place.at)}"]`, div); return c ? c.dataset.tpl : null; };
 
 const removeBtn = '<button type="button" class="btn ghost danger" data-remove>' + icon('trash') + 'Remove</button>';
 const OFFSET_UNITS = [['d', 'days'], ['w', 'weeks'], ['m', 'months'], ['y', 'years']];
@@ -611,9 +611,9 @@ function blankPop(place, name, naming) {
     const el = openPop(place, `<h4>Blank</h4>
         <div class="ft">
             <label class="k" for="cpName">Name</label><input class="in" id="cpName" value="${esc(name)}" autocomplete="off">
-            <span class="k">Kind</span><span class="seg">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-kind="${v}" class="${kind === v ? 'on' : ''}">${n}</button>`).join('')}</span>
+            <span class="k">Kind</span><span class="seg">${BLANK_KINDS.map(([v, n]) => `<button type="button" data-kind="${esc(v)}" class="${kind === v ? 'on' : ''}">${esc(n)}</button>`).join('')}</span>
             ${kind === 'choice' ? `<label class="k" for="cpChoices">Choices</label><textarea class="in" id="cpChoices" rows="3" placeholder="One per line, the first is the default">${esc(blankChoices(item, name).join('\n'))}</textarea>`
-            : kind === 'date' ? `<span class="k">Starts at</span><span class="row">today + <input class="in num" type="number" data-off-n value="${offset ? parseInt(offset, 10) : ''}" placeholder="0"><select class="in" data-off-u>${OFFSET_UNITS.map(([v, n]) => `<option value="${v}"${offset && offset.slice(-1) === v ? ' selected' : ''}>${n}</option>`).join('')}</select></span>`
+            : kind === 'date' ? `<span class="k">Starts at</span><span class="row">today + <input class="in num" type="number" data-off-n value="${offset ? esc(parseInt(offset, 10)) : ''}" placeholder="0"><select class="in" data-off-u>${OFFSET_UNITS.map(([v, n]) => `<option value="${esc(v)}"${offset && offset.slice(-1) === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></span>`
             : `<label class="k" for="cpDef">Default</label><input class="in" id="cpDef" type="${kind === 'number' ? 'number' : 'text'}" value="${esc(f.default || '')}" placeholder="Optional">`}
             <span class="k">This print</span>${fill}
         </div>
@@ -677,8 +677,8 @@ function datePop(place, date) {
     const el = openPop(place, `<h4>Date</h4>
         <div class="ft">
             <span class="k">Shows</span><span class="seg"><button type="button" data-time="0" class="${date.time ? '' : 'on'}">The day</button><button type="button" data-time="1" class="${date.time ? 'on' : ''}">Day and time</button></span>
-            <span class="k">From now</span><span class="row"><span class="az"><button type="button" class="azb" data-step="-1" aria-label="Earlier">${icon('minus', '')}</button><input class="anum num" data-n value="${(date.sign === '-' ? -1 : 1) * date.n}" inputmode="numeric" aria-label="How many"><button type="button" class="azb" data-step="1" aria-label="Later">${icon('plus', '')}</button></span>
-                <select class="in" data-unit>${units.map(([v, n]) => `<option value="${v}"${v === date.unit ? ' selected' : ''}>${n}</option>`).join('')}</select></span>
+            <span class="k">From now</span><span class="row"><span class="az"><button type="button" class="azb" data-step="-1" aria-label="Earlier">${icon('minus', '')}</button><input class="anum num" data-n value="${esc((date.sign === '-' ? -1 : 1) * date.n)}" inputmode="numeric" aria-label="How many"><button type="button" class="azb" data-step="1" aria-label="Later">${icon('plus', '')}</button></span>
+                <select class="in" data-unit>${units.map(([v, n]) => `<option value="${esc(v)}"${v === date.unit ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></span>
             <label class="k" for="cpFormat">Format</label><span class="row"><input class="in" id="cpFormat" value="${esc(date.format)}" spellcheck="false" autocomplete="off" aria-label="Date format"><button type="button" class="custom" data-codes>Codes</button></span>
         </div>
         <div class="pop-acts"><span class="muted small">${own ? 'Its own format' : 'The date format of the settings'}</span>${own ? '<button type="button" class="custom" data-like>Like the settings</button>' : ''}${removeBtn}</div>`);
@@ -778,7 +778,7 @@ function openVariables(place, tpl, naming = false) {
     const on = (v, n) => tpl && (v ? v === tpl || (asn && v === '{{asn}}') : (n === 'Random text' && c.random) || (n === 'Environment variable' && c.env));
     const known = asn || (c && (c.random || c.env)) || VARIABLES.some(([v]) => v === tpl);
     const el = openPop(tpl ? place : null, `<h4>${tpl ? 'Variable' : 'Insert a variable'}</h4>
-        <div class="list">${VARIABLES.map(([v, n, note], k) => `<button type="button" data-var="${k}" class="${on(v, n) ? 'on' : ''}">${icon('braces')}<span><b>${esc(n)}</b><small>${esc(note)}</small></span></button>`).join('')}</div>
+        <div class="list">${VARIABLES.map(([v, n, note], k) => `<button type="button" data-var="${esc(k)}" class="${on(v, n) ? 'on' : ''}">${icon('braces')}<span><b>${esc(n)}</b><small>${esc(note)}</small></span></button>`).join('')}</div>
         ${asn ? `<div class="ft"><label class="k" for="cpDigits">Digits</label><input class="in num" id="cpDigits" type="number" min="1" max="20" value="${esc(c.digits)}" placeholder="As it comes"></div>` : ''}
         ${c && c.random ? `<div class="ft"><label class="k" for="cpLen">Characters</label><span class="row"><input class="in num" id="cpLen" type="number" min="1" max="10000" value="${esc(c.random.length)}" placeholder="64"><label class="row small"><input type="checkbox" id="cpShift"${c.random.shift ? ' checked' : ''}>Shifted around</label></span></div>` : ''}
         ${!tpl || (c && c.env) ? `<div class="ft env-row"${tpl || naming ? '' : ' hidden'}><label class="k" for="cpEnv">Name</label><span class="row"><input class="in" id="cpEnv" value="${esc(c && c.env ? c.env : '')}" placeholder="e.g. SITE_NAME" spellcheck="false" autocomplete="off">${tpl ? '' : '<button type="button" class="btn soft sm" data-envgo>Insert</button>'}</span></div>` : ''}
@@ -844,8 +844,8 @@ async function openSymbols(place, tpl) {
         const plain = query ? [] : list.map(ch => `<button type="button" class="sym" data-ch="${esc(ch)}">${esc(ch)}</button>`).join('');
         const found = named.map(([set, items]) => {
             const hits = findIcons(items, query), shown = all.has(set) ? hits : hits.slice(0, query ? 60 : 24);
-            return hits.length ? `<h5>${esc(SYMBOL_SETS[set])}</h5><div class="sym-grid">${shown.map(i => `<button type="button" class="sym ${set === 'mdi' ? 'mdi' : 'sx'}" data-tpl="${set}:${esc(i.name)}" title="${esc(i.name)}">${i.char}</button>`).join('')}</div>
-                ${shown.length < hits.length ? `<button type="button" class="custom" data-all="${set}">Show all ${hits.length}</button>` : ''}` : '';
+            return hits.length ? `<h5>${esc(SYMBOL_SETS[set])}</h5><div class="sym-grid">${shown.map(i => `<button type="button" class="sym ${set === 'mdi' ? 'mdi' : 'sx'}" data-tpl="${esc(set)}:${esc(i.name)}" title="${esc(i.name)}">${esc(i.char)}</button>`).join('')}</div>
+                ${shown.length < hits.length ? `<button type="button" class="custom" data-all="${esc(set)}">Show all ${esc(hits.length)}</button>` : ''}` : '';
         }).join('');
         grid.innerHTML = (plain ? `<h5>Symbols</h5><div class="sym-grid">${plain}</div>` : '') + found || '<p class="muted small">Nothing found.</p>';
     };

@@ -63,7 +63,7 @@ function remember(name) {
 
 // The button showing the font, it opens the menu
 export function fontButton(attrs, text, cls = 'fsel') {
-    return `<button type="button" class="${cls}" ${attrs} aria-haspopup="dialog" aria-expanded="false"><span>${esc(text)}</span>${icon('down')}</button>`;
+    return `<button type="button" class="${esc(cls)}" ${attrs} aria-haspopup="dialog" aria-expanded="false"><span>${esc(text)}</span>${icon('down')}</button>`;
 }
 
 let menu = null;
@@ -148,8 +148,8 @@ function choose(value) {
 function drawList() {
     const { el, opts } = menu, list = $('.fm-list', el), query = $('input', el).value.trim().toLowerCase();
     const current = opts.state().family;
-    const row = (value, text, i, sample = !samples.none.has(value)) => `<div class="fm-o${samples.drawn.has(value) ? ' drawn' : ''}" role="option" id="fm-o-${i}" data-family="${esc(value)}" aria-selected="${value === current}">
-        ${sample ? `<img class="fs" src="${API}/fonts/sample?family=${encodeURIComponent(value)}" alt="">` : ''}<span class="fn">${esc(text)}</span>${icon('check')}</div>`;
+    const row = (value, text, i, sample = !samples.none.has(value)) => `<div class="fm-o${samples.drawn.has(value) ? ' drawn' : ''}" role="option" id="fm-o-${esc(i)}" data-family="${esc(value)}" aria-selected="${value === current}">
+        ${sample ? `<img class="fs" src="${esc(`${API}/fonts/sample?family=${encodeURIComponent(value)}`)}" alt="">` : ''}<span class="fn">${esc(text)}</span>${icon('check')}</div>`;
     const found = FAMILIES.filter(f => !query || f.name.toLowerCase().includes(query)).map(f => f.name);
     let html = '', i = 0;
     if (query) html = found.map(name => row(name, name, i++)).join('') || '<p class="fm-none">No font is named like that</p>';
@@ -195,11 +195,11 @@ function drawFace({ family, faces = [] }) {
         box.hidden = !shown;
         box.innerHTML = !shown ? '' : `<div class="fm-name">${esc(fam.name)}</div>
             ${weights.length > 1 ? `<div class="fm-row"><span class="k">Weight</span><b data-wname></b></div>
-                <div class="fm-ends"><small>${WEIGHTS[weights[0]]}</small><input type="range" data-fweight min="0" max="${weights.length - 1}" step="1" aria-label="Weight"><small>${WEIGHTS[weights[weights.length - 1]]}</small></div>` : ''}
+                <div class="fm-ends"><small>${esc(WEIGHTS[weights[0]])}</small><input type="range" data-fweight min="0" max="${esc(weights.length - 1)}" step="1" aria-label="Weight"><small>${esc(WEIGHTS[weights[weights.length - 1]])}</small></div>` : ''}
             ${widths.length > MANY_WIDTHS ? `<div class="fm-row"><span class="k">Width</span><b data-dname></b></div>
-                <div class="fm-ends"><small>${widthName(widths[0])}</small><input type="range" data-fwidths min="0" max="${widths.length - 1}" step="1" aria-label="Width"><small>${widthName(widths[widths.length - 1])}</small></div>`
+                <div class="fm-ends"><small>${esc(widthName(widths[0]))}</small><input type="range" data-fwidths min="0" max="${esc(widths.length - 1)}" step="1" aria-label="Width"><small>${esc(widthName(widths[widths.length - 1]))}</small></div>`
             : widths.length > 1 ? `<div class="fm-row"><span class="k">Width</span></div>
-                <div class="seg fm-widths" role="group" aria-label="Width">${widths.map(w => `<button type="button" data-fwidth="${w}" aria-pressed="false">${widthName(w)}</button>`).join('')}</div>` : ''}`;
+                <div class="seg fm-widths" role="group" aria-label="Width">${widths.map(w => `<button type="button" data-fwidth="${esc(w)}" aria-pressed="false">${esc(widthName(w))}</button>`).join('')}</div>` : ''}`;
         const range = $('[data-fweight]', box), wide = $('[data-fwidths]', box);
         if (range) range.addEventListener('input', () => { opts.weight(weights[+range.value]); refreshFontMenu(); });
         if (wide) wide.addEventListener('input', () => { opts.width(widths[+wide.value]); refreshFontMenu(); });

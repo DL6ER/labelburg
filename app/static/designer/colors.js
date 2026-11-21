@@ -5,7 +5,12 @@
 
 import { $, $$, esc, icon, S, isColorTape, redTape } from './core.js';
 
-export const hexOf = c => c === 'red' ? '#ff0000' : /^#[0-9a-f]{6}$/i.test(c || '') ? c.toLowerCase() : '#000000';
+// Only a checked #rrggbb, also of a color saved or typed by hand
+export function hexOf(c) {
+    if (c === 'red') return '#ff0000';
+    const hex = /^#[0-9a-f]{6}$/i.exec(typeof c === 'string' ? c : '');
+    return hex ? hex[0].toLowerCase() : '#000000';
+}
 export const colorOf = hex => hex === '#000000' ? 'black' : hex === '#ff0000' ? 'red' : hex;
 
 // Common colors that print well on white color tape
@@ -34,7 +39,7 @@ export function swatchHTML(attr, color, d, what) {
     if (!offersColor(color, d)) return '';
     const off = !printable(color);
     const title = off ? hint(color, d, what) : `Color of ${what}`;
-    return `<button type="button" class="tb swb${off ? ' off' : ''}" ${attr} aria-haspopup="true" aria-expanded="false" title="${esc(title)}" aria-label="${esc(title)}"><i class="sw" style="background:${hexOf(color)}"></i></button>`;
+    return `<button type="button" class="tb swb${off ? ' off' : ''}" ${attr} aria-haspopup="true" aria-expanded="false" title="${esc(title)}" aria-label="${esc(title)}"><i class="sw" style="background:${esc(hexOf(color))}"></i></button>`;
 }
 
 let open = null;
@@ -56,8 +61,8 @@ export function openColors(btn, { color, d, what, pick, box = $('#center') }) {
     el.className = 'menu color-menu';
     const on = c => same(c, color || 'black');
     el.innerHTML = `${hint(color, d, what) ? `<p class="mnote">${icon('warn')}<span>${esc(hint(color, d, what))}</span></p>` : ''}
-        <div class="swatches${full ? '' : ' two'}">${choices.map(([c, name]) => `<button type="button" class="swc${on(c) ? ' on' : ''}" data-c="${esc(c)}" title="${esc(name)}" aria-label="${esc(name)}" aria-pressed="${on(c)}"><i class="sw" style="background:${hexOf(c)}"></i>${full ? '' : `<span>${esc(name)}</span>`}</button>`).join('')}</div>
-        ${full ? `<label class="mi">${icon('drop')}<span>Custom color</span><input type="color" data-custom value="${hexOf(color)}" aria-label="Custom color"></label>` : ''}`;
+        <div class="swatches${full ? '' : ' two'}">${choices.map(([c, name]) => `<button type="button" class="swc${on(c) ? ' on' : ''}" data-c="${esc(c)}" title="${esc(name)}" aria-label="${esc(name)}" aria-pressed="${on(c)}"><i class="sw" style="background:${esc(hexOf(c))}"></i>${full ? '' : `<span>${esc(name)}</span>`}</button>`).join('')}</div>
+        ${full ? `<label class="mi">${icon('drop')}<span>Custom color</span><input type="color" data-custom value="${esc(hexOf(color))}" aria-label="Custom color"></label>` : ''}`;
     box.appendChild(el);
     const r = btn.getBoundingClientRect(), c = box.getBoundingClientRect();
     el.style.left = `${Math.max(8, Math.min(r.left - c.left - 8, c.width - el.offsetWidth - 8))}px`;

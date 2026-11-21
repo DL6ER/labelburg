@@ -17,7 +17,7 @@ export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const clone = o => JSON.parse(JSON.stringify(o));
 export const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-export const icon = (name, cls = 's') => `<svg class="ic ${cls}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+export const icon = (name, cls = 's') => `<svg class="ic ${esc(cls)}" aria-hidden="true"><use href="#i-${esc(name)}"/></svg>`;
 // Runs fn at once. Called while it runs, it runs once more afterwards with
 // the newest arguments: a preview follows typing without requests piling up.
 export function latest(fn) {
@@ -296,7 +296,12 @@ export function blanksOf(design) {
 export const blankFields = item => (item.design && item.design.fields) || {};
 export const BLANK_KINDS = [['text', 'Text'], ['number', 'Number'], ['date', 'Date'], ['choice', 'Choice']];
 export const guessKind = name => /(^|\s)on$|\bdate\b/i.test(name) ? 'date' : /^(box|number|portions|no\.?|count)$/i.test(name) ? 'number' : 'text';
-export const fieldType = (item, name) => (blankFields(item)[name] || {}).type || guessKind(name);
+// The kinds of blanks, a saved label naming another is guessed by its name
+const FIELD_TYPES = ['text', 'number', 'date', 'choice'];
+export const fieldType = (item, name) => {
+    const type = (blankFields(item)[name] || {}).type;
+    return FIELD_TYPES.includes(type) ? type : guessKind(name);
+};
 export const blankChoices = (item, name) => ((blankFields(item)[name] || {}).choices || []).map(String);
 export const choicesOf = text => [...new Set(String(text).split('\n').map(c => c.trim()).filter(Boolean))];
 export const choicesMissing = item => blanksOf(item.design).filter(b => fieldType(item, b) === 'choice' && !blankChoices(item, b).length);
@@ -391,8 +396,8 @@ export function cutStrip(c, k, files = 1) {
     const half = halfOf(c, k);
     const between = c.cut === 'each' ? 'full' : half ? 'half' : 'none';
     const end = noCutter(k) ? 'none' : chainOf(c, k) || c.cut === 'none' ? 'chain' : 'full';
-    const [third, second, first] = printOrder(files).slice(0, 3).reverse().map(i => `<span class="lab">${'ABC'[Math.min(i, 2)]}</span>`);
-    const mark = m => `<span class="cm ${m}"></span>`;
+    const [third, second, first] = printOrder(files).slice(0, 3).reverse().map(i => `<span class="lab">${esc('ABC'[Math.min(i, 2)])}</span>`);
+    const mark = m => `<span class="cm ${esc(m)}"></span>`;
     const text = esc(cutText(c, k));
     const waste = k.feed_waste ? `${mark(half || c.cut === 'each' ? 'half' : 'full')}<span class="waste"></span>` : '';
     return `<span class="cut-strip" title="${text}" role="img" aria-label="${text}"><span class="out"></span>${mark(end)}${third}${mark(between)}${second}${mark(between)}${first}${waste}</span>`;
