@@ -341,6 +341,24 @@ def test_the_code_in_the_card_can_be_selected(station):
     assert station.codes() == ['A-17', 'B-42']
 
 
+def test_a_scan_with_the_code_in_the_card_selected_is_caught(station):
+    page = station.page
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult:has-text("Printed: Box")')
+    code = page.locator('#scanResult .scan-code').bounding_box()
+    page.mouse.move(code['x'] + 1, code['y'] + code['height'] / 2)
+    page.mouse.down()
+    page.mouse.move(code['x'] + code['width'] - 1, code['y'] + code['height'] / 2, steps=5)
+    page.mouse.up()
+    page.wait_for_function("() => getSelection().toString() === 'A-17'")
+    assert page.evaluate('() => document.activeElement.id') != 'scanField'
+    station.scan('B-42')
+    station.wait_for(2)
+    assert station.none_for(300) == 2
+    assert station.codes() == ['A-17', 'B-42']
+    assert page.evaluate('() => getSelection().toString()') == ''
+
+
 def test_tab_in_the_empty_field_moves_on(station):
     page = station.page
     page.keyboard.press('Tab')
