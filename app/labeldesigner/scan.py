@@ -7,7 +7,7 @@ from .label import MAX_TEXT_LENGTH, check_blank_choice
 NOTHING_SCANNED = 'Nothing was scanned'
 NO_BLANKS = 'The label has no blank for the scanned code. Add one in the editor, e.g., a blank named "code".'
 SEVERAL_BLANKS = 'The label has several blanks, so it is not clear which one the code fills. Name the blank for the code "code".'
-NO_CONTACT_MATCH = 'The code holds a contact, but none of its details fits a blank of the label. Name the blanks e.g. "Name" and "Address".'
+NO_CONTACT_MATCH = 'The code holds a contact, but none of its details fits a blank of the label. Name the blanks e.g., "Name" and "Address".'
 WRONG_LAYOUT = ('The scanner types with another keyboard layout than this computer. '
                 'Set the scanner to the layout of the computer with the setup code in its manual.')
 MESSAGES = (NOTHING_SCANNED, NO_BLANKS, SEVERAL_BLANKS, NO_CONTACT_MATCH, WRONG_LAYOUT)
