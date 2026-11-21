@@ -57,6 +57,16 @@ def test_refusals():
             scan.fill_blanks(names, {}, text)
 
 
+def test_a_vcard_cut_in_parts_is_refused():
+    # A pause of the scanner within the card splits it into scans of their own
+    head, tail = VCARD[:60], VCARD[60:]
+    for text in (head, tail, ' begin:vcard\nFN:Erika Muster'):
+        with pytest.raises(ValueError, match=re.escape(scan.INCOMPLETE)):
+            scan.fill_blanks(['code'], {}, text)
+    assert scan.INCOMPLETE in scan.MESSAGES and scan.INCOMPLETE == 'The code came in incomplete. Scan it again.'
+    assert refusals.message(ValueError(scan.INCOMPLETE), 'x') == scan.INCOMPLETE
+
+
 def test_choice_blank_refuses_a_value_it_does_not_offer():
     with pytest.raises(ValueError, match='is none of the choices of the blank Room') as error:
         scan.fill_blanks(['Room'], {'Room': {'type': 'choice', 'choices': ['Garage', 'Attic']}}, 'Kitchen')

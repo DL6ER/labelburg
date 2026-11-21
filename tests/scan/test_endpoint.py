@@ -128,7 +128,9 @@ def test_refusals_are_sent_as_they_are(printed):
         {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:a}}'}, {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:b}}'}])
     for body, message in (({'name': 'None.json', 'code': 'x'}, scan.NO_BLANKS), ({'name': 'Two.json', 'code': 'x'}, scan.SEVERAL_BLANKS),
                           ({'name': 'Box.json', 'code': 'https>&&example.org'}, scan.WRONG_LAYOUT), ({'name': 'Box.json', 'code': '  '}, scan.NOTHING_SCANNED),
-                          ({'name': 'Box.json', 'code': ['x']}, scan.NOTHING_SCANNED), ({'name': 'Box.json'}, scan.NOTHING_SCANNED)):
+                          ({'name': 'Box.json', 'code': ['x']}, scan.NOTHING_SCANNED), ({'name': 'Box.json'}, scan.NOTHING_SCANNED),
+                          ({'name': 'Box.json', 'code': 'BEGIN:VCARD\nFN:Erika Muster'}, scan.INCOMPLETE),
+                          ({'name': 'Box.json', 'code': 'TEL:+49 228 1234\nEND:VCARD'}, scan.INCOMPLETE)):
         response = _scan(printed, **body)
         assert (response.status_code, response.get_json()['message']) == (400, message)
     response = _scan(printed, name='Gone', code='x')

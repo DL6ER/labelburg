@@ -10,7 +10,8 @@ SEVERAL_BLANKS = 'The label has several blanks, so it is not clear which one the
 NO_CONTACT_MATCH = 'The code holds a contact, but none of its details fits a blank of the label. Name the blanks e.g., "Name" and "Address".'
 WRONG_LAYOUT = ('The scanner types with another keyboard layout than this computer. '
                 'Set the scanner to the layout of the computer with the setup code in its manual.')
-MESSAGES = (NOTHING_SCANNED, NO_BLANKS, SEVERAL_BLANKS, NO_CONTACT_MATCH, WRONG_LAYOUT)
+INCOMPLETE = 'The code came in incomplete. Scan it again.'
+MESSAGES = (NOTHING_SCANNED, NO_BLANKS, SEVERAL_BLANKS, NO_CONTACT_MATCH, WRONG_LAYOUT, INCOMPLETE)
 
 CONTACT_FIELDS = {
     'name': ('Name',),
@@ -37,6 +38,12 @@ def blank_key(name: str) -> str:
 
 def wrong_layout(text: str) -> bool:
     return text.lower().startswith(_WRONG_LAYOUT_PREFIXES)
+
+
+def incomplete(text: str) -> bool:
+    """A part of a vCard, e.g. split by a pause of the scanner within it."""
+    upper = text.upper()
+    return upper.lstrip().startswith('BEGIN:VCARD') != ('END:VCARD' in upper)
 
 
 def _split(value: str, sep: str) -> list[str]:
@@ -144,6 +151,8 @@ def fill_blanks(names: list[str], fields: dict, text: str) -> dict[str, str]:
         raise ValueError(NOTHING_SCANNED)
     if wrong_layout(text):
         raise ValueError(WRONG_LAYOUT)
+    if incomplete(text):
+        raise ValueError(INCOMPLETE)
     if len(text) > MAX_TEXT_LENGTH:
         raise ValueError('Text is too long')
     if not names:
