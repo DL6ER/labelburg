@@ -748,13 +748,36 @@ def test_status_of_a_printer_not_listed_is_refused(b1, fake):
     assert response.status_code == 404 and fake.commands == []
 
 
-@pytest.mark.parametrize('barcode, size', [(b'052325253', (15, 8)), (b'052325254', (13, 35)), (b'052325255', (30, 15))])
-def test_b1_tells_the_labels_of_a_roll_with_several_to_a_page(b1, fake, monkeypatch, barcode, size):
-    # The label designer does not offer them yet, it says which labels the roll has
-    tag = bytes.fromhex('881d137bdf181080') + bytes([len(barcode)]) + barcode + b'\x10PZ0G000000000001' + struct.pack('>HHB', 552, 5, 5)
-    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
+def _roll(barcode: bytes, kind: int = 1) -> bytes:
+    """The RFID tag of a roll by its barcode."""
+    return bytes.fromhex('881d137bdf181080') + bytes([len(barcode)]) + barcode + b'\x10PZ0G000000000001' + struct.pack('>HHB', 552, 5, kind)
+
+
+@pytest.mark.parametrize('barcode, label_size', [(b'052325253', 'niimbot15x8-2x3'), (b'052325254', 'niimbot13x35-2x1'),
+                                                 (b'052325255', 'niimbot30x15-1x2')])
+def test_b1_tells_the_page_of_a_roll_with_several_labels_to_a_page(b1, fake, monkeypatch, barcode, label_size):
+    # Offered as the whole page, the label designer shows where it is cut
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, _roll(barcode)))
     printer_ = b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert (printer_['media_width'], printer_['media_length'], printer_['label_size_assumed']) == (*size, True)
+    assert (printer_['label_size'], printer_['label_size_assumed']) == (label_size, False)
+
+
+def test_pages_of_several_labels_know_their_labels():
+    # Lanes across, rows along, the gap between lanes in mm
+    pages = {label.identifier: (label.tape_size, label.pieces) for label in niimbot.LABELS if label.pieces != (1, 1, 0)}
+    assert pages == {'niimbot30x15-1x2': ((30, 30), (1, 2, 0)), 'niimbot15x8-2x3': ((30, 24), (2, 3, 0)),
+                     'niimbot13x35-2x1': ((28, 35), (2, 1, 2))}
+    assert niimbot.NAMES['niimbot13x35-2x1'] == '28 x 35 mm, 2 labels of 13 x 35 (Niimbot)'
+
+
+def test_page_of_two_labels_prints_whole_on_a_b1(b1, fake, monkeypatch):
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, _roll(b'052325255', kind=5)))
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot30x15-1x2', 'print_type': 'text', 'text': TEXT})
+    assert response.get_json() == {'success': True}
+    # 30 mm along, across the printhead, on transparent labels
+    size = struct.unpack('>HHH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:6])
+    assert size[:2] == (240, 384) and data_of(next(p for p in fake.packets if p[2] == 0x23)) == b'\x05'
 
 
 @pytest.mark.parametrize('barcode, label_size', [(b'10262260', 'niimbot50x30'), (b'080924001', 'niimbot50x80')])

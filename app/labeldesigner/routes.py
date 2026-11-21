@@ -206,7 +206,7 @@ def _designer_config() -> dict:
     fonts = get_fonts()
     label_sizes = [
         {'id': label.identifier, 'name': label_name(label), 'form': label.form_factor.name.lower(),
-         'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1,
+         'tape': list(label.tape_size), 'dots': list(label.dots_printable), 'red': label.color == 1, 'pieces': list(label.pieces),
          'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set

@@ -5,6 +5,7 @@ are torn off. Not the D110, which niimbluelib prints with other commands."""
 import logging
 import re
 import time
+from dataclasses import replace
 
 from PIL import Image
 
@@ -40,16 +41,19 @@ SIZES = ((12, 22), (12, 40), (14, 22), (14, 40), (14, 60), (15, 30), (15, 50))
 B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80))
 # Round labels, by their diameter in mm
 B1_ROUND = (50,)
+# Rolls of several labels to a page, printed as the whole page: the width and
+# length of a label, how many across and along, the gap between lanes in mm
+B1_PAGES = ((30, 15, 1, 2, 0), (15, 8, 2, 3, 0), (13, 35, 2, 1, 2))
 # Width x length of the rolls by the barcode in their RFID tag, the label
 # designer then picks them. Niimbot tells it only online, at
 # print.niimbot.com, the label designer stays offline.
 ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
          '10262260': (50, 30),  # T50*30-230WHITE
          '080924001': (50, 80),  # T50*80-95WHITE
-         # Several labels to a page, told but not offered by the label designer
-         '052325253': (15, 8),  # T15*8/2L3R-1650White, 2 across, 3 along
-         '052325254': (13, 35),  # F13*35/2L-200 Luminous, 2 across
-         '052325255': (30, 15),  # TT30*15/2R-460 Transparent, 2 along
+         # Several labels to a page, by the size of the page, see B1_PAGES
+         '052325253': (30, 24),  # T15*8/2L3R-1650White, 2 across, 3 along
+         '052325254': (28, 35),  # F13*35/2L-200 Luminous, 2 across, 2 mm apart
+         '052325255': (30, 30),  # TT30*15/2R-460 Transparent, 2 along
          '080924002': (50, 50)}  # T50*50ROUND
 # Rolls of round labels, told apart from square ones of the same size
 ROUND = {'080924002'}
@@ -93,11 +97,27 @@ def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DI
     return Label(identifier, (width, length), form, dots, printable, 0, models=(model,))
 
 
+def _page(width: int, length: int, across: int, along: int, gap: float, model: str) -> Label:
+    """The page of a roll of several labels, named by one of them."""
+    page = _label(across * width + (across - 1) * gap, along * length, model)
+    return replace(page, identifier=f'niimbot{width}x{length}-{across}x{along}', pieces=(across, along, gap))
+
+
+def _name(label: Label) -> str:
+    width, length = label.tape_size
+    if label.form_factor == FormFactor.ROUND_DIE_CUT:
+        return f'{width} mm round die-cut (Niimbot)'
+    across, along, gap = label.pieces
+    if across * along > 1:
+        return f'{width} x {length} mm, {across * along} labels of {(width - (across - 1) * gap) // across} x {length // along} (Niimbot)'
+    return f'{width} x {length} mm die-cut (Niimbot)'
+
+
 LABELS = (tuple(_label(width, length, 'Niimbot/D110_M') for width, length in SIZES)
           + tuple(_label(width, length, 'Niimbot/B1') for width, length in B1_SIZES)
-          + tuple(_label(d, d, 'Niimbot/B1', FormFactor.ROUND_DIE_CUT) for d in B1_ROUND))
-NAMES = {label.identifier: (f'{label.tape_size[0]} mm round die-cut (Niimbot)' if label.form_factor == FormFactor.ROUND_DIE_CUT
-                            else f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (Niimbot)') for label in LABELS}
+          + tuple(_label(d, d, 'Niimbot/B1', FormFactor.ROUND_DIE_CUT) for d in B1_ROUND)
+          + tuple(_page(*page, 'Niimbot/B1') for page in B1_PAGES))
+NAMES = {label.identifier: _name(label) for label in LABELS}
 
 
 def centered(dots: bytes, head: int, shift: int = 0) -> bytes:
