@@ -116,10 +116,11 @@ def card(page):
 
 def test_fast_scan_ending_on_enter_prints_once(station):
     page = station.page
-    assert 'Each scan fills: code' in page.inner_text('.scan-label')
+    assert 'Blanks of the label: code' in page.inner_text('.scan-label')
     station.scan('A-17')
     station.wait_for(1)
     page.wait_for_selector('#scanResult:has-text("Printed: Box")')
+    assert 'Filled: code' in card(page)
     assert station.none_for(300) == 1
     assert station.codes() == ['A-17']
     assert station.requests[0]['name'] == BOX
@@ -143,6 +144,15 @@ def test_tab_ends_a_scan(station):
     assert station.none_for(300) == 1
     assert station.codes() == ['B-42']
     assert station.page.evaluate('() => document.activeElement.id') == 'scanField'
+
+
+def test_card_names_the_blanks_the_server_filled(station):
+    page = station.page
+    station.answer = (200, {'success': True, 'printed': True, 'label': 'Box', 'filled': {'Name': 'Erika', '<b>Room</b>': 'x'}, 'image': IMAGE})
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult:has-text("Printed: Box")')
+    assert 'Filled: Name, <b>Room</b>' in card(page)
+    assert page.locator('#scanResult b').count() == 0
 
 
 def test_hand_typing_waits_for_enter(station):

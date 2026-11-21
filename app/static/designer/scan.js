@@ -175,7 +175,7 @@ export function renderScan(el, name) {
         drawThumb(img, item);
         itemDesign(item).then(design => {
             const blanks = blanksOf(design), fills = $('#scanFills');
-            if (fills) fills.textContent = blanks.length ? `Each scan fills: ${blanks.join(', ')}` : 'The label has no blank for the code yet, add one in the editor.';
+            if (fills) fills.textContent = blanks.length ? `Blanks of the label: ${blanks.join(', ')}` : 'The label has no blank for the code yet, add one in the editor.';
         }, () => { });
         $('#scanShow').onchange = () => $('#scanField').focus();
         $('#scanCamera').onclick = toggleCamera;
@@ -211,7 +211,8 @@ function drawResult() {
     if (shown === sending) state = `<p class="scan-state">${esc(shown.previewOnly ? 'Showing' : 'Printing')}${esc(queue.length ? ', the next scans wait their turn' : '...')}</p>`;
     else if (shown.message) state = `<p class="scan-state warn">${icon('warn')}<span>${esc(shown.message)}</span></p>`;
     else state = `${shown.image ? `<div class="scan-shot"><img alt="The label" src="data:image/png;base64,${esc(shown.image)}"></div>` : ''}
-        <p class="scan-state ok">${icon('check')}<span>${esc(shown.printed ? `Printed: ${titleOf(shown.name)}` : 'Shown, not printed')}</span></p>`;
+        <p class="scan-state ok">${icon('check')}<span>${esc(shown.printed ? `Printed: ${titleOf(shown.name)}` : 'Shown, not printed')}</span></p>
+        ${shown.filled.length ? `<p class="scan-filled muted">${esc(`Filled: ${shown.filled.join(', ')}`)}</p>` : ''}`;
     box.innerHTML = `<p class="scan-code">${esc(code)}</p>${state}`;
 }
 
@@ -233,7 +234,7 @@ async function send() {
             if (r.status === 404) scan.message = GONE(scan.name);
             // Only an answer that says so is a success, e.g. not a sign-in page in between
             else if (!r.ok || data.success !== true) scan.message = data.message || (r.ok ? UNREACHABLE : 'The printer answered ' + r.status);
-            else Object.assign(scan, { printed: !!data.printed, image: data.image || '' });
+            else Object.assign(scan, { printed: !!data.printed, image: data.image || '', filled: Object.keys(data.filled || {}) });
         } catch (e) {
             scan.message = e.message;
         }
