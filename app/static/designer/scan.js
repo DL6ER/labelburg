@@ -2,39 +2,56 @@
 // (it types like a keyboard) is sent to the server, which fills the blanks
 // of the label with it and prints it.
 
-import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen } from './core.js';
+import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, UNREACHABLE } from './core.js';
 
 // ms: a scanner types faster than FAST between characters; after Enter or
-// Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE
-export const END_WAIT = 80, PAUSE = 200, FAST = 35;
+// Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
+// Typing that starts after IDLE is a run of its own.
+export const END_WAIT = 80, PAUSE = 200, FAST = 35, IDLE = 2000;
 
 // Reads what is typed into target, a textarea, and calls onScan(text) at the
 // end of each scan: Enter or Tab, else a pause after a fast one
 export function scanInput(target, onScan, clock = performance) {
-    let times = [], pasted = false, timer = null;
-    const fast = () => !pasted && times.length >= 3 && target.value.trim().length >= 3 && times.every((t, i) => !i || t - times[i - 1] < FAST);
+    // The current run: its change times, the text before it, e.g. a key
+    // pressed by mistake, and the text after the last change
+    let times = [], before = '', typed = '', pasted = false, timer = null;
+    const run = () => target.value.slice(before.length);
+    const fast = () => !pasted && times.length >= 3 && run().trim().length >= 3 && times.every((t, i) => !i || t - times[i - 1] < FAST);
     const later = (fn, ms) => { clearTimeout(timer); timer = setTimeout(fn, ms); };
+    // A screen keyboard opens only for a tap on the field, a scanner types without it
+    const touch = matchMedia('(pointer: coarse)').matches;
+    const screenKeys = on => { if (touch) target.inputMode = on ? 'text' : 'none'; };
+    const reset = () => { times = []; before = typed = ''; pasted = false; };
     const end = () => {
         clearTimeout(timer);
-        const text = target.value.replace(/\n+$/, '');
+        // A fast run is the scan, without what was left in the field before it
+        const text = (fast() ? run() : target.value).replace(/\n+$/, '');
         target.value = '';
-        times = [];
-        pasted = false;
+        reset();
+        screenKeys(false);
         if (text.trim()) onScan(text);
     };
     const changed = () => {
-        times.push(clock.now());
+        const now = clock.now();
+        if (times.length && now - times[times.length - 1] > IDLE) {
+            times = [];
+            pasted = false;
+            before = target.value.startsWith(typed) ? typed : '';
+        }
+        times.push(now);
+        typed = target.value;
         if (fast()) later(end, PAUSE); else clearTimeout(timer);
     };
     const onInput = e => {
-        if (!target.value) { clearTimeout(timer); times = []; pasted = false; return; }
+        if (!target.value) { clearTimeout(timer); reset(); return; }
         if (/^insertFrom(Paste|Drop)/.test(e.inputType || '')) pasted = true;
         changed();
     };
     // Enter or Tab ends the scan, unless more follows at once: a line break
-    // of the code, e.g. of a contact
+    // of the code, e.g. of a contact. Tab in the empty field moves on.
     const onKey = e => {
         if (!['Enter', 'Tab'].includes(e.key) || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return;
+        if (!target.value && e.key === 'Tab') return;
         e.preventDefault();
         if (!target.value) return;
         target.value += '\n';
@@ -42,32 +59,30 @@ export function scanInput(target, onScan, clock = performance) {
         later(end, END_WAIT);
     };
     // The field keeps the focus: the scanner types where it is. A layer
-    // open, e.g. the search, keeps its own.
+    // open, e.g. the search, keeps its own, so does text selected with the mouse.
+    let pressed = false;
     const refocus = () => {
-        if (!target.isConnected || layerOpen() || document.activeElement === target) return;
+        if (!target.isConnected || layerOpen() || document.activeElement === target || String(getSelection())) return;
         if (document.activeElement && document.activeElement !== document.body && document.activeElement.matches('input, select, textarea')) return;
         target.focus();
     };
-    const onBlur = e => { if (!e.relatedTarget) setTimeout(refocus); };
+    const onBlur = e => { if (!e.relatedTarget && !pressed) setTimeout(refocus); };
     const onShown = () => { if (!document.hidden) refocus(); };
+    const onPress = e => { pressed = e.type === 'pointerdown'; };
+    const onTap = () => screenKeys(true);
     const layer = new MutationObserver(refocus);
-    target.addEventListener('input', onInput);
-    target.addEventListener('keydown', onKey);
-    target.addEventListener('focusout', onBlur);
-    document.addEventListener('click', refocus);
-    document.addEventListener('visibilitychange', onShown);
-    addEventListener('focus', refocus);
+    // The pointer is followed before anything else sees it
+    const on = [[target, 'input', onInput], [target, 'keydown', onKey], [target, 'focusout', onBlur], [target, 'pointerdown', onTap],
+        [document, 'click', refocus], [document, 'visibilitychange', onShown], [window, 'focus', refocus], [window, 'blur', onPress],
+        ...['pointerdown', 'pointerup', 'pointercancel'].map(type => [document, type, onPress, true])];
+    on.forEach(([el, type, fn, capture]) => el.addEventListener(type, fn, !!capture));
     layer.observe($('#layer'), { attributes: true, attributeFilter: ['hidden'] });
+    screenKeys(false);
     target.focus();
     return {
         stop() {
             clearTimeout(timer);
-            target.removeEventListener('input', onInput);
-            target.removeEventListener('keydown', onKey);
-            target.removeEventListener('focusout', onBlur);
-            document.removeEventListener('click', refocus);
-            document.removeEventListener('visibilitychange', onShown);
-            removeEventListener('focus', refocus);
+            on.forEach(([el, type, fn, capture]) => el.removeEventListener(type, fn, !!capture));
             layer.disconnect();
         }
     };
@@ -169,7 +184,8 @@ async function send() {
             let data = {};
             try { data = await r.json(); } catch (e) { }
             if (r.status === 404) scan.message = GONE(scan.name);
-            else if (!r.ok || data.success === false) scan.message = data.message || ('The printer answered ' + r.status);
+            // Only an answer that says so is a success, e.g. not a sign-in page in between
+            else if (!r.ok || data.success !== true) scan.message = data.message || (r.ok ? UNREACHABLE : 'The printer answered ' + r.status);
             else Object.assign(scan, { printed: !!data.printed, image: data.image || '' });
         } catch (e) {
             scan.message = e.message;

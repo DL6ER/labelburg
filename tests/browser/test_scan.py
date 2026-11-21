@@ -37,6 +37,9 @@ class Station:
         self.fulfill(route, fields)
 
     def fulfill(self, route, fields):
+        if self.answer and self.answer[1] is None:
+            route.fulfill(status=self.answer[0], content_type='text/html', body='<html><body>Sign in</body></html>')
+            return
         if self.answer:
             status, body = self.answer
         else:
@@ -71,10 +74,10 @@ def save_box(page, server):
     assert answer.ok
 
 
-def open_station(browser, server, app, viewport, hash_=f'#scan/{BOX}'):
+def open_station(browser, server, app, viewport, hash_=f'#scan/{BOX}', **options):
     with contextlib.suppress(FileNotFoundError):
         os.remove(os.path.join(app.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE))
-    context = browser.new_context(viewport=viewport, locale='en-US')
+    context = browser.new_context(viewport=viewport, locale='en-US', **options)
     page = context.new_page()
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
@@ -260,7 +263,89 @@ def test_change_picks_another_label(station):
     page.wait_for_selector('#scanField:focus')
     station.scan('A-17')
     station.wait_for(1)
+    assert station.none_for(300) == 1
     assert station.requests[0]['name'] == 'TODO-List.json'
+
+
+def test_a_station_opened_again_sends_each_scan_once(station):
+    page = station.page
+    page.evaluate("() => { location.hash = 'edit'; }")
+    page.wait_for_selector('#field')
+    page.evaluate(f"() => {{ location.hash = 'scan/{BOX}'; }}")
+    page.wait_for_selector('#scanField:focus')
+    page.click('#scanChange')
+    page.click(f'.scan-pick [data-name="{BOX}"]')
+    page.wait_for_selector('.scan-pick', state='detached')
+    page.wait_for_selector('#scanField:focus')
+    station.scan('A-17')
+    station.wait_for(1)
+    assert station.none_for(300) == 1
+    assert station.codes() == ['A-17']
+
+
+def test_a_label_opened_from_the_search_leaves_the_station(station):
+    page = station.page
+    page.keyboard.press('Control+k')
+    page.wait_for_selector('.palette #palQ:focus')
+    page.keyboard.type('Box')
+    page.wait_for_selector('.res:has-text("Box")')
+    page.keyboard.press('Enter')
+    page.wait_for_selector('#print', state='visible')
+    assert page.evaluate('() => document.body.dataset.view') == 'edit'
+    assert page.evaluate('() => labelEditor.S.edit.title') == 'Box'
+    assert page.locator('#scanField').count() == 0
+    station.scan('A-17', end=None)
+    assert station.none_for(500) == 0
+
+
+def test_a_stray_character_does_not_slow_a_later_scan(station):
+    page = station.page
+    page.keyboard.type('x')
+    page.wait_for_timeout(2300)
+    station.scan('A-17', end=None)
+    station.wait_for(1)
+    page.keyboard.type('y')
+    page.wait_for_timeout(2300)
+    station.scan('B-42')
+    station.wait_for(2)
+    assert station.none_for(300) == 2
+    assert station.codes() == ['A-17', 'B-42']
+
+
+def test_an_answer_that_is_no_json_is_a_failure(station):
+    page = station.page
+    station.answer = (200, None)
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult .warn')
+    assert 'Shown, not printed' not in card(page)
+    assert 'Printed' not in card(page)
+    assert page.locator('#scanResult img').count() == 0
+
+
+def test_the_code_in_the_card_can_be_selected(station):
+    page = station.page
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult:has-text("Printed: Box")')
+    code = page.locator('#scanResult .scan-code').bounding_box()
+    page.mouse.move(code['x'] + 1, code['y'] + code['height'] / 2)
+    page.mouse.down()
+    page.mouse.move(code['x'] + code['width'] - 1, code['y'] + code['height'] / 2, steps=5)
+    page.mouse.up()
+    page.wait_for_timeout(100)
+    assert page.evaluate('() => getSelection().toString()') == 'A-17'
+    # Clicked away, the next scan is caught again
+    page.mouse.click(1500, 850)
+    page.wait_for_selector('#scanField:focus')
+    station.scan('B-42')
+    station.wait_for(2)
+    assert station.codes() == ['A-17', 'B-42']
+
+
+def test_tab_in_the_empty_field_moves_on(station):
+    page = station.page
+    page.keyboard.press('Tab')
+    assert page.evaluate('() => document.activeElement.id') == 'scanShow'
+    assert station.none_for(200) == 0
 
 
 def test_without_a_label_the_picker_opens(browser, server, app):
@@ -304,5 +389,24 @@ def test_station_fits_a_phone(browser, server, app):
     page.locator('#scanResult').scroll_into_view_if_needed()
     assert page.locator('#scanResult').is_visible()
     assert not page.locator('#mainActs').is_visible()
+    context.close()
+    assert errors == []
+
+
+def test_a_phone_keeps_its_keyboard_closed_until_the_field_is_tapped(browser, server, app):
+    context, page, station, errors = open_station(browser, server, app, {'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
+    page.wait_for_selector('#scanField:focus')
+    assert page.evaluate("() => matchMedia('(pointer: coarse)').matches")
+    # A scanner types without the keyboard of the screen
+    assert page.get_attribute('#scanField', 'inputmode') == 'none'
+    station.scan('A-17')
+    station.wait_for(1)
+    # Tapped, the field takes typing by hand until the scan ends
+    page.tap('#scanField')
+    assert page.get_attribute('#scanField', 'inputmode') == 'text'
+    station.scan('B-42')
+    station.wait_for(2)
+    page.wait_for_function("() => document.querySelector('#scanField').getAttribute('inputmode') === 'none'")
+    assert station.codes() == ['A-17', 'B-42']
     context.close()
     assert errors == []
