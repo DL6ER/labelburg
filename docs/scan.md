@@ -6,7 +6,7 @@ The scan station prints a saved label for each code you scan: the code is filled
 
 Make a label with a blank for the code first and save it: type `[` in a line or in the code of the label, choose "Blank" and name it `code`. A QR code holding the blank `code` prints the scanned code again as a QR code.
 
-Then choose the label under "Templates", "Your labels" and press "Scan to print". The search (Ctrl K) opens it as well: type `>scan`. The station remembers its label, "Change" picks another one.
+Then choose the label under "Templates", "Your labels" and press "Use from anywhere", then "Scan to print". The search (Ctrl K) opens it as well: type `>scan`. The station remembers its label, "Change" picks another one.
 
 ## Barcode scanners
 

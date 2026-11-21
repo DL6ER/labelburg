@@ -219,7 +219,6 @@ async function showDetail(item, values = null) {
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
             ${saved ? `<button class="btn ghost" type="button" id="tplLinks">${icon('qr')}Use from anywhere</button>
-                <button class="btn ghost" type="button" id="tplScan">${icon('barcode')}Scan to print</button>
                 <button class="btn ghost" type="button" id="tplTags">${icon('tag')}Tags</button>
                 <button class="btn ghost danger" type="button" id="tplRemove">${icon('trash')}Remove</button>` : ''}
         </div>
@@ -289,7 +288,6 @@ async function showDetail(item, values = null) {
     };
     if (saved) {
         $('#tplLinks').onclick = () => linksPanel(item, work.design);
-        $('#tplScan').onclick = () => { location.hash = 'scan/' + encodeURIComponent(item.id); };
         $('#tplTags').onclick = () => tagsPanel(item);
         $('#tplRemove').onclick = () => removeLabel(item);
     }
@@ -332,7 +330,9 @@ function linksPanel(item, design) {
         <span class="row"><input class="in" id="tplLink" readonly value="${esc(example)}"><button class="btn soft sm" type="button" id="tplCopy">Copy</button></span>
         <p class="muted small">For bookmarks, NFC tags and Stream Deck buttons; on the phone "Add to Home screen" opens straight into this label.</p>
         <div class="tpl-shot small"><img alt="Sticker" id="tplSticker"></div>
-        <button class="btn soft sm" type="button" id="tplPrintSticker">${icon('printer')}Print the QR sticker</button></div>`;
+        <button class="btn soft sm" type="button" id="tplPrintSticker">${icon('printer')}Print the QR sticker</button>
+        <p class="muted small">With a barcode scanner or the camera, each code scanned is filled into this label and printed.</p>
+        <button class="btn soft sm" type="button" id="tplScan">${icon('barcode')}Scan to print</button></div>`;
     preview(sticker, {}).then(p => { const img = $('#tplSticker'); if (img) img.src = p.url; }, () => { });
     $('#tplCopy').onclick = async () => {
         try { await navigator.clipboard.writeText($('#tplLink').value); toast('Link copied'); } catch (e) { $('#tplLink').select(); toast('Press Ctrl C to copy'); }
@@ -341,6 +341,7 @@ function linksPanel(item, design) {
         const entry = await printJob({ title: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
         toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT.failed}: ${entry.message}`);
     };
+    $('#tplScan').onclick = () => { location.hash = 'scan/' + encodeURIComponent(item.id); };
 }
 
 function tagsPanel(item) {

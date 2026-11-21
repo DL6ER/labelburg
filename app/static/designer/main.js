@@ -31,7 +31,7 @@ function route() {
     closePop();
     if (station) { station.stop(); station = null; }
     const view = viewOf();
-    $$('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'settings' ? 'settings' : view === 'scan' ? '' : 'edit')));
+    $$('#tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'settings' ? 'settings' : 'edit')));
     // On the phone the gear is the way to the settings and back
     $('#gear').classList.toggle('on', view === 'settings');
     $('#gear').href = view === 'settings' ? '#edit' : '#settings';

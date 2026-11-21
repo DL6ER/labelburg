@@ -484,10 +484,14 @@ def test_reached_from_the_saved_label_and_the_search(station, server):
     page.click('#templates')
     page.click('.tpl-nav [data-cat="saved"]')
     page.click('.thumb:has-text("Box")')
-    page.click('#tplScan')
+    # In "Use from anywhere", not one more button next to it
+    assert page.locator('.tpl-acts #tplScan').count() == 0
+    page.click('#tplLinks')
+    page.click('#tplLinksBox #tplScan')
     page.wait_for_function(f"() => location.hash === '#scan/{BOX}'")
     page.wait_for_selector('#scanField:focus')
     assert page.locator('.tpl').count() == 0
+    assert page.locator('#tabs a.on').evaluate_all('tabs => tabs.map(t => t.dataset.tab)') == ['edit']
     page.evaluate("() => { location.hash = 'edit'; }")
     page.wait_for_selector('#field')
     page.keyboard.press('Control+k')
