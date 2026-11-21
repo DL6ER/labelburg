@@ -380,6 +380,18 @@ def test_space_presses_a_button_of_the_station(station):
     assert station.codes() == ['A-17']
 
 
+def test_a_scan_with_the_switch_focused_is_caught(station):
+    page = station.page
+    page.keyboard.press('Tab')
+    assert page.evaluate('() => document.activeElement.id') == 'scanShow'
+    station.scan('A-17')
+    station.wait_for(1)
+    assert station.none_for(300) == 1
+    assert station.codes() == ['A-17']
+    assert not page.is_checked('#scanShow')
+    assert 'preview_only' not in station.requests[0]
+
+
 def test_a_pointer_released_outside_the_window_does_not_hold_the_focus(station):
     page = station.page
     blurred = """() => new Promise(done => {

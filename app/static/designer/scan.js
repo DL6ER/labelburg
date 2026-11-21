@@ -8,6 +8,7 @@ import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blan
 // Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
 // Typing that starts after IDLE is a run of its own.
 export const END_WAIT = 80, PAUSE = 200, FAST = 35, IDLE = 2000;
+const TEXT_ENTRY = 'textarea, select, input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=image], [type=file], [type=range], [type=color])';
 
 // Reads what is typed into target, a textarea, and calls onScan(text) at the
 // end of each scan: Enter or Tab, else a pause after a fast one
@@ -76,8 +77,8 @@ export function scanInput(target, onScan, clock = performance) {
     const onStray = e => {
         const at = document.activeElement;
         if (at === target || e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || !target.isConnected || layerOpen()) return;
-        // Space presses a button or link that has the focus
-        if (at && at !== document.body && (at.matches('input, textarea, select') || at.isContentEditable || e.key === ' ')) return;
+        // Space presses a button, link or switch that has the focus
+        if (at && at !== document.body && (at.matches(TEXT_ENTRY) || at.isContentEditable || e.key === ' ')) return;
         getSelection().removeAllRanges();
         target.focus();
     };
