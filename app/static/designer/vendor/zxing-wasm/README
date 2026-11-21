@@ -1,0 +1,1 @@
+zxing-wasm 3.1.6 from https://registry.npmjs.org/zxing-wasm/-/zxing-wasm-3.1.6.tgz, unchanged: dist/es/reader/index.js, dist/es/share.js and dist/reader/zxing_reader.wasm. Its own code is under the MIT License (LICENSE), the wasm is built from zxing-cpp under the Apache License 2.0 (LICENSE-zxing-cpp).

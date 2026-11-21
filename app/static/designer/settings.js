@@ -27,7 +27,7 @@ const PATHS = {
     robot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V5M2 13v3M22 13v3M9 13v1M15 13v1M9.5 17h5"/><circle cx="12" cy="4" r="1"/>',
 };
 const ic = name => Object.hasOwn(PATHS, name) ? `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>` : icon(name);
-const SOURCE = 'https://github.com/DL6ER/labelburg';
+export const SOURCE = 'https://github.com/DL6ER/labelburg';
 
 // main.js hands over the printer chip, the status refresh and the theme
 const host = { chip: () => { }, refresh: async () => { }, theme: () => { } };

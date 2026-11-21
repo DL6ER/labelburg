@@ -3,6 +3,8 @@
 // of the label with it and prints it.
 
 import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, UNREACHABLE } from './core.js';
+import { camera, cameraBlocked } from './camera.js';
+import { SOURCE } from './settings.js';
 
 // ms: a scanner types faster than FAST between characters; after Enter or
 // Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
@@ -67,7 +69,8 @@ export function scanInput(target, onScan, clock = performance) {
         if (document.activeElement && document.activeElement !== document.body && document.activeElement.matches('input, select, textarea')) return;
         target.focus();
     };
-    const onBlur = e => { if (!e.relatedTarget && !pressed) setTimeout(refocus); };
+    // Focus given back by the page keeps the keyboard of the screen closed
+    const onBlur = e => { screenKeys(false); if (!e.relatedTarget && !pressed) setTimeout(refocus); };
     const onShown = () => { if (!document.hidden) refocus(); };
     // A press released outside the window ends with the next move without a button
     const onPress = e => { pressed = e.type === 'pointerdown' || (e.type === 'pointermove' && pressed && !!e.buttons); };
@@ -111,7 +114,33 @@ const GONE = name => `The label ${titleOf(name)} is no longer saved. Choose anot
 
 export function renderScan(el, name) {
     if (!name) name = load(REMEMBERED, null);
-    let input = null, live = true;
+    // The camera and its video outlive the view drawn again
+    let input = null, live = true, cam = null, note = '';
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.setAttribute('aria-label', 'The picture of the camera');
+    const onScan = text => {
+        queue.push({ name, code: text, previewOnly: !!($('#scanShow') || {}).checked });
+        send();
+    };
+    const stopCamera = () => { if (cam) cam.stop(); cam = null; };
+    const drawCamera = () => {
+        const box = $('#scanCam'), says = $('#scanCamNote');
+        if (!box) return;
+        $('#scanCamera').innerHTML = `${icon('camera')}${cam ? 'Stop the camera' : 'Use the camera'}`;
+        box.hidden = !cam;
+        if (cam && video.parentElement !== box) box.append(video);
+        says.hidden = !note;
+        says.innerHTML = note ? `${icon('warn')}<span>${note}</span>` : '';
+    };
+    const toggleCamera = () => {
+        note = '';
+        if (cam) stopCamera();
+        else if (cameraBlocked()) note = `${esc('The camera works only over a secure address (https).')} <a href="${esc(SOURCE + '/blob/master/docs/reverse-proxy.md')}" target="_blank" rel="noopener">The guide</a> shows how to set one up.`;
+        else cam = camera(video, onScan, { paused: layerOpen, onError: message => { cam = null; note = esc(message); drawCamera(); } });
+        drawCamera();
+    };
     const draw = () => {
         if (input) input.stop();
         const s = S.saved.find(x => x.name === name);
@@ -125,10 +154,16 @@ export function renderScan(el, name) {
                     <button class="btn soft" type="button" id="scanChange">${icon('grid')}${s ? 'Change' : 'Choose'}</button></section>
                 <section class="set-card scan-in">
                     <textarea class="in scan-field" id="scanField" rows="2" placeholder="Scan a code, or type one and press Enter" aria-label="Scan a code, or type one and press Enter" spellcheck="false" autocomplete="off" autocapitalize="off"${s ? '' : ' disabled'}></textarea>
-                    <label class="scan-switch"><input type="checkbox" role="switch" id="scanShow"><span>Show only, don't print</span></label>
+                    <div class="scan-cam" id="scanCam" hidden></div>
+                    <p class="scan-state warn" id="scanCamNote" hidden></p>
+                    <div class="scan-acts">
+                        <label class="scan-switch"><input type="checkbox" role="switch" id="scanShow"><span>Show only, don't print</span></label>
+                        <button class="btn soft" type="button" id="scanCamera"${s ? '' : ' disabled'}>${icon('camera')}Use the camera</button>
+                    </div>
                 </section>
                 <section class="set-card scan-result" id="scanResult" aria-live="polite" hidden></section>`}
         </div></div>`;
+        if (!s) stopCamera();
         if (!S.saved.length) return;
         $('#scanChange').onclick = () => pick(name);
         drawResult();
@@ -140,17 +175,15 @@ export function renderScan(el, name) {
             const blanks = blanksOf(design), fills = $('#scanFills');
             if (fills) fills.textContent = blanks.length ? `Each scan fills: ${blanks.join(', ')}` : 'The label has no blank for the code yet, add one in the editor.';
         }, () => { });
-        const show = $('#scanShow');
-        show.onchange = () => $('#scanField').focus();
-        input = scanInput($('#scanField'), text => {
-            queue.push({ name, code: text, previewOnly: show.checked });
-            send();
-        });
+        $('#scanShow').onchange = () => $('#scanField').focus();
+        $('#scanCamera').onclick = toggleCamera;
+        drawCamera();
+        input = scanInput($('#scanField'), onScan);
     };
     draw();
     // Saved meanwhile in another browser
     loadSaved().then(changed => { if (changed && live) draw(); });
-    return { stop: () => { live = false; if (input) input.stop(); input = null; } };
+    return { stop: () => { live = false; if (input) input.stop(); input = null; stopCamera(); } };
 }
 
 function pick(chosen) {
