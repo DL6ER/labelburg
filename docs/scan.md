@@ -71,4 +71,4 @@ The answer tells which blanks got which value in `filled`, and with `preview_onl
 
 A scanner ends each code with Enter or Tab; a line that follows within a moment belongs to the same code. A scanner without Enter or Tab at the end is recognized by its speed, the code ends when it stops typing. Codes typed by hand print on Enter.
 
-The camera's picture is read in the browser with [zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded from the label designer when the camera is switched on, nothing is sent elsewhere. It reads QR Code, DataMatrix, Aztec, PDF417, EAN-13, EAN-8, UPC-A, UPC-E, Code 128 and Code 39.
+The camera's picture is read in the browser with [zxing-wasm](https://github.com/Sec-ant/zxing-wasm), loaded from the label designer when the camera is switched on, nothing is sent elsewhere. It reads the codes Labelburg prints, QR Code, Micro QR, rMQR, DataMatrix, Aztec, PDF417, EAN-13, EAN-8, UPC-A, Code 128, Code 39, PZN, ITF and Codabar, and UPC-E.

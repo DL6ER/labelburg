@@ -3,8 +3,8 @@
 
 const READER = new URL('./vendor/zxing-wasm/reader/index.js', import.meta.url).href;
 const WASM = new URL('./vendor/zxing-wasm/zxing_reader.wasm', import.meta.url).href;
-// What Labelburg prints and what letters and products carry
-const FORMATS = ['QRCode', 'DataMatrix', 'Aztec', 'PDF417', 'EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128', 'Code39'];
+// The codes Labelburg prints (PZN is a Code 39), and UPC-E of products
+const FORMATS = ['QRCode', 'MicroQRCode', 'RMQRCode', 'DataMatrix', 'Aztec', 'PDF417', 'EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128', 'Code39', 'PZN', 'ITF', 'Codabar'];
 
 export const REFUSED = 'The browser did not allow the camera. Allow it in the address bar and try again.';
 export const NO_CAMERA = 'No camera found.';

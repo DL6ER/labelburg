@@ -1,6 +1,7 @@
 """Codes read with the camera at the scan station: decoded in the browser
 with the vendored reader, which is loaded from the server only when the
 camera is switched on."""
+import base64
 import contextlib
 import io
 import os
@@ -16,7 +17,8 @@ WASM = '/static/designer/vendor/zxing-wasm/zxing_reader.wasm'
 
 
 def code_png(code_type, data, scale=8, quiet=4):
-    rows, _ = codes.matrix(code_type, data, 'M' if code_type == 'QR' else None)
+    """A 2D code as Labelburg draws it, with a white margin."""
+    rows, high = codes.matrix(code_type, data, codes.correction(code_type, None))
     size = len(rows[0]) + 2 * quiet, len(rows) + 2 * quiet
     image = Image.new('L', size, 255)
     for y, row in enumerate(rows):
@@ -24,7 +26,14 @@ def code_png(code_type, data, scale=8, quiet=4):
             if dot:
                 image.putpixel((x + quiet, y + quiet), 0)
     out = io.BytesIO()
-    image.resize((size[0] * scale, size[1] * scale), Image.NEAREST).save(out, format='PNG')
+    image.resize((size[0] * scale, size[1] * scale * high), Image.NEAREST).save(out, format='PNG')
+    return out.getvalue()
+
+
+def barcode_png(kind, value):
+    """A barcode as Labelburg draws it."""
+    out = io.BytesIO()
+    codes.barcode_image(codes.barcode_class(kind), value).save(out, format='PNG')
     return out.getvalue()
 
 
@@ -120,6 +129,41 @@ def test_decode_reads_a_qr_and_a_datamatrix(camera_station, server):
     # The decoder comes from the server, nothing from elsewhere
     assert server + WASM in loaded
     assert [url for url in loaded if not url.startswith(server + '/') and not url.startswith('data:')] == []
+
+
+@pytest.mark.parametrize('picture, text', [
+    (lambda: code_png('MICROQR', 'A-17'), 'A-17'),
+    (lambda: code_png('RMQR', 'A-17'), 'A-17'),
+    (lambda: code_png('AZTEC', 'A-17'), 'A-17'),
+    (lambda: code_png('PDF417', 'A-17'), 'A-17'),
+    (lambda: barcode_png('itf', '12345678'), '12345678'),
+    (lambda: barcode_png('codabar', 'A40156B'), 'A40156B'),
+    (lambda: barcode_png('pzn', '123456'), 'PZN-1234562'),
+    (lambda: barcode_png('code128', 'A-17'), 'A-17'),
+    # python-barcode adds the check character, which the reader keeps
+    (lambda: barcode_png('code39', 'A-17'), 'A-17B'),
+    (lambda: barcode_png('ean13', '400638133393'), '4006381333931'),
+    (lambda: barcode_png('ean8', '9638507'), '96385074'),
+    (lambda: barcode_png('isbn13', '978316148410'), '9783161484100'),
+    (lambda: barcode_png('gs1_128', '0101234567890128'), '(01)01234567890128'),
+], ids=['microqr', 'rmqr', 'aztec', 'pdf417', 'itf', 'codabar', 'pzn', 'code128', 'code39', 'ean13', 'ean8', 'isbn13', 'gs1_128'])
+def test_decode_reads_the_codes_labelburg_prints(camera_station, picture, text):
+    page, _, _ = camera_station()
+    src = 'data:image/png;base64,' + base64.b64encode(picture()).decode()
+    assert page.evaluate("""async src => {
+        const { decode } = await import('/static/designer/camera.js');
+        const img = new Image();
+        img.src = src;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width + 60;
+        canvas.height = img.height + 60;
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        g.drawImage(img, 30, 30);
+        return decode(canvas);
+    }""", src) == text
 
 
 def test_same_code_in_view_prints_once(camera_station):
