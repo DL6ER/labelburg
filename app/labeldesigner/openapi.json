@@ -52,6 +52,18 @@
                         ],
                         "default": "0",
                         "description": "1 shows blanks without a value in the text as their name and a question mark, e.g. `Room?`, as the label designer previews them. A code that takes the text gets it without them."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                      },
+                      "file_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of files to be printed, each a label of its own, for `X-Label-Sheet`. The preview shows the first."
                       }
                     }
                   }
@@ -86,6 +98,18 @@
                         ],
                         "default": "0",
                         "description": "1 shows blanks without a value in the text as their name and a question mark, e.g. `Room?`, as the label designer previews them. A code that takes the text gets it without them."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                      },
+                      "file_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of files to be printed, each a label of its own, for `X-Label-Sheet`. The preview shows the first."
                       }
                     }
                   }
@@ -100,6 +124,12 @@
             "headers": {
               "X-Label-Warning": {
                 "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Label-Sheet": {
+                "description": "On a roll of several labels to a page, how the labels `print_count` and `file_count` (or the pages `pdf_pages` selects) fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. Not set for other label sizes.",
                 "schema": {
                   "type": "string"
                 }

@@ -11,7 +11,7 @@ from PIL import Image
 from app.labeldesigner import paperless, printer, routes
 from app.labeldesigner.drivers import niimbot
 from app.labeldesigner.sheets import Sheet
-from tests.helpers import make_client
+from tests.helpers import _pdf, make_client
 
 API = '/labeldesigner/api'
 B1 = {'printer': 'simulation', 'model': 'Niimbot/B1'}
@@ -165,3 +165,54 @@ def test_homebox_fills_one_label(client, printed, monkeypatch):
 def test_single_label_sizes_print_as_before(client, printed):
     _print(client, label_size='niimbot50x30', print_count=2)
     assert [image.size for image in printed] == [(384, 240), (384, 240)]
+
+
+def sheet_header(client, label_size, **values):
+    """How the preview tells the copies fill the last page, None where it does not."""
+    response = client.post(f'{API}/preview', data={'label_size': label_size, 'text': COUNTER, **B1, **values})
+    assert response.status_code == 200, response.get_json()
+    header = response.headers.get('X-Label-Sheet')
+    return json.loads(header) if header else None
+
+
+def test_last_sheet_of_eight_copies(client):
+    assert sheet_header(client, 'niimbot15x8-2x3', print_count=8) == {
+        'size': [30, 24], 'labels': [[0, 0, 15, 8], [15, 0, 15, 8], [0, 8, 15, 8], [15, 8, 15, 8], [0, 16, 15, 8], [15, 16, 15, 8]],
+        'filled': 2, 'fill': 12}
+
+
+def test_lanes_of_lying_labels_one_above_the_other(client):
+    assert sheet_header(client, 'niimbot13x35-2x1') == {'size': [35, 28], 'labels': [[0, 0, 35, 13], [0, 15, 35, 13]], 'filled': 1, 'fill': 2}
+
+
+def test_text_along_fills_the_lower_label_first(client):
+    assert sheet_header(client, 'niimbot30x15-1x2', orientation='rotated')['labels'] == [[0, 0, 15, 30], [15, 0, 15, 30]]
+
+
+def test_full_sheet_has_no_fill(client):
+    assert sheet_header(client, 'niimbot15x8-2x3', print_count=6) | {'labels': None} == {'size': [30, 24], 'labels': None, 'filled': 6, 'fill': None}
+
+
+def test_files_count_per_copy(client):
+    state = sheet_header(client, 'niimbot15x8-2x3', file_count=4)
+    assert (state['filled'], state['fill']) == (4, 3)
+
+
+def test_fill_above_the_limit_is_left_out(client):
+    client.application.config['PRINT_MAX_COUNT'] = 10
+    state = sheet_header(client, 'niimbot15x8-2x3', file_count=5)
+    assert (state['filled'], state['fill']) == (5, None)
+
+
+def test_pdf_pages_count_per_copy(client):
+    state = sheet_header(client, 'niimbot15x8-2x3', print_type='image', pdf_pages='all',
+                         image=(io.BytesIO(_pdf((100, 50), (100, 50), (100, 50))), 'pages.pdf'))
+    assert (state['filled'], state['fill']) == (3, 2)
+
+
+def test_copies_below_one_count_as_one(client):
+    assert sheet_header(client, 'niimbot15x8-2x3', print_count=0)['filled'] == 1
+
+
+def test_single_sizes_tell_no_sheet(client):
+    assert sheet_header(client, 'niimbot50x30', print_count=3) is None

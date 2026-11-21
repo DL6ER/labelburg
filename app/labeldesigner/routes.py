@@ -1306,6 +1306,12 @@ def preview_from_image():
         response.headers.set('X-PDF-Pages', str(page_count))
         # and shows how the selected ones print
         response.headers.set('X-PDF-Selected-Pages', str(len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count))))
+    # On a roll with several labels to a page, how the copies fill the last one
+    copies, files = max(1, _whole_or(values.get('print_count'), 1)), max(1, _whole_or(values.get('file_count'), 1))
+    per_copy = files if files > 1 else len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
+    size = label_of(values.get('label_size', DEFAULT_LABEL_SIZE))
+    if state := sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT']):
+        response.headers.set('X-Label-Sheet', json.dumps(state, separators=(',', ':')))
     # It suggests stronger contrast for a light image on the tapes of the VC-500W
     if (images[0] is not None and _palette(values.get('label_size', DEFAULT_LABEL_SIZE)) == 'color'
             and not _image_contrast(values) and looks_faint(images[0])):

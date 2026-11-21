@@ -90,3 +90,35 @@ class Sheet:
         if getattr(self.labels[0], 'keep_generated', False):
             self.labels[0].generated = image
         return image
+
+
+def _mm(value: float) -> int | float:
+    return _whole(round(value, 1))
+
+
+def fill_state(label: Label, lying: bool, copies: int, per_copy: int, limit: int) -> dict | None:
+    """How the copies fill the last sheet, for the label designer to draw:
+    the sheet and its labels in mm as the label is seen upright, in the
+    order they are filled, how many of them are filled, and the copies that
+    fill it, None where it is full or that would be more than limit labels.
+    None where a label size has one label to a page."""
+    per = per_sheet(label)
+    if per == 1:
+        return None
+    width, length = piece(label).tape_size
+    sheet = label.tape_size
+    scale = sheet[0] / label.dots_total[0]
+    boxes = [(x * scale, y * scale, width, length) for x, y in spots(label, lying)]
+    if lying:
+        # Turned clockwise, the end printed first is on the right
+        boxes = [(sheet[1] - y - h, x, h, w) for x, y, w, h in boxes]
+        sheet = sheet[::-1]
+    filled = (copies * per_copy - 1) % per + 1
+    fill = None
+    if filled < per:
+        fill = copies + 1
+        while fill * per_copy % per:
+            fill += 1
+        if fill * per_copy > limit:
+            fill = None
+    return {'size': [_mm(v) for v in sheet], 'labels': [[_mm(v) for v in box] for box in boxes], 'filled': filled, 'fill': fill}
