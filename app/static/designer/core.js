@@ -1014,8 +1014,8 @@ export async function printJob(job, onDone, printer = S.printer) {
         } else if (data.job && data.state !== 'printed') {
             // Queued: followed until its outcome is known
             Object.assign(entry, { job: data.job, start: data.start, seen: data.state });
-            if (data.state === 'failed') { entry.state = 'failed'; entry.message = data.message || 'The label was not printed'; }
-            else { saveHistory(); await followJob(entry); }
+            saveHistory();
+            await followJob(entry);
         } else entry.state = 'printed';
     } catch (e) {
         entry.state = 'failed';
@@ -1043,13 +1043,13 @@ export function followJob(entry) {
             asking = true;
             try {
                 const r = await fetch(API + '/queue/' + encodeURIComponent(entry.job));
-                const data = await r.json();
-                if (r.status === 404 && data.start) {
-                    if (data.start === entry.start) end('unknown', 'Its outcome is no longer known');
+                const data = await r.json().catch(() => ({}));
+                if (r.status === 404) {
+                    if (!data.start || data.start === entry.start) end('unknown', 'Its outcome is no longer known');
                     else if (entry.seen === 'printing') end('unknown', 'The label designer was restarted while it printed');
                     else end('failed', 'The label designer was restarted before it printed');
                 } else if (data.state === 'printed') end('printed');
-                else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'The label was not printed');
+                else if (data.state === 'failed' || data.state === 'removed') end('failed', data.message || 'It was not printed');
                 else if (data.state && data.state !== entry.seen) { entry.seen = data.state; saveHistory(); }
             } catch (e) {
                 // The next one asks again
@@ -1059,6 +1059,8 @@ export function followJob(entry) {
         };
         const timer = setInterval(ask, 1500);
         document.addEventListener('visibilitychange', ask);
+        // A job the answer already calls failed is read at once for its message
+        if (entry.seen === 'failed') ask();
     });
 }
 

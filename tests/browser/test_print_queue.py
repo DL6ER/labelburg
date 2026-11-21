@@ -118,3 +118,38 @@ def test_the_outcome_is_asked_once_at_a_time_and_not_from_a_tab_in_the_backgroun
         assert len(held) == 1
     held[0].fulfill(json=dict(job('printed'), start=START))
     editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+
+
+def test_a_job_failed_at_once_shows_the_message_of_the_server(editor):  # noqa: F811
+    type_label(editor, 'Shelf')
+    answer_print(editor, 'failed')
+    answer_queue(editor, [job('failed', message='The printer is out of tape')])
+    editor.click('#print')
+    editor.wait_for_selector('[role=alertdialog]:has-text("The printer is out of tape")', timeout=15000)
+    assert history(editor) == [['failed', 'The printer is out of tape', 'failed']]
+
+
+def test_a_job_failed_without_a_message_uses_the_fixed_text(editor):  # noqa: F811
+    type_label(editor, 'Shelf')
+    answer_print(editor)
+    answer_queue(editor, [job('failed')])
+    editor.click('#print')
+    editor.wait_for_selector('[role=alertdialog]:has-text("It was not printed")', timeout=15000)
+
+
+def test_a_not_found_without_a_start_is_not_known(editor):  # noqa: F811
+    type_label(editor, 'Shelf')
+    answer_print(editor)
+    editor.route('**/api/queue/**', lambda route: route.fulfill(status=404, body='<html>Not found</html>', content_type='text/html'))
+    editor.click('#print')
+    editor.wait_for_selector('[role=alertdialog]:has-text("Its outcome is no longer known")', timeout=15000)
+    assert history(editor)[0][0] == 'unknown'
+
+
+def test_a_server_error_keeps_asking(editor):  # noqa: F811
+    type_label(editor, 'Shelf')
+    answer_print(editor)
+    replies = [lambda r: r.fulfill(status=500, body='oops'), lambda r: r.fulfill(json=dict(job('printed'), start=START))]
+    editor.route('**/api/queue/**', lambda route: (replies.pop(0) if len(replies) > 1 else replies[0])(route))
+    editor.click('#print')
+    editor.wait_for_selector('#toast:has-text("Printed 1 label")', timeout=15000)
