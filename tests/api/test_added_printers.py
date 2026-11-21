@@ -369,3 +369,16 @@ def test_a_broken_settings_file_is_left_as_it_is(client, host, content):
     with open(settings_file(client), 'rb') as fh:
         assert fh.read() == content
     assert not usbip.connected(host.address())
+
+
+def test_a_niimbot_b1_shared_is_added(client, monkeypatch):
+    # Its status is not asked for long, the fake printer does not answer it
+    monkeypatch.setattr('app.labeldesigner.drivers.niimbot.protocol.ANSWER_WAIT', 0.05)
+    shared = FakeHost(SharedDevice(product=0x0002, device_id='MFG:NIIMBOT;CMD:ESC;MDL: B1;'))
+    try:
+        answer = add(client, shared.address(), 'B1')
+        assert answer.get_json()['success'] is True, answer.get_json()
+        assert kept(client)['added'][0]['model'] == 'Niimbot/B1'
+    finally:
+        usbip.disconnect(shared.address())
+        shared.close()

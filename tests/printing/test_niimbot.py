@@ -926,3 +926,10 @@ def test_page_that_is_not_told_printed(b1, fake, monkeypatch):
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot15x8-2x3', 'print_type': 'text', 'text': TEXT})
     assert response.get_json()['message'] == 'The printer did not tell that it printed the page'
+
+
+def test_device_id_names_the_b1():
+    from app.labeldesigner import drivers
+    assert drivers.told_model(B1_DEVICE_ID) == 'Niimbot/B1'
+    assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL: K9;') is None
+    assert niimbot.DRIVER.model_in('MFG:Brother;CMD:PT-CBP;MDL:QL-800;') is None

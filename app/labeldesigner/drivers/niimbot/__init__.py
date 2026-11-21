@@ -170,9 +170,12 @@ class Niimbot(Driver):
     refusals = (calibration.KIND_MESSAGE,)
 
     def model_of(self, device, device_id=None):
-        # By the device ID on USB: MFG:NIIMBOT;CMD:ESC;MDL: B1;
         if device_id is None:
             device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+        return self.model_in(device_id)
+
+    def model_in(self, device_id):
+        # MFG:NIIMBOT;CMD:ESC;MDL: B1; on USB, also shared over USB/IP
         fields = devices.device_id_fields(device_id)
         model = f"Niimbot/{fields.get('MDL', '').strip()}"
         return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
