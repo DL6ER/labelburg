@@ -569,9 +569,9 @@ def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
     assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with gaps')
     assert status()['media_type'] == 'Die-cut labels'
     r = client.post('/labeldesigner/api/settings', data={'sensing': 'mark'})
-    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with black marks on the back')
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Black marks on the back')
     shown = status()
-    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Labels with black marks on the back', 152, True)
+    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Black marks on the back', 152, True)
     # The labels are as long as the label size, set by hand or of the label
     r = client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
     assert (r.get_json()['tape']['known'], r.get_json()['tape']['roll']) == (False, 'Continuous roll')

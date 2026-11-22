@@ -153,7 +153,7 @@ function qualityHTML(p) {
 // tells them; none is shown as chosen while none is set, so that any is sent
 function sensingHTML(p) {
     const on = kept(p).sensing || '';
-    const about = !on ? 'Choose what is on the roll. Until then the printer finds the labels as before.'
+    const about = !on ? 'Choose what is on the roll.'
         : on === 'endless' ? 'Each label is as long as the tape chosen above.' : 'How the printer finds where each label starts.';
     return `<div class="set-stack">${seg('sensing', C.rolls, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
 }

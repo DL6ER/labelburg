@@ -22,7 +22,7 @@ GAP = 3
 # labels, by black marks on their back, or not at all on a continuous roll
 SENSINGS = ('gap', 'mark', 'endless')
 # The roll of each, as the label designer offers and names it
-ROLLS = {'gap': 'Labels with gaps', 'mark': 'Labels with black marks on the back', 'endless': 'Continuous roll'}
+ROLLS = {'gap': 'Labels with gaps', 'mark': 'Black marks on the back', 'endless': 'Continuous roll'}
 # The roll a status names, of labels with gaps or where nothing is set
 MEDIA_TYPE = 'Die-cut labels'
 # A measured length further off than this from all sizes is not taken
