@@ -278,8 +278,8 @@ class Ipp(Driver):
     device_patterns = (re.compile(rf'ipps?://[A-Za-z0-9.-]+(:\d{{1,5}})?({ipp.PATH})?'),
                        re.compile(rf'ipps?://\[[0-9A-Fa-f:.]+\](:\d{{1,5}})?({ipp.PATH})?'),
                        re.compile(r'cups://[A-Za-z0-9_+-][A-Za-z0-9_.+-]*'))
-    # Also an address at a raw port, which is never asked
-    errors = (OSError, ipp.IPPError, http.client.HTTPException, ipp.RawPort)
+    # Also an address at a raw port or none on IPP, which is never asked
+    errors = (OSError, ipp.IPPError, http.client.HTTPException, ipp.RawPort, ipp.NotOnIpp)
     takes_usbip = False
 
     def claims(self, device) -> bool:

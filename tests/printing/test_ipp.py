@@ -223,7 +223,7 @@ def test_printer_uris():
 
 @pytest.mark.parametrize('device', ['tcp://192.0.2.1', 'ipp:///ipp/print', 'ipp://printer:99999/ipp/print', None])
 def test_no_printers_on_ipp(device):
-    with pytest.raises(ValueError):
+    with pytest.raises(ipp.NotOnIpp, match=f'^{ipp.NOT_ON_IPP}$'):
         ipp.printer_at(device)
 
 
@@ -232,9 +232,10 @@ def test_no_printers_on_ipp(device):
     'ipp://127.0.0.1:2375/containers/labelburg/kill', 'ipp://printer.local/', 'ipp://printer.local/admin',
     'ipp://printer.local/ipp/../containers/labelburg', 'ipp://printer.local/printers/./x', 'ipp://printer.local/ipp%2f..',
     'ipp://printer.local/ipp/print?x=1', 'ipp://printer.local/ipp/print#x', 'cups://..',
+    'ipp://ricoh.local/printer', 'ipp://printer.local/ipp/print/', 'ipp://printer.local/printers/x/.printer',
 ])
 def test_printers_on_ipp_are_asked_at_their_paths_only(device):
-    with pytest.raises(ValueError):
+    with pytest.raises(ipp.NotOnIpp):
         ipp.printer_at(device)
 
 

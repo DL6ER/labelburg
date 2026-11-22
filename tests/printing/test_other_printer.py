@@ -793,3 +793,30 @@ def test_request_naming_a_printer_on_ipp_without_a_model(tmp_path, fake):
     assert outcome(client, print_label(client, 'ipp102x152', printer=fake.address)) == ('printed', '')
     (attributes, _), = fake.jobs()
     assert attributes['media-col']['media-size'] == {'x-dimension': 10160, 'y-dimension': 15240}
+
+
+@pytest.mark.parametrize('address', ['ipp://127.0.0.1/printer', 'ipp://127.0.0.1/ipp/print/', 'ipp://127.0.0.1/printers/x/.printer'])
+def test_printer_at_no_path_of_a_printer_on_ipp(tmp_path, tried, address):
+    # As PRINTER_PRINTER: listed with why, next to the demo printer, and never asked
+    client = make_client(tmp_path, model='Other/IPP', printer=address)
+    printers = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert [(p['path'], p['errors']) for p in printers[:1]] == [(address, [ipp.NOT_ON_IPP])]
+    assert printers[-1]['path'] == 'simulation'
+    assert outcome(client, print_label(client, 'ipp102x152')) == ('failed', f'{devices.NOT_SENT}: {ipp.NOT_ON_IPP}')
+    assert tried == []
+
+
+@pytest.mark.parametrize('address', ['tcp://127.0.0.1', 'file:///dev/usb/lp0'])
+def test_other_printer_at_an_address_not_on_ipp_is_refused(tmp_path, tried, address):
+    client = make_client(tmp_path, model='Other/IPP', printer=address)
+    printers = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert (printers[0]['errors'], printers[-1]['path']) == ([ipp.NOT_ON_IPP], 'simulation')
+    answer = print_label(client, 'ipp102x152')
+    assert (answer.status_code, answer.get_json()['message']) == (400, ipp.NOT_ON_IPP)
+    with pytest.raises(ipp.NotOnIpp):
+        drivers.resolve(address, 'Other/IPP', assumed=True)
+    assert tried == []
+
+
+def test_other_printer_as_the_model_of_the_demo_printer():
+    assert drivers.resolve('simulation', 'Other/IPP') == (other.DRIVER, 'Other/IPP')

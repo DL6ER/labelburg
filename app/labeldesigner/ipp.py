@@ -75,6 +75,7 @@ PATH = r'/(ipp|printers|classes)(/[A-Za-z0-9_~+-][A-Za-z0-9._~+-]*)*'
 # Ports of raw printing and LPD, which print a request as text
 RAW_PORTS = frozenset((515, 6101, *range(9100, 9200)))
 RAW_PORT = 'Printers take raw jobs on this port, give the port of IPP, 631 unless it was changed'
+NOT_ON_IPP = 'Give this printer an address on IPP, e.g., ipp://<host>/ipp/print'
 # Who sends the jobs and their name, as the printer lists them
 USER = b'labelburg'
 JOB_NAME = b'Labelburg'
@@ -125,6 +126,13 @@ class RawPort(ValueError):
         super().__init__(RAW_PORT)
 
 
+class NotOnIpp(ValueError):
+    """No address of a printer on IPP, also one of a path not of PATH."""
+
+    def __init__(self):
+        super().__init__(NOT_ON_IPP)
+
+
 class Printer(NamedTuple):
     """A printer on IPP: whether it is asked over TLS, its host, port and path."""
     tls: bool
@@ -145,20 +153,21 @@ def is_address(device) -> bool:
 
 def printer_at(device: str) -> Printer:
     """The printer at ipp://<host>[:<port>][/<path>], ipps:// alike over
-    TLS, or cups://<queue>, a queue of CUPS on this computer. ValueError
+    TLS, or cups://<queue>, a queue of CUPS on this computer. NotOnIpp
     for another address, also of another path than PATH, RawPort for one
     at a port of RAW_PORTS."""
     if not is_address(device):
-        raise ValueError('No address of a printer on IPP')
+        raise NotOnIpp()
     if device.lower().startswith('cups://'):
         device = f'ipp://localhost:{PORT}/printers/{device[len("cups://"):]}'
     parts = urlsplit(device)
-    if not parts.hostname:
-        raise ValueError('No address of a printer on IPP')
-    printer = Printer(parts.scheme.lower() == 'ipps', parts.hostname, PORT if parts.port is None else parts.port,
-                      parts.path or DEFAULT_PATH)
-    if parts.query or parts.fragment or not re.fullmatch(PATH, printer.path):
-        raise ValueError('No path of a printer on IPP')
+    try:
+        port = PORT if parts.port is None else parts.port
+    except ValueError:
+        raise NotOnIpp() from None
+    if not parts.hostname or parts.query or parts.fragment or not re.fullmatch(PATH, parts.path or DEFAULT_PATH):
+        raise NotOnIpp()
+    printer = Printer(parts.scheme.lower() == 'ipps', parts.hostname, port, parts.path or DEFAULT_PATH)
     if printer.port in RAW_PORTS:
         raise RawPort()
     return printer
