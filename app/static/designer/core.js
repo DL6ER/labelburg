@@ -124,6 +124,8 @@ export function sizeName(id) {
 }
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
+// A label that shows the number of labels printed ({{total}}) is drawn for the copies
+export const withTotal = design => (design.text || []).map(l => l.text).concat(design.code_text).some(t => String(t || '').includes('{{total}}'));
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
 export function sizeShort(id) {
     const s = SIZES[id];
@@ -533,7 +535,7 @@ export function sheetNote(sheet, max = 100) {
 export async function preview(design, values, copies = 1, perCopy = 0) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
     // On a roll with several labels to a page the server tells how the copies fill the last one
-    const sheet = isSheet(asked.label_size);
+    const sheet = isSheet(asked.label_size), counted = sheet || withTotal(asked);
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -543,7 +545,7 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
     const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
-        sheet ? [copies, perCopy] : 0]);
+        counted ? [copies, perCopy] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -553,9 +555,9 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
     const p = (async () => {
         let r;
         try {
-            const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
+            const fd = formFor(asked, counted ? copies : 1, false, values, true, blanks);
             // Each copy prints all files and PDF pages, the preview shows one
-            if (sheet && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (counted && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
             r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');

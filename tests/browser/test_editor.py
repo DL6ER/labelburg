@@ -92,6 +92,32 @@ def test_a_date_and_a_blank_from_the_bracket_menu(editor):
     assert editor.inner_text('#field .chip.blank') == 'Name'
 
 
+def test_the_number_of_labels_from_the_bracket_menu(editor):
+    type_label(editor, 'Box ')
+    editor.keyboard.type('[')
+    editor.click('.pop-menu button:has-text("Counter")')
+    editor.wait_for_selector('#field .chip.counter')
+    editor.keyboard.type(' of [')
+    assert 'Number of labels\ne.g. the 6 in 1 of 6' in editor.inner_text('.pop-menu')
+    editor.click('.pop-menu button:has-text("Number of labels")')
+    editor.wait_for_selector('#field .chip.total')
+    assert editor.inner_text('#field .chip.total') == 'number of labels'
+    editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of {{total}}'")
+    wait_for_preview(editor)
+    # The preview is drawn again for the copies chosen, the server counts them
+    request = changed_preview(editor, lambda: (editor.fill('#copies', '6'), editor.dispatch_event('#copies', 'input')))
+    assert request['print_count'] == '6' and json.loads(request['text'])[0]['text'] == 'Box {{counter}} of {{total}}'
+    with editor.expect_response('**/api/print') as answer:
+        editor.click('#print')
+    assert answer.value.ok and sent(answer.value.request)['print_count'] == '6'
+    # Its options tell what it is, and remove it
+    editor.click('#field .chip.total')
+    editor.wait_for_selector('.chip-pop')
+    assert 'How many labels are printed together' in editor.inner_text('.chip-pop')
+    editor.click('.chip-pop [data-remove]')
+    editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of '")
+
+
 def test_a_line_picked_on_the_label_changes_its_size_and_is_inverted(editor):
     type_label(editor, 'Shelf 3', 'spices')
     editor.wait_for_selector('#picks .pk[data-i="1"]')

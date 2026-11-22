@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, sheetNote, untold
+    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -647,9 +647,10 @@ function drawSheet(sheet) {
     note.innerHTML = html;
     note.hidden = !html;
 }
-// Only a roll with several labels to a page previews the copies
+// Only a roll with several labels to a page and the number of labels
+// previews the copies
 export function copiesChanged() {
-    if (ui.last && isSheet(ui.last.labelSize)) drawPreview();
+    if ((ui.last && isSheet(ui.last.labelSize)) || (S.edit && withTotal(S.edit.design))) drawPreview();
 }
 
 function previewValues(E) {
