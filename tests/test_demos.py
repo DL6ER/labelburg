@@ -10,7 +10,7 @@ from datetime import date, datetime
 import pytest
 from PIL import Image
 
-from app.labeldesigner import demos
+from app.labeldesigner import demos, icons
 from app.labeldesigner.drivers import LABELS
 from app.labeldesigner.routes import create_label_from_request
 from tests.helpers import make_client, outcome
@@ -265,6 +265,30 @@ def test_food_is_best_by_its_keep_time(client, label_id):
     # The small labels have the words and the dates on lines of their own
     assert ' '.join(lines) == f'{food} {words[0]} {dates[0]} {words[1]} {dates[1]}'
     assert lines[0] == food and len(lines) in (3, 5)
+
+
+SPOOL_IDS = [label_id for label_id in DEMO_IDS if label_id.startswith('3d-printing/')]
+
+
+def test_filament_spools_in_each_size_and_language():
+    sizes = Counter(demos.load(label_id)['label_size'] for label_id in SPOOL_IDS)
+    assert sizes == {size: 2 for size in ('niimbot40x30', 'niimbot50x30', '29x90', '62x29', '62', 'pt24', 'pt12')}
+
+
+@pytest.mark.parametrize('label_id', SPOOL_IDS)
+def test_filament_spools(client, label_id):
+    # The material and whether the spool was opened or dried are chosen, the
+    # temperatures typed in, in degrees Celsius
+    fields = demos.load(label_id)['fields']
+    material, when = (name for name, field in fields.items() if field['type'] == 'choice')
+    nozzle, bed = (name for name, field in fields.items() if field['type'] == 'number')
+    assert fields[material]['choices'] == ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PA/Nylon', 'PC']
+    assert (fields[nozzle]['default'], fields[bed]['default']) == ('210', '60')
+    blanks = {material: 'PETG', when: fields[when]['choices'][1], nozzle: '240', bed: '80'}
+    text = ' '.join(_printed_lines(client, label_id, datetime(2024, 1, 31, 12), blanks))
+    dried = 'Getrocknet am 31.01.2024' if label_id.endswith('-de.json') else 'Dried on 2024-01-31'
+    celsius = icons.icon('temperature-celsius')
+    assert text.startswith('PETG ') and f' 240{celsius}' in text and f' 80{celsius}' in text and dried in text
 
 
 def test_a_model_that_is_no_text_is_refused(client):
