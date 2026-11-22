@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from . import drivers, sheets
 from .drivers.labels import FormFactor
-from .label_names import LABELS, SIZES, label_printers, label_size_problem
+from .label_names import LABELS, SIZES, label_name, label_printers, label_size_problem
 
 TAKEN_BY = {label.identifier: label_printers(label) for label in LABELS}
 # The models some label size names
@@ -50,10 +50,16 @@ def _shown_as_another(size_id: str) -> bool:
 
 def takes(model) -> list[str]:
     """The label sizes a printer takes, for the label designer. A printer of
-    no known model takes each paper once, not again as the size of a model
-    shown as another one."""
-    known = bool(model) and model in _LISTED
-    return [s for s in SIZES if _takes(s, model) and (known or not _shown_as_another(s))]
+    no known model takes each paper once: not again as the size of a model
+    shown as another one, nor as another size its driver names alike, e.g.
+    an RD roll of each TD series."""
+    if bool(model) and model in _LISTED:
+        return [s for s in SIZES if _takes(s, model)]
+    named = {}
+    for s in SIZES:
+        if TAKEN_BY[s] and not _shown_as_another(s):
+            named.setdefault((drivers.for_label(s), label_name(SIZES[s])), s)
+    return list(named.values())
 
 
 def same_paper(size_id: str | None, model) -> str | None:

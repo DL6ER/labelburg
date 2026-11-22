@@ -53,8 +53,14 @@ def labels(prefix: str, dpi: int, head_dots: int, models: tuple, sizes: tuple) -
         return Label(f'{prefix}{width}x{length}', (width, length), FormFactor.DIE_CUT, total,
                      (min(total[0], head_dots), total[1]), 0, models=tuple(models), gap=GAP)
     made = tuple(label(width, length) for width, length in sizes)
-    _PAPERS.update((size.identifier, size.tape_size) for size in made)
+    note_papers(made)
     return made
+
+
+def note_papers(made: tuple[Label, ...]):
+    """Note the paper of label sizes made otherwise than by labels(), see
+    label_for()."""
+    _PAPERS.update((size.identifier, size.tape_size) for size in made)
 
 
 def label_for(label_size: str, labels: tuple, model: str) -> str:

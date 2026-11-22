@@ -11,7 +11,7 @@ from ... import ipp, snmp
 from .. import devices, reach
 from ..base import network_status
 from . import usb
-from .models import MODELS
+from .models import MODELS, SHOWN_AS, named
 from .status import StatusError, parse_status
 
 logger = logging.getLogger(__name__)
@@ -147,11 +147,12 @@ def _snmp_network_status(device_specifier: str, host: str, default_model: str) -
     return status
 
 
-def label_printer_model(name: str) -> str | None:
-    """The model of a name like "Brother QL-810W", None for other
-    devices, e.g. office printers."""
-    model = (name or '').removeprefix('Brother ').strip()
-    return model if model in MODELS else None
+def label_printer_model(name: str, configured: str | None = None) -> str | None:
+    """The model of a name like "Brother QL-810W", None for other devices,
+    e.g. office printers. A TD-2300D model named without its resolution is
+    the configured model of either resolution, else the one of 203 dpi."""
+    model, told = named(name)
+    return configured if model and not told and SHOWN_AS.get(configured) == model else model
 
 
 def query_network_status(device_specifier: str, default_model: str = 'Unknown',
@@ -178,7 +179,7 @@ def _ipp_network_status(device_specifier: str, host: str, default_model: str, la
     except (ConnectionRefusedError, ipp.IPPError, http.client.HTTPException) as e:
         logger.debug('No IPP status from %s: %s', device_specifier, e)
         return network_printer(device_specifier, default_model)
-    model = label_printer_model(str(attributes.get('printer-make-and-model') or ''))
+    model = label_printer_model(str(attributes.get('printer-make-and-model') or ''), default_model)
     if model is None:
         if label_printers_only:
             logger.debug('%s is no label printer: %s', device_specifier, attributes.get('printer-make-and-model'))
@@ -198,7 +199,9 @@ def announced(service: dict) -> tuple[str, str] | None:
     """(tcp://<address>[:<port>], model) of a Brother label printer that
     announces itself, None for other devices."""
     txt = service['txt']
-    model = label_printer_model(txt.get('usb_mdl') or '') or label_printer_model(txt.get('ty') or '')
+    # The name that tells the resolution of a TD-2300D model, if one does
+    names = [named(txt.get('usb_mdl') or ''), named(txt.get('ty') or '')]
+    model = next((model for model, told in names if model and told), None) or names[0][0] or names[1][0]
     if model is None:
         return None
     # IPP announces its own port, jobs go to the raw port

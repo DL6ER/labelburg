@@ -24,8 +24,8 @@ from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
 from .print_queue import FAILED as NOT_PRINTED, NO_PREVIEW, NO_SUCH_JOB, NOT_WAITING, PRINTER_REQUIRED, PRINTING_ALREADY, REMOVED
 from .printer import BUSY as PRINTER_BUSY, NO_FEED, WRONG_MODEL
-from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, NO_SENSING, NO_SIDES, OFFSET_LIMIT,
-                               READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
+from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, NO_CUTTER_OPTION, NO_SENSING, NO_SIDES,
+                               OFFSET_LIMIT, READINGS_DISAGREE, SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
 LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
@@ -71,6 +71,7 @@ MESSAGES = (
     SETTINGS_MESSAGE,
     NO_SENSING,
     NO_SIDES,
+    NO_CUTTER_OPTION,
     TOO_MANY_PRINTERS,
     LABEL_SETTINGS_MESSAGE,
     TOO_MANY_ADDED,

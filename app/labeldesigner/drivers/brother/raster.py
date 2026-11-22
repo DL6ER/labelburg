@@ -10,6 +10,7 @@ from ...label import LabelContent, LabelOrientation, LabelType
 from ..labels import FormFactor
 from .commands import Raster, RasterError
 from .labels import BY_ID, PTOUCH_LABELS
+from .labels_td import CUTTER_SHORTEST
 from .models import MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, length_problem
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ def render(queue, entries, keep=None) -> Raster:
     """Rasterize the queue entries into one job. Each label is converted as
     soon as its job is complete, so that the images of a long job are not all
     kept in memory; the simulator keeps them as PNG instead."""
-    raster = Raster(queue.model)
+    raster = Raster(queue.model, cutter=queue.cutter)
     ptouch = raster.ptouch
     job = None
     for i, entry in enumerate(entries):
@@ -108,10 +109,15 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
     if red and not raster.spec.two_color:
         raise RasterError('Printing in red is not supported with the selected model.')
 
-    raster.add_switch_mode()
-    raster.add_invalidate()
-    raster.add_initialize()
-    raster.add_switch_mode()
+    if raster.td:
+        # A TD printer gets ESC i a with each page (TD2000 2.1, TD2300 and TD4000 4.1)
+        raster.add_invalidate()
+        raster.add_initialize()
+    else:
+        raster.add_switch_mode()
+        raster.add_invalidate()
+        raster.add_initialize()
+        raster.add_switch_mode()
     for i, im in enumerate(images):
         if im.mode.endswith('A'):
             # In front of a white background
@@ -133,6 +139,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
                 logger.warning('Resizing the image to the width of the label')
                 im = im.resize((dots_printable[0], int((dots_printable[0] / im.size[0]) * im.size[1])),
                                Image.Resampling.LANCZOS)
+            shortest = CUTTER_SHORTEST[raster.spec.dpi] if raster.spec.optional_cutter and raster.cutting else 0
+            if im.size[1] < shortest:
+                # Lengthened to the shortest label the cutter cuts, the print in its middle
+                padded = Image.new(im.mode, (im.size[0], shortest), (255,) * len(im.mode))
+                padded.paste(im, (0, (shortest - im.size[1]) // 2))
+                im = padded
         else:
             if rotate == 'auto':
                 if im.size[0] == dots_expected[1] and im.size[1] == dots_expected[0]:
@@ -165,7 +177,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             else:
                 im = im.point(lambda x: 0 if x < THRESHOLD else 255, mode='1')
 
-        raster.add_status_information()
+        if raster.td:
+            # Raster mode with each page, and status messages while printing
+            raster.add_switch_mode()
+            raster.add_status_notification()
+        else:
+            raster.add_status_information()
         tape = label.tape_size
         if label.form_factor in (FormFactor.DIE_CUT, FormFactor.ROUND_DIE_CUT):
             raster.add_media_and_quality(im.size[1], 0x0B, tape[0], tape[1], hq)
@@ -187,6 +204,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         else:
             raster.add_raster_data(im)
         raster.add_print(last_page=i == len(images) - 1)
+    raster.add_default_mode()
 
 
 def _filtered_hsv(im: Image.Image, bands: tuple, filter_h, filter_s, filter_v) -> Image.Image:

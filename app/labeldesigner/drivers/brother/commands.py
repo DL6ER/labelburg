@@ -1,7 +1,8 @@
 """The raster commands of the Brother QL and P-touch printers, after the
 raster module of brother_ql by Philipp Klaus and Brother's raster command
 references, e.g. that of the PT-E550W, PT-P750W and PT-P710BT:
-https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf"""
+https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
+and those of the TD printers, see models.py."""
 
 import struct
 
@@ -20,10 +21,13 @@ class Raster:
     other. page_lengths holds the length of each page in mm, at most: how
     long the printer may take to print it."""
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, cutter: bool = False):
         self.model = model
         self.spec = MODELS[model]
+        # Of a model whose cutter is an option, whether it is attached
+        self.cutting = self.spec.cutting and (cutter or not self.spec.optional_cutter)
         self.ptouch = model.startswith('PT-')
+        self.td = model.startswith('TD-')
         self.data = bytearray()
         self.page_number = 0
         self.page_lengths = []
@@ -50,28 +54,45 @@ class Raster:
         """Status information request (ESC i S)."""
         self.data += b'\x1b\x69\x53'
 
+    def add_status_notification(self):
+        """Status messages while printing (ESC i ! 00h), which the newer TD
+        printers send only when asked to (TD2300 and TD4000, ESC i !)."""
+        if self.spec.status_notification:
+            self.data += b'\x1b\x69\x21\x00'
+
+    def add_default_mode(self):
+        """Back to the default mode after a job (ESC i a FFh), as the newer TD
+        printers' references end one (TD2300 and TD4000, 4.1)."""
+        if self.spec.status_notification:
+            self.data += b'\x1b\x69\x61\xff'
+
     def add_media_and_quality(self, lines: int, media_type: int | None, width: int, length: int, quality: bool):
         """Print information (ESC i z). Without a media type, the printer
-        checks the width of its media only."""
-        flags = 0x80 | (media_type is not None) << 1 | 1 << 2 | 1 << 3 | quality << 6
+        checks the width of its media only. A TD printer is given the length
+        of die-cut labels only, as in the example of a continuous roll
+        (TD2000 2.1), and the quality where it takes it."""
+        given_length = not self.td or length > 0
+        quality = quality and self.spec.quality_flag
+        flags = 0x80 | (media_type is not None) << 1 | 1 << 2 | given_length << 3 | quality << 6
         self.data += b'\x1b\x69\x7a' + bytes([flags, media_type or 0, width & 0xFF, length & 0xFF])
         self.data += struct.pack('<L', lines) + bytes([0 if self.page_number == 0 else 1, 0])
 
     def add_autocut(self, on: bool):
         """Whether the printer cuts at all (ESC i M)."""
-        if self.spec.cutting:
+        if self.cutting:
             self.data += b'\x1b\x69\x4d' + bytes([on << 6])
 
     def add_cut_every(self, labels: int):
         """Cut after this many labels (ESC i A)."""
-        if self.spec.cutting:
+        if self.cutting:
             self.data += b'\x1b\x69\x41' + bytes([labels & 0xFF])
 
     def add_expanded_mode(self, cut_at_end: bool, dpi_600: bool, two_color: bool, half_cut: bool, chain: bool):
         """ESC i K: on P-touch printers half cuts between labels and chain
         printing, on QL printers the cut after the last label, 600 dpi and
-        printing in red."""
-        if not self.spec.expanded_mode:
+        printing in red, on TD printers the cut after the last label only
+        with the cutter attached."""
+        if not self.spec.expanded_mode or self.spec.optional_cutter and not self.cutting:
             return
         if self.ptouch:
             flags = half_cut << 2 | (not chain) << 3 | dpi_600 << 5

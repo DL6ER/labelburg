@@ -1637,6 +1637,7 @@ def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
     queue.offset = (calibration['across'], calibration['along'])
     settings = printer_settings.of_printer(kept, device, model)
     queue.sensing, queue.side = settings.get('sensing'), settings.get('side')
+    queue.cutter = settings.get('cutter') == '1'
     return queue
 
 

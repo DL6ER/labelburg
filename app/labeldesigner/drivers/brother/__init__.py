@@ -1,4 +1,4 @@
-"""Brother QL and P-touch printers, which speak Brother's raster protocol
+"""Brother QL, P-touch and TD printers, which speak Brother's raster protocol
 (commands.py, raster.py), on USB (usb.py, ../backends.py) and on the network
 (network.py). Based on brother_ql by Philipp Klaus and its fork
 brother_ql-inventree by Matthias Mair, both GPLv3."""
@@ -7,11 +7,13 @@ import logging
 import re
 
 from .. import devices, usbip
-from ..base import Driver
+from ..base import Driver, Told
 from ..labels import Color, FormFactor
-from . import labels as tables, names, network, raster, usb
+from . import labels as tables, labels_td, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, length_problem, longest_label, resolution_problem)
+                     RED_SPEED, SHOWN_AS, TD_PRODUCT_IDS, length_problem, longest_label, named, resolution_problem)
+
+VENDOR_ID = 0x04F9
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +22,10 @@ class BrotherRaster(Driver):
     vendor = 'Brother'
     models = tuple(MODELS)
     labels = tables.LABELS
-    label_names = names.LABEL_NAMES
+    label_names = {**names.LABEL_NAMES, **labels_td.NAMES}
     hidden_labels = tables.HIDDEN_LABELS
+    # The 300 dpi TD-2300D models have the names of the 203 dpi ones
+    shown_as = SHOWN_AS
     device_patterns = (
         re.compile(r'(file://)?/dev/usb/lp\d+'),
         re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
@@ -33,14 +37,22 @@ class BrotherRaster(Driver):
     refusals = tuple(length_problem(model) for model in MODELS)
 
     def model_of(self, device, device_id=None):
-        # Over USB/IP the device ID read at the import names the model
-        if not usbip.is_address(device):
+        if not isinstance(device, str):
             return None
-        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        # Over USB/IP the device ID read at the import names the model
+        if usbip.is_address(device):
+            return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        # On USB a TD printer of the TD-2000 series by its product ID
+        ids = devices.usb_ids(device)
+        return TD_PRODUCT_IDS.get(ids[1]) if ids and ids[0] == VENDOR_ID else None
 
     def model_in(self, device_id):
-        model = devices.device_id_fields(device_id).get('MDL')
-        return model if model in MODELS else None
+        return named(devices.device_id_fields(device_id).get('MDL', ''))[0]
+
+    def told(self, device_id):
+        # The name of a TD-2300D model may be that of either resolution
+        model, resolution = named(devices.device_id_fields(device_id).get('MDL', ''))
+        return Told(model, resolution=resolution) if model else None
 
     def fits(self, label, model):
         return tables.label_fits(label, model)
@@ -64,6 +76,7 @@ class BrotherRaster(Driver):
         if label.form_factor not in (FormFactor.ENDLESS, FormFactor.PTOUCH_ENDLESS):
             return None
         shortest = MIN_PTOUCH_PRINT_LENGTH if label.identifier in tables.PTOUCH_LABELS else MIN_PRINT_LENGTH
+        shortest = labels_td.SHORTEST.get(label.identifier, shortest)
         # The longest of the printers taking the tape, each refuses more than it prints
         longest = max(longest_label(model) for model in MODELS if tables.label_fits(label, model))
         # The printer feeds the margin before and after the print
@@ -75,15 +88,26 @@ class BrotherRaster(Driver):
             return length_problem(model)
         return ''
 
+    def label_for(self, label_size, model):
+        # A label of the same paper prints on the printer's own roll of it
+        if model in labels_td.MODELS:
+            return labels_td.label_for(label_size, model)
+        paper = labels_td.BY_ID[label_size].tape_size if label_size in labels_td.BY_ID else None
+        return next((dk for dk, same in labels_td.DK_PAPERS.items()
+                     if same == paper and model in MODELS and tables.label_fits(tables.BY_ID[dk], model)), label_size)
+
     def capabilities(self, model):
         ptouch = model.startswith('PT-')
-        # The QL-500 takes no cut commands, its labels are cut with a lever
+        td = model in labels_td.MODELS
+        # The QL-500 takes no cut commands, its labels are cut with a lever,
+        # those of the TD-2000 series are torn off
         cutting = MODELS[model].cutting
-        return dict(super().capabilities(model), qualities=['fast', 'quality', 'high'],
-                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting,
-                    half_cut=model in HALF_CUTTERS, chain=ptouch, feed_waste=ptouch,
-                    # The top of a label leaves a QL or P-touch printer first
-                    leaves_turned=True)
+        qualities = ['fast', 'quality'] if MODELS[model].quality_flag else ['quality']
+        return dict(super().capabilities(model), qualities=qualities if td else ['fast', 'quality', 'high'],
+                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting and not td,
+                    half_cut=model in HALF_CUTTERS, chain=ptouch, feed_waste=ptouch, cutter_option=MODELS[model].optional_cutter,
+                    # The top of a label leaves a QL, P-touch or TD printer first
+                    leaves_turned=True, **({'model_shown': SHOWN_AS[model]} if model in SHOWN_AS else {}))
 
     def resolution_problem(self, model, high_res):
         return resolution_problem(model, high_res)
@@ -111,7 +135,8 @@ class BrotherRaster(Driver):
 
     def print_speed(self, model, fast, red):
         spec = MODELS[model]
-        slower = 1 if fast else QUALITY_SLOWER
+        # A printer without the flag of print quality prints alike either way
+        slower = 1 if fast or not spec.quality_flag else QUALITY_SLOWER
         speed = RED_SPEED if red and spec.two_color else spec.speed
         return speed / slower, (PTOUCH_BESIDES if model.startswith('PT-') else QL_BESIDES) * slower
 
