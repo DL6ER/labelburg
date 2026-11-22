@@ -55,6 +55,9 @@ export function renderSettings(el, hooks) {
         <nav class="set-nav" aria-label="Settings">${PARTS.map(([id, name, i]) =>
             `<a href="#settings/${esc(id)}" data-part="${esc(id)}"${id === part ? ' class="on" aria-current="page"' : ''}>${ic(i)}<span>${esc(name)}</span></a>`).join('')}</nav>
         <div class="set-main"><div class="set-inner" id="setPart" data-part="${esc(part)}"></div></div></div>`;
+    // On a phone the parts are a row of tabs wider than the screen: the one shown in sight
+    const nav = $('.set-nav', el), on = $('.set-nav .on', el);
+    if (on) nav.scrollLeft += on.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - on.offsetWidth) / 2;
     (Object.hasOwn(DRAW, part) ? DRAW[part] : DRAW.printers)($('#setPart'));
 }
 

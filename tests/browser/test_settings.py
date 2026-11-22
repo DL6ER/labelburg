@@ -15,6 +15,7 @@ from app.labeldesigner import printer_settings
 from app.labeldesigner.dates import format_date
 from tests.browser.helpers import clear_printed, shown_again, with_tape
 from tests.browser.test_editor import sent, type_label, wait_for_preview
+from tests.browser.test_shell import phone  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -452,3 +453,11 @@ def test_the_cutting_of_a_printer_is_said_as_in_the_editor(designer, server):
     printers_are(designer, server, {'path': 'simulation', 'model': 'PT-E550W', 'name': 'Shop'})
     open_settings(designer)
     assert 'The tape fed before the first label is waste, short labels get some extra tape.' in designer.inner_text('#setPrinters')
+
+
+@pytest.mark.parametrize('part', ['printed', 'about'])
+def test_the_part_shown_is_in_sight_in_the_tabs_on_a_phone(phone, server, part):  # noqa: F811
+    phone.goto(server + f'/labeldesigner/#settings/{part}')
+    phone.wait_for_selector(f'#setPart[data-part="{part}"]')
+    tabs, shown = phone.locator('.set-nav').bounding_box(), phone.locator('.set-nav a.on').bounding_box()
+    assert tabs['x'] <= shown['x'] and shown['x'] + shown['width'] <= tabs['x'] + tabs['width']
