@@ -384,3 +384,37 @@ def test_epson_printer_found_on_classic_bluetooth_prints_as_on_usb(tmp_path, mon
     job = fake.all_received()[-1]
     assert escpos_on_usb(tmp_path, monkeypatch, ESCPOS_LABEL).endswith(job)
     assert job.startswith(escpos_protocol.OFFLINE + escpos_protocol.PAPER + escpos_protocol.INIT)
+
+
+class HangsUp:
+    """A printer that closes the connection at the first request."""
+
+    def heard(self, data: bytes) -> bytes:
+        raise ConnectionAbortedError
+
+
+def test_connection_the_printer_closed_is_not_read_as_one_without_an_answer(on_bluetooth):
+    on_bluetooth(HangsUp())
+    printer_ = transports.RfcommPrinter(DEVICE)
+    # Nothing came yet
+    assert printer_.read(64) == b''
+    printer_.write(b'?')
+    with pytest.raises(ConnectionResetError):
+        for _ in range(500):
+            printer_.read(64)
+    printer_.dispose()
+
+
+@pytest.mark.parametrize('model', ['TSC/TSPL', 'Epson/ESC-POS'])
+def test_status_of_a_printer_on_bluetooth_that_closes_the_connection_is_not_waited_for(on_bluetooth, monkeypatch, model):
+    monkeypatch.setattr(tspl_protocol, 'ANSWER_WAIT', 5)
+    monkeypatch.setattr(escpos_protocol, 'ANSWER_WAIT', 5)
+    on_bluetooth(HangsUp())
+    started = time.monotonic()
+    if model == 'TSC/TSPL':
+        # Told as ready, as one that never answered
+        assert tspl.DRIVER.status(DEVICE, model)['errors'] == []
+    else:
+        with pytest.raises(ConnectionResetError):
+            escpos.DRIVER.status(DEVICE, model)
+    assert time.monotonic() - started < 1

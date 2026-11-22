@@ -64,9 +64,13 @@ class RfcommPrinter(backends.Printer):
     def _read(self, length: int) -> bytes:
         self.s.settimeout(self.read_timeout)
         try:
-            return self.s.recv(length)
+            data = self.s.recv(length)
         except TimeoutError:
             return b''
+        if not data:
+            # Closed by the printer: nothing will come, unlike a read that timed out
+            raise ConnectionResetError(errno.ECONNRESET, 'The printer closed the connection')
+        return data
 
     def _dispose(self):
         self.s.close()
