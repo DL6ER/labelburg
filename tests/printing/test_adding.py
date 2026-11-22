@@ -267,6 +267,15 @@ def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections,
     assert connections and set(connections) == {network.IPP_PORT}
 
 
+def test_computer_with_queues_of_cups_is_told_how_to_give_one(fake_printer, connections):  # noqa: F811
+    # CUPS answers that it has no printer at /ipp/print
+    fake_printer['body'] = response(status=ipp.NOT_FOUND)
+    with pytest.raises(ValueError) as refused:
+        adding.identify('127.0.0.1', 'local')
+    assert str(refused.value) == adding.QUEUES
+    assert 9100 not in connections
+
+
 def test_office_printer_given_on_ipp_is_an_other_printer(fake_printer):  # noqa: F811
     fake_printer['body'] = LASER_OVER_IPP
     found = adding.identify(f'ipp://127.0.0.1:{network.IPP_PORT}/ipp/print', 'local')

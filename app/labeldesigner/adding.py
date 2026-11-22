@@ -44,6 +44,8 @@ NOT_SHARED = 'The device at this address shares no printer'
 SHARED_BUSY = 'The printer is used by another computer'
 NO_PRINTER = 'No label printer this server knows answers at this address, name others in PRINTERS'
 NO_IPP = 'No printer answers over IPP at this address, check its path, e.g., /ipp/print'
+QUEUES = ('This computer offers each printer over IPP at an address of its own, '
+          'e.g., ipp://<host>:631/printers/<queue> for a queue of CUPS')
 NAME_REFUSED = 'A name has up to 40 letters and digits, also spaces, dots, hyphens and underscores between them'
 NAME_TAKEN = 'Another printer has this name'
 ALREADY = 'This printer is in the list already'
@@ -55,7 +57,7 @@ NAMED_OFF = ('Only printers of the configuration, found by the search or added i
 NAMED_OUTSIDE = 'Printers outside the local network print here only when they are configured, ADD_PRINTERS=any allows them'
 NAMED_NEVER = 'No printer prints at this address unless it is named in PRINTERS'
 MESSAGES = (NOT_AN_ADDRESS, BLUETOOTH, PRINT_PORT, RAW_PORT, OFF, ONLY_LOCAL, NEVER, UNKNOWN_NAME, NO_ANSWER, NOT_SHARED,
-            SHARED_BUSY, NO_PRINTER, NO_IPP, other.NO_FORMAT, other.LOGIN, other.TLS, NAME_REFUSED, NAME_TAKEN, ALREADY,
+            SHARED_BUSY, NO_PRINTER, NO_IPP, QUEUES, other.NO_FORMAT, other.LOGIN, other.TLS, NAME_REFUSED, NAME_TAKEN, ALREADY,
             NOT_ADDED, NOT_ASKED, NAMED_OFF, NAMED_OUTSIDE, NAMED_NEVER)
 
 # By the reasons of reach.refusal()
@@ -216,11 +218,17 @@ def _shared(address: str, keep: bool) -> dict:
 
 
 def _ipp_identity(host: str) -> dict:
+    """What a network printer tells over IPP, empty where it does not answer.
+    ValueError where IPP answers without a printer at /ipp/print, as CUPS."""
     try:
         return ipp.get_printer_attributes(host, network.IPP_PORT, attributes=ASKED_OVER_IPP)
     except reach.NotAllowed:
         raise
-    except (OSError, ipp.IPPError, http.client.HTTPException):
+    except ipp.IPPError as e:
+        if e.status == ipp.NOT_FOUND:
+            raise ValueError(QUEUES) from e
+        return {}
+    except (OSError, http.client.HTTPException):
         return {}
 
 
