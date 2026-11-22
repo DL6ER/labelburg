@@ -8,6 +8,8 @@ Start from the demo label "Paperless ASN" in the office category: a QR code with
 
 Labelburg remembers the last number it printed. Labels printed again before their documents are scanned get numbers of their own, so no number is stuck on two documents. A job the printer failed keeps its numbers too, as some of its labels may have come out. Gaps do no harm to Paperless.
 
+A label that tore can be printed again with its own number: under Printed labels in the Settings, "Print again" asks whether it keeps its number or takes the next one. Labels still waiting when Labelburg restarts keep their numbers too.
+
 ## Paperless's settings
 
 So that the numbers continue where those in Paperless end, give Labelburg the address of Paperless and an API token, which you find in Paperless under "My Profile":
