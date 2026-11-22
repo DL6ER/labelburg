@@ -1,3 +1,4 @@
+import bisect
 import io
 import os
 import re
@@ -26,6 +27,12 @@ WIDTH_WORDS = {'ultracondensed': 'ultra-condensed', 'extracondensed': 'extra-con
                'narrow': 'condensed', 'semicondensed': 'semi-condensed', 'semiexpanded': 'semi-expanded',
                'expanded': 'expanded', 'wide': 'expanded', 'extraexpanded': 'extra-expanded', 'ultraexpanded': 'ultra-expanded'}
 SLANT_WORDS = ('italic', 'oblique')
+# Fonts that draw what the font of a line has no glyph for, in this order:
+# symbols, arrows and dingbats of the fonts installed, then emoji in black
+# and white, see tools/update_fonts.py
+FALLBACK_FONTS = (('DejaVu Sans', 'Book'), ('Noto Sans Symbols 2', 'Regular'), ('Noto Sans Symbols', 'Regular'),
+                  ('Noto Sans Math', 'Regular'), ('FreeSerif', 'Regular'))
+EMOJI_FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'emoji', 'NotoEmoji.ttf')
 
 
 class FontNotFound(LookupError):
@@ -135,6 +142,84 @@ def font_names(path) -> tuple[str | None, str | None]:
     return font_info(path)[:2]
 
 
+def _cmap_ranges(table: bytes) -> list[tuple[int, int]] | None:
+    """The characters a cmap table maps to a glyph, as (first, last) ranges,
+    of the Unicode subtable FreeType takes: one for all of Unicode before
+    one for the BMP. None without either."""
+    count = struct.unpack_from('>H', table, 2)[0]
+    subtables = {}
+    for i in range(count):
+        platform, encoding, offset = struct.unpack_from('>HHI', table, 4 + 8 * i)
+        if platform == 0 or (platform, encoding) in ((3, 1), (3, 10)):
+            subtables.setdefault(struct.unpack_from('>H', table, offset)[0], offset)
+    ranges = []
+    if 12 in subtables:
+        offset = subtables[12]
+        groups = struct.unpack_from('>I', table, offset + 12)[0]
+        for i in range(groups):
+            first, last, glyph = struct.unpack_from('>III', table, offset + 16 + 12 * i)
+            # Glyph 0 is the missing glyph
+            ranges.append((first + (glyph == 0), min(last, 0x10FFFF)))
+    elif 4 in subtables:
+        offset = subtables[4]
+        segments = struct.unpack_from('>H', table, offset + 6)[0] // 2
+        ends = struct.unpack_from(f'>{segments}H', table, offset + 14)
+        starts = struct.unpack_from(f'>{segments}H', table, offset + 16 + 2 * segments)
+        deltas = struct.unpack_from(f'>{segments}H', table, offset + 16 + 4 * segments)
+        range_offsets = offset + 16 + 6 * segments
+        for i, (first, last, delta) in enumerate(zip(starts, ends, deltas)):
+            shift = struct.unpack_from('>H', table, range_offsets + 2 * i)[0]
+            if not shift:
+                # Only the one character the delta takes to glyph 0 is missing
+                missing = (0x10000 - delta) % 0x10000
+                ranges += [(first, min(last, missing - 1)), (max(first, missing + 1), last)]
+                continue
+            for code in range(first, last + 1):
+                glyph = struct.unpack_from('>H', table, range_offsets + 2 * i + shift + 2 * (code - first))[0]
+                if glyph and (glyph + delta) % 0x10000:
+                    ranges.append((code, code))
+    else:
+        return None
+    return [(first, last) for first, last in ranges if first <= last]
+
+
+@lru_cache(maxsize=256)
+def _glyph_ranges(path: str) -> tuple[list[int], list[int]] | None:
+    """The first and last characters of the ranges of characters the font
+    at path has glyphs for, merged and in order. None where its cmap cannot
+    be read."""
+    try:
+        table = _tables(path, (b'cmap',)).get(b'cmap')
+        ranges = _cmap_ranges(table) if table is not None else None
+    except (OSError, ValueError, struct.error):
+        return None
+    if ranges is None:
+        return None
+    firsts, lasts = [], []
+    for first, last in sorted(ranges):
+        if lasts and first <= lasts[-1] + 1:
+            lasts[-1] = max(lasts[-1], last)
+        else:
+            firsts.append(first)
+            lasts.append(last)
+    return firsts, lasts
+
+
+def has_glyphs(path: str, text: str) -> bool:
+    """Whether the font at path has a glyph for each character of text. A
+    font whose characters cannot be read is taken to have them all, so that
+    it draws as without fallback fonts."""
+    ranges = _glyph_ranges(path)
+    if ranges is None:
+        return True
+    firsts, lasts = ranges
+    for char in set(text):
+        i = bisect.bisect_right(firsts, ord(char)) - 1
+        if i < 0 or ord(char) > lasts[i]:
+            return False
+    return True
+
+
 SAMPLE_SIZE = 40
 
 
@@ -177,6 +262,8 @@ class Fonts:
         self.fonts = defaultdict(dict)
         # Weight, width and slant of each font file, see font_info()
         self.faces = {}
+        # Each font file by the family and style its names tell
+        named = {}
         self.default_family = default_family
         self.default_style = default_style
 
@@ -206,6 +293,7 @@ class Fonts:
                             family, style, face = font_info(font_path)
                             if family and style:
                                 self.fonts[family][style] = font_path
+                                named.setdefault((family, style), font_path)
                                 # Without an OS/2 table as its names tell it
                                 self.faces[font_path] = face or _named_face(f'{family} {style}')
                         except Exception:
@@ -241,6 +329,10 @@ class Fonts:
             self.default_family = first['family']
             self.default_style = first['styles'][0]
             logger.warning(f'The default font is now set to: {self.default_family} ({self.default_style})')
+
+        # Those whose characters can be read
+        fallbacks = [named[name] for name in FALLBACK_FONTS if name in named] + [EMOJI_FONT_PATH]
+        self._fallbacks = tuple(path for path in fallbacks if _glyph_ranges(path) is not None)
 
         # The families of the font menu and the regular font of each name
         # family_font() takes, made once: every label and sample asks
@@ -304,6 +396,11 @@ class Fonts:
     def family_names(self) -> set[str]:
         """The names family_font() takes."""
         return set(self._regular)
+
+    def fallbacks(self) -> tuple[str, ...]:
+        """The files of the fonts that draw what the font of a line has no
+        glyph for, the first that has it, see FALLBACK_FONTS."""
+        return self._fallbacks
 
     def fonts_available(self):
         """Return True if any fonts are available, else False."""
