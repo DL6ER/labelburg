@@ -21,6 +21,9 @@ def only_this_host(monkeypatch):
     connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
 
     def elsewhere(sock, address):
+        # Nor to printers on Bluetooth, the tests fake them
+        if sock.family == getattr(socket, 'AF_BLUETOOTH', None):
+            return True
         if sock.family not in (socket.AF_INET, socket.AF_INET6):
             return False
         try:
@@ -81,6 +84,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(devices, '_unreached', {})
     monkeypatch.setattr('app.labeldesigner.drivers.base._bluetooth_asked', {})
     monkeypatch.setattr(devices, 'classic_search', threading.Event())
+    monkeypatch.setattr(devices, '_unanswered', {})
 
 
 @pytest.fixture(autouse=True)
