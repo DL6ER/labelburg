@@ -60,6 +60,17 @@ def test_a_print_on_a_busy_printer_waits_and_prints(client, queued, monkeypatch)
     assert _job(first).ended < _job(second).ended
 
 
+def test_feed_and_cut_waits_behind_the_job_printing(client, queued, monkeypatch):
+    started, release = _held(monkeypatch)
+    first = client.post(PRINT, data=EXAMPLE_FORMDATA)
+    assert started.wait(10)
+    fed = client.post(f'{API}/feed')
+    release.set()
+    assert fed.get_json()['state'] == 'waiting'
+    assert _ended(first, fed) == [('printed', ''), ('printed', '')]
+    assert _job(first).ended < _job(fed).ended
+
+
 def test_every_print_route_answers_with_its_job(client, monkeypatch):
     monkeypatch.setattr(ExclusiveUsbPrinter, 'print_seconds', 0.0)
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'
