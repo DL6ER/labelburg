@@ -260,11 +260,16 @@ class PrinterQueue:
         Driver.calibration_job()."""
         if is_simulation(self.device_specifier):
             return ''
+        return self._send_alone(self.driver.calibration_job(self))
+
+    def _send_alone(self, job) -> str:
+        """Send a job of its own, e.g. the calibration label, held and checked
+        as process_queue() sends the labels of the queue."""
         with devices.device_lock(self.device_specifier) as acquired:
             if not acquired:
                 logger.warning('Printer %s is busy with another job', self.device_specifier)
                 return BUSY
-            return self._send(self.driver.calibration_job(self), 1, (False, False, False))
+            return self._model_problem() or self._send(job, 1, (False, False, False))
 
 
 def _local_address(addresses: list[str]) -> str | None:
