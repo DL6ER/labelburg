@@ -80,6 +80,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
+    monkeypatch.setattr(devices, '_unanswered', {})
 
 
 @pytest.fixture(autouse=True)
