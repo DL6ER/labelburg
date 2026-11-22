@@ -399,7 +399,7 @@ export function cutShort(c, k) {
 export const collated = () => S.settings.collate !== '0';
 // What happens to the copies, in words
 export function cutText(c, k) {
-    if (noCutter(k)) return k.cut_on_printer ? 'The printer cuts or tears off the labels as it is set up, this cannot be chosen here.'
+    if (noCutter(k)) return k.cut_on_printer ? 'Set on the printer itself.'
         : k.manual_cutter ? 'No automatic cutter, cut the labels off with the lever on the printer.' : 'No cutter, the labels are torn off.';
     const half = halfOf(c, k), chain = chainOf(c, k);
     const text = c.cut === 'each' ? 'Cut after each label'
