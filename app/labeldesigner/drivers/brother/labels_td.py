@@ -1,18 +1,12 @@
-"""The RD rolls of Brother's TD printers and which model prints which, after
-the raster command references of the TD-2000, TD-2300D and TD-4D series
-(TD2000, TD2300 and TD4000 in models.py). Die-cut labels are printed in their
-print area as on the QL printers, the printer keeps the margins along them
-itself; a continuous roll is fed a margin before and after the print."""
+"""The RD rolls of Brother's TD printers, after the raster command
+references in models.py."""
 
 from .. import diecut
 from ..labels import FormFactor, Label
 from .models import TD_SERIES
 
-# Each series' rolls of each resolution: width and length in mm as the status
-# tells them, the length 0 of a continuous roll, the dots of the paper across
-# and along, those of the print area, and the pins right of it, which the
-# first byte of a raster line holds (TD2000 2.3.2 and 2.3.5, TD2300 and
-# TD4000 4.3.2 and 4.3.5). The linerless rolls are left out with their models.
+# mm as the status tells them (0 long: continuous), dots in all and printed, pins
+# right of the print (TD2000 2.3.2 and 2.3.5, TD2300 and TD4000 4.3.2 and 4.3.5)
 ROLLS = {
     ('td2', 203): (((57, 0), (457, 0), (432, 0), 8), ((58, 0), (464, 0), (440, 0), 4),
                    ((30, 30), (240, 240), (216, 192), 116), ((40, 40), (320, 320), (296, 272), 76),

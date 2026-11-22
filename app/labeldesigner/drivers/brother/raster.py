@@ -91,8 +91,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         raise RasterError('Printing in red is not supported with the selected model.')
 
     if raster.td:
-        # A TD printer is switched to raster mode with each page (TD2000 2.1,
-        # TD2300 and TD4000 4.1)
+        # A TD printer gets ESC i a with each page (TD2000 2.1, TD2300 and TD4000 4.1)
         raster.add_invalidate()
         raster.add_initialize()
     else:
@@ -160,7 +159,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
                 im = im.point(lambda x: 0 if x < THRESHOLD else 255, mode='1')
 
         if raster.td:
-            # Asked for no status while it prints (TD2000, ESC i S)
+            # Raster mode with each page, and status messages while printing
             raster.add_switch_mode()
             raster.add_status_notification()
         else:

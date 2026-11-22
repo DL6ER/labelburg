@@ -16,7 +16,8 @@ class Model:
     data sheets give it. quality_flag: whether it takes the flag of print
     quality in its print information. status_notification: whether it sends
     its status while printing only when asked to (ESC i !) and is switched
-    back to its default mode after a job (ESC i a FFh)."""
+    back to its default mode after a job (ESC i a FFh). optional_cutter:
+    whether its cutter is an optional unit."""
     identifier: str
     speed: float = 0
     max_length_dots: int = 11811
@@ -36,16 +37,8 @@ class Model:
     optional_cutter: bool = False
 
 
-# Brother's TD printers by series, of each resolution its models with their
-# model codes, series code 35h, after the raster command references of
-# the TD-2000 series (TD2000, status, p. 22), the TD-2300D series (TD2300,
-# 5.2.1) and the TD-4D series (TD4000, 5.2.1), and their speed in mm/s as
-# Brother's user's guides give it (TD2000_GUIDE, TD2125_GUIDE, TD2300_GUIDE,
-# TD4410_GUIDE, TD4550_GUIDE, TD4215_GUIDE). The 300 dpi TD-2300D models
-# have the names of the 203 dpi ones, see SHOWN_AS. Left out: the models of
-# linerless rolls (TD-2320DF, TD-2350DF, TD-4425DNF, TD-4555DNWBF), the
-# TD-4510D, whose speed no guide gives, and the TD-2030A of 300 dpi in TD2000,
-# which TD2125_GUIDE names TD-2020A of 203 dpi.
+# TD models by series and dpi: model code, series 35h (TD2000 p. 22, TD2300
+# and TD4000 5.2.1), and mm/s as the user's guides below give it
 TD2000 = 'https://download.brother.com/welcome/docp000750/cv_td2000_eng_raster_101.pdf'
 TD2300 = 'https://download.brother.com/welcome/docp100812/cv_td2300d_eng_raster_100.pdf'
 TD4000 = 'https://download.brother.com/welcome/docp100429/cv_td4000d_eng_raster_103.pdf'
@@ -84,11 +77,8 @@ TD4_INVALIDATE_350 = ('TD-4410D', 'TD-4420DN', 'TD-4520DN', 'TD-4550DNWB', 'TD-4
 
 
 def _td_models() -> tuple:
-    """The TD models, see TD_SERIES. The TD-2000 series takes no cut
-    commands (TD2000, 3. Print Command List) and a quality flag (TD2000, ESC
-    i z); the others take the cut commands of the QL printers and no quality
-    flag (TD2300 and TD4000, ESC i z, M, A, K), and tell their status while
-    printing only when asked to (ESC i !)."""
+    """The models of TD_SERIES, of the TD-2000 series without cut
+    commands, with a quality flag and status messages unasked."""
     return tuple(
         Model(model, speed=speed, max_length_dots=TD_LONGEST[series][dpi], dpi=dpi,
               number_bytes_per_row=TD_ROW_BYTES[series][dpi], cutting=series != 'td2', expanded_mode=series != 'td2',
