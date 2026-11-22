@@ -55,8 +55,8 @@ NAMED_OFF = ('Only printers of the configuration, found by the search or added i
 NAMED_OUTSIDE = 'Printers outside the local network print here only when they are configured, ADD_PRINTERS=any allows them'
 NAMED_NEVER = 'No printer prints at this address unless it is named in PRINTERS'
 MESSAGES = (NOT_AN_ADDRESS, BLUETOOTH, PRINT_PORT, RAW_PORT, OFF, ONLY_LOCAL, NEVER, UNKNOWN_NAME, NO_ANSWER, NOT_SHARED,
-            SHARED_BUSY, NO_PRINTER, NO_IPP, other.NO_FORMAT, NAME_REFUSED, NAME_TAKEN, ALREADY, NOT_ADDED, NOT_ASKED,
-            NAMED_OFF, NAMED_OUTSIDE, NAMED_NEVER)
+            SHARED_BUSY, NO_PRINTER, NO_IPP, other.NO_FORMAT, other.LOGIN, other.TLS, NAME_REFUSED, NAME_TAKEN, ALREADY,
+            NOT_ADDED, NOT_ASKED, NAMED_OFF, NAMED_OUTSIDE, NAMED_NEVER)
 
 # By the reasons of reach.refusal()
 _REFUSALS = {'off': OFF, 'outside': ONLY_LOCAL, 'never': NEVER, 'unknown': UNKNOWN_NAME}
@@ -281,7 +281,7 @@ def _on_ipp(address: str) -> dict:
     except reach.NotAllowed:
         raise
     except ipp.IPPError as e:
-        raise ValueError(NO_IPP) from e
+        raise ValueError(other.asked_for(e) or NO_IPP) from e
     except (OSError, http.client.HTTPException) as e:
         raise ValueError(NO_ANSWER) from e
     model = other.offered(told)

@@ -549,6 +549,29 @@ def test_refused_jobs(tmp_path, fake, status, message):
     assert outcome(client, print_label(client)) == ('failed', message)
 
 
+@pytest.mark.parametrize('http_status, message', [(401, other.LOGIN), (403, other.LOGIN), (426, other.TLS)])
+@pytest.mark.parametrize('operation', [ipp.GET_PRINTER_ATTRIBUTES, ipp.PRINT_JOB])
+def test_login_or_tls_asked_for_over_http(tmp_path, fake, http_status, message, operation):
+    # As CUPS asks for them, before it reads the request
+    fake.http[operation] = http_status
+    client = client_of(tmp_path, fake)
+    assert outcome(client, print_label(client)) == ('failed', message)
+    if operation == ipp.GET_PRINTER_ATTRIBUTES:
+        # Asked for before the job, which is not sent
+        assert fake.jobs() == []
+        found = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (found['errors'], found['status_type']) == ([message], 'Error occurred')
+        with pytest.raises(ValueError) as refused:
+            adding.identify(fake.address, 'local')
+        assert str(refused.value) == message
+
+
+def test_job_cups_holds_for_a_login(tmp_path, fake):
+    fake.states = [(ipp.HELD, 'cups-held-for-authentication')]
+    client = client_of(tmp_path, fake)
+    assert outcome(client, print_label(client)) == ('failed', other.LOGIN)
+
+
 def test_job_answered_late_is_printed(tmp_path, fake, monkeypatch):
     # Later than it takes to connect, as a printer that reads the job while it prints
     monkeypatch.setattr(other, 'JOB_TIMEOUT', 0.2)

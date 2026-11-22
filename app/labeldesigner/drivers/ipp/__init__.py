@@ -55,6 +55,7 @@ BESIDES = 2.0
 
 NO_FORMAT = 'The printer takes none of the kinds of files Labelburg sends'
 LOGIN = 'The printer asks for a login, which Labelburg cannot give'
+TLS = 'The printer asks for an encrypted connection, give its address with ipps:// instead of ipp://'
 NOT_TAKING = 'The printer takes no jobs at the moment, try again later'
 REFUSED = 'The printer refused the label, the log of the server names the reason'
 CANCELED = 'The label was canceled on the printer'
@@ -62,6 +63,8 @@ ABORTED = 'The printer could not print the label'
 HELD = 'The printer holds the label until it is released on the printer'
 NOT_FINISHED = 'The printer did not report that it finished the label, check whether it was printed'
 NO_ANSWER = 'The printer did not answer after receiving the label, check whether it was printed'
+# The job-state-reasons of a job CUPS holds until someone logs in
+AUTHENTICATION = 'cups-held-for-authentication'
 
 
 class Job(NamedTuple):
@@ -146,14 +149,35 @@ def _waited(lengths: list[float]) -> float:
     return JOB_WAIT + sum(lengths) / SLOWEST
 
 
+def asked_for(error: ipp.IPPError) -> str:
+    """LOGIN or TLS where the printer refused a request for want of a login
+    or of TLS, else an empty string."""
+    if error.status in ipp.LOGIN or error.http_status in ipp.HTTP_LOGIN:
+        return LOGIN
+    return TLS if error.http_status == ipp.HTTP_TLS else ''
+
+
 def _refusal(error: ipp.IPPError) -> str:
     """Why a job was not taken. One the printer answered without a reason
     did not reach it in time."""
-    if error.status is None:
+    if asked := asked_for(error):
+        return asked
+    if error.status is None and error.http_status is None:
         return devices.not_sent(error)
-    if error.status in ipp.LOGIN:
-        return LOGIN
     return NOT_TAKING if error.status in ipp.NOT_TAKING else REFUSED
+
+
+def _status(device: str, model: str) -> dict:
+    """Status of the printer, also of one that asks for a login or TLS."""
+    try:
+        attributes = ask(device, ipp.STATUS_ATTRIBUTES)
+    except ipp.IPPError as e:
+        if not (asked := asked_for(e)):
+            raise
+        state = dict(network_status(device, model), errors=[asked])
+        devices.set_state(state, False, True)
+        return state
+    return told_status(device, model, attributes)
 
 
 def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[float]) -> str:
@@ -171,7 +195,11 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
         if state == ipp.COMPLETED:
             return ''
         if state in (ipp.CANCELED, ipp.ABORTED, ipp.HELD):
-            logger.warning('Job %s on %s ended in state %s: %s', job_id, device, state, job.get('job-state-reasons'))
+            reasons = job.get('job-state-reasons')
+            logger.warning('Job %s on %s ended in state %s: %s', job_id, device, state, reasons)
+            # CUPS holds a job until someone logs in
+            if state == ipp.HELD and AUTHENTICATION in (reasons if isinstance(reasons, list) else [reasons]):
+                return LOGIN
             return {ipp.CANCELED: CANCELED, ipp.ABORTED: ABORTED, ipp.HELD: HELD}[state]
         try:
             # Waiting or printing: the printer may tell why it does not go on
@@ -187,7 +215,7 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
             if e.status == ipp.NOT_FOUND:
                 return ''
             logger.warning('No state of job %s on %s: %s', job_id, device, e)
-            return NO_ANSWER
+            return asked_for(e) or NO_ANSWER
         except (OSError, http.client.HTTPException) as e:
             logger.warning('No state of job %s on %s: %s', job_id, device, e)
             return NO_ANSWER
@@ -246,7 +274,7 @@ class Ipp(Driver):
                     leaves_turned=True, model_shown=self.shown_as[model].split('/')[-1])
 
     def status(self, device, model, unconfirmed=False):
-        return self.noted_status(device, lambda: told_status(device, model, ask(device, ipp.STATUS_ATTRIBUTES)))
+        return self.noted_status(device, lambda: _status(device, model))
 
     def print_speed(self, model, fast, red):
         return SPEED, BESIDES
@@ -273,7 +301,8 @@ class Ipp(Driver):
             attributes = ask(device)
         except (ValueError, *self.errors) as e:
             logger.warning('Printing on %s failed: %s', device, e)
-            return devices.not_sent(e)
+            asked = asked_for(e) if isinstance(e, ipp.IPPError) else ''
+            return asked or devices.not_sent(e)
         state = told_status(device, queue.model, attributes)
         if state['errors']:
             # Not sent to a printer that cannot take it, it would wait there

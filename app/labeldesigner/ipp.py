@@ -55,6 +55,10 @@ PENDING, HELD, JOB_PROCESSING, JOB_STOPPED, CANCELED, ABORTED, COMPLETED = range
 LOGIN = (0x0401, 0x0402, 0x0403)
 NOT_FOUND = 0x0406
 NOT_TAKING = (0x0506, 0x0507)
+# HTTP status codes of refused requests (RFC 9110): a login is asked for,
+# or TLS, as by CUPS
+HTTP_LOGIN = (401, 403)
+HTTP_TLS = 426
 # Units of a resolution (RFC 8010 3.9)
 DOTS_PER_INCH, DOTS_PER_CM = 3, 4
 
@@ -94,11 +98,12 @@ _request_ids = count(1)
 
 class IPPError(Exception):
     """The printer answered, but not with the attributes. status: the
-    status code of an answer that refuses the request."""
+    status code of an answer that refuses the request, http_status that of
+    an HTTP answer that does."""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, http_status: int | None = None):
         super().__init__(message)
-        self.status = status
+        self.status, self.http_status = status, http_status
 
 
 class Unanswered(IPPError):
@@ -432,7 +437,7 @@ def ask(printer: Printer, body: bytes, timeout: float, wait: float | None = None
     if ended.is_set():
         raise (Unanswered if wait is not None else IPPError)('The printer took too long to answer')
     if response.status != 200:
-        raise IPPError(f'The printer answers with HTTP status {response.status}')
+        raise IPPError(f'The printer answers with HTTP status {response.status}', http_status=response.status)
     try:
         return decode_response(data)
     except IPPError as e:
