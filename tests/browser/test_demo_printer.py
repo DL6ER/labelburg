@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from app.labeldesigner import printer_settings, tape
+from app.labeldesigner import drivers, printer_settings, tape
 from app.labeldesigner.drivers import MODELS
 from tests.browser.test_editor import sent, type_label, wait_for_preview
 from tests.browser.test_settings import back_to_the_editor, open_settings
@@ -62,7 +62,12 @@ def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
-    assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(MODELS)
+    # Once each name: not the models shown as another one
+    shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
+    assert shown_as == {'Epson/ESC-POS-180', 'Zebra/ZPL-300'}
+    assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
+    for vendor, models in (('Epson', ['ESC-POS']), ('Zebra', ['ZPL'])):
+        assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
