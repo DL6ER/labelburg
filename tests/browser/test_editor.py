@@ -92,6 +92,73 @@ def test_a_date_and_a_blank_from_the_bracket_menu(editor):
     assert editor.inner_text('#field .chip.blank') == 'Name'
 
 
+def test_the_number_of_labels_from_the_bracket_menu(editor):
+    type_label(editor, 'Box ')
+    editor.keyboard.type('[')
+    editor.click('.pop-menu button:has-text("Counter")')
+    editor.wait_for_selector('#field .chip.counter')
+    editor.keyboard.type(' of [')
+    assert 'Total\nthe 6 in 1 of 6' in editor.inner_text('.pop-menu')
+    editor.click('.pop-menu button:has-text("Total")')
+    editor.wait_for_selector('#field .chip.total')
+    assert editor.inner_text('#field .chip.total') == 'total'
+    editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of {{total}}'")
+    wait_for_preview(editor)
+    # The preview is drawn again for the copies chosen, the server counts them
+    request = changed_preview(editor, lambda: (editor.fill('#copies', '6'), editor.dispatch_event('#copies', 'input')))
+    assert request['print_count'] == '6' and json.loads(request['text'])[0]['text'] == 'Box {{counter}} of {{total}}'
+    with editor.expect_response('**/api/print') as answer:
+        editor.click('#print')
+    assert answer.value.ok and sent(answer.value.request)['print_count'] == '6'
+    # Its options tell what it is, and remove it
+    editor.click('#field .chip.total')
+    editor.wait_for_selector('.chip-pop')
+    assert editor.text_content('.chip-pop h4') == 'Total' and editor.inner_text('.chip-pop p') == 'How many labels print, set with the copies.'
+    editor.click('.chip-pop [data-remove]')
+    editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of '")
+
+
+def thumb_preview(page, action) -> dict:
+    """The preview request a printed label with the number of labels is drawn with."""
+    with page.expect_request(lambda r: r.url.endswith('/api/preview') and '%7B%7Btotal%7D%7D' in (r.post_data or '')) as request:
+        action()
+    return sent(request.value)
+
+
+def test_printed_labels_show_the_number_of_labels_printed(editor):
+    type_label(editor, 'Box [counter] of ')
+    editor.keyboard.type('[')
+    editor.click('.pop-menu button:has-text("Total")')
+    editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of {{total}}'")
+    editor.fill('#copies', '6')
+    editor.dispatch_event('#copies', 'input')
+    wait_for_preview(editor)
+    editor.click('#print')
+    editor.wait_for_function("() => labelEditor.S.history.length === 1 && labelEditor.S.history[0].state === 'printed'")
+    # As many as the server counted, Box 1 of 6, the copies apart: they
+    # would fill a page roll
+    assert editor.evaluate('() => labelEditor.S.history[0].labels') == 6
+    request = thumb_preview(editor, lambda: (editor.click('#tabs [data-tab="settings"]'), editor.click('.set-nav [data-part="printed"]')))
+    assert (request['total'], request['print_count']) == ('6', '1')
+    editor.click('#tabs [data-tab="edit"]')
+    editor.wait_for_selector('#field .ln')
+    editor.reload()
+    editor.wait_for_selector('#field .ln')
+    request = thumb_preview(editor, lambda: (editor.click('#templates'), editor.click('.tpl-nav [data-cat="printed"]')))
+    assert (request['total'], request['print_count']) == ('6', '1')
+    editor.keyboard.press('Escape')
+    editor.wait_for_function("() => location.hash === '#edit'")
+    # Printed before the server told it, it stays at 1 of 1
+    editor.evaluate("""() => {
+        const key = Object.keys(localStorage).find(k => k.endsWith('designer_history'));
+        localStorage.setItem(key, JSON.stringify(JSON.parse(localStorage.getItem(key)).map(h => { delete h.labels; return h; })));
+    }""")
+    editor.reload()
+    editor.wait_for_selector('#field .ln')
+    request = thumb_preview(editor, lambda: (editor.click('#templates'), editor.click('.tpl-nav [data-cat="printed"]')))
+    assert 'total' not in request and request['print_count'] == '1'
+
+
 def test_a_line_picked_on_the_label_changes_its_size_and_is_inverted(editor):
     type_label(editor, 'Shelf 3', 'spices')
     editor.wait_for_selector('#picks .pk[data-i="1"]')

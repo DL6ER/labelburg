@@ -1,7 +1,9 @@
 """All codes of the labels: QR and the other 2D codes (DataMatrix, Micro QR,
 rMQR, Aztec, PDF417), each from a library of its own, and python-barcode's
 barcodes, with their error correction, check digits and refusals."""
+import functools
 import math
+import re
 
 import aztec_code_generator
 import barcode
@@ -34,6 +36,20 @@ BARCODE_TOO_LONG = f"Barcode value must not exceed {MAX_BARCODE_LENGTH} characte
 # PDF417 codes have 3 to 90 rows of up to 30 columns, 6 where they can
 PDF417_ROWS = (3, 90)
 PDF417_COLUMNS = 6
+# Phones misread dots of 2D codes narrower than this
+MIN_MODULE_MM = 0.25
+# Bars of barcodes scan at close range down to 7.5 mil
+MIN_BAR_MM = 0.19
+# Printheads draw narrower dots and bars unevenly
+MIN_DOTS = 2
+
+
+def too_small(size: float, dpi: int, bar: bool = False) -> bool:
+    """Whether a dot of a 2D code, with bar a bar of a barcode, size dots
+    wide on a label made at dpi, is too narrow to scan."""
+    # Rounded, a size of exactly the smallest is not too small
+    smallest = MIN_BAR_MM if bar else MIN_MODULE_MM
+    return round(size / dpi * 25.4, 3) < smallest or round(size, 3) < MIN_DOTS
 
 
 def correction(code_type: str, value) -> str | None:
@@ -196,6 +212,34 @@ def barcode_image(kind, value: str, color: tuple = (0, 0, 0)) -> Image.Image:
     """The image of a barcode of the python-barcode class kind, in color on
     white."""
     return kind(value, writer=ImageWriter()).render(writer_options={'foreground': '#%02x%02x%02x' % color})
+
+
+class _Measuring(ImageWriter):
+    """Draws nothing, render() only sets the width of the modules, which the
+    classes of python-barcode choose."""
+
+    def _init(self, code):
+        pass
+
+    def _paint_module(self, xpos, ypos, width, color):
+        pass
+
+    def _paint_text(self, xpos, ypos):
+        pass
+
+    def _finish(self):
+        return None
+
+
+@functools.lru_cache(maxsize=256)
+def narrowest_bar(barcode_type: str, value: str) -> float:
+    """How wide the narrowest bar of a barcode is in dots of its image."""
+    code = barcode_class(barcode_type)(value, writer=_Measuring())
+    # ITF takes no default for the options
+    code.render({})
+    # G are the modules of bars that reach down between the digits
+    modules = min(len(bar) for bar in re.findall('[1G]+', code.build()[0]))
+    return modules * code.writer.module_width * code.writer.dpi / 25.4
 
 
 def _gtin_check_digit(digits: str) -> str:

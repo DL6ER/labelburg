@@ -156,6 +156,20 @@ class Driver:
         shows where to read it. ValueError for an unknown kind."""
         raise NotImplementedError
 
+    def feed_kind(self, model: str, label_size: str) -> str:
+        """What feed_job() does on the model with the label size loaded:
+        'cut' feeds a little paper and cuts it, 'cut_paper' feeds the paper
+        to the cutter and cuts it, 'cut_label' feeds one empty label and cuts
+        it, 'label' feeds one empty label, an empty string where the model
+        cannot."""
+        return ''
+
+    def feed_job(self, queue):
+        """The job that feeds the paper of the printer of the queue as
+        feed_kind() says, e.g. to cut off the last label of a job not cut
+        after it, as send() takes it. None where the model cannot."""
+        return None
+
     def followed(self, device: str, model: str) -> bool:
         """Whether the label designer may ask the printer every few seconds:
         one on USB costs nothing, one on the network or on Bluetooth takes

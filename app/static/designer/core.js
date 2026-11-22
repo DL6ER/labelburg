@@ -124,6 +124,8 @@ export function sizeName(id) {
 }
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
+// A label that shows the number of labels printed ({{total}}) is drawn for the copies
+export const withTotal = design => (design.text || []).map(l => l.text).concat(design.code_text).some(t => String(t || '').includes('{{total}}'));
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
 export function sizeShort(id) {
     const s = SIZES[id];
@@ -287,6 +289,12 @@ export function browserDateFormat() {
     } catch (e) { return '%Y-%m-%d'; }
 }
 export const dateFormat = () => S.settings.date_format || browserDateFormat();
+// The examples of the date and time codes, those of names in the language of
+// dates, as the server wrote them
+export function dateCodeExamples() {
+    const dc = C.datetime_codes || { codes: [] };
+    return Object.assign(Object.fromEntries(dc.codes.map(([code, , example]) => [code, example])), (dc.languages || {})[S.settings.date_language] || {});
+}
 
 // [today], [today+5d], [now+2h], dates typed between brackets
 export const TODAY_RE = /^(?:today|now)(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?|h|hours?|min|minutes?))?$/i;
@@ -457,7 +465,8 @@ export function formFor(design, copies = 1, forPrint = false, values = null, mar
     fd.append('text', JSON.stringify(design.text.map(l => ({
         text: l.text, size: String(l.size), font: l.font, align: l.align, inverted: !!l.inverted,
         checkbox: !!l.checkbox, color: l.color || 'black', line_spacing: String(l.line_spacing || '100'),
-        ...(l.underline ? { underline: true } : {})
+        ...(l.underline ? { underline: true } : {}), ...(l.caps ? { caps: true } : {}),
+        ...(+l.letter_spacing ? { letter_spacing: +l.letter_spacing } : {})
     }))));
     if (design.image && withImage(design)) {
         for (const im of [design.image].concat(forPrint ? design.more_images || [] : [])) fd.append('image', b64ToBlob(im.data, im.mime), im.name);
@@ -541,10 +550,11 @@ export function sheetNote(sheet, max = 100) {
         + (sheet.fill && sheet.fill <= max ? `<button type="button" class="pill" data-fill="${esc(sheet.fill)}">Fill it</button>` : '');
 }
 
-export async function preview(design, values, copies = 1, perCopy = 0) {
+// total: the number of labels of a job printed before, for {{total}} only
+export async function preview(design, values, copies = 1, perCopy = 0, total = 0) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
     // On a roll with several labels to a page the server tells how the copies fill the last one
-    const sheet = isSheet(asked.label_size);
+    const sheet = isSheet(asked.label_size), counted = sheet || withTotal(asked);
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -553,8 +563,8 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
-    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
-        sheet ? [copies, perCopy] : 0]);
+    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format, S.settings.date_language,
+        counted ? [copies, perCopy, total] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -564,9 +574,10 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
     const p = (async () => {
         let r;
         try {
-            const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
+            const fd = formFor(asked, counted ? copies : 1, false, values, true, blanks);
             // Each copy prints all files and PDF pages, the preview shows one
-            if (sheet && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (counted && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (counted && total > 0) fd.append('total', String(total));
             r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');
@@ -612,8 +623,8 @@ export const S = {
     demos: [], demoList: [], saved: [], codes: C.codes,
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
-    // Of labels, kept on the server for every browser: date_format, collate
-    // and font_family, see /api/settings/labels
+    // Of labels, kept on the server for every browser: date_format,
+    // date_language, collate and font_family, see /api/settings/labels
     settings: Object.assign({}, C.label_settings),
     edit: null,
     // The colors of the label in the editor its tape prints otherwise, as its
@@ -956,7 +967,7 @@ export function drawThumb(img, item, make = (design, values) => ({ design, value
         try {
             if (img.isConnected) {
                 const design = await itemDesign(item), shown = make(design, defaults({ design }));
-                const p = await preview(shown.design, shown.values);
+                const p = await preview(shown.design, shown.values, 1, 0, shown.total || 0);
                 if (img.isConnected) img.src = p.url;
             }
         } catch (e) { img.classList.add('failed'); }
@@ -1069,6 +1080,8 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
         const r = await sent;
         let data = {};
         try { data = await r.json(); } catch (e) { }
+        // The labels the server counted, {{total}} in the previews of the entry
+        if (r.ok && data.labels > 0) entry.labels = data.labels;
         if (!r.ok || data.success === false) {
             entry.state = 'failed';
             entry.message = data.message || ('The printer answered ' + r.status);
