@@ -169,8 +169,10 @@ class FakeVC500W:
                 if refusal:
                     connection.sendall(answer(code=1, comment=refusal))
                     continue
-                connection.sendall(answer(comment='ready to receive'))
+                # Taken before it is sent: the label designer cannot read it
+                # earlier, also where this thread is held up after sending
                 self.ready_at.append(time.monotonic())
+                connection.sendall(answer(comment='ready to receive'))
                 size = int(re.search(r'<datasize>(\d+)</datasize>', command).group(1))
                 while not buffer:
                     data = connection.recv(65536)
@@ -216,6 +218,9 @@ def fake(request, monkeypatch):
         monkeypatch.setattr(vc500w, name, value)
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(vc500w, '_answers', {})
+    # Nothing learned of the jobs of an earlier fake: a pseudo terminal
+    # closed before gives its path to the next one
+    monkeypatch.setattr(progress, '_factors', {})
     yield printer_
     printer_.close()
 
