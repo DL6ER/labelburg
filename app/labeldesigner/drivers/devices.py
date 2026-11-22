@@ -454,6 +454,8 @@ def unanswered_reason(error: Exception) -> str:
         return reach.NOT_ALLOWED
     if isinstance(error, OtherPrinterOnly):
         return OTHER_PRINTER_ONLY
+    if isinstance(error, ipp.RawPort):
+        return ipp.RAW_PORT
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -470,7 +472,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY, ipp.RAW_PORT])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 

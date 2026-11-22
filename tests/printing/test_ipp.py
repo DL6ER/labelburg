@@ -227,6 +227,30 @@ def test_no_printers_on_ipp(device):
         ipp.printer_at(device)
 
 
+@pytest.mark.parametrize('device', [
+    # Another server at an allowed host, e.g. the API of Docker
+    'ipp://127.0.0.1:2375/containers/labelburg/kill', 'ipp://printer.local/', 'ipp://printer.local/admin',
+    'ipp://printer.local/ipp/../containers/labelburg', 'ipp://printer.local/printers/./x', 'ipp://printer.local/ipp%2f..',
+    'ipp://printer.local/ipp/print?x=1', 'ipp://printer.local/ipp/print#x', 'cups://..',
+])
+def test_printers_on_ipp_are_asked_at_their_paths_only(device):
+    with pytest.raises(ValueError):
+        ipp.printer_at(device)
+
+
+@pytest.mark.parametrize('device', ['ipp://printer.local/ipp', 'ipp://printer.local/ipp/print/Zebra_ZD421', 'ipps://printer.local/classes/Labels',
+                                    'cups://Zebra.ZD421'])
+def test_paths_of_printers_on_ipp(device):
+    assert ipp.printer_at(device).path.startswith(('/ipp', '/printers/', '/classes/'))
+
+
+@pytest.mark.parametrize('device', ['ipp://printer.local:9100/ipp/print', 'ipps://printer.local:515', 'ipp://printer.local:6101/printers/x'])
+def test_raw_ports_are_never_asked_over_ipp(device):
+    # A request there would be printed as text
+    with pytest.raises(ipp.RawPort):
+        ipp.printer_at(device)
+
+
 class Recording:
     """An IPP server on localhost that keeps each request with its path and
     content type and answers with self.answer, over TLS with context."""

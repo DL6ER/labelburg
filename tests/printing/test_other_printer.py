@@ -15,7 +15,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import adding, drivers, ipp, refusals
-from app.labeldesigner.drivers import devices, ipp as other
+from app.labeldesigner.drivers import devices, ipp as other, reach
 from app.labeldesigner.drivers.ipp import documents
 from app.labeldesigner.label_names import label_of
 from tests.helpers import make_client, outcome
@@ -626,6 +626,37 @@ def test_request_naming_a_printer_outside_the_local_network_is_refused(tmp_path,
     client = client_of(tmp_path, fake)
     answer = print_label(client, printer='ipp://8.8.8.8/ipp/print')
     assert (answer.status_code, answer.get_json()['message']) == (400, adding.NAMED_OUTSIDE)
+
+
+@pytest.fixture
+def tried(monkeypatch):
+    """The ports the server connects to."""
+    ports = []
+    real = reach.create_connection
+
+    def recorded(address, timeout, source_address=None, deadline=None):
+        ports.append(address[1])
+        return real(address, timeout, source_address, deadline)
+    monkeypatch.setattr(reach, 'create_connection', recorded)
+    return ports
+
+
+@pytest.mark.parametrize('named, message', [
+    ('ipp://127.0.0.1:{port}/containers/labelburg/kill', 'Unsupported printer'),
+    ('ipp://127.0.0.1:{port}/ipp/../containers/labelburg/kill', 'Unsupported printer'),
+    ('ipp://127.0.0.1:9100/ipp/print', ipp.RAW_PORT),
+])
+def test_requests_ask_printers_on_ipp_at_their_paths_and_ports_only(tmp_path, fake, tried, named, message):
+    answer = print_label(client_of(tmp_path, fake), printer=named.format(port=fake.port))
+    assert (answer.status_code, answer.get_json()['message']) == (400, message)
+    assert tried == [] and fake.requests == []
+
+
+def test_printer_on_ipp_configured_at_a_raw_port_is_never_asked(tmp_path, tried):
+    client = make_client(tmp_path, model='Other/IPP-203', printer='ipp://127.0.0.1:9100/ipp/print')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == [ipp.RAW_PORT]
+    assert outcome(client, print_label(client)) == ('failed', f'{devices.NOT_SENT}: {ipp.RAW_PORT}')
+    assert tried == []
 
 
 def test_what_the_label_designer_offers():

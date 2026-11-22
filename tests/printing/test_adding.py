@@ -128,6 +128,9 @@ def test_addresses_as_kept(typed, kept):
     ('ipp://192.168.1.80/ipp/print?x=1', adding.NOT_AN_ADDRESS),
     ('ipp://192.168.1.80:99999/ipp/print', adding.NOT_AN_ADDRESS),
     ('cups://queue/other', adding.NOT_AN_ADDRESS),
+    # Only the paths of printers on IPP, not another server at the host
+    ('ipp://127.0.0.1:2375/containers/labelburg/kill', adding.NOT_AN_ADDRESS),
+    ('ipp://192.168.1.80/ipp/../admin', adding.NOT_AN_ADDRESS),
 ])
 def test_addresses_refused(typed, refusal):
     with pytest.raises(ValueError) as refused:

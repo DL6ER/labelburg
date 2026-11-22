@@ -34,7 +34,7 @@ FIELDS = ('MFG', 'MDL', 'CMD', 'CLS', 'DES')
 NOT_AN_ADDRESS = 'Give the address of the printer, e.g., usbip://192.168.1.50, tcp://192.168.1.60 or vc500w://192.168.1.70'
 BLUETOOTH = 'Printers on Bluetooth cannot be added here, name them in PRINTERS'
 PRINT_PORT = 'Printers take jobs on this port, give the port of USB/IP, 3240 unless it was changed'
-RAW_PORT = 'Printers take raw jobs on this port, give the port of IPP, 631 unless it was changed'
+RAW_PORT = ipp.RAW_PORT
 OFF = 'Adding printers is switched off on this server (ADD_PRINTERS)'
 ONLY_LOCAL = 'Only printers in your local network can be added (ADD_PRINTERS)'
 NEVER = 'No printer can be added at this address'
@@ -95,13 +95,19 @@ def address_of(text: str) -> str:
     if not any(pattern.fullmatch(address) for pattern in DEVICE_PATTERNS):
         raise ValueError(NOT_AN_ADDRESS)
     if ipp.is_address(address):
-        try:
-            port = ipp.printer_at(address).port
-        except ValueError:
-            raise ValueError(NOT_AN_ADDRESS) from None
-        if port in PRINT_PORTS - {ipp.PORT}:
-            raise ValueError(RAW_PORT)
+        _on_ipp_at(address)
     return address
+
+
+def _on_ipp_at(address: str):
+    """ValueError for an address on IPP that is asked nowhere, see
+    ipp.printer_at()."""
+    try:
+        ipp.printer_at(address)
+    except ipp.RawPort:
+        raise ValueError(RAW_PORT) from None
+    except ValueError:
+        raise ValueError(NOT_AN_ADDRESS) from None
 
 
 def name_of(text: str, taken) -> str:
@@ -121,7 +127,9 @@ def check_named(device: str, mode: str):
     """A printer on the network a request names that is neither configured,
     added nor found by the search: ValueError unless the mode allows every
     address of its host, as for adding it. USB and Bluetooth printers have
-    no host."""
+    no host, one on IPP is asked at its paths and ports only."""
+    if ipp.is_address(device):
+        _on_ipp_at(device)
     host = host_of(device)
     if host is None:
         return

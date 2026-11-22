@@ -260,10 +260,11 @@ class Ipp(Driver):
     shown_as = {model: 'Other/printer' for model in MODELS}
     names = {model: SHOWN for model in MODELS}
     # ipp://<host>[:<port>][/<path>], ipps:// alike, cups://<queue>
-    device_patterns = (re.compile(r'ipps?://[A-Za-z0-9.-]+(:\d{1,5})?(/[A-Za-z0-9._~%+/-]*)?'),
-                       re.compile(r'ipps?://\[[0-9A-Fa-f:.]+\](:\d{1,5})?(/[A-Za-z0-9._~%+/-]*)?'),
-                       re.compile(r'cups://[A-Za-z0-9_.+-]+'))
-    errors = (OSError, ipp.IPPError, http.client.HTTPException)
+    device_patterns = (re.compile(rf'ipps?://[A-Za-z0-9.-]+(:\d{{1,5}})?({ipp.PATH})?'),
+                       re.compile(rf'ipps?://\[[0-9A-Fa-f:.]+\](:\d{{1,5}})?({ipp.PATH})?'),
+                       re.compile(r'cups://[A-Za-z0-9_+-][A-Za-z0-9_.+-]*'))
+    # Also an address at a raw port, which is never asked
+    errors = (OSError, ipp.IPPError, http.client.HTTPException, ipp.RawPort)
     takes_usbip = False
 
     def claims(self, device) -> bool:
