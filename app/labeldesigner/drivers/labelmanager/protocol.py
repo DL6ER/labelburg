@@ -107,24 +107,26 @@ def errors(status: int) -> list[str]:
 
 class UsbConnection(Connection):
     """The printer through PyUSB, usb://<vendor>:<product>[/<serial>]: its
-    printer interface, else its HID interface, which takes the same bytes, as
-    labelle opens it (usb_device.py, _setup()). A PnP shows the HID one also
-    while it is not switched to printing, as 0x1001, which dymoprint, labelle
-    before, printed on (its commit e9a2010); one that shows neither is
-    UsbDrive."""
+    printer interface, else, of a LabelManager of ids, (vendor, product), its
+    HID interface, which takes the same bytes, as labelle opens it
+    (usb_device.py, _setup()). A PnP shows the HID one also while it is not
+    switched to printing, as 0x1001, which dymoprint, labelle before, printed
+    on (its commit e9a2010); one that shows neither is UsbDrive."""
 
-    def __init__(self, device: str):
+    def __init__(self, device: str, ids: frozenset):
         import usb.core
         import usb.util
         self._usb = usb
-        self.dev = backends.find_device(usb, device)
+        # Any other device without a printer interface is not found
+        self.dev = backends.find_device(usb, device, ids)
         try:
             config = self.dev.get_active_configuration()
         except usb.core.USBError:
             self.dev.set_configuration()
             config = self.dev.get_active_configuration()
-        interface = (usb.util.find_descriptor(config, bInterfaceClass=7)
-                     or usb.util.find_descriptor(config, bInterfaceClass=3))
+        interface = usb.util.find_descriptor(config, bInterfaceClass=7)
+        if interface is None and (self.dev.idVendor, self.dev.idProduct) in ids:
+            interface = usb.util.find_descriptor(config, bInterfaceClass=3)
         if interface is None:
             raise UsbDrive()
         # Only the interface used, never the USB drive's
@@ -161,8 +163,9 @@ class UsbConnection(Connection):
             return b''
 
 
-def connect(device: str) -> Connection:
-    return UsbConnection(device) if device.startswith('usb://') else Connection(device)
+def connect(device: str, ids: frozenset) -> Connection:
+    """The printer at the address, ids as UsbConnection takes them."""
+    return UsbConnection(device, ids) if device.startswith('usb://') else Connection(device)
 
 
 # When each printer was asked the request it left unanswered, by the key

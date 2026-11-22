@@ -197,7 +197,7 @@ class LabelManager(Driver):
             if not acquired:
                 return devices.busy_state(device, state)
             try:
-                with protocol.connect(device) as c:
+                with protocol.connect(device, self.usb_ids) as c:
                     errors = _problems(c, device)
             except protocol.UsbDrive:
                 errors = [protocol.USB_DRIVE_TEXT]
@@ -227,7 +227,7 @@ class LabelManager(Driver):
     def send(self, queue, job) -> str:
         device = queue.device_specifier
         try:
-            with protocol.connect(device) as c:
+            with protocol.connect(device, self.usb_ids) as c:
                 # A row a job broken off left unfinished takes them, ESC A
                 # is read as a command again
                 c.write(protocol.SYNC)

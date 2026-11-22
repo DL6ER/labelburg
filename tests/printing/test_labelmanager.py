@@ -137,7 +137,7 @@ class _Printer(D1):
 @pytest.fixture
 def printer(monkeypatch):
     fake = _Printer()
-    monkeypatch.setattr(protocol, 'connect', lambda device: fake)
+    monkeypatch.setattr(protocol, 'connect', lambda device, ids: fake)
     return fake
 
 
@@ -554,3 +554,36 @@ def test_found_on_usb_also_on_hid(pyusb, tmp_path, monkeypatch):
         ('usb://0x0922:0x1001/A1', PNP, []), ('usb://0x0922:0x1005/C3', LM280, [protocol.USB_DRIVE_TEXT]), ('simulation', 'QL-800', [])]
     assert found[0]['tape']['id'] == 'd1-12' and found[0]['tape']['assumed']
     assert held.calls == []
+
+
+@pytest.mark.parametrize('vendor, product', [
+    # A security key, a DYMO scale: HID devices, no LabelManagers
+    (0x1050, 0x0407), (0x0922, 0x8003)])
+def test_a_request_naming_another_hid_device_is_refused_untouched(pyusb, tmp_path, vendor, product):
+    other = Device(product, [3])
+    other.idVendor = vendor
+    pyusb.append(other)
+    address = 'usb://0x%04x:0x%04x' % (vendor, product)
+    client = make_client(tmp_path)
+    r = client.post('/labeldesigner/api/print', data={'printer': address, 'model': PNP, 'label_size': 'd1-12', 'print_type': 'text',
+                                                      'text': TEXT})
+    assert outcome(client, r) == ('failed', 'Could not send the label to the printer: The printer is switched off or not connected')
+    with pytest.raises(FileNotFoundError):
+        labelmanager.DRIVER.status(address, PNP)
+    # Neither its driver taken away nor anything written
+    assert other.calls == [] and other.printer.written == []
+
+
+def test_a_printer_of_another_maker_is_reached_on_its_printer_interface_only(pyusb):
+    other = Device(0x2042, [7, 3])
+    other.idVendor = 0x04f9
+    pyusb.append(other)
+    with protocol.connect('usb://0x04f9:0x2042', labelmanager.DRIVER.usb_ids) as c:
+        assert c.number == 0
+    hid = Device(0x2042, [3])
+    hid.idVendor = 0x04f9
+    pyusb[:] = [hid]
+    with pytest.raises(FileNotFoundError):
+        protocol.connect('usb://0x04f9:0x2042', labelmanager.DRIVER.usb_ids)
+    assert hid.calls == []
+

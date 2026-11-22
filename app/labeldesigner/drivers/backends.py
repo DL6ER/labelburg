@@ -193,23 +193,24 @@ def _usb_printers(usb, vendor: int | None = None):
     return _usb_devices(usb, lambda device: _is_printer(usb, device), vendor)
 
 
-def _find(usb, device_specifier: str, any_interface: bool = False):
-    """The device of usb://<vendor>:<product>[/<serial>], with any_interface
-    also one without a printer interface."""
+def _find(usb, device_specifier: str, ids: frozenset = frozenset()):
+    """The printer of usb://<vendor>:<product>[/<serial>], with ids also a
+    device of those (vendor, product) without a printer interface."""
     vendor_product, _, serial = device_specifier.removeprefix('usb://').partition('/')
     vendor, _, product = vendor_product.partition(':')
     vendor, product = int(vendor, 16), int(product, 16)
-    found = _usb_devices(usb, lambda device: True, vendor) if any_interface else _usb_printers(usb, vendor)
+    found = _usb_devices(usb, lambda device: (device.idVendor, device.idProduct) in ids or _is_printer(usb, device), vendor)
     for printer in found:
         if printer.idProduct == product and (not serial or _same_serial(_serial_number(usb, printer), serial)):
             return printer
     raise FileNotFoundError(errno.ENODEV, 'Device not found', device_specifier)
 
 
-def find_device(usb, device_specifier: str):
-    """The USB device of usb://<vendor>:<product>[/<serial>], whatever
-    interfaces it shows, through PyUSB, the module usb."""
-    return _find(usb, device_specifier, any_interface=True)
+def find_device(usb, device_specifier: str, ids: frozenset):
+    """The printer of usb://<vendor>:<product>[/<serial>] through PyUSB, the
+    module usb, or a device of ids, (vendor, product) of printers that may
+    show no printer interface."""
+    return _find(usb, device_specifier, ids)
 
 
 def _device_id(usb, device) -> str:
