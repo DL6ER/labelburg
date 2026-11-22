@@ -54,9 +54,12 @@ class Connection:
 
     def connect(self, address):
         self.fake.addresses.append(address)
-        if self.fake.error:
+        error = self.fake.error
+        if self.fake.during_page:
+            self.fake.during_page()
+        if error:
             self.theirs.close()
-            raise OSError(self.fake.error, os.strerror(self.fake.error))
+            raise OSError(error, os.strerror(error))
         received = bytearray()
         self.fake.received.append(received)
         thread = threading.Thread(target=self._serve, args=(received,), daemon=True)
@@ -88,10 +91,10 @@ class OnBluetooth:
     """A printer on classic Bluetooth in place of the RFCOMM sockets: each
     connection one of its own, what each received in received. With error,
     connecting fails as the kernel tells it, e.g. EHOSTDOWN for one that is
-    switched off."""
+    switched off. during_page() is called while it is paged."""
 
     def __init__(self, printer_):
-        self.printer, self.error = printer_, 0
+        self.printer, self.error, self.during_page = printer_, 0, None
         self.made, self.addresses, self.received, self.threads, self.closed = [], [], [], [], 0
 
     def __call__(self, family, kind, proto):
@@ -306,6 +309,22 @@ def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, on_bluetooth,
     response = client.post('/labeldesigner/api/print', data=label)
     assert outcome(client, response) == ('printed', '')
     assert len(fake.addresses) == 4 and asked(60) == 5
+
+
+@pytest.mark.parametrize('model', ['TSC/TSPL', 'Epson/ESC-POS'])
+def test_printer_switched_on_while_it_was_paged_is_paged_again(tmp_path, on_bluetooth, model):
+    fake = on_bluetooth(FakeTspl() if model == 'TSC/TSPL' else FakeEscpos())
+    fake.error = errno.EHOSTDOWN
+
+    def switched_on_and_looked_for():
+        # "Look for printers" before the page of the printer that was off ended
+        fake.error, fake.during_page = 0, None
+        devices.look_again()
+    fake.during_page = switched_on_and_looked_for
+    client = make_client(tmp_path, model=model, printer=DEVICE)
+    assert client.get(STATUS).get_json()['printers'][0]['errors'] == ['The printer cannot be reached']
+    assert client.get(STATUS).get_json()['printers'][0]['errors'] == []
+    assert len(fake.addresses) == 2
 
 
 @pytest.mark.parametrize('model, label', [('TSC/TSPL', TSPL_LABEL), ('Epson/ESC-POS', ESCPOS_LABEL)])

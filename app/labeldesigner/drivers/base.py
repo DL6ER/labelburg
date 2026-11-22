@@ -248,10 +248,13 @@ class Driver:
         if error:
             # The traceback of the last time only, it grew at every query
             raise error.with_traceback(None)
+        started = time.monotonic()
         try:
             state = query()
         except self.errors as e:
-            devices.note_answer(device, e)
+            # Looked for meanwhile, it is looked for again
+            if started >= devices.looked:
+                devices.note_answer(device, e)
             raise
         devices.note_answer(device)
         return state
@@ -267,14 +270,17 @@ class Driver:
             if error is not None:
                 raise error.with_traceback(None)
             return dict(state)
+        # When it was asked: an answer to a query from before the label
+        # designer looked for printers is older than that
+        started = time.monotonic()
         try:
             state = query()
         except self.errors as e:
-            _bluetooth_asked[key] = (time.monotonic(), e, None)
+            _bluetooth_asked[key] = (started, e, None)
             raise
         # One a job holds was not asked
         if state.get('status_type') != devices.BUSY_STATUS_TYPE:
-            _bluetooth_asked[key] = (time.monotonic(), None, dict(state))
+            _bluetooth_asked[key] = (started, None, dict(state))
         return state
 
     def ask_bluetooth_again(self, device: str):
