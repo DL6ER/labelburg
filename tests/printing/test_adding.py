@@ -8,11 +8,12 @@ import time
 import pytest
 
 from app.labeldesigner import adding, ipp
-from app.labeldesigner.drivers import reach, told_model, usbip
+from app.labeldesigner.drivers import ipp as other, reach, told_model, usbip
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from tests.helpers import within
 from tests.printing.test_ipp import attribute, fake_printer, fixture, response  # noqa: F401
+from tests.printing.test_other_printer import FakePrinter, printer_attributes
 from tests.printing.test_reach import names  # noqa: F401
 from tests.printing.test_usbip import FakeQL
 from tests.printing.test_vc500w import FakeVC500W
@@ -97,6 +98,10 @@ def test_models_device_ids_name(device_id, model):
     ('/dev/usb/lp1', '/dev/usb/lp1'),
     ('file:///dev/usb/lp1', 'file:///dev/usb/lp1'),
     ('usb://0x04f9:0x2042/A1Z1', 'usb://0x04f9:0x2042/A1Z1'),
+    ('IPP://Printer.local/ipp/print', 'ipp://Printer.local/ipp/print'),
+    ('ipps://192.168.1.80:8631/ipp/print/zebra', 'ipps://192.168.1.80:8631/ipp/print/zebra'),
+    ('ipp://[fd00::8]', 'ipp://[fd00::8]'),
+    ('cups://DYMO_LabelWriter_450', 'cups://DYMO_LabelWriter_450'),
 ])
 def test_addresses_as_kept(typed, kept):
     assert adding.address_of(typed) == kept
@@ -116,6 +121,13 @@ def test_addresses_as_kept(typed, kept):
     ('usbip://192.168.1.50:631/1-1', adding.PRINT_PORT),
     ('usbip://192.168.1.50:515', adding.PRINT_PORT),
     ('usbip://192.168.1.50:6101', adding.PRINT_PORT),
+    # IPP over HTTP to a raw port would be printed as text
+    ('ipp://192.168.1.80:9100/ipp/print', adding.RAW_PORT),
+    ('ipps://192.168.1.80:515', adding.RAW_PORT),
+    ('ipp://192.168.1.80/ipp print', adding.NOT_AN_ADDRESS),
+    ('ipp://192.168.1.80/ipp/print?x=1', adding.NOT_AN_ADDRESS),
+    ('ipp://192.168.1.80:99999/ipp/print', adding.NOT_AN_ADDRESS),
+    ('cups://queue/other', adding.NOT_AN_ADDRESS),
 ])
 def test_addresses_refused(typed, refusal):
     with pytest.raises(ValueError) as refused:
@@ -303,8 +315,75 @@ def test_usb_printer_known_by_its_device_id(tmp_path, monkeypatch):
 
 
 def test_identity_is_asked_for_over_ipp():
-    request = ipp.decode_response(ipp.encode_request('ipp://192.0.2.1:631/ipp/print', adding.IDENTITY))
-    assert request['requested-attributes'] == ['printer-make-and-model', 'printer-device-id']
+    request = ipp.decode_response(ipp.encode_request('ipp://192.0.2.1:631/ipp/print', adding.ASKED_OVER_IPP))
+    # Also what tells whether it is one for "Other printer"
+    assert request['requested-attributes'] == [
+        'printer-make-and-model', 'printer-device-id', 'printer-state', 'printer-state-reasons', 'media-col-ready',
+        'document-format-supported', 'pwg-raster-document-type-supported', 'pwg-raster-document-resolution-supported',
+        'printer-resolution-default']
+
+
+def test_network_printer_no_driver_claims_is_an_other_printer(fake_printer, connections):  # noqa: F811
+    fake_printer['body'] = printer_attributes()
+    found = adding.identify('tcp://127.0.0.1:9100', 'local')
+    # Printed on over IPP, where it answered, never on its raw port
+    assert (found['address'], found['kind'], found['model']) == (f'ipp://127.0.0.1:{network.IPP_PORT}/ipp/print', 'network', 'Other/IPP-203')
+    assert (found['state']['media_width'], found['state']['media_length'], found['state']['device_name']) == (102, 152, 'Zebra ZD421')
+    assert 9100 not in connections
+
+
+def test_printer_at_an_ipp_address_is_an_other_printer(connections):
+    printer = FakePrinter(printer_attributes(name=b'Brother QL-810W', resolutions=(300,), default=300))
+    try:
+        # Asked there, even where another driver would take its raw port
+        found = adding.identify(printer.address, 'local')
+        assert (found['address'], found['model'], found['state']['device_name']) == (printer.address, 'Other/IPP', 'Brother QL-810W')
+        assert printer.operations() == [ipp.GET_PRINTER_ATTRIBUTES] and set(connections) == {printer.port}
+    finally:
+        printer.close()
+
+
+def test_queue_of_cups_is_asked_on_this_computer(monkeypatch, connections):
+    printer = FakePrinter(printer_attributes(formats=('application/pdf', 'image/png'), default=300))
+    monkeypatch.setattr(ipp, 'PORT', printer.port)
+    try:
+        found = adding.identify('cups://DYMO_450', 'local')
+        assert (found['address'], found['model']) == ('cups://DYMO_450', 'Other/IPP')
+        assert printer.paths == ['/printers/DYMO_450']
+    finally:
+        printer.close()
+
+
+@pytest.mark.parametrize('answer, refusal', [
+    (printer_attributes(formats=('image/urf', 'application/octet-stream')), other.NO_FORMAT),
+    # Not found at this path
+    (response(status=0x0406), adding.NO_IPP),
+])
+def test_printer_on_ipp_that_cannot_be_added(answer, refusal):
+    printer = FakePrinter(answer)
+    try:
+        with pytest.raises(ValueError) as refused:
+            adding.identify(printer.address, 'local')
+        assert str(refused.value) == refusal
+    finally:
+        printer.close()
+
+
+def test_nothing_answers_at_an_ipp_address():
+    with socket.socket() as unused:
+        unused.bind(('127.0.0.1', 0))
+        address = f'ipp://127.0.0.1:{unused.getsockname()[1]}/ipp/print'
+    with pytest.raises(ValueError) as refused:
+        adding.identify(address, 'local')
+    assert str(refused.value) == adding.NO_ANSWER
+
+
+def test_ipp_addresses_the_mode_refuses_are_not_asked(names, connections):  # noqa: F811
+    names['printer.test'] = ['8.8.8.8']
+    with pytest.raises(ValueError) as refused:
+        adding.identify('ipp://printer.test/ipp/print', 'local')
+    assert str(refused.value) == adding.ONLY_LOCAL
+    assert connections == []
 
 
 @pytest.mark.parametrize('device_id', [LASER, 'MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;'])

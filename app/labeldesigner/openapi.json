@@ -640,7 +640,7 @@
                     "properties": {
                       "printer": {
                         "type": "string",
-                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>` or a VC-500W as `vc500w://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>`, a VC-500W as `vc500w://<host>` or another printer on IPP as `ipp://<host>[:<port>][/<path>]`, `ipps://` alike or `cups://<queue>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
                       },
                       "model": {
                         "type": "string",
@@ -704,7 +704,7 @@
                     "properties": {
                       "printer": {
                         "type": "string",
-                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>` or a VC-500W as `vc500w://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>`, a VC-500W as `vc500w://<host>` or another printer on IPP as `ipp://<host>[:<port>][/<path>]`, `ipps://` alike or `cups://<queue>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
                       },
                       "model": {
                         "type": "string",
@@ -1223,7 +1223,7 @@
     "/labeldesigner/api/printers/identify": {
       "post": {
         "summary": "Ask what answers at an address",
-        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP, e.g. a TSC printer by the maker its SNMP system description names. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP, e.g. a TSC printer by the maker its SNMP system description names. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. A network printer no driver prints on that takes PWG raster, PNG or PDF over IPP is offered as \"Other printer\" (`Other/IPP`, `Other/IPP-203` for one of 203 dpi) at `ipp://<host>/ipp/print`, printed on over IPP; one at an `ipp://`, `ipps://` or `cups://` address always is. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "identifyPrinter",
         "requestBody": {
           "content": {
@@ -2316,7 +2316,7 @@
                       },
                       "printer": {
                         "type": "string",
-                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>` or `tcp://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>` or another printer on IPP as `ipp://<host>[:<port>][/<path>]`, `ipps://` alike or `cups://<queue>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
                       },
                       "model": {
                         "type": "string",
@@ -2716,7 +2716,7 @@
                       },
                       "printer": {
                         "type": "string",
-                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>` or `tcp://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>` or another printer on IPP as `ipp://<host>[:<port>][/<path>]`, `ipps://` alike or `cups://<queue>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
                       },
                       "model": {
                         "type": "string",
@@ -4094,7 +4094,7 @@
           },
           "device_name": {
             "type": "string",
-            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS`, `Zebra GX420t` for a `Zebra/ZPL` or `DYMO LabelWriter 450 Turbo` for a `DYMO/LabelWriter-450`, where its model is one for printers of many makers or for several printers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
+            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS`, `Zebra GX420t` for a `Zebra/ZPL` or `DYMO LabelWriter 450 Turbo` for a `DYMO/LabelWriter-450`, where its model is one for printers of many makers or for several printers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with; a printer on IPP by its `printer-make-and-model`, e.g. for an `Other/IPP`. The label designer shows it instead of the model. Missing where the printer names none."
           },
           "errors": {
             "type": "array",
@@ -4251,7 +4251,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `ipp://<host>[:<port>][/<path>]`, `ipps://` alike, `cups://<queue>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
           }
         },
         "required": ["address"]
@@ -4261,7 +4261,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `ipp://<host>[:<port>][/<path>]`, `ipps://` alike, `cups://<queue>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
           },
           "name": {
             "type": "string",
@@ -4338,6 +4338,10 @@
           "listed": {
             "type": ["string", "null"],
             "description": "The name, else the address, it is listed with already, `null` if it is not."
+          },
+          "device_name": {
+            "type": "string",
+            "description": "Maker and model it names where its model is one for printers of many makers, e.g. `Zebra ZD421` for an `Other/IPP-203`, else empty."
           }
         }
       },
@@ -4438,7 +4442,7 @@
           },
           "printer": {
             "type": "string",
-            "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>` or `tcp://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+            "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>`, `tcp://<host>` or another printer on IPP as `ipp://<host>[:<port>][/<path>]`, `ipps://` alike or `cups://<queue>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
           },
           "model": {
             "type": "string",

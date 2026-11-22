@@ -72,6 +72,7 @@ class FakePrinter:
         self.states = [ipp.COMPLETED]
         self.refusal = 0
         self.requests = []
+        self.paths = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -79,6 +80,7 @@ class FakePrinter:
                 header, document = split(self.rfile.read(int(self.headers['Content-Length'])))
                 operation = struct.unpack('>H', header[2:4])[0]
                 fake.requests.append((operation, ipp.decode_response(header), document))
+                fake.paths.append(self.path)
                 answer = fake.answer(operation)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/ipp')
@@ -90,7 +92,8 @@ class FakePrinter:
                 pass
 
         self.server = HTTPServer(('127.0.0.1', 0), Handler)
-        self.address = f'ipp://127.0.0.1:{self.server.server_port}/ipp/print'
+        self.port = self.server.server_port
+        self.address = f'ipp://127.0.0.1:{self.port}/ipp/print'
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     @staticmethod
@@ -526,3 +529,16 @@ def test_what_the_label_designer_offers():
     assert (caps['cutter'], caps['cut_on_printer'], caps['leaves_turned']) == (False, True, True)
     # Shown as "Other printer"
     assert (caps['vendor'], caps['model_shown'], caps['qualities']) == ('Other', 'printer', ['quality'])
+
+
+def test_printer_on_ipp_is_added_and_printed_on(tmp_path, fake):
+    client = make_client(tmp_path, empty_repo=True)
+    found = client.post('/labeldesigner/api/printers/identify', json={'address': fake.address}).get_json()['printer']
+    assert (found['address'], found['model'], found['device_name']) == (fake.address, 'Other/IPP-203', 'Zebra ZD421')
+    assert (found['tape']['id'], found['errors'], found['listed']) == ('ipp203-102x152', [], None)
+    added = client.post('/labeldesigner/api/printers/add', json={'address': fake.address, 'name': 'Shipping'}).get_json()
+    assert added['printer'] == {'address': fake.address, 'model': 'Other/IPP-203', 'name': 'Shipping'}
+    shown = next(p for p in client.get('/labeldesigner/api/printer_status').get_json()['printers'] if p.get('added'))
+    assert (shown['name'], shown['model'], shown['device_name'], shown['media_width']) == ('Shipping', 'Other/IPP-203', 'Zebra ZD421', 102)
+    assert outcome(client, print_label(client, printer='Shipping')) == ('printed', '')
+    assert len(fake.jobs()) == 1

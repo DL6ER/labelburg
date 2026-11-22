@@ -1810,7 +1810,8 @@ def identify_printer():
         return _refused('Identifying a printer', e, adding.NOT_ASKED)
     state = found.pop('state')
     found.update(errors=state.get('errors') or [], status_type=state.get('status_type') or '',
-                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()))
+                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()),
+                 device_name=state.get('device_name') or '')
     return jsonify({'success': True, 'printer': found})
 
 
