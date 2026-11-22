@@ -531,3 +531,30 @@ def test_found_on_usb(tmp_path, monkeypatch, printer):
     assert [(p['path'], p['model']) for p in found] == [
         ('usb://0x0922:0x0022/01010112345', 'DYMO/LabelWriter-450-Twin-Turbo'), ('simulation', 'QL-800')]
     assert found[0]['tape']['id'] == 'dymo28x89' and found[0]['tape']['assumed']
+
+
+@pytest.mark.parametrize('side, roll', [(None, b'1'), ('left', b'1'), ('right', b'2')])
+def test_a_twin_turbo_prints_on_the_roll_chosen(printer, side, roll):
+    # ESC q with ASCII 1 for the left roll, 2 for the right one (p. 16)
+    queue = SimpleNamespace(device_specifier='/dev/usb/lp0', model='DYMO/LabelWriter-450-Twin-Turbo', label_size='dymo28x89', side=side)
+    job = dymo.DRIVER.render(queue, [{'label': _Label(1051, 331), 'cut': True}])
+    assert dymo.DRIVER.send(queue, job) == ''
+    assert printer.written[1] == (ESC * 85 + b'\x1b@\x1bq' + roll + b'\x1bh\x1be'
+                                  + b'\x1bD\x2a' + b'\x1bL\x04\x1b' + _rows(42, 331, 10, 1051) + b'\x1bE')
+
+
+def test_the_roll_set_for_a_twin_turbo_goes_to_its_jobs(tmp_path, printer):
+    device = 'file:///dev/usb/lp_dymo'
+    client = make_client(tmp_path, empty_repo=True, model='DYMO/LabelWriter-450-Twin-Turbo', printer=device)
+    job = {'label_size': 'dymo28x89', 'print_type': 'text', 'text': TEXT}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=job)) == ('printed', '')
+    assert client.post('/labeldesigner/api/settings', data={'side': 'right'}).get_json()['settings'] == {'side': 'right'}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=job)) == ('printed', '')
+    jobs = [data for data in printer.written if data != protocol.STATUS]
+    assert [data[85:90] for data in jobs] == [b'\x1b@\x1bq1', b'\x1b@\x1bq2']
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['settings'] == {'side': 'right'}
+
+
+def test_only_a_twin_turbo_has_two_rolls():
+    assert {model for model in drivers.MODELS if drivers.for_model(model).capabilities(model)['two_rolls']} == {
+        'DYMO/LabelWriter-450-Twin-Turbo'}

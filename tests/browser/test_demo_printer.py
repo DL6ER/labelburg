@@ -127,6 +127,32 @@ def test_a_dymo_labelwriter_offers_its_address_labels(designer):
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
+def test_a_twin_turbo_prints_on_the_roll_chosen(designer):
+    choice = '[data-card="0"] button[data-k="side"]'
+    open_settings(designer)
+    # A printer of one roll offers none
+    assert designer.query_selector(choice) is None
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'DYMO/LabelWriter-450-Twin-Turbo')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'DYMO/LabelWriter-450-Twin-Turbo'")
+    designer.wait_for_selector(choice)
+    assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == ['Left roll', 'Right roll']
+    # The left one until another is chosen
+    assert designer.inner_text(f'{choice}.on') == 'Left roll'
+    assert 'Which of the two rolls the labels are printed on.' in designer.inner_text('[data-card="0"]')
+    assert setting(designer, f'{choice}[data-v="right"]') == {
+        'printer': 'simulation', 'model': 'DYMO/LabelWriter-450-Twin-Turbo', 'side': 'right'}
+    assert designer.inner_text(f'{choice}.on') == 'Right roll'
+    # Kept on the server, another visit shows it
+    designer.reload()
+    open_settings(designer)
+    assert designer.inner_text(f'{choice}.on') == 'Right roll'
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'DYMO/LabelWriter-4XL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'DYMO/LabelWriter-4XL'")
+    assert designer.query_selector(choice) is None
+
+
 def test_a_model_the_server_refuses_is_taken_back(designer):
     open_settings(designer)
     designer.route('**/api/settings', lambda route: route.fulfill(status=400, json={'success': False, 'message': 'Not now'}))

@@ -155,7 +155,7 @@ class Dymo(Driver):
     def capabilities(self, model):
         # Torn off, their top leaves it first
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
-                    model_shown=self.shown_as.get(model, model).split('/')[-1])
+                    model_shown=self.shown_as.get(model, model).split('/')[-1], two_rolls=model == TWIN_TURBO)
 
     def status(self, device, model, unconfirmed=False):
         state = dict(network_status(device, model), media_type=diecut.MEDIA_TYPE, phase_type='Waiting to receive')
@@ -200,8 +200,12 @@ class Dymo(Driver):
                 problems = _problems(c, device, model)
                 if problems:
                     return problems[0]
-                # The SE450 takes no short form feed (SE450 reference, raster mode)
-                c.write(protocol.job([(rows, width) for rows, width, _ in job], HEAD_DOTS[model] // 8, short_feed=model != SE450))
+                # The SE450 takes no short form feed (SE450 reference, raster
+                # mode). A Twin Turbo prints on the left roll unless the
+                # right one is chosen, as CUPS and LPrint send it.
+                roll = (queue.side or 'left') if model == TWIN_TURBO else None
+                c.write(protocol.job([(rows, width) for rows, width, _ in job], HEAD_DOTS[model] // 8,
+                                     short_feed=model != SE450, roll=roll))
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)

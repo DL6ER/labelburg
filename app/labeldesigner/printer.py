@@ -134,6 +134,8 @@ class PrinterQueue:
         # How the printer finds the start of each label, one of
         # diecut.SENSINGS, None as it is set up
         self.sensing = None
+        # The roll of a printer of two, left or right, None for its first
+        self.side = None
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):

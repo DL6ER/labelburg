@@ -3486,6 +3486,11 @@
             "enum": ["gap", "mark", "endless"],
             "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL and TSPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as last told or as set up on the printer."
           },
+          "side": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "The roll a printer of two prints on, a DYMO LabelWriter 450 Twin Turbo; printers of one roll refuse it. Not set, the left one."
+          },
           "quality": {
             "type": "string",
             "enum": ["quality", "high", "fast"],

@@ -158,6 +158,12 @@ function sensingHTML(p) {
     return `<div class="set-stack">${seg('sensing', C.rolls, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
 }
 
+// The roll of a printer of two, the left one until another is chosen
+function sideHTML(p) {
+    return `<div class="set-stack">${seg('side', [['left', 'Left roll'], ['right', 'Right roll']], kept(p).side || 'left', 'Roll')}
+        <small class="muted">Which of the two rolls the labels are printed on.</small></div>`;
+}
+
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
     if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
@@ -191,6 +197,7 @@ function cardHTML(p, i) {
             ${isDemo(p) ? `<span class="k">Model</span>${modelHTML(p)}` : ''}
             <span class="k">Tape</span>${tapeHTML(p)}
             ${capsOf(p.model).sensing ? `<span class="k">Roll</span>${sensingHTML(p)}` : ''}
+            ${capsOf(p.model).two_rolls ? `<span class="k">Roll</span>${sideHTML(p)}` : ''}
             <span class="k">Quality</span>${qualityHTML(p)}
             <span class="k">Cutting</span>${cuttingHTML(p)}
             <span class="k">Leaves first</span><div class="set-stack">${seg('leaves_first', [['top', 'Top'], ['bottom', 'Bottom']], leavesFirst(printerCaps(p), p), 'Leaves the printer first')}
