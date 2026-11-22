@@ -14,6 +14,7 @@ added in the Settings are kept there too, see adding.py."""
 import json
 import re
 
+from .dates import LANGUAGES as DATE_LANGUAGES
 from .drivers import MODELS, devices, for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
 from .drivers.diecut import SENSINGS
@@ -297,10 +298,13 @@ def for_printing(kept: dict, model: str, values: dict) -> dict:
 
 
 # Of the labels, not of a printer
-LABEL_SETTINGS = ('date_format', 'collate', 'font_family')
+LABEL_SETTINGS = ('date_format', 'date_language', 'collate', 'font_family')
 # Those the label designer offers, e.g. 2026-11-01 or 01.11.2026
 DATE_FORMATS = ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%m/%d/%Y')
+_LANGUAGE_CODES = sorted(DATE_LANGUAGES)
 LABEL_SETTINGS_MESSAGE = ('label settings are date_format (%Y-%m-%d, %d.%m.%Y, %d/%m/%Y or %m/%d/%Y), '
+                          f'date_language ({", ".join(_LANGUAGE_CODES[:-1])} or {_LANGUAGE_CODES[-1]}, '
+                          'the language of the names of months and weekdays, English without one), '
                           'collate (0 or 1) and font_family (a font family of the server or of the font menu of the label designer), '
                           'an empty value removes one')
 
@@ -311,6 +315,8 @@ def _label_setting(name: str, value, families) -> bool:
         return False
     if name == 'date_format':
         return value in DATE_FORMATS
+    if name == 'date_language':
+        return value in DATE_LANGUAGES
     if name == 'collate':
         return value in ('0', '1')
     return value in families

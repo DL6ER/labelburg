@@ -745,6 +745,14 @@ def test_a_job_made_for_another_model_is_not_sent(unknown_epson):
         assert routes._printer(None, None)[1] == 'Epson/ESC-POS'
 
 
+@pytest.mark.parametrize('path, values', [('feed', {}), ('calibration/print', {'model': 'Niimbot/B1', 'label_size': 'niimbot40x30'})])
+def test_a_job_of_its_own_made_for_another_model_is_not_sent(unknown_epson, path, values):
+    client, tm = unknown_epson
+    answer = client.post(f'/labeldesigner/api/{path}', data=values)
+    assert (answer.status_code, outcome(client, answer)) == (200, ('failed', printer.WRONG_MODEL))
+    assert tm.received == b''
+
+
 def test_a_printer_that_never_told_its_model_is_asked_in_its_own_commands(unknown_epson):
     client, tm = unknown_epson
     shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
