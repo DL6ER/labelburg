@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import socket
+import struct
 import threading
 import time
 import types
@@ -17,7 +18,7 @@ from app.labeldesigner.drivers import base, devices, escpos, progress, transport
 from app.labeldesigner.drivers.escpos import protocol as escpos_protocol
 from app.labeldesigner.drivers.tspl import protocol as tspl_protocol
 from tests.helpers import make_client, outcome
-from tests.printing.test_bluetooth import Management, found
+from tests.printing.test_bluetooth import Management, event, found
 from tests.printing.test_escpos import QUIET, Usblp as EscposUsblp
 from tests.printing.test_transports import PRINTER_CLASS, class_of_device
 from tests.printing.test_tspl import FakeTspl, FakeUsblp
@@ -516,3 +517,52 @@ def test_last_answer_of_a_printer_that_got_a_job_is_kept_for_a_search(on_bluetoo
     assert tspl.DRIVER.status(DEVICE, 'TSC/TSPL')['errors'] == [] and len(fake.addresses) == 1
     devices.classic_search.clear()
     assert tspl.DRIVER.status(DEVICE, 'TSC/TSPL')['errors'] == ['No labels are in the printer'] and len(fake.addresses) == 2
+
+
+def unnamed(address, raw=b''):
+    """A Device Found event of classic Bluetooth without a name, the kernel
+    asking whether it is known (Confirm name)."""
+    params = bytes.fromhex(address.replace(':', ''))[::-1] + bytes([0]) + struct.pack('<bIH', -60, 1, len(raw)) + raw
+    return event(0x0012, 0, params)
+
+
+class NamesAsked(Management):
+    """A search in which a device of classic Bluetooth tells its name once
+    the kernel asked it for it, after Confirm Name with Name_Known 0."""
+
+    def __init__(self, devices_found, names):
+        super().__init__(devices_found)
+        self.names = names
+
+    def send(self, data):
+        op, index, _ = struct.unpack_from('<HHH', data)
+        if op != 0x0025:
+            return super().send(data)
+        self.sent.append((op, index, data[6:]))
+        address = ':'.join(f'{b:02X}' for b in data[11:5:-1])
+        # Before the search ends
+        if not data[13] and address in self.names:
+            self.incoming.insert(0, found(address, kind=0, name=self.names[address]))
+        self.incoming.insert(0, event(0x0001, index, struct.pack('<HB', op, 0) + data[6:13]))
+        return len(data)
+
+
+def test_classic_device_that_told_no_name_is_asked_for_it(monkeypatch):
+    other = '00:00:5E:00:53:22'
+    named = found(other, kind=0, name='Phone')
+    # As the kernel asks for each device it found on classic Bluetooth
+    named = named[:14] + struct.pack('<I', 1) + named[18:]
+    fake = NamesAsked([unnamed(MAC, class_of_device(PRINTER_CLASS)), named], {MAC: 'TM-P20_123456'})
+    monkeypatch.setattr(bluetooth, 'socket', Sockets(fake))
+    waits = []
+    monkeypatch.setattr(bluetooth, 'select', types.SimpleNamespace(
+        select=lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], [])))
+    nearby = {device['address']: device for device in bluetooth.discover(1, classic=True)}
+    assert nearby[MAC]['name'] == 'TM-P20_123456' and nearby[MAC]['device_class'] == PRINTER_CLASS
+    assert escpos.DRIVER.found_on_bluetooth(nearby[MAC]) == (DEVICE, 'Epson/ESC-POS')
+    # Name_Known 0 for the one without a name, 1 for the other one
+    address = bytes.fromhex(MAC.replace(':', ''))[::-1]
+    assert [params for op, _, params in fake.sent if op == 0x0025] == [
+        address + b'\x00\x00', bytes.fromhex(other.replace(':', ''))[::-1] + b'\x00\x01']
+    # Waited for the names the kernel asks for after its inquiry
+    assert waits[0] <= bluetooth.CLASSIC_SEARCH < max(waits) <= bluetooth.CLASSIC_SEARCH + bluetooth.NAME_WAIT

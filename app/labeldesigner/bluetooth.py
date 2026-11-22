@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # The management channel, for no controller in particular
 HCI_DEV_NONE = 0xffff
 HCI_CHANNEL_CONTROL = 3
-READ_INDEX_LIST, START_DISCOVERY, STOP_DISCOVERY = 0x0003, 0x0023, 0x0024
+READ_INDEX_LIST, START_DISCOVERY, STOP_DISCOVERY, CONFIRM_NAME = 0x0003, 0x0023, 0x0024, 0x0025
 COMMAND_COMPLETE, COMMAND_STATUS, DEVICE_FOUND, DISCOVERING = 0x0001, 0x0002, 0x0012, 0x0013
 # Public and random LE addresses, and classic Bluetooth (BR/EDR)
 LE, CLASSIC = 0x06, 0x01
@@ -25,6 +25,11 @@ CLASS_OF_DEVICE = 0x0d
 # Searching both, the kernel searches LE for 5.12 s, then classic Bluetooth
 # for as long
 CLASSIC_SEARCH = 11.0
+# The flag of a device found whose name the kernel asks user space to confirm,
+# see Confirm Name in BlueZ's doc/mgmt-protocol.rst: one without a name is then
+# asked for it after the inquiry, a page of up to 5.12 s the search waits for
+CONFIRM_NAME_FLAG = 0x01
+NAME_WAIT = 5.12
 
 
 def _command(op: int, index: int, params: bytes = b'') -> bytes:
@@ -68,6 +73,7 @@ def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
             sock.bind((HCI_DEV_NONE, HCI_CHANNEL_CONTROL))
             sock.send(_command(READ_INDEX_LIST, HCI_DEV_NONE))
             index, deadline = None, time.monotonic() + (max(timeout, CLASSIC_SEARCH) if classic else timeout)
+            waited_for_names = False
             try:
                 while (remaining := deadline - time.monotonic()) > 0:
                     if not select.select([sock], [], [], remaining)[0]:
@@ -105,6 +111,11 @@ def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
                             known['le'], known['classic'] = known['le'] or device['le'], known['classic'] or device['classic']
                             if known['device_class'] is None:
                                 known['device_class'] = device['device_class']
+                        # Expected for each one so flagged, else one that told no name keeps none
+                        if struct.unpack_from('<I', params, 8)[0] & CONFIRM_NAME_FLAG:
+                            sock.send(_command(CONFIRM_NAME, index, params[:7] + bytes([bool(known['name'])])))
+                            if not known['name'] and not waited_for_names:
+                                waited_for_names, deadline = True, deadline + NAME_WAIT
                     elif code == DISCOVERING and at == index and len(params) > 1 and not params[1]:
                         break
             finally:
