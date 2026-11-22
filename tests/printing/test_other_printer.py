@@ -821,3 +821,15 @@ def test_other_printer_at_an_address_not_on_ipp_is_refused(tmp_path, tried, addr
 
 def test_other_printer_as_the_model_of_the_demo_printer():
     assert drivers.resolve('simulation', 'Other/IPP') == (other.DRIVER, 'Other/IPP')
+
+
+@pytest.mark.parametrize('model, address, message', [
+    ('QL-800', 'ipp://127.0.0.1/ipp/print', devices.OTHER_PRINTER_ONLY), ('Other/IPP', 'tcp://127.0.0.1', ipp.NOT_ON_IPP),
+])
+@pytest.mark.parametrize('method', ['get', 'post'])
+def test_homebox_tells_why_its_printer_cannot_print(tmp_path, tried, model, address, message, method):
+    client = make_client(tmp_path)
+    client.application.config['PRINTERS'] = [(model, address, 'Labels')]
+    answer = getattr(client, method)('/labeldesigner/api/homebox')
+    assert (answer.status_code, answer.get_json()['message']) == (400, message)
+    assert tried == []
