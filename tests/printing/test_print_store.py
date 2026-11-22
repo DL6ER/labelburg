@@ -540,3 +540,49 @@ def test_a_label_printed_again_as_it_was_keeps_its_date_after_a_restart(server, 
     restart(tmp_path)
     assert ended(again).state == 'printed'
     assert {timestamp for _, _, timestamp, by_queue in calls if by_queue} == {int(print_store.entry(first)['started_at'])}
+
+
+def photo(width, height) -> tuple:
+    out = io.BytesIO()
+    Image.effect_noise((width, height), 40).convert('RGB').save(out, 'PNG')
+    return io.BytesIO(out.getvalue()), 'photo.png'
+
+
+@pytest.mark.parametrize('fit, kept', [('1', None), ('0', (3000, 1500))])
+def test_a_photo_is_kept_no_larger_than_the_label_shows_it(server, monkeypatch, fit, kept):
+    print_queue.stop()
+    upload = dict(LABEL, print_type='image', image_fit=fit, image=photo(3000, 1500))
+    job = server.post(f'{API}/print', data=upload, content_type='multipart/form-data').get_json()['job']
+    with Image.open(os.path.join(repo(server), print_store.QUEUE, f'{job}-0.png')) as image:
+        size = image.size
+    # Its shorter side as long as the longest side of the label at 600 dpi
+    longest = max(routes._canvas('62', True, routes.LabelOrientation.STANDARD))
+    assert size == (kept or (2 * longest, longest))
+
+
+def test_the_images_are_written_while_the_label_is_drawn(server, monkeypatch):
+    order, stage, check = [], print_store.stage, printer.PrinterQueue.check
+    monkeypatch.setattr(print_store, 'stage', lambda *args: (order.append('stage'), stage(*args))[1])
+    monkeypatch.setattr(printer.PrinterQueue, 'check', lambda queue: (order.append('check'), check(queue))[1])
+    upload = dict(LABEL, print_type='image', image=photo(400, 200))
+    assert server.post(f'{API}/print', data=upload, content_type='multipart/form-data').status_code == 200
+    assert order == ['stage', 'check']
+
+
+def test_images_written_for_a_job_that_is_refused_go(server):
+    upload = dict(LABEL, print_type='image_qrcode_text', barcode_type='EAN13', code_text='123', image=photo(400, 200))
+    response = server.post(f'{API}/print', data=upload, content_type='multipart/form-data')
+    assert response.status_code == 400
+    assert files(os.path.join(repo(server), print_store.QUEUE)) == []
+
+
+def test_a_job_refused_before_its_images_are_read_is_told(server):
+    upload = dict(LABEL, print_type='image', pdf_pages='9', image=(io.BytesIO(routes_pdf()), 'two.pdf'))
+    response = server.post(f'{API}/print', data=upload, content_type='multipart/form-data')
+    assert (response.status_code, response.get_json()['message']) == (400, 'The PDF has no such page')
+
+
+def routes_pdf() -> bytes:
+    out = io.BytesIO()
+    Image.new('L', (100, 50), 0).save(out, 'PDF')
+    return out.getvalue()

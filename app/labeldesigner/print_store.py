@@ -7,6 +7,7 @@ One process of the server keeps the queue on disk, the first one to lock it;
 another one, e.g. a second worker of gunicorn, keeps its queue in memory.
 Every process adds the jobs it ended to the history."""
 
+import concurrent.futures
 import contextlib
 import io
 import json
@@ -63,6 +64,8 @@ MAX_LIMIT = 200
 LIMIT_REFUSED = f'limit must be a whole number from 1 to {MAX_LIMIT}'
 
 _lock = threading.Lock()
+# Writes the images of jobs while their requests draw their labels
+_writer = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='print-store')
 # The folder opened, None while the store is closed
 _base = None
 # The lock of the queue while this process keeps it on disk
@@ -173,28 +176,59 @@ def preview_name(job_id: str) -> str:
 
 # --- The queue -----------------------------------------------------------------------
 
-def queued(record: dict, images: list, preview: bytes | None) -> bool:
-    """Keep a job before it is accepted: its images, its preview, then its
-    record. Whether it is on disk; a job that is not prints from memory."""
-    global _warned
-    if _queue_fd is None:
-        return False
-    job_id, written = record['id'], []
+def stage(job_id: str, images: list) -> concurrent.futures.Future | None:
+    """Start to write the images of a job before it is queued, e.g. while its
+    request draws its label, see queued(). None where nothing is written."""
+    if _queue_fd is None or not images:
+        return None
+    return _writer.submit(_write_images, job_id, list(images))
+
+
+def _write_images(job_id: str, images: list) -> list[str]:
+    """The files of the images written, none where one cannot be."""
+    written = []
     try:
         if shutil.disk_usage(_queue_path('')).free < MIN_FREE_BYTES:
             raise OSError('less than 50 MB free')
         for number, image in enumerate(images):
             written.append(_queue_path(image_name(job_id, number)))
             _write(written[-1], png(image))
+    except BaseException:
+        _remove(written)
+        raise
+    return written
+
+
+def _remove(paths: list[str]):
+    for path in paths:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+
+
+def discard(job_id: str, staged: concurrent.futures.Future | None):
+    """The images stage() wrote for a job that is not queued."""
+    if staged is not None:
+        with contextlib.suppress(Exception):
+            _remove(staged.result())
+
+
+def queued(record: dict, images: list, preview: bytes | None, staged: concurrent.futures.Future | None = None) -> bool:
+    """Keep a job before it is accepted: its images, written by stage() where
+    it started them, its preview, then its record. Whether it is on disk; a
+    job that is not prints from memory."""
+    global _warned
+    if _queue_fd is None:
+        return False
+    job_id, written = record['id'], []
+    try:
+        written = staged.result() if staged is not None else _write_images(job_id, images)
         if preview is not None:
             written.append(_queue_path(preview_name(job_id)))
             _write(written[-1], preview)
         _write(_queue_path(f'{job_id}.json'), json.dumps(record, ensure_ascii=False, default=str).encode('utf-8'))
         return True
     except (OSError, ValueError) as e:
-        for path in written:
-            with contextlib.suppress(OSError):
-                os.remove(path)
+        _remove(written)
         if not _warned:
             _warned = True
             logger.warning('A print job is kept in memory only, it would be lost on a restart: %s', e)

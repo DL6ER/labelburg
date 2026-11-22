@@ -947,12 +947,13 @@ TOLD_SOURCES = ('designer', 'mcp')
 
 
 def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, recipe: dict, images: list = (),
-            drawn: Drawn | None = None, return_format=None, extra: dict | None = None):
+            drawn: Drawn | None = None, return_format=None, extra: dict | None = None, job_id: str | None = None, staged=None):
     """Add the job run() prints to the line of the printer and answer that it
     waits there. drawn is its first label as printer.check() drew it: the
     queue shows it, return_format png returns it as base64 (image) as the
     printer gets it. recipe and images make it again, see _rebuilt(): it is
-    kept on disk before it is accepted."""
+    kept on disk before it is accepted, its images written by staged where
+    print_store.stage() started them for job_id."""
     preview = image = None
     if drawn is not None:
         gray = not drawn.label.in_color
@@ -961,10 +962,10 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
         preview = image_to_png_bytes(small, gray=gray)
         if return_format == 'png':
             image = base64.b64encode(image_to_png_bytes(drawn.image, gray=gray)).decode()
-    record = {'v': print_store.VERSION, 'id': uuid.uuid4().hex, 'queued_at': time.time(), 'source': source, 'title': title,
+    record = {'v': print_store.VERSION, 'id': job_id or uuid.uuid4().hex, 'queued_at': time.time(), 'source': source, 'title': title,
               'labels': labels, 'state': 'waiting', 'printer': _printer_record(printer),
               'printer_name': _printer_name(printer.device_specifier, printer.model), 'images': len(images), **recipe}
-    on_disk = print_store.queued(record, images, preview)
+    on_disk = print_store.queued(record, images, preview, staged)
     try:
         job = print_queue.add(printer.device_specifier, _as_in_this_request(run), title=title, labels=labels, source=source,
                               preview=preview, size=print_queue.image_bytes(printer.images()),
@@ -1347,24 +1348,45 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     # Refused before archive serial numbers are taken for it
     if full := print_queue.full(printer.device_specifier):
         return _line_full(printer, full)
+    job_id, staged = uuid.uuid4().hex, None
     try:
         # Decode the image once, all labels of the job share it. Of a PDF
         # each selected page is a label of its own.
         images, _ = load_label_images(data, files, copies=print_count, **stored)
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
-        images = [image for image in images if image is not None]
+        images = [_kept_size(image, data) for image in images if image is not None]
         order = _copies(list(range(len(images))) or [None], print_count, collate)
+        # Written while the label is drawn
+        staged = print_store.stage(job_id, images)
         # Taken before printing: labels of a job that fails may have come out
         asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(order)) if paperless.uses_asn(data) else None
         _queue_labels(printer, data, images, order, high_res, fast, [asn])
         drawn = printer.check()
     except Exception as e:
+        print_store.discard(job_id, staged)
         return _refused('Print job', e, refusals.PRINT_FAILED)
     return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
                    recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast,
                            'copies': print_count, 'collate': collate},
-                   images=images, drawn=drawn, return_format=return_format)
+                   images=images, drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
+
+
+def _kept_size(image: Image.Image, data: dict) -> Image.Image:
+    """An image fitted to the label as small as the label can show it, also
+    at 600 dpi, turned, cropped or on a label of a set length: its shorter
+    side as long as the longest side of the label. One scaled by hand keeps
+    its size, its pixels set it."""
+    label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
+    size = label_of(label_size)
+    if size is None or _whole_or(data.get('image_fit'), 1) <= 0:
+        return image
+    length = _printed_length(_label_length(data.get('label_length')), size, _cable_flag(data, size.form_factor), True)
+    longest = max(*_canvas(label_size, True, LabelOrientation.STANDARD), length or 0)
+    if min(image.size) <= longest:
+        return image
+    scale = longest / min(image.size)
+    return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
 
 
 # --- Demo labels --------------------------------------------------------------------------
