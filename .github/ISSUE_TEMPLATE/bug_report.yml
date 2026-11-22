@@ -6,7 +6,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Shown under "Label Designer" in the navbar, e.g. "v1.0, 2026-10-30 15:40 UTC" or a commit.
+      description: Shown in the Settings under About, e.g. "v8.0.0, commit 42ef2db". "Report a problem" there fills it in.
     validations:
       required: true
   - type: input
@@ -17,7 +17,7 @@ body:
     validations:
       required: true
   - type: input
-    id: labels
+    id: label_size
     attributes:
       label: Labels
       description: The label size chosen in the label designer and the labels in the printer, e.g. "103 x 164 mm die-cut (DK-11247)".

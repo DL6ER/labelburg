@@ -357,6 +357,7 @@ input.anum::placeholder { color: var(--select); opacity: 1; font-weight: 600; }
 .sw { width: 15px; height: 15px; border-radius: 50%; display: inline-block; flex: none; }
 .sw.red { background: var(--label-red); }
 .line-menu { width: 280px; }
+.line-menu [data-lsv] { min-width: 54px; }
 /* The font menu: families in their own fonts, weight and width below */
 .font-menu { position: fixed; z-index: 30; width: 320px; max-height: 560px; display: flex; flex-direction: column; gap: 6px; padding: 8px; overflow: auto; overscroll-behavior: contain; }
 .fm-search { display: flex; align-items: center; gap: 8px; flex: none; padding: 0 10px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }

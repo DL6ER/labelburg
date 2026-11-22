@@ -162,7 +162,7 @@ def create_app(config_class=Config) -> Flask:
 
     app.extensions['fonts'] = init_fonts(app)
 
-    build = get_build_info()
+    build = app.extensions['build'] = get_build_info()
 
     @app.context_processor
     def inject_build_info():

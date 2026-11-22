@@ -3,6 +3,7 @@ import os
 import re
 
 from app import create_app
+from app.labeldesigner import dates
 
 SPEC = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'app', 'labeldesigner', 'openapi.json')
 
@@ -99,6 +100,12 @@ def test_a_busy_printer_names_both_reasons_of_the_refusal():
     # The line is full, or the waiting jobs hold too many large images
     spec = json.load(open(SPEC))
     for path in ('/labeldesigner/api/print', '/labeldesigner/api/repository/print', '/labeldesigner/api/demos/print',
-                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print'):
+                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print',
+                 '/labeldesigner/api/feed'):
         description = spec['paths'][path]['post']['responses']['503']['description']
         assert 'line of the printer is full' in description and 'large images' in description, path
+
+
+def test_the_languages_of_dates_are_documented():
+    spec = json.load(open(SPEC))
+    assert spec['components']['schemas']['LabelSettings']['properties']['date_language']['enum'] == ['', *sorted(dates.LANGUAGES)]

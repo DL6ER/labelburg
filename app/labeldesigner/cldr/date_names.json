@@ -1,0 +1,206 @@
+{
+  "cs": {
+    "name": "Čeština",
+    "months": {
+      "format": {
+        "wide": ["ledna", "února", "března", "dubna", "května", "června", "července", "srpna", "září", "října", "listopadu", "prosince"],
+        "abbreviated": ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"]
+      },
+      "stand-alone": {
+        "wide": ["leden", "únor", "březen", "duben", "květen", "červen", "červenec", "srpen", "září", "říjen", "listopad", "prosinec"],
+        "abbreviated": ["led", "úno", "bře", "dub", "kvě", "čvn", "čvc", "srp", "zář", "říj", "lis", "pro"]
+      }
+    },
+    "days": {
+      "wide": ["pondělí", "úterý", "středa", "čtvrtek", "pátek", "sobota", "neděle"],
+      "abbreviated": ["po", "út", "st", "čt", "pá", "so", "ne"]
+    }
+  },
+  "da": {
+    "name": "Dansk",
+    "months": {
+      "format": {
+        "wide": ["januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan.", "feb.", "mar.", "apr.", "maj", "jun.", "jul.", "aug.", "sep.", "okt.", "nov.", "dec."]
+      },
+      "stand-alone": {
+        "wide": ["januar", "februar", "marts", "april", "maj", "juni", "juli", "august", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan.", "feb.", "mar.", "apr.", "maj", "jun.", "jul.", "aug.", "sep.", "okt.", "nov.", "dec."]
+      }
+    },
+    "days": {
+      "wide": ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"],
+      "abbreviated": ["man.", "tirs.", "ons.", "tors.", "fre.", "lør.", "søn."]
+    }
+  },
+  "de": {
+    "name": "Deutsch",
+    "months": {
+      "format": {
+        "wide": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
+        "abbreviated": ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sept.", "Okt.", "Nov.", "Dez."]
+      },
+      "stand-alone": {
+        "wide": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
+        "abbreviated": ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"]
+      }
+    },
+    "days": {
+      "wide": ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"],
+      "abbreviated": ["Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So."]
+    }
+  },
+  "es": {
+    "name": "Español",
+    "months": {
+      "format": {
+        "wide": ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
+        "abbreviated": ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"]
+      },
+      "stand-alone": {
+        "wide": ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"],
+        "abbreviated": ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sept", "oct", "nov", "dic"]
+      }
+    },
+    "days": {
+      "wide": ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"],
+      "abbreviated": ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
+    }
+  },
+  "fr": {
+    "name": "Français",
+    "months": {
+      "format": {
+        "wide": ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
+        "abbreviated": ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+      },
+      "stand-alone": {
+        "wide": ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"],
+        "abbreviated": ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+      }
+    },
+    "days": {
+      "wide": ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
+      "abbreviated": ["lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim."]
+    }
+  },
+  "it": {
+    "name": "Italiano",
+    "months": {
+      "format": {
+        "wide": ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
+        "abbreviated": ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"]
+      },
+      "stand-alone": {
+        "wide": ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
+        "abbreviated": ["gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"]
+      }
+    },
+    "days": {
+      "wide": ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"],
+      "abbreviated": ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
+    }
+  },
+  "nl": {
+    "name": "Nederlands",
+    "months": {
+      "format": {
+        "wide": ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"]
+      },
+      "stand-alone": {
+        "wide": ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"]
+      }
+    },
+    "days": {
+      "wide": ["maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"],
+      "abbreviated": ["ma", "di", "wo", "do", "vr", "za", "zo"]
+    }
+  },
+  "nb": {
+    "name": "Norsk bokmål",
+    "months": {
+      "format": {
+        "wide": ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"],
+        "abbreviated": ["jan.", "feb.", "mars", "apr.", "mai", "juni", "juli", "aug.", "sep.", "okt.", "nov.", "des."]
+      },
+      "stand-alone": {
+        "wide": ["januar", "februar", "mars", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "desember"],
+        "abbreviated": ["jan", "feb", "mar", "apr", "mai", "jun", "jul", "aug", "sep", "okt", "nov", "des"]
+      }
+    },
+    "days": {
+      "wide": ["mandag", "tirsdag", "onsdag", "torsdag", "fredag", "lørdag", "søndag"],
+      "abbreviated": ["man.", "tir.", "ons.", "tor.", "fre.", "lør.", "søn."]
+    }
+  },
+  "pl": {
+    "name": "Polski",
+    "months": {
+      "format": {
+        "wide": ["stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"],
+        "abbreviated": ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+      },
+      "stand-alone": {
+        "wide": ["styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"],
+        "abbreviated": ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"]
+      }
+    },
+    "days": {
+      "wide": ["poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota", "niedziela"],
+      "abbreviated": ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."]
+    }
+  },
+  "pt": {
+    "name": "Português",
+    "months": {
+      "format": {
+        "wide": ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"],
+        "abbreviated": ["jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.", "dez."]
+      },
+      "stand-alone": {
+        "wide": ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"],
+        "abbreviated": ["jan.", "fev.", "mar.", "abr.", "mai.", "jun.", "jul.", "ago.", "set.", "out.", "nov.", "dez."]
+      }
+    },
+    "days": {
+      "wide": ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"],
+      "abbreviated": ["seg.", "ter.", "qua.", "qui.", "sex.", "sáb.", "dom."]
+    }
+  },
+  "fi": {
+    "name": "Suomi",
+    "months": {
+      "format": {
+        "wide": ["tammikuuta", "helmikuuta", "maaliskuuta", "huhtikuuta", "toukokuuta", "kesäkuuta", "heinäkuuta", "elokuuta", "syyskuuta", "lokakuuta", "marraskuuta", "joulukuuta"],
+        "abbreviated": ["tammi", "helmi", "maalis", "huhti", "touko", "kesä", "heinä", "elo", "syys", "loka", "marras", "joulu"]
+      },
+      "stand-alone": {
+        "wide": ["tammikuu", "helmikuu", "maaliskuu", "huhtikuu", "toukokuu", "kesäkuu", "heinäkuu", "elokuu", "syyskuu", "lokakuu", "marraskuu", "joulukuu"],
+        "abbreviated": ["tammi", "helmi", "maalis", "huhti", "touko", "kesä", "heinä", "elo", "syys", "loka", "marras", "joulu"]
+      }
+    },
+    "days": {
+      "wide": ["maanantai", "tiistai", "keskiviikko", "torstai", "perjantai", "lauantai", "sunnuntai"],
+      "abbreviated": ["ma", "ti", "ke", "to", "pe", "la", "su"]
+    }
+  },
+  "sv": {
+    "name": "Svenska",
+    "months": {
+      "format": {
+        "wide": ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan.", "feb.", "mars", "apr.", "maj", "juni", "juli", "aug.", "sep.", "okt.", "nov.", "dec."]
+      },
+      "stand-alone": {
+        "wide": ["januari", "februari", "mars", "april", "maj", "juni", "juli", "augusti", "september", "oktober", "november", "december"],
+        "abbreviated": ["jan.", "feb.", "mars", "apr.", "maj", "juni", "juli", "aug.", "sep.", "okt.", "nov.", "dec."]
+      }
+    },
+    "days": {
+      "wide": ["måndag", "tisdag", "onsdag", "torsdag", "fredag", "lördag", "söndag"],
+      "abbreviated": ["mån", "tis", "ons", "tors", "fre", "lör", "sön"]
+    }
+  }
+}

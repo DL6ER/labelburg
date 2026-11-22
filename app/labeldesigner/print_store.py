@@ -37,7 +37,7 @@ LOCK_FILE = '.lock'
 BROKEN = 'broken'
 BROKEN_DAYS = 7
 VERSION = 1
-KINDS = ('request', 'image', 'calibration')
+KINDS = ('request', 'image', 'calibration', 'feed')
 # The history keeps the entries of the last year, at most this many. The
 # file is cut back once it has half as many again.
 HISTORY_KEEP = 1000
@@ -380,7 +380,7 @@ def ended(record: dict, state: str, message: str, keep: bool, images: list | Non
     if _base is None:
         return
     try:
-        if keep and record.get('kind') != 'calibration':
+        if keep and record.get('kind') not in ('calibration', 'feed'):
             _keep(record, state, message, images, preview)
     except OSError as e:
         logger.warning('Printed label %s was not kept: %s', record['id'], e)

@@ -1,8 +1,9 @@
 """The settings of labels kept on the server for every browser: how dates
-are written, the order of copies of several files and the font of new
-labels."""
+are written and the language of their names, the order of copies of
+several files and the font of new labels."""
 
 import base64
+import datetime
 import io
 import json
 import os
@@ -11,13 +12,13 @@ import re
 import pytest
 from PIL import Image
 
-from app.labeldesigner import printer_settings, refusals
+from app.labeldesigner import dates, printer_settings, refusals
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client, outcome
+from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client, outcome, pixels
 
 URL = '/labeldesigner/api/settings/labels'
-NONE_SET = {'date_format': '', 'collate': '', 'font_family': '', 'history': ''}
+NONE_SET = {'date_format': '', 'date_language': '', 'collate': '', 'font_family': '', 'history': ''}
 
 
 def test_label_settings_are_kept_for_every_browser(tmp_path):
@@ -55,12 +56,13 @@ def test_label_settings_are_kept_with_the_printer_settings(tmp_path, monkeypatch
 def test_label_settings_are_checked(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
     for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'}, {'history': 'off'},
+                  {'date_language': 'xx'}, {'date_language': 'en'}, {'date_language': 'DE'}, {'date_language': 'de_DE'},
                   {'font_family': 'No Such Font'}, {'font_family': 'DejaVu Sans,Book'}, {'quality': 'fast'},
                   {'date_format': '%d.%m.%Y', 'colour': 'red'}, {}):
         r = client.post(URL, data=wrong)
         assert r.status_code == 400, wrong
         assert r.get_json() == {'success': False, 'message': printer_settings.LABEL_SETTINGS_MESSAGE}
-    for wrong in ({'collate': [0]}, {'date_format': {'x': 1}}, {'font_family': None}):
+    for wrong in ({'collate': [0]}, {'date_format': {'x': 1}}, {'font_family': None}, {'date_language': ['de']}):
         assert client.post(URL, json=wrong).status_code == 400, wrong
     assert client.get(URL).get_json() == NONE_SET
     assert not (tmp_path / 'label_repo' / printer_settings.FILE).exists()
@@ -77,7 +79,7 @@ def test_label_settings_written_by_hand_that_are_wrong_are_not_set(tmp_path):
     # The file may be edited by hand, a font may be gone since
     client = make_client(tmp_path, empty_repo=True)
     path = tmp_path / 'label_repo' / printer_settings.FILE
-    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'collate': 0, 'font_family': 'Gone Sans', 'history': False}}))
+    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'date_language': 'xx', 'collate': 0, 'font_family': 'Gone Sans', 'history': False}}))
     assert client.get(URL).get_json() == NONE_SET
     path.write_text(json.dumps({'printers': {}, 'labels': ['collate', '0']}))
     assert client.get(URL).get_json() == NONE_SET
@@ -253,3 +255,60 @@ def test_saved_labels_write_their_date_blanks_as_set(tmp_path, monkeypatch):
     assert outcome(client, r) == ('printed', '')
     queued[0].process_templates()
     assert queued[0].text[0]['text'] == 'Filled 03.11.2026'
+
+
+def test_the_language_of_dates_is_kept(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    for language in dates.LANGUAGES:
+        assert client.post(URL, data={'date_language': language}).get_json()['settings'] == {**NONE_SET, 'date_language': language}
+    assert client.post(URL, json={'date_language': 'de'}).get_json()['settings'] == {**NONE_SET, 'date_language': 'de'}
+    assert make_client(tmp_path, empty_repo=True).get(URL).get_json() == {**NONE_SET, 'date_language': 'de'}
+    # Empty is English
+    assert client.post(URL, data={'date_language': ''}).get_json()['settings'] == NONE_SET
+    # The refusal names them
+    assert 'date_language (cs, da, de, es, fi, fr, it, nb, nl, pl, pt or sv' in printer_settings.LABEL_SETTINGS_MESSAGE
+
+
+def test_the_page_is_given_the_languages_of_dates(tmp_path):
+    html = make_client(tmp_path, empty_repo=True).get('/labeldesigner/').get_data(as_text=True)
+    config = json.loads(re.search(r'DESIGNER_CONFIG = (\{.*\});</script>', html).group(1))
+    # Each in itself, English the empty one and first
+    assert config['date_languages'] == [['', 'English'], ['cs', 'Čeština'], ['da', 'Dansk'], ['de', 'Deutsch'], ['es', 'Español'],
+                                        ['fr', 'Français'], ['it', 'Italiano'], ['nl', 'Nederlands'], ['nb', 'Norsk bokmål'],
+                                        ['pl', 'Polski'], ['pt', 'Português'], ['fi', 'Suomi'], ['sv', 'Svenska']]
+    assert config['datetime_codes']['languages']['fr'] == {'%a': 'sam.', '%A': 'samedi', '%b': 'mars', '%B': 'mars'}
+
+
+def test_requests_name_months_and_weekdays_in_the_language_of_dates(tmp_path, monkeypatch):
+    # Without the label designer: previews and prints of the API, saved
+    # labels printed by name, e.g. by Grocy or the MCP tools
+    made = _made(monkeypatch)
+    client = make_client(tmp_path, empty_repo=True)
+    when = str(int(datetime.datetime(2026, 3, 7, 14, 5).timestamp()))
+    text = json.dumps([{'text': '{{datetime:%A, %-d. %B %Y}}', 'size': '40'}])
+    assert client.post('/labeldesigner/api/preview', data={'text': text, 'timestamp': when}).status_code == 200
+    assert made[-1].text[0]['text'] == 'Saturday, 7. March 2026'
+    client.post(URL, data={'date_language': 'de'})
+    assert client.post('/labeldesigner/api/preview', data={'text': text, 'timestamp': when}).status_code == 200
+    assert made[-1].text[0]['text'] == 'Samstag, 7. März 2026'
+    r = client.post('/labeldesigner/api/print', data={'text': text, 'timestamp': when, 'printer': 'simulation'})
+    assert outcome(client, r) == ('printed', '')
+    assert made[-1].text[0]['text'] == 'Samstag, 7. März 2026'
+    label = {'name': 'Jar', 'label_size': '62', 'text': [{'size': '40', 'text': 'Filled {{blank:Filled on}}'}],
+             'fields': {'Filled on': {'type': 'date', 'format': '%a %-d. %b'}}}
+    assert client.post('/labeldesigner/api/repository/save', json=label).status_code == 200
+    r = client.post('/labeldesigner/api/repository/print', json={'name': 'Jar.json', 'printer': 'simulation', 'blanks': {'Filled on': '2026-11-22'}})
+    assert outcome(client, r) == ('printed', '')
+    assert made[-1].text[0]['text'] == 'Filled So. 22. Nov.'
+
+
+def test_the_name_of_the_month_is_drawn_in_the_language_of_dates(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    client.post(URL, data={'date_language': 'de'})
+
+    def drawn(text, **more):
+        r = client.post('/labeldesigner/api/preview', data={
+            **EXAMPLE_FORMDATA, 'text': json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': text}]), **more})
+        assert r.status_code == 200
+        return pixels(r.data)
+    assert drawn('{{datetime:%-d. %B %Y}}', timestamp=str(int(datetime.datetime(2026, 3, 7, 12).timestamp()))) == drawn('7. März 2026')

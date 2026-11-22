@@ -51,7 +51,8 @@ THREADS_INHERIT_CONTEXT = bool(getattr(sys.flags, 'thread_inherit_context', 0))
 
 # Where a job comes from in plain words, and how it was sent for a hover text
 SOURCES = {'designer': ('', ''), 'api': ('another program', 'Sent over the API'), 'homebox': ('Homebox', ''),
-           'webhook': ('another program', 'Sent over the webhook'), 'mcp': ('an AI assistant', 'Sent over MCP'), 'calibration': ('', '')}
+           'webhook': ('another program', 'Sent over the webhook'), 'mcp': ('an AI assistant', 'Sent over MCP'), 'calibration': ('', ''),
+           'feed': ('', '')}
 
 
 class Full(Exception):
