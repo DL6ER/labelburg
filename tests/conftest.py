@@ -5,10 +5,25 @@ import socket
 
 import pytest
 
-from app.labeldesigner import print_queue, printer, printer_settings
+from app.labeldesigner import print_queue, print_store, printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
+
+
+@pytest.fixture(scope='session', autouse=True)
+def no_print_store():
+    """Print jobs and printed labels are kept on disk only where a test opens
+    the store, never in the labels of the working tree."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(print_store, 'ENABLED', False)
+        yield
+
+
+@pytest.fixture(autouse=True)
+def print_store_elsewhere(tmp_path, monkeypatch):
+    # Also where a test switches it on without a folder of its own
+    monkeypatch.setattr(print_store, 'FOLDER', str(tmp_path / 'print-store'))
 
 
 @pytest.fixture(autouse=True)
