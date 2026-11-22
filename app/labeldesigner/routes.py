@@ -1401,7 +1401,7 @@ def _tape_colors(values: dict) -> tuple[str, str] | None:
     last answer of its printer tells them, where the label is on that tape.
     The printer is not asked, not even for its model: the label designer
     follows it anyway."""
-    printers, configured, _ = _known_printers()
+    printers, configured, configured_model = _known_printers()
     try:
         device = _named_device(values.get('printer') or configured, printers, configured)
     except ValueError:
@@ -1411,7 +1411,7 @@ def _tape_colors(values: dict) -> tuple[str, str] | None:
     shown = tuple((colors.get(part) or {}).get('hex') for part in ('tape', 'ink'))
     if not all(shown):
         return None
-    model = drivers.canonical(values['model']) if values.get('model') else state.get('model')
+    model = drivers.canonical(values['model']) if values.get('model') else _known_model(device, printers, configured, configured_model)
     loaded = tape.in_printer(state, model, '', current_app.config['LABEL_DEFAULT_SIZE'])
     return shown if loaded.known and tape.fits(values.get('label_size', DEFAULT_LABEL_SIZE), loaded) else None
 
@@ -1432,7 +1432,7 @@ def _length_problem(values: dict, im, model: str | None = None) -> str:
     is the one _resolved_printer() found where the request was resolved."""
     if model is None:
         try:
-            _, model = _printer(values.get('printer') or '', values.get('model'))
+            _, model = _printer(values.get('printer') or '', values.get('model'), quiet=True)
         except ValueError:
             return ''
     label_size = values.get('label_size', DEFAULT_LABEL_SIZE)
@@ -2180,14 +2180,15 @@ def _stop_checking(error=None):
         reach.stop(token)
 
 
-def _printer(requested_device, requested_model, ask: bool = False, shown: bool = False) -> tuple[str, str]:
+def _printer(requested_device, requested_model, ask: bool = False, shown: bool = False, quiet: bool = False) -> tuple[str, str]:
     """Return the device and model selected by a request, or the configured
     ones. With PRINTERS, the model of a listed device is the configured one,
     and a request may name the printer instead of its device. With ask, a
-    printer requested as model Unknown is asked for its model. A printer on
-    the network that is neither configured, added nor found by the search,
-    nor shown, one the status of the printers lists, is checked by
-    ADD_PRINTERS."""
+    printer requested as model Unknown is asked for its model. With quiet,
+    one requested without a model is not asked for it where _known_model()
+    tells it, e.g. for a preview. A printer on the network that is neither
+    configured, added nor found by the search, nor shown, one the status of
+    the printers lists, is checked by ADD_PRINTERS."""
     printers, configured, model = _known_printers()
     device = _named_device(requested_device or configured, printers, configured)
     listed = [d for _, d, _ in printers]
@@ -2196,17 +2197,30 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
         _check_named(device)
     if requested_model:
         model = drivers.canonical(requested_model)
+    elif is_simulation(device):
+        model = _demo_model(_kept_settings())
+    elif quiet and (known := _known_model(device, printers, configured, model)):
+        model = known
     else:
         # The model a printer tells, e.g. in its device ID, else the configured one
         model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
-        if is_simulation(device):
-            model = _demo_model(_kept_settings())
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
     if model not in MODELS:
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
+
+
+def _known_model(device: str, printers: list, configured: str, configured_model: str) -> str | None:
+    """The model of a printer without asking it: the one PRINTERS or the
+    Settings list it with, else the one its last status told, else
+    PRINTER_MODEL for the configured printer, as the status of the printers
+    names them. None where none of them tells one. printers, configured and
+    its model as _known_printers() tells them."""
+    listed = next((m for m, d, _ in printers if d == device), None)
+    told = devices.status_cache.get(devices.lock_key(device), {}).get('model')
+    return next((m for m in (listed, told, configured_model if device == configured else None) if m in MODELS), None)
 
 
 def _known_printers() -> tuple[list, str, str]:
