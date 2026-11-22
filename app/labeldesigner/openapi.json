@@ -1067,7 +1067,7 @@
     "/labeldesigner/api/problem_report": {
       "get": {
         "summary": "Details for a problem report",
-        "description": "The version and each listed printer with its model, kind of connection (USB, network, Bluetooth, USB on another device or demo printer), firmware where its status reports it and labels, in plain words, and the bug form on GitHub with them filled in. The demo printer is left out next to other printers unless it is configured. Nothing is sent anywhere: the label designer opens `url` in a new tab only when the user clicks \"Report a problem\". Addresses, host names, serial numbers, the names of printers, files and label texts are never included.",
+        "description": "The version and each listed printer with its model, kind of connection (USB, network, Bluetooth, USB on another device or demo printer), whether it answered and its labels, in plain words, and the bug form on GitHub with them filled in. The demo printer is left out next to other printers unless it is configured. Nothing is sent anywhere: the label designer opens `url` in a new tab only when the user clicks \"Report a problem\". Addresses, host names, serial numbers, the names of printers, files and label texts are never included.",
         "operationId": "problemReport",
         "responses": {
           "200": {

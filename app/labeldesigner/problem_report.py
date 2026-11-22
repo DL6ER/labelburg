@@ -6,7 +6,7 @@ numbers, the names printers were given, files or label texts."""
 import re
 from urllib.parse import quote, urlencode
 
-from .drivers import MODELS, usbip
+from .drivers import MODELS, devices, for_model, usbip
 from .label_names import SIZES, label_name
 from .printer import is_simulation
 
@@ -17,7 +17,6 @@ FIELDS = (('version', 'Version'), ('printer', 'Printer'), ('label_size', 'Labels
 # Characters of a field, further printers are counted: the address stays far
 # below GitHub's limit even with every character written as %XX
 LONGEST = 700
-FIRMWARE = re.compile(r'[0-9A-Za-z][0-9A-Za-z._-]{0,31}')
 # What a printer reports where no label size matches, see tape.Tape.unknown
 UNKNOWN_TAPE = re.compile(r'[0-9.]+( x [0-9.]+)? mm( long)?')
 
@@ -48,12 +47,14 @@ def _connection(path: str) -> str:
     return 'over another connection'
 
 
+def _answered(printer: dict) -> bool:
+    # Not for errors the printer itself reports, e.g. its cover open
+    return printer.get('status_type') != devices.FAILED_STATUS_TYPE
+
+
 def _printer(printer: dict) -> str:
     told = f"{_model(printer)} {_connection(printer.get('path') or '')}"
-    firmware = printer.get('firmware')
-    if isinstance(firmware, str) and FIRMWARE.fullmatch(firmware):
-        told += f', firmware {firmware}'
-    return told
+    return told if _answered(printer) else f'{told}, not reachable'
 
 
 def _labels(printer: dict) -> str:
@@ -69,7 +70,11 @@ def _labels(printer: dict) -> str:
     unknown = tape.get('unknown')
     if isinstance(unknown, str) and UNKNOWN_TAPE.fullmatch(unknown):
         return f'{unknown} reported by the printer, unknown to Labelburg'
-    return f'{name}, assumed as the printer does not report it'
+    if is_simulation(printer.get('path')) or not for_model(printer.get('model')).reports_tape:
+        return f'{name}, assumed as the printer cannot report it'
+    if not _answered(printer):
+        return f'{name}, the printer did not answer'
+    return f'{name}, not reported by the printer'
 
 
 def _who(printer: dict) -> str:

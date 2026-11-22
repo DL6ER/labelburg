@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import pytest
 
 from app.labeldesigner import printer, printer_settings, problem_report, routes
-from app.labeldesigner.drivers import reach
+from app.labeldesigner.drivers import devices, reach
 from tests.helpers import make_client
 
 API = '/labeldesigner/api'
@@ -89,7 +89,7 @@ def test_the_demo_printer_configured_in_printers_is_told(client, monkeypatch):
     details = report(client)['details']
     assert details['printer'] == 'QL-810W over the network; QL-700 as the demo printer'
     assert details['label_size'] == ('QL-810W: 62 mm endless (DK-22205 / DK-2205), reported by the printer; '
-                                     'Demo printer: 62 mm endless (DK-22205 / DK-2205), assumed as the printer does not report it')
+                                     'Demo printer: 62 mm endless (DK-22205 / DK-2205), assumed as the printer cannot report it')
 
 
 def test_the_demo_printer_set_as_the_printer_is_told_next_to_an_added_one(client, monkeypatch):
@@ -118,12 +118,15 @@ def test_an_unknown_model_or_connection_is_not_named(client, monkeypatch):
     assert report(client)['details']['printer'] == 'Unknown model over another connection'
 
 
-def test_the_firmware_is_told_where_the_status_reports_it(client, monkeypatch):
-    listed(monkeypatch, state('tcp://192.168.1.60', 'QL-810W', firmware='1.12'),
-           state('tcp://192.168.1.61', 'QL-810W', firmware='1.12 Anna'),
-           state('tcp://192.168.1.62', 'QL-810W', firmware=12))
-    assert report(client)['details']['printer'] == (
-        'QL-810W over the network, firmware 1.12; QL-810W over the network; QL-810W over the network')
+def test_a_printer_that_did_not_answer_is_told_as_not_reachable(client, monkeypatch):
+    listed(monkeypatch,
+           devices.failed_printer_state('tcp://192.168.1.60', TimeoutError(), 'QL-810W'),
+           # Answered with an error of its own
+           state('file:///dev/usb/lp0', 'QL-800', media_width=62, errors=['Cover open'], status_type='Error occurred'))
+    details = report(client)['details']
+    assert details['printer'] == 'QL-810W over the network, not reachable; QL-800 over USB'
+    assert details['label_size'] == ('QL-810W: 62 mm endless (DK-22205 / DK-2205), the printer did not answer; '
+                                     'QL-800: 62 mm endless (DK-22205 / DK-2205), reported by the printer')
 
 
 def test_the_labels_of_each_printer_are_told_and_where_they_come_from(client, monkeypatch):
@@ -131,13 +134,16 @@ def test_the_labels_of_each_printer_are_told_and_where_they_come_from(client, mo
            state('file:///dev/usb/lp0', 'QL-800', media_width=29, media_length=90),
            state('tcp://192.168.1.60', 'QL-810W'),
            state('bt://AA:BB:CC:DD:EE:FF', 'PUQU/Q00'),
-           state('file:///dev/usb/lp1', 'QL-1100', media_width=40))
+           state('file:///dev/usb/lp1', 'QL-1100', media_width=40),
+           # A network printer that takes jobs only, it answered without its tape
+           state('tcp://192.168.1.61', 'QL-720NW'))
     client.post(f'{API}/settings', data={'printer': 'tcp://192.168.1.60', 'model': 'QL-810W', 'label_size': '62x29'})
     assert report(client)['details']['label_size'] == (
         'QL-800: 29 x 90 mm die-cut (DK-11201 / DK-1201), reported by the printer; '
         'QL-810W: 62 x 29 mm die-cut (DK-11209 / DK-1209), chosen in the Settings; '
-        'PUQU Q00: 50 x 30 mm die-cut (PUQU), assumed as the printer does not report it; '
-        'QL-1100: 40 mm reported by the printer, unknown to Labelburg')
+        'PUQU Q00: 50 x 30 mm die-cut (PUQU), assumed as the printer cannot report it; '
+        'QL-1100: 40 mm reported by the printer, unknown to Labelburg; '
+        'QL-720NW: 62 mm endless (DK-22205 / DK-2205), not reported by the printer')
 
 
 def test_the_labels_of_a_single_printer_are_told_without_its_model(client, monkeypatch):
