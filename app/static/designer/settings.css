@@ -79,6 +79,8 @@
 .set-note { color: var(--muted); }
 .set-note .custom { font-size: 12px; padding: 0; }
 .set-card a:not(.btn) { color: var(--select); }
+.set-report { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-details { max-width: 560px; background: var(--surface-2); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; white-space: pre-line; overflow-wrap: anywhere; }
 
 .q-card .q-row { padding: 8px 16px; }
 .q-card .q-row + .q-row { border-top-color: var(--line); }

@@ -685,3 +685,14 @@ def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
         response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl102x152', 'print_type': 'text', 'text': TEXT, 'model': model})
         assert outcome(client, response) == ('printed', '')
     assert [data[:data.index(b'^FO')] for _, data in sent] == [b'^XA\n^PW1208\n^LL1795\n'] * 2
+
+def test_a_problem_report_leaves_the_states_the_search_keeps(tmp_path, monkeypatch):
+    # As printer_status does: the roll set is not written into them
+    from app.labeldesigner import routes
+    kept = {'path': 'tcp://127.0.0.1', 'model': 'Zebra/ZPL', 'errors': [], 'media_width': 102, 'media_length': 152}
+    told = dict(kept)
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {'printers': [told]})
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert client.get('/labeldesigner/api/problem_report').status_code == 200
+    assert told == kept
