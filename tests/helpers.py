@@ -13,6 +13,7 @@ from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
 from app import create_app
+from config import Config
 from app.labeldesigner import print_queue
 
 
@@ -60,7 +61,14 @@ def verify_image(response_data: bytes, expected_image_path: str):
 
 def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = None,
                 printer: Union[str, None] = None) -> FlaskClient:
-    app = create_app()
+    config = Config
+    if empty_repo:
+        # point repository to temporary folder, already as the app starts:
+        # it opens the print queue kept there
+        repo_dir = tmp_path / 'label_repo'
+        os.makedirs(repo_dir, exist_ok=True)
+        config = type('EmptyRepo', (Config,), {'LABEL_REPOSITORY_DIR': str(repo_dir)})
+    app = create_app(config)
     # Bind app context
     app.app_context().push()
     app.config['TESTING'] = True
@@ -69,11 +77,6 @@ def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = No
         app.config['PRINTER_MODEL'] = model
     if printer:
         app.config['PRINTER_PRINTER'] = printer
-    if empty_repo:
-        # point repository to temporary folder
-        repo_dir = tmp_path / 'label_repo'
-        app.config['LABEL_REPOSITORY_DIR'] = str(repo_dir)
-        os.makedirs(app.config['LABEL_REPOSITORY_DIR'], exist_ok=True)
     return app.test_client()
 
 

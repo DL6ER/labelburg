@@ -1,15 +1,19 @@
 """The print queue and the labels printed, kept on disk: what is written
 where, what a start finds and how the history is kept."""
+import base64
 import fcntl
+import io
 import json
 import os
 import stat
+import threading
 import time
 
 import pytest
 from PIL import Image
 
-from app.labeldesigner import print_store
+from app.labeldesigner import adding, paperless, print_queue, print_store, printer, routes
+from tests.helpers import EXAMPLE_FORMDATA, make_client, without_status
 
 
 @pytest.fixture
@@ -231,3 +235,178 @@ def test_clear_removes_every_entry_and_image(store):
     assert files(store / print_store.HISTORY) == []
     print_store.ended(record('next', images=0), 'printed', '', keep=True)
     assert [entry['id'] for entry in print_store.entries(10)] == ['next']
+
+
+# --- The queue of the server on disk -----------------------------------------------------
+
+API = '/labeldesigner/api'
+LINES = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Jar {{counter}}', 'size': '40'}])
+ASN = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'ASN{{asn:5}}', 'size': '40'}])
+LABEL = dict(EXAMPLE_FORMDATA, printer='simulation', text=LINES)
+
+
+@pytest.fixture
+def server(tmp_path, monkeypatch, queued):
+    """A server keeping its queue and history in the folder of its labels,
+    print requests answered once their job is in the queue."""
+    monkeypatch.setattr(print_store, 'ENABLED', True)
+    monkeypatch.setattr(print_store, 'FOLDER', None)
+    monkeypatch.setattr(print_queue, 'STOP_WAIT', 0.1)
+    yield make_client(tmp_path, empty_repo=True)
+    print_store.close()
+
+
+def repo(client) -> str:
+    return client.application.config['LABEL_REPOSITORY_DIR']
+
+
+def restart(tmp_path):
+    """The server stops, jobs waiting stay in the queue on disk, and starts again."""
+    print_queue.stop()
+    print_queue.reset()
+    print_store.close()
+    return make_client(tmp_path, empty_repo=True)
+
+
+def holding(monkeypatch) -> tuple:
+    """The first job on the demo printer prints until release is set."""
+    started, release = threading.Event(), threading.Event()
+    prune = printer._prune_simulated_labels
+
+    def held():
+        if not started.is_set():
+            started.set()
+            release.wait(10)
+        prune()
+    monkeypatch.setattr(printer, '_prune_simulated_labels', held)
+    return started, release
+
+
+def made(monkeypatch) -> list:
+    """The archive serial number, counter and timestamp of each label made,
+    and whether it was made by the queue."""
+    calls, create = [], routes.create_label_from_request
+
+    def recorded(d={}, files={}, counter=0, *args, **kwargs):
+        calls.append((kwargs.get('asn'), counter, d.get('timestamp'), threading.current_thread().name.startswith(print_queue.WORKER_PREFIX)))
+        return create(d, files, counter, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
+    return calls
+
+
+def ended(job_id: str) -> print_queue.Job:
+    job = print_queue.get(job_id)
+    assert job.done.wait(10)
+    return job
+
+
+def test_a_job_is_on_disk_once_it_is_accepted_and_leaves_with_its_end(server, monkeypatch):
+    started, release = holding(monkeypatch)
+    first = server.post(f'{API}/print', data=LABEL).get_json()['job']
+    assert started.wait(10)
+    second = server.post(f'{API}/print', data=dict(LABEL, print_count='2')).get_json()['job']
+    queue = os.path.join(repo(server), print_store.QUEUE)
+    assert files(queue) == sorted([f'{first}-preview.png', f'{first}.json', f'{second}-preview.png', f'{second}.json'])
+    kept = json.loads(open(os.path.join(queue, f'{second}.json')).read())
+    assert (kept['state'], kept['kind'], kept['labels'], kept['order'], kept['source']) == ('waiting', 'request', 2, [None, None], 'api')
+    assert kept['printer'] == {'device': 'simulation', 'model': 'QL-800', 'label_size': '62', 'cut': 'each', 'half_cut': True,
+                               'chain': False, 'leaves_first': None}
+    assert json.loads(open(os.path.join(queue, f'{first}.json')).read())['state'] == 'printing'
+    release.set()
+    assert ended(second).state == 'printed'
+    assert files(queue) == []
+    assert [entry['id'] for entry in print_store.entries(10)] == [second, first]
+
+
+def test_waiting_jobs_print_after_a_restart_with_their_ids_in_their_order(server, tmp_path, monkeypatch):
+    print_queue.stop()
+    jobs = [server.post(f'{API}/print', data=dict(LABEL, title=f'Jar {number}')).get_json()['job'] for number in range(3)]
+    calls = made(monkeypatch)
+    server = restart(tmp_path)
+    assert all(ended(job).state == 'printed' for job in jobs)
+    assert [entry['id'] for entry in print_store.entries(10)] == jobs[::-1]
+    assert [entry['title'] for entry in print_store.entries(10)] == ['Jar 2', 'Jar 1', 'Jar 0']
+    # Made when they print, with the dates of then
+    assert calls and all(by_queue and timestamp is None for _, _, timestamp, by_queue in calls)
+    assert files(os.path.join(repo(server), print_store.QUEUE)) == []
+
+
+def test_the_job_that_printed_at_a_restart_may_not_have_printed_and_holds_nothing(server, tmp_path, monkeypatch):
+    started, release = holding(monkeypatch)
+    first = server.post(f'{API}/print', data=dict(LABEL, title='First')).get_json()['job']
+    assert started.wait(10)
+    second = server.post(f'{API}/print', data=dict(LABEL, title='Second')).get_json()['job']
+    # The server dies while the first one prints
+    real = print_store.ended
+    monkeypatch.setattr(print_store, 'ended', lambda *args, **kwargs: None)
+    print_queue.stop()
+    release.set()
+    print_queue.reset()
+    monkeypatch.setattr(print_store, 'ended', real)
+    print_store.close()
+    make_client(tmp_path, empty_repo=True)
+    assert ended(second).state == 'printed'
+    first_kept = print_store.entry(first)
+    assert (first_kept['state'], first_kept['message']) == ('unknown', print_store.PRINTING_AT_RESTART)
+    assert print_queue.line('simulation')['held'] is None
+
+
+def test_a_restored_job_keeps_its_archive_serial_number(server, tmp_path, monkeypatch):
+    print_queue.stop()
+    job = server.post(f'{API}/print', data=dict(LABEL, text=ASN, print_count='3')).get_json()['job']
+    next_asn = os.path.join(repo(server), paperless.STATE_FILE)
+    assert open(next_asn).read().strip() == '4'
+    calls = made(monkeypatch)
+    restart(tmp_path)
+    assert ended(job).state == 'printed'
+    assert [(asn, counter) for asn, counter, _, _ in calls if _] == [(1, 0), (1, 1), (1, 2)]
+    assert open(next_asn).read().strip() == '4'
+
+
+def test_a_restored_job_is_checked_as_printers_are_today(server, tmp_path, monkeypatch):
+    without_status(monkeypatch)
+    print_queue.stop()
+    # A network printer named by its address, allowed while ADD_PRINTERS is local
+    response = server.post(f'{API}/print', data=dict(LABEL, printer='tcp://192.168.2.50:9100', model='QL-810W'))
+    assert response.status_code == 200, response.get_json()
+    monkeypatch.setenv('ADD_PRINTERS', 'off')
+    restart(tmp_path)
+    job = ended(response.get_json()['job'])
+    assert (job.state, job.message) == ('failed', adding.NAMED_OFF)
+
+
+def test_an_image_from_the_webhook_and_homebox_print_after_a_restart(server, tmp_path, monkeypatch):
+    server.application.config['WEBHOOK_PASSWORD'] = 'secret'
+    state = {'errors': [], 'path': 'simulation', 'model': 'QL-800', 'media_width': 62, 'media_length': 0}
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**state, 'printers': [state], 'selected': 'simulation'})
+    image = io.BytesIO()
+    Image.new('L', (200, 100), 0).save(image, 'PNG')
+    print_queue.stop()
+    webhook = server.post(f'{API}/webhook/print', json={'password': 'secret', 'printer': 'simulation',
+                                                        'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+    homebox = server.post(f'{API}/homebox', data=image.getvalue(), headers={'Content-Type': 'image/png'})
+    calibration = server.post(f'{API}/calibration/print', data={'printer': 'simulation', 'model': 'Niimbot/B1', 'across': '0.5'})
+    jobs = [response.get_json()['job'] for response in (webhook, homebox, calibration)]
+    kept = json.loads(open(os.path.join(repo(server), print_store.QUEUE, f'{jobs[0]}.json')).read())
+    assert (kept['kind'], kept['images'], len(kept['labels'])) == ('image', 1, 1)
+    restart(tmp_path)
+    assert [ended(job).state for job in jobs] == ['printed'] * 3
+    # Calibration labels are not kept
+    assert [entry['source'] for entry in print_store.entries(10)] == ['homebox', 'webhook']
+
+
+def test_a_full_disk_prints_from_memory(server, monkeypatch, caplog):
+    monkeypatch.setattr(print_store, 'MIN_FREE_BYTES', 1 << 62)
+    job = server.post(f'{API}/print', data=LABEL).get_json()['job']
+    assert ended(job).state == 'printed'
+    assert any('kept in memory only' in message for message in caplog.messages)
+
+
+def test_the_folders_never_show_up_with_the_saved_labels(server):
+    assert ended(server.post(f'{API}/print', data=LABEL).get_json()['job']).state == 'printed'
+    assert sorted(os.listdir(repo(server))) == ['.print-history', '.print-queue']
+    assert server.get(f'{API}/repository/list').get_json() == {'files': []}
+    for name in ('.print-history', '.print-queue', 'print-history', '.print-history/history.jsonl', '../label_repo/.print-history'):
+        assert server.get(f'{API}/repository/load', query_string={'name': name}).status_code == 404, name
+        assert server.post(f'{API}/repository/print', json={'name': name}).status_code == 404, name
+    assert server.get(f'{API}/homebox/.print-history').status_code == 404

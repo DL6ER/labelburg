@@ -463,3 +463,16 @@ def clear():
             if name != LOCK_FILE:
                 os.remove(_history_path(name))
         _lines = _image_bytes = 0
+
+
+def queued_image(job_id: str, number: int) -> str:
+    """The file of an image of a job in the queue."""
+    return _queue_path(image_name(job_id, number))
+
+
+def queued_preview(job_id: str) -> bytes | None:
+    try:
+        with open(_queue_path(preview_name(job_id)), 'rb') as fh:
+            return fh.read()
+    except OSError:
+        return None

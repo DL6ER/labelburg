@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, print_store, printer_settings, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, DEMO_NAME, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -918,19 +918,19 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
     return cut, _whole(option('half_cut', 1)) != 0, _whole(option('chain', 0)) != 0 or cut == 'none'
 
 
-def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLabel]:
-    """Adds the labels to the queue, the printer cuts them as printer.cut
-    says. The labels queued."""
-    # Taken before printing: labels of a job that fails may have come out
-    asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(labels)) if paperless.uses_asn(data) else None
+def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool, fast: bool, starts: list) -> None:
+    """Adds the labels of order to the queue, each with its image by its
+    index in images, None without, the printer cuts them as printer.cut
+    says. They are added once for each archive serial number in starts, the
+    one the first label of order takes."""
     # The copies share the text measured, alike where nothing changes
     layouts = {}
-    queued = []
-    for i, image in enumerate(labels):
-        # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
-        queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn, total=len(labels)))
-        printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
-    return queued
+    for asn in starts:
+        for i, index in enumerate(order):
+            # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
+            label = create_label_from_request(data, {}, i, None if index is None else images[index], layouts=layouts, asn=asn,
+                                              total=len(order))
+            printer.add_label_to_queue(label, high_res=high_res, fast=fast)
 
 
 # The preview of a job in the queue, at most this many pixels on its long side
@@ -940,12 +940,13 @@ MAX_TITLE_LENGTH = 200
 TOLD_SOURCES = ('designer', 'mcp')
 
 
-def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, drawn: Drawn | None = None,
-            return_format=None, extra: dict | None = None):
+def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, recipe: dict, images: list = (),
+            drawn: Drawn | None = None, return_format=None, extra: dict | None = None):
     """Add the job run() prints to the line of the printer and answer that it
     waits there. drawn is its first label as printer.check() drew it: the
     queue shows it, return_format png returns it as base64 (image) as the
-    printer gets it."""
+    printer gets it. recipe and images make it again, see _rebuilt(): it is
+    kept on disk before it is accepted."""
     preview = image = None
     if drawn is not None:
         gray = not drawn.label.in_color
@@ -954,16 +955,119 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
         preview = image_to_png_bytes(small, gray=gray)
         if return_format == 'png':
             image = base64.b64encode(image_to_png_bytes(drawn.image, gray=gray)).decode()
+    record = {'v': print_store.VERSION, 'id': uuid.uuid4().hex, 'queued_at': time.time(), 'source': source, 'title': title,
+              'labels': labels, 'state': 'waiting', 'printer': _printer_record(printer),
+              'printer_name': _printer_name(printer.device_specifier, printer.model), 'images': len(images), **recipe}
+    on_disk = print_store.queued(record, images, preview)
     try:
         job = print_queue.add(printer.device_specifier, _as_in_this_request(run), title=title, labels=labels, source=source,
                               preview=preview, size=print_queue.image_bytes(printer.images()),
-                              explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
+                              explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)),
+                              job_id=record['id'], **_store_hooks(record, images, preview, on_disk))
     except print_queue.Full as full:
+        print_store.ended(record, 'removed', '', keep=False)
         return _line_full(printer, str(full))
     result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
+
+
+def _printer_record(printer: PrinterQueue) -> dict:
+    """Where and how a job prints, as kept with it."""
+    return {'device': printer.device_specifier, 'model': printer.model, 'label_size': printer.label_size, 'cut': printer.cut,
+            'half_cut': printer.half_cut, 'chain': printer.chain, 'leaves_first': printer.leaves_first}
+
+
+def _printer_name(device: str, model: str) -> str:
+    """A printer as the label designer names it: by the name it is given,
+    else the demo printer, else its model."""
+    if is_simulation(device):
+        return DEMO_NAME
+    return next((name for _, listed, name in _known_printers()[0] if listed == device and name), model.split('/')[-1])
+
+
+def _keeping() -> bool:
+    """Whether printed labels are kept, see the label setting history."""
+    return _label_settings().get('history') != '0'
+
+
+def _store_hooks(record: dict, images: list, preview: bytes | None, on_disk: bool, app=None) -> dict:
+    """The hooks that keep the job of record on disk as it starts and ends,
+    see print_store. images and preview go into the history of a job that
+    is not on disk."""
+    if not print_store.is_open():
+        return {}
+    app = app or current_app._get_current_object()
+    images, preview = (None, None) if on_disk else (list(images), preview)
+
+    def on_end(job):
+        with app.app_context():
+            keep = _keeping()
+        print_store.ended(record, job.state, job.message, keep, images, preview)
+    return {'on_start': lambda job: print_store.started(record), 'on_end': on_end}
+
+
+def restore_print_queue(app):
+    """Open the print queue kept on disk, see print_store, and queue the jobs
+    left in it once more. The one that printed as the server stopped may not
+    have printed, it is not printed again."""
+    with app.app_context():
+        left = print_store.start(_get_repo_dir())
+        keep = _keeping() if left else True
+    for record in left:
+        try:
+            if record['state'] == 'printing':
+                print_store.ended(record, 'unknown', print_store.PRINTING_AT_RESTART, keep)
+                continue
+            job_id = record['id']
+            print_queue.restore(record['printer']['device'], _in_app(app, lambda record=record: _print_restored(record)), job_id=job_id,
+                                title=record.get('title') or 'Label', labels=record.get('labels') or 1, source=record.get('source') or 'api',
+                                preview=print_store.queued_preview(job_id), explain=_in_app(app, lambda e: refusals.message(e, refusals.PRINT_FAILED)),
+                                **_store_hooks(record, (), None, True, app))
+        except Exception:
+            app.logger.exception('Print job %s was not restored', record.get('id'))
+
+
+def _in_app(app, call):
+    """call within the app, outside a request: connections to printers are
+    checked as _check_named() says for the job."""
+    def called(*args):
+        with app.app_context(), reach.checking(None):
+            return call(*args)
+    return called
+
+
+def _print_restored(record: dict) -> str:
+    """Print a job restored at the start, checked as a request naming its
+    printer is today, e.g. by ADD_PRINTERS."""
+    kept = record['printer']
+    printer = _rebuilt(record, *_printer(kept['device'], kept['model']))
+    return printer.print_calibration() if record['kind'] == 'calibration' else printer.process_queue()
+
+
+def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
+    """The job of a record kept by _queued(), its images read from the queue
+    on disk, as it was made: the same labels with the same archive serial
+    numbers, dates of the time it prints."""
+    kept = record['printer']
+    printer = _queue(model, device, kept['label_size'])
+    printer.cut, printer.half_cut, printer.chain, printer.leaves_first = kept['cut'], kept['half_cut'], kept['chain'], kept['leaves_first']
+    images = [_read_image(print_store.queued_image(record['id'], number)) for number in range(record.get('images', 0))]
+    if record['kind'] == 'calibration':
+        printer.offset = tuple(record['offset'])
+    elif record['kind'] == 'image':
+        for shape in record['labels']:
+            printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
+    else:
+        _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']])
+    return printer
+
+
+def _read_image(path: str) -> Image.Image:
+    with Image.open(path) as image:
+        image.load()
+        return image
 
 
 def _line_full(printer: PrinterQueue, why: str):
@@ -1225,12 +1329,17 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
         images, _ = load_label_images(data, files, copies=print_count, **stored)
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
-        queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
+        images = [image for image in images if image is not None]
+        order = _copies(list(range(len(images))) or [None], print_count, collate)
+        # Taken before printing: labels of a job that fails may have come out
+        asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(order)) if paperless.uses_asn(data) else None
+        _queue_labels(printer, data, images, order, high_res, fast, [asn])
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(queued),
-                   drawn=drawn, return_format=return_format)
+    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
+                   recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast},
+                   images=images, drawn=drawn, return_format=return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -1965,7 +2074,8 @@ def print_calibration():
             printer_settings.checked_offsets(*queue.offset)
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
-    return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
+    return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1,
+                   recipe={'kind': 'calibration', 'offset': list(queue.offset)})
 
 
 def _job_told(told: dict, printing_on: str | None = None) -> dict:
@@ -2153,8 +2263,12 @@ def _check_named(device: str):
     connection of the request is checked as for an added one."""
     mode = _add_mode()
     adding.check_named(device, mode)
-    if adding.host_of(device) is not None and has_request_context():
-        request.environ.setdefault(CHECKED, []).append(reach.check(mode))
+    if adding.host_of(device) is not None:
+        # Outside a request, for a job restored at the start, the caller
+        # ends it with reach.checking()
+        token = reach.check(mode)
+        if has_request_context():
+            request.environ.setdefault(CHECKED, []).append(token)
 
 
 @bp.teardown_request
@@ -2835,8 +2949,23 @@ def _image_label(img: Image.Image, label_size: str, label_orientation: LabelOrie
         width, height, label_orientation = _fitting_orientation(img, width, height, label_orientation)
     image = _scale_image_to_label(img, width, height, label_type == LabelType.ENDLESS_LABEL,
                                   label_orientation == LabelOrientation.ROTATED)
-    return SimpleLabel(width=width, height=height, label_content=IMAGE_CONTENT.get(image_mode, LabelContent.IMAGE_BW),
-                       label_orientation=label_orientation, label_type=label_type, image=image, image_fit=True, text=[])
+    shape = {'width': width, 'height': height, 'content': IMAGE_CONTENT.get(image_mode, LabelContent.IMAGE_BW).name,
+             'orientation': label_orientation.name, 'type': label_type.name}
+    label = _image_label_of(shape, image)
+    label.shape = shape
+    return label
+
+
+def _image_label_of(shape: dict, image: Image.Image) -> SimpleLabel:
+    """A label of image alone, of the size and kind _image_label() gave it."""
+    return SimpleLabel(width=shape['width'], height=shape['height'], label_content=LabelContent[shape['content']],
+                       label_orientation=LabelOrientation[shape['orientation']], label_type=LabelType[shape['type']],
+                       image=image, image_fit=True, text=[])
+
+
+def _image_recipe(labels: list, high_res: bool, fast: bool) -> dict:
+    """How the labels of images alone are made again, each of its image."""
+    return {'kind': 'image', 'labels': [dict(label.shape, image=i) for i, label in enumerate(labels)], 'high_res': high_res, 'fast': fast}
 
 
 def _scale_image_to_label(img: Image.Image, width: int, height: int, endless: bool, rotated: bool) -> Image.Image:
@@ -3024,7 +3153,8 @@ def webhook_print():
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
     return _queued(printer, run=printer.process_queue, title=_job_title({}, drawn), source=_job_source('webhook'), labels=len(labels),
-                   drawn=drawn, extra={'count': len(labels)})
+                   recipe=_image_recipe(labels, high_res, fast), images=[label.image for label in labels], drawn=drawn,
+                   extra={'count': len(labels)})
 
 
 # --- Homebox ------------------------------------------------------------------
@@ -3125,10 +3255,10 @@ def homebox(name: str | None = None):
             orientation = LabelOrientation.ROTATED if data.get('orientation') == 'rotated' else LabelOrientation.STANDARD
         # Printed as it is shown, dithered like the labels made here
         image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
-        printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
-                                   high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
+        label, fast = _image_label(img, label_size, orientation, image_mode, high_res=high_res), _whole(_option('fast_printing', data, 0)) != 0
+        printer.add_label_to_queue(label, high_res=high_res, fast=fast)
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
     return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}, drawn), source=_job_source('homebox'),
-                   labels=1, drawn=drawn)
+                   labels=1, recipe=_image_recipe([label], high_res, fast), images=[label.image], drawn=drawn)

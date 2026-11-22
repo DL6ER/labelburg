@@ -195,6 +195,10 @@ def create_app(config_class=Config) -> Flask:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxies, x_proto=proxies,
                                 x_host=proxies, x_prefix=proxies)
 
+    # The jobs that waited when the server stopped print now
+    from app.labeldesigner.routes import restore_print_queue
+    restore_print_queue(app)
+
     return app
 
 
