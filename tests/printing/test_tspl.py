@@ -644,3 +644,17 @@ def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
         assert outcome(client, response) == ('printed', '')
     head = b'\r\nSIZE 102 mm,152 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,151,1795,0,'
     assert [data[:len(head)] for _, data in sent] == [head] * 2
+
+
+@pytest.mark.parametrize('configured, model', [(None, 'TSC/TSPL'), ('QL-800', 'QL-800')])
+def test_a_printer_of_lprints_list_is_tspl_unless_another_model_is_given(tmp_path, monkeypatch, sent, configured, model):
+    # PRINTER_MODEL left unset is no model given
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;')
+    monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
+    monkeypatch.delenv('PRINTER_MODEL', raising=False)
+    client = make_client(tmp_path, model=configured, printer='usb://0x0483:0x5720')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == model
+    if configured is None:
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'tspl57x32', 'print_type': 'text', 'text': TEXT})
+        assert outcome(client, response) == ('printed', '')
+        assert sent[0][1].startswith(b'\r\nSIZE 57 mm,32 mm\r\n')

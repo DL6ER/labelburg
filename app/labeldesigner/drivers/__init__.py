@@ -72,18 +72,19 @@ def _claim(driver: Driver, device: str, device_id: str) -> Told | None:
     return told if told and told.model == known else Told(known)
 
 
-def resolve(device: str, model: str) -> tuple[Driver, str]:
+def resolve(device: str, model: str, assumed: bool = False) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
     ID tells, else the configured or requested model. The driver of that
     model keeps a printer it also takes, e.g. ZPL one that also names TSPL,
     and the model where it is the same printer of another resolution, shown
     alike, and the device ID names none, e.g. TSC/TSPL-300 for TSC/TSPL.
     Another driver takes it from that model only by its command set, not by
-    a device ID of its table alone."""
+    a device ID of its table alone. An assumed model, e.g. PRINTER_MODEL
+    left at its default, is none of these, only what is left."""
     # Read once for all drivers, it may ask the printer
     device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
     named = canonical(model)
-    chosen = _BY_MODEL.get(named)
+    chosen = None if assumed else _BY_MODEL.get(named)
     if chosen and (told := _claim(chosen, device, device_id)):
         alike = chosen.shown_as.get(named, named) == chosen.shown_as.get(told.model, told.model)
         return chosen, named if alike and not told.resolution else told.model

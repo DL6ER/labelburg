@@ -44,6 +44,18 @@ def test_driver_of_a_printer():
     assert drivers.for_label('99x99') is None
 
 
+@pytest.mark.parametrize('device_id, model', [
+    # Left at its default, the model is taken only where nothing else tells one
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra/ZPL-300'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'TSC/TSPL'),
+    # A Brother printer tells its model in its status
+    ('MFG:Brother;CMD:PT-CBP;MDL:QL-700;', 'QL-800')])
+def test_driver_and_model_of_a_printer_of_the_default_model(monkeypatch, device_id, model):
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
+    assert drivers.resolve('file:///dev/usb/lp0', 'QL-800', assumed=True) == (drivers.for_model(model), model)
+
+
 @pytest.mark.parametrize('device_id, configured, model', [
     # The other resolution of the same printer as configured, where the
     # device ID names none
