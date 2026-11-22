@@ -1398,8 +1398,8 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
             return _line_full(printer, full)
         images = [image for image in images if image is not None]
         order = _copies(list(range(len(images))) or [None], print_count, collate)
-        # Written while the label is drawn, as copies made here: two threads
-        # must not read one picture from its file at once
+        # Written while the label is drawn, loaded or copied here: two
+        # threads must not read one picture from its file at once
         kept = [_kept_copy(image, data) for image in images]
         staged = print_store.stage(job_id, [copy for copy, _ in kept])
         # Taken before printing: labels of a job that fails may have come out
@@ -1422,22 +1422,24 @@ def _dates_set() -> dict:
 
 
 def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None]:
-    """A copy of a picture to keep with its job, and the size of the picture
-    where the copy is smaller: a label made of the copy is fitted as of the
+    """The picture to keep with its job, else a smaller copy of it with the
+    size of the picture: a label made of the copy is fitted as of the
     picture, so that it comes out as it did. A picture fitted to the
     label is kept as small as the label shows it, also at 600 dpi or on a
     label of a set length: its shorter side as long as the longest side of
     the label. Cropped or turned the label shows a part of it, scaled by
     hand its pixels set its size: kept as it is."""
+    # Loaded here, the request draws it while it is written
+    image.load()
     label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
     if (size is None or _whole_or(data.get('image_fit'), 1) <= 0 or _whole_or(data.get('image_crop'), 0) > 0
             or float(data.get('image_rotation') or 0) % 360):
-        return image.copy(), None
+        return image, None
     length = _printed_length(_label_length(data.get('label_length')), size, _cable_flag(data, size.form_factor), True)
     longest = max(*_canvas(label_size, True, LabelOrientation.STANDARD), length or 0)
     if min(image.size) <= longest:
-        return image.copy(), None
+        return image, None
     scale = longest / min(image.size)
     return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS), list(image.size)
 

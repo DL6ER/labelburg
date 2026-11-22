@@ -681,22 +681,28 @@ for number in range(150):
     assert len(ids) == len(set(ids)) and 1 <= len(ids) <= 15 and ids[-1] == 'last'
 
 
-@pytest.mark.parametrize('mode', ['colored', 'grayscale'])
-def test_the_images_written_are_never_those_the_request_draws(server, monkeypatch, mode):
+@pytest.mark.parametrize('mode, size, own', [('colored', (300, 200), False), ('grayscale', (300, 200), False), ('grayscale', (3000, 2000), True)])
+def test_the_images_written_are_loaded_and_not_copied_where_they_are_kept_as_they_came(server, monkeypatch, mode, size, own):
     staged, drawn, stage, create = [], [], print_store.stage, routes.create_label_from_request
-    monkeypatch.setattr(print_store, 'stage', lambda job_id, images: (staged.extend(images), stage(job_id, images))[1])
+
+    def staging(job_id, images):
+        # Loaded before they are written: two threads must not read one file at once
+        staged.extend((image, getattr(image, 'fp', None) is None) for image in images)
+        return stage(job_id, images)
+    monkeypatch.setattr(print_store, 'stage', staging)
 
     def recorded(d={}, files={}, counter=0, image=None, *args, **kwargs):
         drawn.append(image)
         return create(d, files, counter, image, *args, **kwargs)
     monkeypatch.setattr(routes, 'create_label_from_request', recorded)
     jpeg = io.BytesIO()
-    Image.effect_noise((300, 200), 60).convert('RGB').save(jpeg, 'JPEG')
+    Image.effect_noise(size, 60).convert('RGB').save(jpeg, 'JPEG')
     upload = dict(LABEL, print_type='image', image_mode=mode, image=(io.BytesIO(jpeg.getvalue()), 'photo.jpg'))
     assert server.post(f'{API}/print', data=upload, content_type='multipart/form-data').status_code == 200
-    # Loaded before they are written: two threads must not read one file at once
-    assert staged and drawn and not {id(image) for image in staged} & {id(image) for image in drawn}
-    assert all(getattr(image, 'fp', None) is None for image in staged)
+    [(kept, loaded)] = staged
+    assert loaded and drawn
+    # Copied only where the picture is kept smaller, else it would take twice the memory
+    assert (kept is drawn[0]) is not own
 
 
 def test_a_job_whose_images_fail_in_any_way_prints_from_memory(server, monkeypatch, caplog):
