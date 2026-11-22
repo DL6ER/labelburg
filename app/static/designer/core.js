@@ -995,6 +995,8 @@ export const savedAs = d => `as ${sizeName(d.label_size)} label`;
 // --- Printing ----------------------------------------------------------------
 
 export function entryName(e) {
+    // Printed again from the list of the server, without its label here
+    if (!e.design) return e.title || 'Label';
     const blanks = blanksOf(e.design);
     const first = blanks.length ? (e.values || {})[blanks[0]] : '';
     if (first) return first;
@@ -1029,28 +1031,38 @@ export function untold(entry) {
 // order they were printed; a slow printer holds back no other
 const sending = new Map();
 // job: { title, design, values, copies, source }. Kept in the history of
-// this browser, Settings list it under Printed labels. Printed on printer,
+// this browser for its search and the values of blanks. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
 // took it, onDone(entry) with its outcome.
 export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
-    const behind = lineBusy(printer), path = (printer && printer.path) || '';
-    const entry = {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
-        design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
-    };
+    const entry = Object.assign(newEntry(printer, job.copies || 1), {
+        title: job.title, design: clone(job.design), values: Object.assign({}, job.values || {}), source: job.source || null
+    });
     S.history.unshift(entry);
     saveHistory();
-    const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
-    const shown = () => !!S.printer && S.printer.path === path;
-    QUEUE.follow();
-    try {
+    return sendJob(entry, printer, () => {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
         form.set('title', entryName(entry));
         form.set('source', 'designer');
-        const sent = (sending.get(path) || Promise.resolve()).then(() => post('/print', form));
+        return ['/print', form];
+    }, onDone, onAccepted);
+}
+const newEntry = (printer, copies) => ({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), copies,
+    printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path: (printer && printer.path) || '', state: 'printing', message: ''
+});
+// Sends the request request() gives as [path, body] for the job of entry
+// and follows it until its outcome is known
+async function sendJob(entry, printer, request, onDone, onAccepted = null) {
+    const behind = lineBusy(printer), path = entry.path;
+    const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
+    const shown = () => !!S.printer && S.printer.path === path;
+    QUEUE.follow();
+    try {
+        const [to, form] = request();
+        const sent = (sending.get(path) || Promise.resolve()).then(() => post(to, form));
         const settled = sent.catch(() => { }).then(() => { if (sending.get(path) === settled) sending.delete(path); });
         sending.set(path, settled);
         const r = await sent;
@@ -1140,6 +1152,7 @@ async function askJob(entry) {
             else endJob(entry, 'failed', 'The label designer was restarted before it printed');
         } else if (data.state === 'printed') endJob(entry, 'printed');
         else if (data.state === 'failed' || data.state === 'removed') endJob(entry, 'failed', data.message || 'It was not printed');
+        else if (data.state === 'unknown') endJob(entry, 'unknown', data.message);
         else if (data.state) sawJob(entry, data.state);
         else if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
     } catch (e) {
@@ -1200,6 +1213,53 @@ export function announcePrint(entry, again = () => printAgain(entry)) {
     else if (entry.state === 'unknown') toast(`Maybe not printed: ${entry.message}`, { label: 'Print again', run: again }, 10000);
     else toast(`Not printed: ${entry.message}`, { label: 'Try again', run: again }, 10000);
 }
+// --- Labels printed, as the server keeps them ------------------------------
+
+// The newest ones, those before the entry before for the next ones;
+// enabled is false where they are not kept
+export async function loadPrinted(before = '') {
+    const r = await reached(fetch(`${API}/history?limit=60${before ? '&before=' + encodeURIComponent(before) : ''}`));
+    if (!r.ok) throw new Error('The printed labels could not be loaded');
+    return r.json();
+}
+// What a label printed is listed with: its labels, when, where and from
+export const keptSub = h => h.state === 'printed' ? [`${h.labels} x`, fmtTime(Date.parse(h.time)), h.printer_name, h.from && `from ${h.from}`].filter(Boolean).join(', ')
+    : `${h.state === 'unknown' ? 'Maybe not printed' : 'Not printed'}: ${h.message}`;
+// A label printed, printed again on the printer chosen. Where that changes
+// its date or Paperless number, it asks whether they stay.
+export const IMAGE_GONE = 'Its image is no longer kept';
+export function printKeptAgain(h, onDone = announceKept) {
+    if (!h.again) { toast(IMAGE_GONE); return; }
+    const asks = h.again_asks || [], date = asks.includes('date'), number = asks.includes('asn');
+    if (!date && !number) { sendAgain(h, true, onDone); return; }
+    const [same, next] = date && number ? ['Same date and number', "Today's date, next number"] : date ? ['Same date', "Today's date"] : ['Same number', 'Next number'];
+    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Print again">
+        <div class="dialog-h"><h2>Print again</h2><span class="sp"></span><button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
+        <div class="acts"><button class="btn" type="button" id="againNext">${esc(next)}</button><button class="btn primary" type="button" id="againSame">${esc(same)}</button></div></div>`, 'center');
+    $('#againSame').onclick = () => { closeLayer(true); sendAgain(h, true, onDone); };
+    $('#againNext').onclick = () => { closeLayer(true); sendAgain(h, false, onDone); };
+    $('#againSame').focus();
+}
+function sendAgain(h, asBefore, onDone) {
+    const printer = S.printer, entry = Object.assign(newEntry(printer, h.labels), { title: h.title });
+    return sendJob(entry, printer, () => {
+        const form = new URLSearchParams({ as_before: asBefore ? '1' : '0', source: 'designer' });
+        if (printer && printer.path) form.set('printer', printer.path);
+        if (printer && printer.model) form.set('model', printer.model);
+        return [`/history/${encodeURIComponent(h.id)}/print`, form];
+    }, entry => onDone(entry, h));
+}
+export function announceKept(entry, h) {
+    announcePrint(entry, () => printKeptAgain(h));
+}
+// A label printed as the editor opens it, with the values it was printed with
+export async function keptLabel(h) {
+    const r = await reached(fetch(`${API}/history/${encodeURIComponent(h.id)}/label`));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The label could not be loaded');
+    const raw = await r.json(), design = normalize(raw);
+    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin: null };
+}
+
 // What a label printed before is listed with: its copies, the values
 // printed, when
 export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');

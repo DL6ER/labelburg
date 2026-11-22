@@ -11,7 +11,7 @@ from urllib.request import urlopen
 import pytest
 
 from app.labeldesigner import printer_settings
-from tests.browser.helpers import shown_again, with_tape
+from tests.browser.helpers import clear_printed, shown_again, with_tape
 from tests.browser.test_editor import sent, type_label, wait_for_preview
 
 
@@ -217,7 +217,8 @@ def test_the_printer_chip_switches_printers(designer, server):
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
-def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designer, server):
+def test_labels_are_kept_on_the_server_and_printed_ones_listed_from_it(designer, server):
+    clear_printed(server)
     open_settings(designer, 'labels')
     assert designer.inner_text('#setPart .set-h p') == 'Kept on the server, the same in every browser.'
     family = other_family(designer)
@@ -226,7 +227,7 @@ def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designe
         with designer.expect_response('**/api/settings/labels') as answer:
             change()
         assert answer.value.ok
-    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': family}
+    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': family, 'history': ''}
     assert designer.locator('[data-k="collate"][data-v="0"].on').count() == 1
     # Nothing of them is kept in this browser
     assert designer.evaluate("() => [localStorage.getItem('designer_settings'), localStorage.getItem('designer_font')]") == [None, None]
@@ -243,10 +244,12 @@ def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designe
     designer.wait_for_selector('#setHist .set-hrow')
     assert 'Flour' in designer.inner_text('#setHist .set-hrow')
     designer.wait_for_selector('#setHist .set-thumb.shown')
-    with designer.expect_request('**/api/print'):
+    with designer.expect_request('**/api/history/*/print'):
         designer.click('#setHist [data-again]')
-    designer.wait_for_function('() => labelEditor.S.history.length === 2 && labelEditor.S.history[0].state === "printed"')
-    assert designer.locator('#setHist .set-hrow').count() == 2
+    designer.wait_for_selector('#toast:has-text("Printed 1 label: Flour")')
+    designer.wait_for_function("() => document.querySelectorAll('#setHist .set-hrow').length === 2")
+    # Printed again by the server, this browser keeps the label printed here
+    assert designer.evaluate('() => labelEditor.S.history.length') == 1
 
 
 def test_two_browsers_have_the_same_label_settings(designer, browser, server):
@@ -323,7 +326,7 @@ def test_label_settings_this_browser_kept_are_carried_over_once(designer, server
     with designer.expect_response('**/api/settings/labels'):
         designer.reload()
     designer.wait_for_function("() => localStorage.getItem('designer_font') === null && window.labelEditor")
-    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '1', 'font_family': family}
+    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '1', 'font_family': family, 'history': ''}
     assert designer.evaluate("() => JSON.parse(localStorage.getItem('designer_settings'))") == {'largePreview': True}
     assert designer.evaluate('() => [labelEditor.S.settings.date_format, labelEditor.S.settings.collate]') == ['%d.%m.%Y', '1']
     # Once: removed on the server since, they stay removed
@@ -331,7 +334,7 @@ def test_label_settings_this_browser_kept_are_carried_over_once(designer, server
     designer.reload()
     designer.wait_for_selector('#field .ln')
     wait_for_preview(designer)
-    assert label_settings(server) == {'date_format': '', 'collate': '1', 'font_family': ''}
+    assert label_settings(server) == {'date_format': '', 'collate': '1', 'font_family': '', 'history': ''}
 
 
 def test_connections_have_the_addresses_of_this_server(designer, server):

@@ -54,12 +54,7 @@ def test_a_label_removed_in_another_tab_is_not_printed(editor):  # noqa: F811
     answer_queue(editor, [job('removed', message='Removed from the queue')])
     editor.click('#print')
     editor.wait_for_selector('[role=alertdialog]:has-text("Removed from the queue")', timeout=15000)
-    editor.click('[role=alertdialog] [data-close]')
-    editor.click('#templates')
-    editor.click('.tpl-nav [data-cat="printed"]')
-    editor.wait_for_selector('.thumb small:text-is("Not printed: Removed from the queue")')
-    editor.click('.thumb')
-    editor.wait_for_selector('#tplPrint:text-is("Print again")')
+    assert history(editor) == [['failed', 'Removed from the queue', 'waiting']]
 
 
 @pytest.mark.parametrize('seen,state,text', [
@@ -75,12 +70,17 @@ def test_a_restart_before_or_while_printing(editor, seen, state, text):  # noqa:
     if state == 'unknown':
         assert editor.locator('[role=alertdialog] button:text-is("Print again")').count() == 1
         assert editor.locator('[role=alertdialog] button:text-is("Try again")').count() == 0
-        editor.click('[role=alertdialog] [data-close]')
-        editor.click('#templates')
-        editor.click('.tpl-nav [data-cat="printed"]')
-        editor.wait_for_selector(f'.thumb small:text-is("Maybe not printed: {text}")')
-        editor.click('.thumb')
-        editor.wait_for_selector('#tplPrint:text-is("Print again")')
+
+
+def test_a_job_the_server_kept_through_a_restart_is_followed_on(editor):  # noqa: F811
+    # Found in the labels printed, or still waiting in the queue kept on disk
+    type_label(editor, 'Shelf')
+    answer_print(editor, 'printing')
+    text = 'The label designer was restarted while it printed'
+    answer_queue(editor, [job('waiting', start='start-2'), job('unknown', message=text, start='start-2')])
+    editor.click('#print')
+    editor.wait_for_selector(f'[role=alertdialog]:has-text("{text}")', timeout=15000)
+    assert history(editor) == [['unknown', text, 'waiting']]
 
 
 def test_an_outcome_asked_too_late_is_not_known(editor):  # noqa: F811
