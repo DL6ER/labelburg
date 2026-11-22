@@ -52,10 +52,11 @@ _discovered = None
 # Printers on Bluetooth LE, e.g. a Niimbot B1. Searched for in the background
 # for BLUETOOTH_SEARCH seconds, first at the first detection, then when the
 # label designer looks for printers, at most every BLUETOOTH_INTERVAL
-# seconds: the search takes the radio. Classic Bluetooth is searched too only
-# when it looks for printers and a driver names printers there, see
-# drivers.classic_bluetooth(). Kept while the server runs, by address
-# with their model, since a printer connected stops advertising.
+# seconds: the search takes the radio. Classic Bluetooth is searched too, for
+# bluetooth.CLASSIC_SEARCH seconds, only when it looks for printers and a
+# driver names printers there, see drivers.classic_bluetooth(). Kept while
+# the server runs, by address with their model, since a printer connected
+# stops advertising.
 BLUETOOTH_DISCOVERY = True
 BLUETOOTH_SEARCH = 5.0
 BLUETOOTH_INTERVAL = 60

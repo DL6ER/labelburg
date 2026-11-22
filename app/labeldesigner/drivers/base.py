@@ -78,11 +78,8 @@ class Driver:
     # (vendor, product) of its printers on USB that are reached through their
     # serial interface, not a printer interface, see backends.UsbSerialPrinter
     usb_serial_ids: tuple = ()
-    # How its printers are found on Bluetooth, see found_on_bluetooth(): by
-    # the names they tell, regular expressions, or by the 128-bit UUIDs of the
-    # services they advertise, with their models; over Bluetooth LE ('le') or
-    # classic Bluetooth ('classic'), which is searched only for drivers that
-    # name printers there
+    # Its printers on Bluetooth by their names and services, with their models,
+    # and whether they are on Bluetooth LE or classic, see found_on_bluetooth()
     bluetooth_names: dict = {}
     bluetooth_services: dict = {}
     bluetooth_kind: str = 'le'
@@ -217,9 +214,12 @@ class Driver:
 
     def found_on_bluetooth(self, device: dict) -> tuple[str, str] | None:
         """(address, model) of a printer of this driver on Bluetooth as
-        bluetooth.discover() found it, None for other devices: one reached
-        the way of bluetooth_kind whose name is one of bluetooth_names, else
-        that advertises one of bluetooth_services."""
+        bluetooth.discover() found it, None for other devices. By default one
+        on the Bluetooth of bluetooth_kind, 'le' or 'classic', whose name a
+        regular expression of bluetooth_names matches, else that advertises
+        a 128-bit service UUID of bluetooth_services. Classic Bluetooth is
+        searched only once a driver names printers there, see
+        drivers.classic_bluetooth()."""
         if not device.get('classic' if self.bluetooth_kind == 'classic' else 'le'):
             return None
         name = device.get('name', '')

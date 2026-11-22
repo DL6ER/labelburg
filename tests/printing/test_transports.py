@@ -18,7 +18,7 @@ from app.labeldesigner.drivers import backends, devices, niimbot, transports
 from app.labeldesigner.drivers.base import Driver
 from app.labeldesigner.drivers.brother import usb as brother_usb
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
-from tests.printing.test_bluetooth import Management, found
+from tests.printing.test_bluetooth import Management, event, found
 from tests.printing.test_niimbot import FakePrinter
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
 from tests.printing.test_usb_backends import Endpoint, USBError, USBTimeoutError
@@ -482,6 +482,40 @@ def test_classic_search_finds_devices_with_their_class(management):
                                    'classic': True, 'device_class': 0x5a020c}
     # Classic Bluetooth and LE, and stopped again
     assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
+
+
+class LeOnly(Management):
+    """An adapter without classic Bluetooth, which refuses to search it."""
+
+    def send(self, data):
+        op, index, _ = struct.unpack_from('<HHH', data)
+        if op == 0x0023 and data[6] != 0x06:
+            self.sent.append((op, index, data[6:]))
+            self.incoming.append(event(0x0002, index, struct.pack('<HB', op, 0x0c)))
+            return len(data)
+        return super().send(data)
+
+
+def test_search_on_an_adapter_without_classic_bluetooth_still_finds_le(monkeypatch):
+    fake = LeOnly([found(MAC, name='B1-TEST0001')])
+    waits = []
+    monkeypatch.setattr(bluetooth.socket, 'socket', fake)
+    monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
+    assert [(d['address'], d['name']) for d in bluetooth.discover(5, classic=True)] == [(MAC, 'B1-TEST0001')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0023, b'\x06'), (0x0024, b'\x06')]
+    # As long as a search of LE alone
+    assert waits[-1] <= 5
+
+
+@pytest.mark.parametrize('classic, longest', [(True, 11), (False, 5)])
+def test_classic_search_lasts_until_the_kernel_searched_both(monkeypatch, classic, longest):
+    # LE for 5.12 s, then classic Bluetooth for as long
+    fake = Management([found(MAC, name='B1-TEST0001')])
+    waits = []
+    monkeypatch.setattr(bluetooth.socket, 'socket', fake)
+    monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
+    bluetooth.discover(5, classic=classic)
+    assert longest - 1 < waits[0] <= longest
 
 
 class ClassicDriver(Driver):

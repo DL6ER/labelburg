@@ -22,6 +22,9 @@ COMMAND_COMPLETE, COMMAND_STATUS, DEVICE_FOUND, DISCOVERING = 0x0001, 0x0002, 0x
 LE, CLASSIC = 0x06, 0x01
 # The advertising field of the class of device
 CLASS_OF_DEVICE = 0x0d
+# Searching both, the kernel searches LE for 5.12 s, then classic Bluetooth
+# for as long
+CLASSIC_SEARCH = 11.0
 
 
 def _command(op: int, index: int, params: bytes = b'') -> bytes:
@@ -55,15 +58,16 @@ def _device(params: bytes, classic: bool = False) -> dict:
 
 
 def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
-    """Search for timeout seconds, the devices found by address, with
-    classic on classic Bluetooth too. Errors, e.g. without an adapter or the
-    right to search, find nothing."""
+    """Search for timeout seconds, the devices found by address. With
+    classic on classic Bluetooth too, for CLASSIC_SEARCH seconds at least,
+    LE alone where the adapter refuses that. Errors, e.g. without an adapter
+    or the right to search, find nothing."""
     found, kind = {}, (LE | CLASSIC) if classic else LE
     try:
         with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI) as sock:
             sock.bind((HCI_DEV_NONE, HCI_CHANNEL_CONTROL))
             sock.send(_command(READ_INDEX_LIST, HCI_DEV_NONE))
-            index, deadline = None, time.monotonic() + timeout
+            index, deadline = None, time.monotonic() + (max(timeout, CLASSIC_SEARCH) if classic else timeout)
             try:
                 while (remaining := deadline - time.monotonic()) > 0:
                     if not select.select([sock], [], [], remaining)[0]:
@@ -80,6 +84,11 @@ def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
                             if not count:
                                 return []
                             index = struct.unpack_from('<H', params, 5)[0]
+                            sock.send(_command(START_DISCOVERY, index, bytes([kind])))
+                        elif op == START_DISCOVERY and status and kind != LE:
+                            # An adapter without classic Bluetooth
+                            logger.debug('Classic Bluetooth is not searched: the search was refused (%#04x)', status)
+                            kind, deadline = LE, time.monotonic() + timeout
                             sock.send(_command(START_DISCOVERY, index, bytes([kind])))
                         elif op == START_DISCOVERY and status:
                             logger.info('Bluetooth printers are not looked for: the search was refused (%#04x)', status)
