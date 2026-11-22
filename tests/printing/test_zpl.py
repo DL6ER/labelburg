@@ -398,6 +398,10 @@ def test_asked_right_after_boot(monkeypatch):
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL-300'),
     ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD621-300dpi ZPL;', 'Zebra/ZPL-300'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra/ZPL-300'),
+    # 200 dpi as some Zebras name their 203 dpi
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT230-200dpi ZPL;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZP 450-200dpi;', 'Zebra/ZPL'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZM400 200 dpi;', 'Zebra/ZPL'),
     # Of a resolution without a model, its labels would come out a third as large
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;', None),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZT411 600 DPI;', None),
