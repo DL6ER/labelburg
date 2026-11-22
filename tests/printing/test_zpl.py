@@ -398,6 +398,9 @@ def test_asked_right_after_boot(monkeypatch):
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL-300'),
     ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD621-300dpi ZPL;', 'Zebra/ZPL-300'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra/ZPL-300'),
+    # Of a resolution without a model, its labels would come out a third as large
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;', None),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZT411 600 DPI;', None),
     # Other models of the same makers and the TSPL printers of lprint-tspl.h
     ('MFG:4BARCODE;CMD:CEZD;MDL:4B-3064TB;', None),
     ('MFG:HP;CMD:PJL,PCL,PCLXL,URF;MDL:HP LaserJet M110w;', None),
@@ -502,3 +505,19 @@ def test_status_names_the_printer_by_its_device_id(monkeypatch, device_id, name)
     driver, model = drivers.resolve(device, 'Zebra/ZPL')
     state = driver.status(device, model)
     assert state.get('device_name') == name
+
+
+def test_printer_of_600_dpi_is_left_to_be_configured(client, monkeypatch):
+    from app.labeldesigner import printer
+    from app.labeldesigner.drivers import devices
+    # Not found on USB as a ZPL printer
+    told = {'usb://0x0a5f:0x0120/ZT610': 'MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;'}
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: told.get(device, ''))
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: (list(told), []))
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, '_cached_printers', [])
+    client.application.config['PRINTER_PRINTER'] = '?'
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert [p['path'] for p in found] == ['simulation']
+    assert zpl.DRIVER.model_of('usb://0x0a5f:0x0120/ZT610') is None

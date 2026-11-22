@@ -67,8 +67,9 @@ def _asked_lately(key: str) -> bool:
 
 # The command set ZPL in a device ID
 ZPL_DEVICE_ID = re.compile(r'(^|;)\s*(CMD|COMMAND SET):[^;]*\bZPL', re.IGNORECASE)
-# A model of 300 dpi, e.g. MDL:ZTC ZD611-300dpi ZPL
-DPI_300 = re.compile(r'300\s*dpi', re.IGNORECASE)
+# The resolution of a model, e.g. MDL:ZTC ZD611-300dpi ZPL. One without a
+# model of it, e.g. 600 dpi, is no printer of this driver until configured.
+RESOLUTION = re.compile(r'(\d+)\s*dpi', re.IGNORECASE)
 # Printers on ZPL by the maker and model of their device ID, where it names
 # no ZPL or no resolution. The device IDs are those LPrint lists in
 # lprint-zpl.h (https://github.com/michaelrsweet/lprint, Apache-2.0).
@@ -155,7 +156,8 @@ class Zpl(Driver):
         known = KNOWN_IDS.get((fields.get('MFG', ''), fields.get('MDL', '')))
         if known or not ZPL_DEVICE_ID.search(device_id):
             return known
-        return MODELS[1] if DPI_300.search(fields.get('MDL', '')) else MODELS[0]
+        resolution = RESOLUTION.search(fields.get('MDL', ''))
+        return next((model for model in MODELS if DPI[model] == int(resolution[1])), None) if resolution else MODELS[0]
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
