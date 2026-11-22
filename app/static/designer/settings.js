@@ -6,7 +6,7 @@ import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, withColors
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
@@ -107,7 +107,7 @@ function sizeOptions(p, chosen) {
 
 function tapeHTML(p) {
     const t = tapeOf(p);
-    if (t.known && !t.manual) return `<div class="row"><span class="set-val">${esc(sizeName(t.id))}</span><small class="set-ok">${icon('check')}read from the printer</small></div>`;
+    if (t.known && !t.manual) return `<div class="row"><span class="set-val">${esc(withColors(sizeName(t.id), p))}</span><small class="set-ok">${icon('check')}read from the printer</small></div>`;
     const chosen = tapesSaving[p.path] > 0 ? kept(p).label_size || '' : t.manual ? t.id : '';
     const note = isDemo(p) ? 'Any roll this model takes.' : t.manual ? 'Set by hand, the printer does not report its tape.'
         : !t.known && (t.candidates || []).length ? `The printer measures labels ${t.unknown}, choose which ones.`
@@ -263,7 +263,7 @@ async function loadAdded() {
 }
 
 const foundText = f => f.errors.length ? f.errors[0]
-    : f.tape && f.tape.known ? `${sizeName(f.tape.id)} in the printer` : 'It does not say which tape it has';
+    : f.tape && f.tape.known ? withColors(`${sizeName(f.tape.id)} in the printer`, f) : 'It does not say which tape it has';
 
 function addHTML() {
     const head = `<div class="set-card-h"><span class="set-add-ic">${icon('plus')}</span><div class="grow"><b>Add a printer</b>

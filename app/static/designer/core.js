@@ -133,6 +133,10 @@ export function sizeShort(id) {
     if (s.form === 'round_die_cut') return `${s.tape[0]} mm round`;
     return `${s.tape[0]} x ${s.tape[1]} mm`;
 }
+// The colors of the tape in a printer and of its print as it tells them, e.g.
+// "black on yellow", and a tape named with them, e.g. "24 mm, black on yellow"
+export const tapeColors = (p = S.printer) => p && p.colors && p.colors.tape && p.colors.ink ? `${p.colors.ink.name} on ${p.colors.tape.name}` : '';
+export const withColors = (named, p = S.printer) => tapeColors(p) ? `${named}, ${tapeColors(p)}` : named;
 
 // --- Fonts and lines ---------------------------------------------------------
 
@@ -530,7 +534,11 @@ export function sheetNote(sheet, max = 100) {
         + (sheet.fill && sheet.fill <= max ? `<button type="button" class="pill" data-fill="${esc(sheet.fill)}">Fill it</button>` : '');
 }
 
-export async function preview(design, values, copies = 1, perCopy = 0) {
+// The colors of the tape in a printer and of its print as the preview shows them
+const shownColors = (p = S.printer) => p && p.colors && p.colors.tape && p.colors.ink ? `${p.colors.tape.hex},${p.colors.ink.hex}` : '';
+
+// onTapeColors: shown on the tape in the printer, in its colors where it tells them
+export async function preview(design, values, copies = 1, perCopy = 0, onTapeColors = false) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
     // On a roll with several labels to a page the server tells how the copies fill the last one
     const sheet = isSheet(asked.label_size);
@@ -542,8 +550,9 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
+    const colors = onTapeColors ? shownColors() : '';
     const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
-        sheet ? [copies, perCopy] : 0]);
+        sheet ? [copies, perCopy] : 0, colors]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -556,6 +565,7 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
             const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
             // Each copy prints all files and PDF pages, the preview shows one
             if (sheet && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (colors) fd.append('tape_colors', '1');
             r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');
@@ -571,7 +581,8 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
             auto: r.headers.get('X-Label-Orientation') === 'auto', gap: +(r.headers.get('X-Label-Image-Text-Gap') || 0),
             order: r.headers.get('X-Label-Parts-Order') || '', direction: r.headers.get('X-Label-Parts-Direction') || '', faint: r.headers.get('X-Image-Faint') === '1',
             pages: +(r.headers.get('X-PDF-Selected-Pages') || 1), pageCount: +(r.headers.get('X-PDF-Pages') || 0), parts: partsOf(r.headers.get('X-Label-Parts')),
-            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet'))
+            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet')),
+            tapeColors: (r.headers.get('X-Label-Tape-Colors') || '').split(',').filter(Boolean)
         };
     })();
     previewCache.set(key, p);
@@ -771,7 +782,7 @@ export function detectTape() {
     S.tapeMoves = t.moves || [];
     S.tapePlace = t.place || {};
 }
-export const tapeState = () => JSON.stringify([S.tape, S.tapeAssumed, S.tapeUnknown, S.printer && S.printer.path, S.printer && S.printer.model]);
+export const tapeState = () => JSON.stringify([S.tape, S.tapeAssumed, S.tapeUnknown, S.printer && S.printer.path, S.printer && S.printer.model, shownColors()]);
 
 // The printers of a status, a status of one printer alone lists none
 const printersIn = data => Array.isArray(data.printers) ? data.printers : [data];

@@ -383,6 +383,7 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
         'red_roll': known.get('red_roll'),
+        'colors': known.get('colors') or {},
         'errors': [unanswered(error)],
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',

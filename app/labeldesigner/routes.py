@@ -1373,13 +1373,15 @@ def preview_from_image():
             more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
                     for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
             im = sheets.page_view(size, [im] + more)
+        # The label designer shows it on the tape in the printer
+        colors = _tape_colors(values) if _flag(values, 'tape_colors') else None
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
     except Exception as e:
         return _preview_refused(e)
 
-    response = _preview_of(label, im, request.values.get('return_format', 'png'))
+    response = _preview_of(label, im, request.values.get('return_format', 'png'), colors)
     # The label designer offers to choose pages of a PDF with several
     if page_count:
         response.headers.set('X-PDF-Pages', str(page_count))
@@ -1392,6 +1394,26 @@ def preview_from_image():
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _tape_colors(values: dict) -> tuple[str, str] | None:
+    """The colors of the tape and of its print a preview is shown in, as the
+    last answer of its printer tells them, where the label is on that tape.
+    The printer is not asked, not even for its model: the label designer
+    follows it anyway."""
+    printers, configured, _ = _known_printers()
+    try:
+        device = _named_device(values.get('printer') or configured, printers, configured)
+    except ValueError:
+        return None
+    state = devices.status_cache.get(devices.lock_key(device), {})
+    colors = state.get('colors') or {}
+    shown = tuple((colors.get(part) or {}).get('hex') for part in ('tape', 'ink'))
+    if not all(shown):
+        return None
+    model = drivers.canonical(values['model']) if values.get('model') else state.get('model')
+    loaded = tape.in_printer(state, model, '', current_app.config['LABEL_DEFAULT_SIZE'])
+    return shown if loaded.known and tape.fits(values.get('label_size', DEFAULT_LABEL_SIZE), loaded) else None
 
 
 def _count(value, default: int = 1) -> int:
@@ -1434,10 +1456,15 @@ MAX_PARTS_HEADER = 2048
 MAX_COLORS_HEADER = 512
 
 
-def _preview_of(label: SimpleLabel, im, return_format: str):
+def _preview_of(label: SimpleLabel, im, return_format: str, colors: tuple[str, str] | None = None):
     """The response with the preview im of label, as PNG or base64
-    (return_format), with what it tells about the label."""
-    response_data = image_to_png_bytes(im, gray=not label.in_color)
+    (return_format), with what it tells about the label. With colors, of the
+    tape and of its print, it is shown in them, see tape.in_colors()."""
+    if colors:
+        im = tape.in_colors(im, *colors)
+    # Gray as printed on white, also white on black
+    neutral = not colors or all(c.lower() in ('#ffffff', '#000000') for c in colors)
+    response_data = image_to_png_bytes(im, gray=not label.in_color and neutral)
     if return_format == 'base64':
         response_data = base64.b64encode(response_data)
         content_type = 'text/plain'
@@ -1446,6 +1473,9 @@ def _preview_of(label: SimpleLabel, im, return_format: str):
     response = make_response(response_data)
     response.headers.set('Content-type', content_type)
     _label_headers(response, label)
+    # For the label designer to show the tape around the label alike
+    if colors:
+        response.headers.set('X-Label-Tape-Colors', ','.join(colors))
     return response
 
 
@@ -1517,6 +1547,8 @@ def get_printer_status():
             printer.update(model=demo, red_support=drivers.for_model(demo).colors(demo) == 'red')
         model = printer.get('model')
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
+        # The colors of the tape and of its print, empty where the printer does not tell them
+        printer['colors'] = printer.get('colors') or {}
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
@@ -1773,7 +1805,8 @@ def identify_printer():
         return _refused('Identifying a printer', e, adding.NOT_ASKED)
     state = found.pop('state')
     found.update(errors=state.get('errors') or [], status_type=state.get('status_type') or '',
-                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()))
+                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()),
+                 colors=state.get('colors') or {})
     return jsonify({'success': True, 'printer': found})
 
 
