@@ -443,8 +443,13 @@ def ask(printer: Printer, body: bytes, timeout: float, wait: float | None = None
     stop.start()
     sent = False
     try:
-        connection.request('POST', printer.path, body, {'Content-Type': 'application/ipp'})
+        connection.putrequest('POST', printer.path)
+        connection.putheader('Content-Type', 'application/ipp')
+        connection.putheader('Content-Length', str(len(body)))
+        connection.endheaders()
+        # A printer may print what it read of a job it took no more of
         sent = True
+        connection.send(body)
         response = connection.getresponse()
         length = response.getheader('Content-Length') or ''
         if length.strip().isdigit() and int(length) > MAX_ANSWER:

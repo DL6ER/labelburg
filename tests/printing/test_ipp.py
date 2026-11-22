@@ -692,3 +692,19 @@ def test_a_request_taken_without_an_answer_is_told_apart(send):
         assert not isinstance(told.value, ipp.Unanswered)
     finally:
         printer.close()
+
+
+def test_a_job_cut_off_while_it_is_sent_is_told_apart():
+    # A printer that takes the connection and reads nothing
+    server = socket.create_server(('127.0.0.1', 0))
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+    taken = []
+    threading.Thread(target=lambda: taken.append(server.accept()[0]), daemon=True).start()
+    target = ipp.Printer(False, '127.0.0.1', server.getsockname()[1], '/ipp/print')
+    try:
+        with pytest.raises(ipp.Unanswered):
+            within(10, lambda: ipp.print_job(target, 'image/png', (5000, 3000), bytes(32 * 1024 * 1024), 0.5))
+    finally:
+        for connection in taken:
+            connection.close()
+        server.close()
