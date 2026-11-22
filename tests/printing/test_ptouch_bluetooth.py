@@ -249,7 +249,13 @@ class FakeBrother:
                     for status_type, phase in ((0x06, 0x01), (0x01, 0x00), (0x06, 0x00)):
                         end.sendall(told(self.model_code, status_type, phase, self.width, self.media))
                     continue
+                except ConnectionResetError:
+                    # Closed with status messages left unread
+                    data = b''
                 if not data:
+                    # A job not waited for ends with the connection
+                    if received:
+                        self.jobs.append(received)
                     return
                 received += data
                 if received == b'\x1b\x69\x53':

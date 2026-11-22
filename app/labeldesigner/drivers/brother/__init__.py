@@ -206,7 +206,9 @@ class BrotherRaster(Driver):
                     logger.warning('Printing failed: %s', message)
                     return message
                 return ""
-            info = usb.send_job(job.data, device, job.page_lengths)
+            # No source says that the PT-D460BT family reports a label printed: sent is printed
+            confirmed = not getattr(MODELS.get(queue.model), 'd460bt_family', False)
+            info = usb.send_job(job.data, device, job.page_lengths, confirmed)
             # Asked again at the next status query, see noted_status()
             devices.note_answer(device)
             logger.info('Sent %d bytes to printer %s', len(job.data), device)

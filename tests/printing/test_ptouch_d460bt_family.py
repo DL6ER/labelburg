@@ -5,6 +5,8 @@ b7c55272, src/libptouch.c and src/ptouch-print.c:
 https://github.com/probonopd/ptouch-print
 their tapes, longest labels and Bluetooth names Brother's User's Guides and
 Quick Setup Guides."""
+import time
+
 import pytest
 from PIL import Image
 
@@ -13,7 +15,8 @@ from app.labeldesigner.drivers import brother, devices
 from app.labeldesigner.drivers.brother.commands import Raster
 from app.labeldesigner.drivers.brother.raster import convert
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
-from tests.printing.test_ptouch_bluetooth import DEVICE, MAC, PRINT, STATUS, UNNAMED, UsbBrother, brother_on_bluetooth, rows  # noqa: F401
+from tests.printing.test_ptouch_bluetooth import (DEVICE, MAC, PRINT, STATUS, UNNAMED, UsbBrother, brother_on_bluetooth,  # noqa: F401
+                                                  rows, told)
 from tests.printing.test_transports import PRINTER_CLASS
 
 FAMILY = ('PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT')
@@ -147,3 +150,48 @@ def test_printing_on_bluetooth(tmp_path, brother_on_bluetooth, model):  # noqa: 
     assert job.startswith(bytes(100) + b'\x1b\x40\x1b\x69\x53\x1b\x69\x61\x01\x1b\x69\x7a\x00\x00\x0c\x00')
     assert job.endswith(b'\x1a') and b'\x1b\x69\x4d' not in job
     assert set(fake.addresses) == {(MAC, 1)}
+
+
+class JobBrother(UsbBrother):
+    """A printer on USB that also answers the status request in a job, with
+    the errors of byte 8 of its status."""
+
+    def __init__(self, model_code: int, errors: int = 0):
+        super().__init__(model_code)
+        self.errors = errors
+
+    def write(self, data: bytes):
+        if len(data) > 3 and b'\x1b\x69\x53' in data:
+            packet = bytearray(told(self.model_code))
+            packet[8] = self.errors
+            self.unread += bytes(packet)
+        else:
+            super().write(data)
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_a_job_sent_is_printed(tmp_path, monkeypatch, model):
+    # The printer tells nothing after the job, no source says it reports printed labels
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: JobBrother(UNNAMED))
+    client = make_client(tmp_path, model=model, printer='/dev/usb/lp0')
+    assert client.get(STATUS).get_json()['printers'][0]['model'] == model
+    start = time.monotonic()
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('printed', '') and time.monotonic() - start < brother.usb.STATUS_WAIT
+
+
+def test_an_error_in_the_reply_to_the_job_is_shown(tmp_path, monkeypatch):
+    # No tape in the reply to the status request of the job
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: JobBrother(UNNAMED, errors=0x01))
+    client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('failed', 'The printer reports: No media when printing')
+
+
+def test_other_brother_printers_still_wait_until_printed(tmp_path, monkeypatch):
+    monkeypatch.setattr(brother.usb, 'STATUS_WAIT', 0.2)
+    monkeypatch.setattr(brother.usb, 'SLOWEST_PRINT_SPEED', 10 ** 6)
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    client = make_client(tmp_path, model='PT-P710BT', printer='/dev/usb/lp0')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('failed', 'The printer did not answer after receiving the label, check whether it was printed')

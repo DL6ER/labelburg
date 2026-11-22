@@ -376,7 +376,7 @@ def test_brother_printer_on_bluetooth_that_is_off_is_not_paged_again(tmp_path, o
 def test_brother_printer_on_bluetooth_is_asked_again_once_it_printed(tmp_path, off, brother_bluetooth, monkeypatch):
     client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
     client.get(STATUS)
-    monkeypatch.setattr(brother_usb, 'send_job', lambda data, device, lengths: {'did_print': True, 'ready_for_next_job': True})
+    monkeypatch.setattr(brother_usb, 'send_job', lambda data, device, lengths, confirmed=True: {'did_print': True, 'ready_for_next_job': True})
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='62'))
     assert outcome(client, response) == ('printed', '')
     client.get(STATUS)
