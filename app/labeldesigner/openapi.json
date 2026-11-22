@@ -4366,7 +4366,7 @@
                     },
                     "report": {
                       "type": "string",
-                      "description": "What a report on GitHub needs, a line each: the version, the connection, the USB IDs and the fields `MFG`, `MDL`, `CMD`, `CLS` and `DES` of the device ID, or the Bluetooth name without its serial number and the 128-bit UUIDs of the services it advertises. Never serial numbers, addresses, host names, paths or names the printer was given."
+                      "description": "What a report on GitHub needs, a line each: the version, the connection, the USB IDs and the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID (`DES` only where it repeats maker and model), or the Bluetooth name without its serial number and the 128-bit UUIDs of the services it advertises. Never serial numbers, addresses, host names, paths or names the printer was given."
                     },
                     "report_url": {
                       "type": "string",

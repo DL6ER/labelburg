@@ -25,7 +25,7 @@ Labelburg looks only where its search for printers (`PRINTER_PRINTER` `?`) looks
 
 Office printers, whose device ID names PCL, PostScript, PDF, AirPrint (URF), IPP Everywhere (PWG) or the commands of inkjets, are neither asked nor reported.
 
-The report holds the fields `MFG`, `MDL`, `CMD`, `CLS` and `DES` of the device ID, without anything that looks like a serial number or an address; `SN`, `SERN` and other fields are left out. Of a Bluetooth name only the model is kept. `GET /labeldesigner/api/printer_status` tells the printers found in `unknown`.
+The report holds the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID, without anything that looks like a serial number, an address or a path, and without the rest of a field after `SN`, `S/N`, `SERIAL`, `MAC`, `IP`, `HOST` or `OWNER`. `DES` is free text and told only where it repeats maker and model; `SN`, `SERN` and other fields are left out. Of a Bluetooth name only the model is kept. `GET /labeldesigner/api/printer_status` tells the printers found in `unknown`.
 
 ### Recording what the maker's app sends
 

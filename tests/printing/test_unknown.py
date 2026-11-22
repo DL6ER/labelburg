@@ -58,28 +58,45 @@ def test_a_long_device_id_keeps_the_address_short():
     assert len(unknown.report_url(found, BUILD)) < 8000
 
 
+# Free text after a model, each with what it must not tell
+FREE = [
+    ('S/N D4J123456789', 'D4J123456789'), ('000L9Z378866', '000L9Z378866'), ('SN 1234-5678-9012', '5678'),
+    ('SN=AB12CD34EF', 'AB12CD34EF'), ('sn:XQ-12345', 'XQ-12345'), ('Serial number XQ-1', 'XQ-1'),
+    ('MAC F4F5E8AABBCC', 'F4F5E8AABBCC'), ('F4F5E8AABBCC', 'F4F5E8AABBCC'), ('on 00-00-5E-00-53-01', '00-00-5E'),
+    ('at ' + MAC, '00:00:5E'), ('00005E005301', '00005E005301'), ('00 00 5E 00 53 01', '5E 00 53'),
+    ('0000.5E00.5301', '5E00'), ('192.168.1.50', '192.168.1.50'), ('fe80::5efe:c000:201', '5efe'),
+    ('IP ::ffff:192.168.1.5', 'ffff'), ('::ffff:192.168.1.5', '192.168'), ('labels.fritz.box', 'fritz.box'),
+    ('shop-printer.local', 'shop-printer'), ('host labelprinter', 'labelprinter'), ('Owner Anna Schmidt', 'Anna'),
+    ('/home/anna/labels', 'anna'), ('C:\\Users\\anna', 'anna'),
+]
+
+
+@pytest.mark.parametrize('text, secret', FREE)
+@pytest.mark.parametrize('field', ['DES', 'MDL'])
+def test_no_report_tells_a_serial_number_an_address_or_free_text(field, text, secret):
+    device_id = f'MFG:TSC;MDL:TE210;DES:{text};' if field == 'DES' else f'MFG:TSC;MDL:TE210 {text};'
+    found = unknown.on_usb(device_id, (0x1203, 0x0140))
+    assert secret.lower() not in told(found).lower()
+    assert found['name'].startswith('TSC TE210') and 'DES' not in found['device_id']
+
+
 @pytest.mark.parametrize('device_id, secret', [
-    # Serial numbers in their own fields, and in those told
-    (DYMO, '12345678901'), (DYMO, 'AB1234567'),
-    ('MFG:Zebra;MDL:ZD421 S/N D4J123456789;CMD:ZPL;', 'D4J123456789'),
-    ('MFG:Zebra;MDL:ZD421;DES:Zebra ZD421 000L9Z378866;', '000L9Z378866'),
-    ('MFG:TSC;MDL:TE210;DES:TE210 on 00-00-5E-00-53-01;', '00-00-5E-00-53-01'),
-    ('MFG:TSC;MDL:TE210;DES:TE210 at ' + MAC + ';', MAC),
-    ('MFG:TSC;MDL:TE210;DES:TE210 00005E005301;', '00005E005301'),
-    ('MFG:TSC;MDL:TE210;DES:TE210 192.168.1.50;', '192.168.1.50'),
-    ('MFG:TSC;MDL:TE210;DES:TE210 fe80::5efe:c000:201;', 'fe80::5efe:c000:201'),
-    ('MFG:TSC;MDL:TE210;DES:labels.fritz.box;', 'fritz.box'),
-    ('MFG:TSC;MDL:TE210;DES:shop-printer.local;', 'shop-printer'),
     # Fields not naming the model, e.g. a path or a serial number
+    (DYMO, '12345678901'), (DYMO, 'AB1234567'),
     ('MFG:TSC;MDL:TE210;SN:000L9Z378866;', 'L9Z378866'),
     ('MFG:TSC;MDL:TE210;SERN:D4J12345;', 'D4J12345'),
     ('MFG:TSC;MDL:TE210;UID:/dev/usb/lp0;', '/dev/usb/lp0'),
     ('MFG:TSC;MDL:TE210;CID:Office label printer;', 'Office label printer'),
+    # A description that tells more than maker and model
+    ('MFG:TSC;MDL:TE210;DES:TSC TE210 of the shop;', 'shop'),
 ])
-def test_no_report_tells_a_serial_number_or_an_address(device_id, secret):
+def test_no_report_tells_other_fields(device_id, secret):
     found = unknown.on_usb(device_id, (0x1203, 0x0140))
     assert secret.lower() not in told(found).lower()
-    assert found['name'].startswith(device_id.split(';')[0][4:])
+
+
+def test_a_description_repeating_maker_and_model_is_told():
+    assert unknown.on_usb('MFG:Zebra;MDL:ZD421;DES:ZEBRA zd421;', None)['device_id']['DES'] == 'ZEBRA zd421'
 
 
 def test_a_usb_device_without_a_device_id_is_named_by_its_maker():

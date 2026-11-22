@@ -41,12 +41,14 @@ NIIMBOT_NAMES = frozenset(('A1_PRO', 'A20', 'A203', 'A63', 'A8_P', 'B1_PRO', 'B1
 NIIMBOT_NAME = re.compile(r'(?P<model>[A-Z0-9_]+)-[A-Z0-9]{4,}', re.IGNORECASE)
 # Brother's P-touch printers on classic Bluetooth, e.g. PT-P710BT<serial>
 PTOUCH_NAME = re.compile(r'(?P<model>PT-[A-Z][0-9]{3}BT)[A-Z0-9]*', re.IGNORECASE)
-# What a field must not tell: MAC, IPv4 and IPv6 addresses, host names,
-# serial numbers, which are words of 6 and more letters and digits with at
-# least 5 digits
-_ADDRESS = re.compile(r'([0-9A-F]{2}[:-]){5}[0-9A-F]{2}|\d{1,3}(\.\d{1,3}){3}'
+# What a field must not tell: everything after a word that names a serial
+# number, an address or an owner, MAC addresses as 12 hex digits with or
+# without separators, IPv4 and IPv6 addresses, host names, paths
+_NAMED = re.compile(r'\b(SN|S/N|SERIAL|MAC|IP|HOST|OWNER)(?![A-Z0-9-]).*', re.IGNORECASE | re.DOTALL)
+_IPV4 = re.compile(r'\d{1,3}(\.\d{1,3}){3}')
+_ADDRESS = re.compile(r'(?<![0-9A-Z])[0-9A-F]{2}([:. -]?[0-9A-F]{2}){5}(?![0-9A-Z])'
                       r'|(?<![\w:])[0-9A-F]{0,4}(:[0-9A-F]{0,4}){2,7}(?![\w:])'
-                      r'|[A-Z0-9-]+(\.[A-Z0-9-]+)*\.[A-Z]{2,}\b', re.IGNORECASE)
+                      r'|[A-Z0-9-]+(\.[A-Z0-9-]+)*\.[A-Z]{2,}\b|(?<![\w/])/\S*|\b[A-Z]:\\\S*', re.IGNORECASE)
 _WORD = re.compile(r'[A-Z0-9]+', re.IGNORECASE)
 # Characters of a field and services told at most
 LONGEST = 120
@@ -60,7 +62,7 @@ def _serial(word: str) -> bool:
 def clean(text: str) -> str:
     """A field as a report tells it: without addresses and serial numbers,
     at most LONGEST characters."""
-    text = _ADDRESS.sub('', str(text or ''))
+    text = _ADDRESS.sub('', _IPV4.sub('', _NAMED.sub('', str(text or ''))))
     text = _WORD.sub(lambda m: '' if _serial(m.group()) else m.group(), text)
     return re.sub(r'\s+', ' ', text).strip(' -_:;,/')[:LONGEST].strip()
 
@@ -88,6 +90,10 @@ def on_usb(device_id: str, ids: tuple[int, int] | None) -> dict:
     fields = devices.device_id_fields(device_id)
     told = {name: value for name in FIELDS if (value := clean(fields.get(name, '')))}
     maker, model = told.get('MFG', ''), told.get('MDL', '')
+    # A description is free text: told only where it repeats maker and model
+    named = {word.upper() for word in _WORD.findall(f'{maker} {model}')}
+    if not {word.upper() for word in _WORD.findall(told.get('DES', ''))} <= named:
+        del told['DES']
     if not maker and ids:
         maker = LABEL_MAKERS.get(ids[0], '')
         model = model or PRODUCTS.get(ids, '')
