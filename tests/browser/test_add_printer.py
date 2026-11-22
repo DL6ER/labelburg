@@ -134,7 +134,7 @@ def test_a_printer_on_ipp_is_added_as_other_printer(designer, app, on_ipp):  # n
     # Its roll as it tells it, the cutting as it is set up
     assert 'read from the printer' in card.inner_text()
     assert 'As set on the printer' in card.inner_text()
-    assert 'Set on the printer itself.' in card.inner_text()
+    assert 'Set on the printer itself.' not in card.inner_text()
     assert kept(app)['added'] == [{'address': on_ipp.address, 'model': 'Other/IPP-203', 'name': 'Shipping'}]
 
     back_to_the_editor(designer)

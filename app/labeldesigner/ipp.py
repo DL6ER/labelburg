@@ -74,7 +74,7 @@ SCHEMES = ('ipp://', 'ipps://', 'cups://')
 PATH = r'/(ipp|printers|classes)(/[A-Za-z0-9_~+-][A-Za-z0-9._~+-]*)*'
 # Ports of raw printing and LPD, which print a request as text
 RAW_PORTS = frozenset((515, 6101, *range(9100, 9200)))
-RAW_PORT = 'Printers take raw jobs on this port, give the port of IPP, 631 unless it was changed'
+RAW_PORT = 'Printers take jobs on this port, give the port of IPP, 631 unless it was changed'
 NOT_ON_IPP = 'Give this printer an address on IPP, e.g., ipp://<host>/ipp/print'
 # Who sends the jobs and their name, as the printer lists them
 USER = b'labelburg'

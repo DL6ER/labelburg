@@ -455,7 +455,7 @@ def test_printer_that_does_not_tell_its_roll(tmp_path, fake, loaded, media_type)
     (ipp.STOPPED, ('media-empty-error', 'media-low-warning'), 'Error occurred', ['There are no labels in the printer']),
     (ipp.STOPPED, ('paused',), 'Error occurred', ['The printer is paused']),
     # Other reasons count only as errors, named by their keyword
-    (ipp.STOPPED, ('toner-gone-error', 'marker-supply-low-report'), 'Error occurred', ['toner-gone']),
+    (ipp.STOPPED, ('marker-supply-empty-error', 'marker-supply-low-report'), 'Error occurred', ['The printer reports "marker-supply-empty"']),
     # A queue of CUPS while it prints
     (ipp.PROCESSING, ('cups-waiting-for-job-completed', 'connecting-to-device'), devices.BUSY_STATUS_TYPE, []),
     (ipp.IDLE, ('offline-report', 'cups-insecure-filter-warning'), 'Reply to status request', []),
@@ -561,7 +561,8 @@ def test_printer_that_takes_none_of_the_formats(tmp_path, fake):
 
 @pytest.mark.parametrize('reasons, message', [
     (('cover-open-error',), 'The printer reports: The cover is open'),
-    (('toner-gone-error',), 'The printer reports: toner-gone'),
+    (('marker-supply-empty-error',), 'The printer reports: "marker-supply-empty"'),
+    (('cover-open-error', 'marker-supply-empty-error'), 'The printer reports: The cover is open, "marker-supply-empty"'),
 ])
 def test_job_is_not_sent_to_a_printer_with_an_error(tmp_path, fake, reasons, message):
     fake.printer = [printer_attributes(printer_state=ipp.STOPPED, reasons=reasons)]

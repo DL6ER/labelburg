@@ -167,7 +167,8 @@ function sideHTML(p) {
 
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${esc(cutShort(c, caps))}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
+    // One that cuts as it is set up says so in its value alone
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${esc(cutShort(c, caps))}</span>${caps.cut_on_printer ? '' : `<small class="muted">${esc(cutText(c, caps))}</small>`}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')

@@ -64,6 +64,7 @@ SPEED = 50
 BESIDES = 2.0
 
 NO_FORMAT = 'The printer takes none of the kinds of files Labelburg sends'
+REPORTS = 'The printer reports'
 LOGIN = 'The printer asks for a login, which Labelburg cannot give'
 TLS = 'The printer asks for an encrypted connection, give its address with ipps:// instead of ipp://'
 NOT_TAKING = 'The printer takes no jobs at the moment, try again later'
@@ -132,10 +133,10 @@ def ask(device: str, attributes=ASKED) -> dict:
     return ipp.get_printer_attributes(printer.host, printer.port, printer.path, attributes, TIMEOUT, printer.tls)
 
 
-def printer_errors(attributes: dict) -> list[str]:
-    """Messages for the reasons why the printer cannot print: those of
-    REASON_MESSAGES, and the keyword of any other with the suffix -error.
-    CUPS tells reasons of no suffix while it prints, e.g.
+def _reasons(attributes: dict) -> list[str]:
+    """The reasons why the printer cannot print: the messages of
+    REASON_MESSAGES, and the keyword of any other with the suffix -error in
+    quotes. CUPS tells reasons of no suffix while it prints, e.g.
     cups-waiting-for-job-completed."""
     reasons = attributes.get('printer-state-reasons') or []
     found = []
@@ -143,10 +144,22 @@ def printer_errors(attributes: dict) -> list[str]:
         if not isinstance(reason, str):
             continue
         keyword = reason.removesuffix('-error')
-        message = ipp.REASON_MESSAGES.get(keyword, keyword if reason.endswith('-error') else '')
+        message = ipp.REASON_MESSAGES.get(keyword, f'"{keyword}"' if reason.endswith('-error') else '')
         if message and message not in found:
             found.append(message)
     return found
+
+
+def printer_errors(attributes: dict) -> list[str]:
+    """Messages for the reasons why the printer cannot print, see _reasons(),
+    a keyword as the Brother driver words it."""
+    return [f'{REPORTS} {reason}' if reason.startswith('"') else reason for reason in _reasons(attributes)]
+
+
+def reported(attributes: dict) -> str:
+    """What the printer reports, see _reasons(), empty where it can print."""
+    reasons = _reasons(attributes)
+    return f"{REPORTS}: {', '.join(reasons)}" if reasons else ''
 
 
 def _loaded(media) -> tuple:
@@ -246,9 +259,9 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
             return {ipp.CANCELED: CANCELED, ipp.ABORTED: ABORTED, ipp.HELD: HELD}[state]
         try:
             # Waiting or printing: the printer may tell why it does not go on
-            problems = printer_errors(ask(device, ipp.STATUS_ATTRIBUTES))
+            problems = reported(ask(device, ipp.STATUS_ATTRIBUTES))
             if problems:
-                return f"The printer reports: {', '.join(problems)}, it prints the label once this is fixed"
+                return f'{problems}, it prints the label once this is fixed'
             if time.monotonic() > deadline:
                 return NOT_FINISHED
             time.sleep(JOB_POLL)
@@ -350,7 +363,7 @@ class Ipp(Driver):
         state = told_status(device, queue.model, attributes)
         if state['errors']:
             # Not sent to a printer that cannot take it, it would wait there
-            return 'The printer reports: ' + ', '.join(state['errors'])
+            return reported(attributes)
         chosen = documents.chosen(attributes, job.dpi)
         if chosen is None:
             logger.warning('%s takes none of %s, only %s', device, documents.FORMATS, attributes.get('document-format-supported'))

@@ -430,8 +430,7 @@ _UNANSWERED = (
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
-OTHER_PRINTER_ONLY = ('A printer at an ipp://, ipps:// or cups:// address prints as "Other printer", '
-                      'give it the model Other/IPP (Other/IPP-203 for one of 203 dpi)')
+OTHER_PRINTER_ONLY = 'Give this printer the model Other/IPP'
 
 
 class OtherPrinterOnly(ValueError):
