@@ -412,3 +412,11 @@ def test_paper_the_printer_leaves_blank_is_told_where_labels_lie_in_it(tmp_path,
 def test_margins_of_the_printer_in_mm():
     assert other.margin({'media-top-margin-supported': [423, 0], 'media-left-margin-supported': 300}) == 3
     assert other.margin({}) is None
+
+
+def test_where_sheets_go_on_edited_by_hand_takes_only_labels():
+    data = {'printers': {'simulation': {'continue_at': {'sheet-l7160': 5, 'sheet-5160': 'x', 'sheet-3474': 1, 'sheet-4226': True}}}}
+    assert printer_settings.of_printer(data, 'simulation')['continue_at'] == {'sheet-l7160': 5}
+    assert 'continue_at' not in printer_settings.of_printer({'printers': {'simulation': {'continue_at': []}}}, 'simulation')
+    kept = printer_settings.continued(data, 'simulation', 'sheet-l7160', 1)
+    assert 'simulation' not in kept['printers']
