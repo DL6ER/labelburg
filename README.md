@@ -16,6 +16,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Brother | QL-800, QL-810W, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
 | Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
+| DYMO | LabelWriter 450, 450 Turbo, 450 Twin Turbo, 450 Duo label side, 4XL, SE450 (USB) | DYMO die-cut thermal labels, e.g. 28 x 89 mm address and 54 x 101 mm shipping labels, also 4 x 6 in on the 4XL, torn off |
 | Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
