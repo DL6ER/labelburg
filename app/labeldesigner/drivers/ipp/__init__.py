@@ -1,7 +1,7 @@
 """Printers on IPP that no other driver prints on, shown as "Other printer":
 label printers set up in CUPS, those LPrint drives, AirPrint label printers.
-Die-cut labels of the common sizes (diecut.py) are sent as images as large
-as the label, in the first format of documents.FORMATS the printer takes,
+Die-cut labels of the common sizes (diecut.py) and DYMO's are sent as
+images as large as the label, in the first format of documents.FORMATS the printer takes,
 made at its resolution, 203 or 300 dpi. The printer cuts or tears them off
 as it is set up. Where it tells its loaded media, e.g. in LPrint, that is
 the roll. Its status is its printer-state and the reasons for it, a job
@@ -16,7 +16,7 @@ from typing import NamedTuple
 from PIL import Image
 
 from ... import ipp
-from .. import bitmap, devices, diecut
+from .. import bitmap, devices, diecut, dymo
 from ..base import Driver, network_status, shown
 from ..labels import Label
 from . import documents
@@ -27,10 +27,16 @@ logger = logging.getLogger(__name__)
 MODELS = ('Other/IPP', 'Other/IPP-203')
 DPI = {MODELS[0]: 300, MODELS[1]: 203}
 SHOWN = 'Other printer'
-WIDEST = max(width for width, _ in diecut.SIZES)
+# The common die-cut labels and DYMO's, which LPrint drives a LabelWriter on;
+# no printhead limits them
+SIZES = diecut.SIZES + tuple(size for size in (*dymo.KINDS, *dymo.WIDE) if size not in diecut.SIZES)
+WIDEST = max(width for width, _ in SIZES)
 # The names of the 300 dpi sizes are the shorter ones, it is the default
 LABELS = tuple(label for model, prefix in zip(MODELS, ('ipp', 'ipp203-'))
-               for label in diecut.labels(prefix, DPI[model], diecut.dots(WIDEST, DPI[model]), (model,), diecut.SIZES))
+               for label in diecut.labels(prefix, DPI[model], diecut.dots(WIDEST, DPI[model]), (model,), SIZES))
+# mm a size told in whole mm may be off from one of SIZES it is: 1-1/8 x
+# 3-1/2 in are 29 x 89 mm, DYMO's 28 x 89 mm address labels
+SIZE_TOLERANCE = 1
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut ({SHOWN})' for label in LABELS}
 
 # What a printer is asked before a job: its state, the formats it takes and
@@ -143,6 +149,15 @@ def printer_errors(attributes: dict) -> list[str]:
     return found
 
 
+def _loaded(media) -> tuple:
+    """Width, length and type of loaded media, see ipp.loaded_media(), of the
+    nearest of SIZES within SIZE_TOLERANCE where there is one."""
+    width, length, kind = ipp.loaded_media(media)
+    near = [(abs(size[0] - width) + abs(size[1] - length), size) for size in SIZES
+            if width and length and abs(size[0] - width) <= SIZE_TOLERANCE and abs(size[1] - length) <= SIZE_TOLERANCE]
+    return (*min(near)[1], kind) if near else (width, length, kind)
+
+
 def told_status(device: str, model: str, attributes: dict) -> dict:
     """Status of the printer of the attributes it told, kept for when it
     does not answer. Its roll is the first of its media that are labels: a
@@ -153,7 +168,7 @@ def told_status(device: str, model: str, attributes: dict) -> dict:
         state['device_name'] = ' '.join(name.split())[:MAX_NAME]
     ready = attributes.get('media-col-ready')
     labels = [media for media in (ready if isinstance(ready, list) else [ready]) if _labels(media)]
-    state['media_width'], state['media_length'], state['media_type'] = ipp.loaded_media(labels)
+    state['media_width'], state['media_length'], state['media_type'] = _loaded(labels)
     state['errors'] = printer_errors(attributes)
     printer_state = attributes.get('printer-state')
     devices.set_state(state, printer_state == ipp.PROCESSING, printer_state == ipp.STOPPED)
@@ -166,7 +181,7 @@ def media_size(label: Label, ready) -> tuple[int, int]:
     and length: the loaded media of its size as the printer names it, else
     the size of the label."""
     for media in ready if isinstance(ready, list) else [ready]:
-        if ipp.loaded_media(media)[:2] == label.tape_size:
+        if _loaded(media)[:2] == label.tape_size:
             size = media['media-size']
             return size['x-dimension'], size['y-dimension']
     return label.tape_size[0] * 100, label.tape_size[1] * 100

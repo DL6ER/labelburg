@@ -393,6 +393,28 @@ def test_label_sizes_in_the_dots_of_each_resolution():
     assert other.NAMES['ipp203-102x152'] == '102 x 152 mm die-cut (Other printer)'
 
 
+def test_dymo_labels_on_other_printers():
+    assert (label_of('ipp28x89').dots_printable, label_of('ipp203-28x89').dots_printable) == ((331, 1051), (224, 712))
+    assert other.DRIVER.label_for('dymo28x89', 'Other/IPP') == 'ipp28x89'
+    # Once, 4 x 6 in shipping labels are of the common sizes too
+    assert sum(label.tape_size == (102, 152) for label in other.LABELS) == 2
+
+
+@pytest.mark.parametrize('loaded, size, label_size', [
+    # LPrint's oe_address-label_1.125x3.5in of a LabelWriter 450, oe_2.25x1.25-label_2.25x1.25in, 4 x 6 in
+    ((2858, 8890), (28, 89), 'ipp28x89'), ((5715, 3175), (57, 32), 'ipp57x32'), ((10160, 15240), (102, 152), 'ipp102x152'),
+    # Nothing near
+    ((3000, 7000), (30, 70), None),
+])
+def test_loaded_inch_sizes_are_those_of_the_labels(tmp_path, fake, loaded, size, label_size):
+    fake.printer = [printer_attributes(loaded=loaded, resolutions=(300,), default=300)]
+    found = client_of(tmp_path, fake, 'Other/IPP').get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert ((found['media_width'], found['media_length']), found['tape']['id'] if found['tape']['known'] else None) == (size, label_size)
+    if label_size:
+        # Printed on the media as the printer names it
+        assert other.media_size(label_of(label_size), ipp.decode_response(fake.printer[0])['media-col-ready']) == loaded
+
+
 def test_one_printer_by_any_of_its_addresses():
     keys = {devices.lock_key(device) for device in ('ipp://Printer.local/ipp/print', 'ipps://printer.local:631/ipp/print')}
     assert keys == {'ipp://printer.local:631/ipp/print'}
