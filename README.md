@@ -10,17 +10,19 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 
 | Vendor | Printers | Labels |
 |---|---|---|
-| Brother | PT-E550W, PT-P700, PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
+| Brother | PT-E550W\*, PT-P700, PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
 | Brother | PT-P900W, PT-P950NW | TZe tapes 18 and 36 mm wide |
-| Brother | QL-500, QL-550, QL-560, QL-570, QL-580N, QL-600, QL-650TD, QL-700, QL-710W, QL-720NW | up to 62 mm wide |
-| Brother | QL-800, QL-810W, QL-820NWB | up to 62 mm wide, also black/red |
-| Brother | QL-1050, QL-1060N, QL-1100, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
-| Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
-| Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
-| Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
-| Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
-| PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
-| Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
+| Brother | QL-500, QL-550, QL-560\*, QL-570, QL-580N, QL-600, QL-650TD, QL-700\*, QL-710W, QL-720NW | up to 62 mm wide |
+| Brother | QL-800, QL-810W\*, QL-820NWB | up to 62 mm wide, also black/red |
+| Brother | QL-1050, QL-1060N, QL-1100\*, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
+| Brother | VC-500W\* | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
+| Epson | ESC/POS receipt printers (USB or network), e.g., the TM-T20II\* and TM-T20III\* | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
+| Niimbot | D110_M\* (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
+| Niimbot | B1\* (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
+| PUQU | Q00\* (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L\*) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
+| Zebra | ZPL printers (USB or network), e.g., the GK420t\*, also the Datamax E-4204B\* | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
+
+\* Tried on a real printer. The others are built from the makers' technical documents and open source drivers.
 
 **Not sure which printer to buy?** Try it first: the demo printer can be any printer in this list. Choose its model and roll in the Settings, design your labels and see how they fit on that printer's labels before you buy it. It needs no printer at all.
 
