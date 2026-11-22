@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.labeldesigner import refusals
+from app.labeldesigner import drivers, refusals
 from app.labeldesigner.drivers import devices, niimbot
 from app.labeldesigner.drivers.niimbot import models, protocol
 from app.labeldesigner.label_names import label_dpi
@@ -49,6 +49,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
+    monkeypatch.setattr(niimbot, '_told_models', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
 
 
@@ -234,6 +235,37 @@ def test_device_id_names_a_model_as_niimbluelib_writes_it():
     assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:D11-H;') == 'Niimbot/D11_H'
     # Not one it prints on
     assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:B21S;') is None
+
+
+def test_printer_on_usb_without_a_device_id_tells_its_model_id(fake, monkeypatch):
+    # e.g. one that is a serial port on USB
+    told(monkeypatch, 785)
+    assert drivers.resolve('usb://0x3513:0x0003', 'Unknown') == (niimbot.DRIVER, 'Niimbot/B21_PRO')
+    # Asked once
+    asked = fake.commands.count(0x40)
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
+    assert fake.commands.count(0x40) == asked == 1
+
+
+def test_printer_on_usb_of_a_model_labelburg_cannot_print_on_is_none(fake, monkeypatch):
+    told(monkeypatch, 768)
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
+
+
+def test_printer_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fake, monkeypatch):
+    monkeypatch.delitem(REPLIES, 0x40)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
+    assert fake.commands.count(0x40) == 1
+    told(monkeypatch, 785)
+    monkeypatch.setattr(devices, 'looked', 1e12)
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
+
+
+def test_other_makers_on_usb_are_not_asked(fake):
+    assert niimbot.DRIVER.model_of('usb://0x04f9:0x209b', '') is None
+    assert fake.commands == []
 
 
 B21_PRO_REPLIES = {0x40: (0x48, struct.pack('>H', 785)), 0xdc: (0xdd, bytes.fromhex('1ff7006100610000' '4f00040001')),

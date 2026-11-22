@@ -64,6 +64,10 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
+# Models of printers on USB that tell no device ID, e.g. a serial port, by
+# the model ID they told, and when they were asked. One that told none is
+# asked again once the label designer looks for printers.
+_told_models: dict[str, tuple[str | None, float]] = {}
 # Printers on Bluetooth LE, the others paired
 _LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
@@ -232,11 +236,13 @@ class Niimbot(Driver):
     # service where it leaves the name out
     bluetooth_names = BLUETOOTH_NAMES
     bluetooth_services = {protocol.NIIMBOT_SERVICE: 'Niimbot/B1'}
+    # Those that are a serial port on USB, which tell their model by its ID
+    usb_serial_ids = ((0x3513, None),)
 
     def model_of(self, device, device_id=None):
         if device_id is None:
             device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
-        return self.model_in(device_id)
+        return self.model_in(device_id) or self._model_told(device)
 
     def model_in(self, device_id):
         # MFG:NIIMBOT;CMD:ESC;MDL: B1; on USB, also shared over USB/IP. Other
@@ -245,6 +251,31 @@ class Niimbot(Driver):
         name = fields.get('MDL', '').strip().upper().replace('-', '_').replace(' ', '_')
         model = f'Niimbot/{name}'
         return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
+
+    def _model_told(self, device) -> str | None:
+        """The model a printer on USB that tells no device ID tells by its
+        model ID, None for another one or a model Labelburg cannot print on."""
+        if not (isinstance(device, str) and device.lower().startswith('usb://0x3513:')):
+            return None
+        key = devices.lock_key(device)
+        known = _told_models.get(key)
+        if known and (known[0] or known[1] >= devices.looked):
+            return known[0]
+        # Never in between the packets of a job or a status query
+        with devices.device_lock(device, timeout=0) as acquired:
+            if not acquired:
+                return known[0] if known else None
+            try:
+                with protocol.connect(device) as c:
+                    model_id = protocol.model_id(c)
+            except Exception:
+                # Also no PyUSB backend, e.g. no libusb
+                logger.debug('No model ID of %s', device, exc_info=True)
+                model_id = None
+        told = models.BY_ID.get(model_id)
+        model = told.name if told in models.PRINTED else None
+        _told_models[key] = (model, time.monotonic())
+        return model
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

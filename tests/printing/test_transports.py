@@ -210,10 +210,41 @@ def test_serial_port_on_usb_that_refuses_its_setup_is_used_as_it_is(pyusb, monke
 
 def test_serial_port_on_usb_no_driver_lists_is_no_printer(pyusb):
     # As before: only devices with a printer interface are printed on
-    assert all(driver.usb_serial_ids == () for driver in drivers.DRIVERS)
-    pyusb.append(SerialDevice(0x0001))
+    assert not any(ids[0] == 0x1234 for driver in drivers.DRIVERS for ids in driver.usb_serial_ids)
+    pyusb.append(SerialDevice(0x0001, vendor=0x1234))
     with pytest.raises(FileNotFoundError):
-        backends.open_printer('usb://0x3513:0x0001')
+        backends.open_printer('usb://0x1234:0x0001')
+
+
+def test_niimbot_without_a_printer_interface_is_reached_through_its_serial_interface(pyusb):
+    # Any of its products: niimbluelib names none
+    device = SerialDevice(0x0003, reads=[b'\x55\x55'])
+    pyusb.append(device)
+    printer_ = backends.open_printer('usb://0x3513:0x0003')
+    assert isinstance(printer_, backends.UsbSerialPrinter) and printer_.read() == b'\x55\x55'
+    printer_.dispose()
+
+
+def _with_printer_interface(device):
+    """The device with a printer interface in place of its serial one, as a B1."""
+    device.data = types.SimpleNamespace(bInterfaceClass=7, bInterfaceNumber=0, endpoints=[Endpoint(0x81), Endpoint(0x02)])
+    device.control = types.SimpleNamespace(bInterfaceClass=0xff, bInterfaceNumber=1, endpoints=[])
+    return device
+
+
+def test_niimbot_with_a_printer_interface_is_reached_through_it(pyusb):
+    pyusb.append(_with_printer_interface(SerialDevice(0x0002)))
+    printer_ = backends.open_printer('usb://0x3513:0x0002')
+    assert type(printer_) is backends.UsbPrinter
+    printer_.dispose()
+
+
+def test_niimbot_that_is_a_serial_port_on_usb_is_found(pyusb, monkeypatch):
+    monkeypatch.setattr(backends, '_shared_bus_ids', set)
+    # The kernel's serial driver holds it, it is taken from it to print
+    pyusb.extend([SerialDevice(0x0003), SerialDevice(0x0001, vendor=0x1234), _with_printer_interface(SerialDevice(0x0002, bound=()))])
+    found, _ = backends.found_printers()
+    assert sorted(found) == [('usb://0x3513:0x0002/TEST0001', ''), ('usb://0x3513:0x0003/TEST0001', '')]
 
 
 class Peer:
