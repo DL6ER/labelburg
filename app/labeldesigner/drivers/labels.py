@@ -4,6 +4,11 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 
+def whole(mm: float) -> int | float:
+    """mm as a whole number where it is one, e.g. 15 for 15.0."""
+    return int(mm) if mm == int(mm) else mm
+
+
 class FormFactor(IntEnum):
     DIE_CUT = 1
     ENDLESS = 2
@@ -19,16 +24,34 @@ class Color(IntEnum):
 
 
 @dataclass(frozen=True)
+class Grid:
+    """Labels laid out on a page, in mm: the size of each, width and length,
+    how many across (columns) and along (rows), the top left of the first
+    one, the step to the next one across and along, and the radius of their
+    corners. paper: a sheet of labels an office printer prints as a page."""
+    size: tuple[float, float]
+    columns: int
+    rows: int
+    left: float = 0
+    top: float = 0
+    step: tuple[float, float] = (0, 0)
+    corner: float = 0
+    paper: bool = False
+
+
+@dataclass(frozen=True)
 class Label:
     """A label size. tape_size is (width, length) in mm, the length 0 for
     endless tape. dots_total and dots_printable are (across, along) in dots of
     the printer, the length 0 for endless tape. offset_r moves the print this
     many dots off the right edge, so that it is centered, feed_margin is fed
     before and after it. models lists the printers it is made for, empty for
-    all printers of its driver. pieces are the labels of a page of several,
-    e.g. of a Niimbot roll, half cut apart: how many across (lanes), how many
-    along (rows), and the gap between lanes in mm. gap is the paper in mm
-    between die-cut labels on their roll."""
+    all printers of its driver. grid lays out the labels of a page of
+    several, e.g. of a Niimbot roll, half cut apart, or a sheet of labels.
+    pieces follow from it: how many across (lanes), how many along (rows),
+    and the gap between lanes in mm; given without a grid, they make one
+    without margins. gap is the paper in mm between die-cut labels on
+    their roll."""
     identifier: str
     tape_size: tuple[int, int]
     form_factor: FormFactor
@@ -38,8 +61,20 @@ class Label:
     feed_margin: int = 0
     models: tuple[str, ...] = ()
     color: Color = Color.BLACK_WHITE
-    pieces: tuple[int, int, float] = (1, 1, 0)
+    pieces: tuple[int, int, float] | None = None
     gap: float = 0
+    grid: Grid | None = None
+
+    def __post_init__(self):
+        grid, pieces = self.grid, self.pieces
+        if grid is None and pieces and pieces[0] * pieces[1] > 1:
+            across, along, gap = pieces
+            size = (whole((self.tape_size[0] - gap * (across - 1)) / across), whole(self.tape_size[1] / along))
+            grid = Grid(size, across, along, step=(whole(size[0] + gap), size[1]))
+            object.__setattr__(self, 'grid', grid)
+        if grid is not None:
+            pieces = (grid.columns, grid.rows, whole(round(grid.step[0] - grid.size[0], 3)) if grid.columns > 1 else 0)
+        object.__setattr__(self, 'pieces', pieces if grid is not None else (1, 1, 0))
 
     @property
     def name(self) -> str:

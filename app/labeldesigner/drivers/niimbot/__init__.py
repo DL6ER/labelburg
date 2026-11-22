@@ -11,7 +11,7 @@ from PIL import Image
 
 from .. import bitmap, devices, progress
 from ..base import Driver, network_status, shown
-from ..labels import FormFactor, Label
+from ..labels import FormFactor, Grid, Label
 from . import calibration, protocol
 
 logger = logging.getLogger(__name__)
@@ -98,9 +98,11 @@ def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DI
 
 
 def _page(width: int, length: int, across: int, along: int, gap: float, model: str) -> Label:
-    """The page of a roll of several labels, named by one of them."""
+    """The page of a roll of several labels, named by one of them, the
+    labels laid out without margins."""
     page = _label(across * width + (across - 1) * gap, along * length, model)
-    return replace(page, identifier=f'niimbot{width}x{length}-{across}x{along}', pieces=(across, along, gap))
+    grid = Grid((width, length), across, along, step=(width + gap, length))
+    return replace(page, identifier=f'niimbot{width}x{length}-{across}x{along}', grid=grid)
 
 
 def _name(label: Label) -> str:
