@@ -533,23 +533,27 @@ DRAW.printed = box => {
         if ('open' in b.dataset) keptLabel(h).then(openEditor, e => toast(e.message));
         else printKeptAgain(h, againDone);
     });
-    $$('[data-k="history"]', box).forEach(b => b.onclick = () => keepLabels(box, { history: b.dataset.v === '0' ? '0' : '' },
-        () => b.dataset.v === '0' ? 'Printed labels are not remembered' : 'Printed labels are remembered', DRAW.printed));
-    $('#setClear').onclick = () => {
-        openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Clear all printed labels?">
-            <h2>Clear all printed labels?</h2>
-            <div class="acts"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="clearGo">${icon('trash')}Clear the list</button></div></div>`, 'center');
-        $('#clearGo').onclick = async () => {
-            closeLayer(true);
-            try {
-                const r = await post('/history/clear', new URLSearchParams());
-                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The printed labels could not be cleared');
-            } catch (e) { toast(e.message); }
-            drawHistory();
-        };
-        $('#clearGo').focus();
-    };
+    // Off, the server removes those kept: asked first where there are any
+    const remember = on => keepLabels(box, { history: on ? '' : '0' }, () => on ? 'Printed labels are remembered' : 'Printed labels are not remembered', DRAW.printed);
+    $$('[data-k="history"]', box).forEach(b => b.onclick = () => {
+        if (b.dataset.v === '1') remember(true);
+        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askClear(() => remember(false)) : remember(false);
+    });
+    $('#setClear').onclick = () => askClear(async () => {
+        try {
+            const r = await post('/history/clear', new URLSearchParams());
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The printed labels could not be cleared');
+        } catch (e) { toast(e.message); }
+        drawHistory();
+    });
 };
+function askClear(then) {
+    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Clear all printed labels?">
+        <h2>Clear all printed labels?</h2>
+        <div class="acts"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="clearGo">${icon('trash')}Clear the list</button></div></div>`, 'center');
+    $('#clearGo').onclick = () => { closeLayer(true); then(); };
+    $('#clearGo').focus();
+}
 const againDone = (entry, h) => announce(entry, () => printKeptAgain(h, againDone));
 
 // From the server, newest first, the next ones after before

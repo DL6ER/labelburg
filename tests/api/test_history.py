@@ -192,17 +192,20 @@ def test_an_unknown_label_is_told(client, path, method):
     assert (response.status_code, response.get_json()['message']) == (404, print_store.NO_SUCH_ENTRY)
 
 
-def test_labels_are_not_kept_while_switched_off(client):
-    kept = printed(client, data=LABEL)
+def test_switched_off_the_labels_kept_go_and_none_are_kept(client):
+    upload = dict(LABEL, print_type='image', image=(io.BytesIO(png()), 'photo.png'))
+    kept = printed(client, data=upload, content_type='multipart/form-data')
     response = client.post(f'{API}/settings/labels', data={'history': '0'})
     assert response.get_json()['settings']['history'] == '0'
+    folder = os.path.join(client.application.config['LABEL_REPOSITORY_DIR'], print_store.HISTORY)
+    assert [name for name in os.listdir(folder) if name != print_store.LOCK_FILE] == []
     printed(client, data=LABEL)
     assert history(client) == {'enabled': False, 'entries': []}
     for path, method in (('preview.png', 'get'), ('label', 'get'), ('print', 'post')):
         response = getattr(client, method)(f'{API}/history/{kept}/{path}')
         assert (response.status_code, response.get_json()['message']) == (404, print_store.NOT_KEPT)
     assert client.post(f'{API}/settings/labels', data={'history': ''}).get_json()['settings']['history'] == ''
-    assert [entry['id'] for entry in history(client)['entries']] == [kept]
+    assert history(client)['entries'] == []
     assert client.post(f'{API}/settings/labels', data={'history': 'no'}).status_code == 400
 
 

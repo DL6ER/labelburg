@@ -1855,6 +1855,13 @@ def label_settings_route():
         return _fail(refusals.LABEL_SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
         return _refused('Saving the label settings', e, refusals.INVALID_INPUT)
+    # Not kept from now on, those kept go too
+    if changes.get('history') == '0':
+        try:
+            print_store.clear()
+        except OSError as e:
+            current_app.logger.warning('The printed labels could not be cleared: %s', e)
+            return _fail(print_store.NOT_CLEARED, 500)
     return jsonify({'success': True, 'settings': printer_settings.label_settings(data, get_fonts().family_names())})
 
 

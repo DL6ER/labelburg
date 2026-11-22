@@ -32,8 +32,9 @@ QUEUE = '.print-queue'
 HISTORY = '.print-history'
 HISTORY_FILE = 'history.jsonl'
 LOCK_FILE = '.lock'
-# Jobs of the queue that cannot be read, kept for a look by hand
+# Jobs of the queue that cannot be read, kept for a look by hand for a week
 BROKEN = 'broken'
+BROKEN_DAYS = 7
 VERSION = 1
 KINDS = ('request', 'image', 'calibration')
 # The history keeps the entries of the last year, at most this many. The
@@ -67,10 +68,11 @@ _base = None
 # The lock of the queue while this process keeps it on disk
 _queue_fd = None
 _warned = False
-# Lines in the history file and bytes of the images kept, as this process
-# counted them
+# Lines in the history file, bytes of the images kept and when the oldest
+# entry ended, as this process counted them
 _lines = 0
 _image_bytes = 0
+_oldest = None
 
 
 def start(folder: str) -> list[dict]:
@@ -108,10 +110,10 @@ def start(folder: str) -> list[dict]:
 
 def close():
     """Close the store, e.g. for the next test."""
-    global _base, _queue_fd, _warned, _lines, _image_bytes
+    global _base, _queue_fd, _warned, _lines, _image_bytes, _oldest
     if _queue_fd is not None:
         os.close(_queue_fd)
-    _base = _queue_fd = None
+    _base = _queue_fd = _oldest = None
     _warned = False
     _lines = _image_bytes = 0
 
@@ -236,6 +238,7 @@ def _left_in_queue() -> list[dict]:
             _broken(job_id)
         else:
             records.append(record)
+    _drop_broken(time.time() - BROKEN_DAYS * 86400)
     # Images of jobs that ended without their record
     known = {record['id'] for record in records}
     for name in os.listdir(directory):
@@ -270,6 +273,15 @@ def _broken(job_id: str):
         _remove_job(job_id)
 
 
+def _drop_broken(before: float):
+    """The files of jobs that could not be read, those written before."""
+    with contextlib.suppress(OSError):
+        for entry in os.scandir(_queue_path(BROKEN)):
+            if entry.stat().st_mtime < before:
+                with contextlib.suppress(OSError):
+                    os.remove(entry.path)
+
+
 def _remove_job(job_id: str):
     """The files of a job that ended, its record first: images left behind
     go at the next start."""
@@ -300,7 +312,7 @@ def ended(record: dict, state: str, message: str, keep: bool, images: list | Non
 # --- The history ---------------------------------------------------------------------
 
 def _keep(record: dict, state: str, message: str, images: list | None, preview: bytes | None):
-    global _lines, _image_bytes
+    global _lines, _image_bytes, _oldest
     job_id = record['id']
     entry = {**record, 'state': state, 'message': message, 'ended_at': time.time()}
     with _history_locked():
@@ -331,7 +343,8 @@ def _keep(record: dict, state: str, message: str, images: list | None, preview: 
             os.close(fd)
         _lines += 1
         _image_bytes += size
-        if _lines > HISTORY_KEEP * 3 // 2:
+        _oldest = entry['ended_at'] if _oldest is None else _oldest
+        if _lines > HISTORY_KEEP * 3 // 2 or _oldest < time.time() - HISTORY_DAYS * 86400:
             _compact()
         if _image_bytes > HISTORY_IMAGE_BYTES:
             _drop_images()
@@ -390,7 +403,7 @@ def _compact():
     """The history cut back to the newest HISTORY_KEEP entries of the last
     HISTORY_DAYS days, also the files of the entries left out. The caller
     holds _history_locked()."""
-    global _lines, _image_bytes
+    global _lines, _image_bytes, _oldest
     cutoff = time.time() - HISTORY_DAYS * 86400
     entries = _read()
     kept = [(entry, line) for entry, line in entries if entry['ended_at'] >= cutoff][-HISTORY_KEEP:]
@@ -404,6 +417,7 @@ def _compact():
                 os.remove(_history_path(name))
     _lines = len(kept)
     _image_bytes = _images_size()
+    _oldest = min((entry['ended_at'] for entry, _ in kept), default=None)
 
 
 def _drop_images():
@@ -470,9 +484,10 @@ def images_kept(entry: dict) -> bool:
 
 
 def clear():
-    """Remove every entry of the history and its images. Raises OSError
-    where they cannot be removed."""
-    global _lines, _image_bytes
+    """Remove every entry of the history and its images, also the jobs of
+    the queue that could not be read. Raises OSError where they cannot be
+    removed."""
+    global _lines, _image_bytes, _oldest
     if _base is None:
         return
     with _history_locked():
@@ -480,6 +495,10 @@ def clear():
             if name != LOCK_FILE:
                 os.remove(_history_path(name))
         _lines = _image_bytes = 0
+        _oldest = None
+        if os.path.isdir(_queue_path(BROKEN)):
+            for name in os.listdir(_queue_path(BROKEN)):
+                os.remove(os.path.join(_queue_path(BROKEN), name))
 
 
 def queued_image(job_id: str, number: int) -> str:

@@ -216,6 +216,26 @@ def test_a_start_drops_entries_older_than_a_year(store, monkeypatch):
     assert files(store / print_store.HISTORY) == ['history.jsonl']
 
 
+def test_entries_older_than_a_year_go_when_the_next_is_added(store, monkeypatch):
+    print_store.queued(rec := record('old'), [IMAGE], b'png')
+    print_store.ended(rec, 'printed', '', keep=True)
+    monkeypatch.setattr(time, 'time', lambda real=time.time: real() + 366 * 86400)
+    print_store.ended(record('new', images=0), 'printed', '', keep=True)
+    assert [entry['id'] for entry, _ in print_store._read()] == ['new']
+    assert files(store / print_store.HISTORY) == ['history.jsonl']
+
+
+def test_jobs_that_could_not_be_read_go_after_a_week(store):
+    print_store.queued(record('bad', v=2), [IMAGE], None)
+    print_store.start(str(store))
+    broken = store / print_store.QUEUE / print_store.BROKEN
+    assert sorted(os.listdir(broken)) == ['bad-0.png', 'bad.json']
+    week = time.time() - 8 * 86400
+    os.utime(broken / 'bad.json', (week, week))
+    print_store.start(str(store))
+    assert os.listdir(broken) == ['bad-0.png']
+
+
 def test_the_oldest_images_go_beyond_their_limit(store, monkeypatch):
     photo = Image.effect_noise((60, 60), 50).convert('L')
     size = len(print_store.png(photo))
@@ -232,9 +252,14 @@ def test_the_oldest_images_go_beyond_their_limit(store, monkeypatch):
 def test_clear_removes_every_entry_and_image(store):
     print_store.queued(rec := record(), [IMAGE], b'png')
     print_store.ended(rec, 'printed', '', keep=True)
+    print_store.queued(record('bad', v=2), [IMAGE], None)
+    print_store.start(str(store))
+    assert os.listdir(store / print_store.QUEUE / print_store.BROKEN)
     print_store.clear()
     assert print_store.entries(10) == []
     assert files(store / print_store.HISTORY) == []
+    # Also the jobs that could not be read, they hold contents of labels too
+    assert os.listdir(store / print_store.QUEUE / print_store.BROKEN) == []
     print_store.ended(record('next', images=0), 'printed', '', keep=True)
     assert [entry['id'] for entry in print_store.entries(10)] == ['next']
 

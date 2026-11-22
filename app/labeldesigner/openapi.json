@@ -1027,7 +1027,7 @@
     "/labeldesigner/api/history": {
       "get": {
         "summary": "Labels printed",
-        "description": "The labels printed on this server, newest first, from every browser and program, also those that did not print. Kept on the server in `.print-history` in the folder of the labels: the entries of the last year, at most 1000, the images of the oldest ones go beyond 200 MB. Calibration labels are not kept. Nothing is kept while the label setting `history` is 0.",
+        "description": "The labels printed on this server, newest first, from every browser and program, also those that did not print. Kept on the server in `.print-history` in the folder of the labels: the entries of the last year, at most 1000, the images of the oldest ones go beyond 200 MB. Calibration labels are not kept. Nothing is kept while the label setting `history` is 0, setting it to 0 removes what was kept.",
         "operationId": "getHistory",
         "parameters": [
           {
@@ -1261,7 +1261,7 @@
     "/labeldesigner/api/history/clear": {
       "post": {
         "summary": "Clear the labels printed",
-        "description": "Removes every entry with its images.",
+        "description": "Removes every entry with its images, also jobs of the queue on disk that could not be read.",
         "operationId": "clearHistory",
         "responses": {
           "200": {
@@ -3964,7 +3964,7 @@
           "history": {
             "type": "string",
             "enum": ["", "0", "1"],
-            "description": "Whether labels printed are kept, see `/labeldesigner/api/history`. 0 keeps none from now on and lists none, those kept before stay until they are cleared. Empty: kept."
+            "description": "Whether labels printed are kept, see `/labeldesigner/api/history`. 0 removes those kept and keeps none from now on. Empty: kept."
           }
         }
       },

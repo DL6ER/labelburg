@@ -121,8 +121,14 @@ def test_labels_printed_are_not_remembered_while_switched_off(page, server):
     assert len(rows(page)) == 1
     assert page.inner_text('#setPart .set-grid').startswith('Remember printed labels')
     assert 'Everyone on your network can see them.' in page.inner_text('#setPart .set-grid')
+    # Those remembered go, it asks first
+    page.click('[data-k="history"][data-v="0"]')
+    page.wait_for_selector('[role=alertdialog] h2:text-is("Clear all printed labels?")')
+    page.click('[role=alertdialog] button:text-is("Cancel")')
+    assert page.locator('[data-k="history"][data-v="1"].on').count() == 1 and len(rows(page)) == 1
+    page.click('[data-k="history"][data-v="0"]')
     with page.expect_response('**/api/settings/labels'):
-        page.click('[data-k="history"][data-v="0"]')
+        page.click('#clearGo')
     page.wait_for_selector('#setHist .set-empty:text-is("Printed labels are not remembered.")')
     page.wait_for_selector('#toast:has-text("Printed labels are not remembered")')
     print_over_the_api(server, 'Sugar')
@@ -136,8 +142,11 @@ def test_labels_printed_are_not_remembered_while_switched_off(page, server):
     open_settings(page, 'printed')
     with page.expect_response('**/api/settings/labels'):
         page.click('[data-k="history"][data-v="1"]')
-    page.wait_for_function("() => document.querySelectorAll('#setHist .set-hrow').length === 1")
-    assert rows(page)[0].startswith('Flour')
+    page.wait_for_selector('#setHist .set-empty:text-is("Nothing printed yet. Labels you print show up here.")')
+    # Off without any, it asks nothing
+    with page.expect_response('**/api/settings/labels'):
+        page.click('[data-k="history"][data-v="0"]')
+    page.wait_for_selector('#setHist .set-empty:text-is("Printed labels are not remembered.")')
 
 
 def test_the_list_is_cleared_after_asking(page, server):
