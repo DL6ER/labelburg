@@ -6,7 +6,7 @@
 
 Start from the demo label "Paperless ASN" in the office category: a QR code with `ASN00042` next to the number. Print as many as you need at once, each gets the next number. `[ASN]` in a line or a code is the number, `[ASN:5]` writes it with 5 digits.
 
-Labelburg remembers the last number it printed. A label printed anew, e.g. from Templates or the editor, gets numbers of its own, so no number is stuck on two documents. A job the printer failed keeps its numbers too, as some of its labels may have come out. Gaps do no harm to Paperless.
+Labelburg remembers the last number it printed. A label printed anew, e.g., from Templates or the editor, gets numbers of its own, so no number is stuck on two documents. A job the printer failed keeps its numbers too, as some of its labels may have come out. Gaps do no harm to Paperless.
 
 A label that tore can be printed again with its own number: "Print again" in the list of printed labels, in the Settings or in Templates, asks whether it keeps its number or takes the next one. With its own numbers it prints only the first labels as they were printed, e.g., one of three copies, not more than before; else it says "Print all its labels again, or choose Next number." Labels still waiting when Labelburg restarts keep their numbers too.
 
