@@ -80,13 +80,8 @@ MODELS = {model.identifier: model for model in (
     # https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf
     Model('PT-P910BT', speed=20, max_length_dots=14173, dpi=360, number_bytes_per_row=70, status_notification=True,
           series_code=0x30, model_code=0x78, bluetooth=True),
-    # The PT-D460BT family of ptouch-print by Dominic Radermacher (GPLv3): USB
-    # product IDs, 128 pixels a line at 180 dpi, ESC i R 01 on the PT-D410
-    # (src/libptouch.c, ptdevs[] and ptouch_rasterstart()). Brother names no
-    # model codes of them. Speeds and the longest labels they make themselves,
-    # 300 mm on the PT-D and 999 mm on the PT-E models, after Brother's User's
-    # Guides, the speed of the PT-E560BT with its adapter.
-    # https://github.com/probonopd/ptouch-print/blob/master/src/libptouch.c
+    # The PT-D460BT family after ptouch-print's libptouch.c, Brother names no model codes;
+    # speeds and longest labels after Brother's User's Guides
     Model('PT-D410', speed=20, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
           num_invalidate_bytes=100, mode_command=b'\x1b\x69\x52\x01', usb_product=0x20DF, d460bt_family=True),
     Model('PT-D460BT', speed=30, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
@@ -119,15 +114,9 @@ QUALITY_SLOWER = 1.7
 
 # P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
 HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
-# The PT-D610BT and the PT-E560BT have an automatic cutter, after their User's
-# Guides, which is not told to cut: ptouch-print sends the PT-D460BT family no
-# cut command, ESC i M 40 only for a cut before the label. The others of the
-# family are cut with a lever.
+# Automatic cutters not told to cut, ptouch-print sends their family no cut command
 UNUSED_CUTTERS = ('PT-D610BT', 'PT-E560BT')
-# Models found on classic Bluetooth by their name, the model and digits, e.g.
-# PT-P710BT1234, as Brother's User's Guide names it, PT-D460BT**** and
-# PT-D610BT**** in their Quick Setup Guides (D033P6001, D033PX001, p. 4).
-# Brother names none of the PT-E310BT and PT-E560BT.
+# Not found on Bluetooth by name, Brother's guides name none
 UNNAMED_ON_BLUETOOTH = ('PT-E310BT', 'PT-E560BT')
 
 # Brother's raster command references: a print of at least 12.7 mm (150

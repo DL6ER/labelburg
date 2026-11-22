@@ -12,10 +12,7 @@ WIDE = ('QL-1050', 'QL-1060N', 'QL-1100', 'QL-1110NWB', 'QL-1115NWB')
 # has a print head of its own, its tapes are "18" and pt36.
 # https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
 SMALL_HEAD = ('PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT')
-# The PT-D460BT family takes lines of 128 pixels too (ptouch-print), tapes up
-# to 18 or 24 mm after the specifications of Brother's User's Guides. These
-# give a print of at most 15.8 mm on 18 mm tape, the 112 pins of pt18, the
-# PT-E310BT has 112 pins only, and of 18.0 mm on 24 mm tape.
+# The PT-D460BT family takes 128 pixels a line too, tapes up to 18 or 24 mm
 UP_TO_18 = ('PT-D410', 'PT-D460BT', 'PT-E310BT')
 UP_TO_24 = ('PT-D610BT', 'PT-E560BT')
 

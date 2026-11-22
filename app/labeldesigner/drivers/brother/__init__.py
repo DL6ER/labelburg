@@ -79,7 +79,7 @@ class BrotherRaster(Driver):
         re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
     )
     mac_address_prefixes = network.MAC_ADDRESS_PREFIXES
-    # On classic Bluetooth by the model and digits, see UNNAMED_ON_BLUETOOTH
+    # On classic Bluetooth by the model and digits, e.g. PT-P710BT1234, as Brother's guides name them
     bluetooth_names = {re.escape(model) + r'\d*': model for model, spec in MODELS.items()
                        if spec.bluetooth and model not in UNNAMED_ON_BLUETOOTH}
     bluetooth_kind = 'classic'
