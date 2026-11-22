@@ -134,7 +134,7 @@ def test_a_code_too_small_to_scan_is_said_until_it_grows(media):
     # Dots of 2 dots of the printer are too small
     request, _ = changed(media, lambda: (media.fill('#ltb [data-csizein]', '2'), media.press('#ltb [data-csizein]', 'Enter')))
     assert (request['image_fit'], request['qrcode_size']) == ('0', '2')
-    # Of a size set, less text would not make it larger
+    # Of a size set, shorter text would not make it larger
     assert media.inner_text('#fits').strip() == 'This code may be too small to scan. Make it larger.'
     request, _ = changed(media, lambda: media.click('#ltb [data-csize="1"]'))
     assert request['qrcode_size'] == '3'

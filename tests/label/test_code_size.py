@@ -31,9 +31,9 @@ def warning(response) -> str:
 
 
 def test_the_texts():
-    assert SMALL_CODE == 'This code may be too small to scan. Make it larger, or put less text into it.'
+    assert SMALL_CODE == 'This code may be too small to scan. Make it larger or shorten its text.'
     assert SMALL_SIZED_CODE == 'This code may be too small to scan. Make it larger.'
-    assert SMALL_BARCODE_NEXT_TO_IMAGE == 'This code may be too small to scan. Next to an image its size cannot be set: use a QR code, or remove the image.'
+    assert SMALL_BARCODE_NEXT_TO_IMAGE == 'This code may be too small to scan. Use a QR code next to an image.'
 
 
 @pytest.mark.parametrize('model, label_size', [('QL-800', '12'), ('PT-P750W', 'pt12')])

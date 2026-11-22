@@ -150,9 +150,9 @@ def long_code_warning(length: int) -> str:
 # What the label designer says of a code with dots or bars too narrow to
 # scan, see codes.too_small(). Less text makes larger dots only where the
 # code is fitted, a barcode next to an image is sized with it.
-SMALL_CODE = 'This code may be too small to scan. Make it larger, or put less text into it.'
+SMALL_CODE = 'This code may be too small to scan. Make it larger or shorten its text.'
 SMALL_SIZED_CODE = 'This code may be too small to scan. Make it larger.'
-SMALL_BARCODE_NEXT_TO_IMAGE = 'This code may be too small to scan. Next to an image its size cannot be set: use a QR code, or remove the image.'
+SMALL_BARCODE_NEXT_TO_IMAGE = 'This code may be too small to scan. Use a QR code next to an image.'
 
 
 # The codes of {{datetime:<format>}} the label designer explains. Their
