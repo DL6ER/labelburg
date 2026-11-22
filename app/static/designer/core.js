@@ -448,7 +448,8 @@ export function formFor(design, copies = 1, forPrint = false, values = null, mar
     fd.append('text', JSON.stringify(design.text.map(l => ({
         text: l.text, size: String(l.size), font: l.font, align: l.align, inverted: !!l.inverted,
         checkbox: !!l.checkbox, color: l.color || 'black', line_spacing: String(l.line_spacing || '100'),
-        ...(l.underline ? { underline: true } : {})
+        ...(l.underline ? { underline: true } : {}), ...(l.caps ? { caps: true } : {}),
+        ...(+l.letter_spacing ? { letter_spacing: +l.letter_spacing } : {})
     }))));
     if (design.image && withImage(design)) {
         for (const im of [design.image].concat(forPrint ? design.more_images || [] : [])) fd.append('image', b64ToBlob(im.data, im.mime), im.name);

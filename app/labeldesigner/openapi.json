@@ -3644,6 +3644,18 @@
             "default": false,
             "description": "The text of the line underlined, in the color of the line."
           },
+          "caps": {
+            "type": "boolean",
+            "default": false,
+            "description": "The line drawn in capitals, once its templates and blanks are filled in, e.g., `ß` as `SS`. A style only: the text, and a code that takes it, keep it as written. Icons and symbols stay as they are."
+          },
+          "letter_spacing": {
+            "type": "number",
+            "minimum": -0.2,
+            "maximum": 1,
+            "default": 0,
+            "description": "Room added between the characters of the line, in parts of its size, e.g., `0.1`: a tenth of the size. Negative values move them closer. The label designer offers -0.05 (narrow), 0 (normal), 0.1 (wide) and 0.2 (wider). Spaced, letters are not kerned."
+          },
           "color": {
             "type": "string",
             "default": "black",

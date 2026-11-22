@@ -28,7 +28,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
+from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_letter_spacing, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
 from .printer_settings import CUTS
 from flask import current_app, g, has_request_context, json, jsonify, redirect, render_template, request, make_response, url_for
@@ -2391,6 +2391,8 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
             raise ValueError("Font size is required")
         if int(line['size']) < 1:
             raise ValueError("Font size must be at least 1")
+        if 'letter_spacing' in line:
+            line['letter_spacing'] = check_letter_spacing(line['letter_spacing'])
         # Lines without a font, e.g. from the API, use the font of new labels
         if not line.get('font'):
             line['font'] = new_font
