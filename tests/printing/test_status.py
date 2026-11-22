@@ -433,6 +433,18 @@ def test_ptouch_models_are_told_apart(code, model):
     assert get_status(FakeSlowPrinter(empty_reads=0, response=bytes(packet)))['model'] == model
 
 
+@pytest.mark.parametrize('media_type, name, category', [
+    (0x04, 'Fabric tape', 'TZe'), (0x13, 'FLe tape', 'FLe'), (0x14, 'Flexible ID tape', 'TZe'), (0x15, 'Satin tape', 'TZe')])
+def test_tapes_of_the_pt_p900_series_are_read(media_type, name, category):
+    # Media types of Brother's raster command reference of the PT-P900
+    # series, p. 27, a PT-P910BT with 12 mm tape
+    from app.labeldesigner.drivers.brother.status import parse_status
+    packet = bytearray(make_status_packet(width=12))
+    packet[3], packet[4], packet[11], packet[24], packet[25] = 0x30, 0x78, media_type, 0x01, 0x08
+    state = parse_status(bytes(packet))
+    assert (state['model'], state['media_type'], state['media_category'], state['media_width']) == ('PT-P910BT', name, category, 12)
+
+
 # Read from a QL-800 by the author of the fork mfwarren/brother_ql_web, who
 # swapped the rolls, and the same from another QL-800 with a DK-22205 and a
 # DK-22251: byte 25 is 0x01 for black rolls, 0x81 for black and red

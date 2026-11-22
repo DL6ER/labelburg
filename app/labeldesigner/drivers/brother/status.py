@@ -29,11 +29,17 @@ ERRORS_2 = {
     7: 'System error',
 }
 
+# Fabric, FLe, flexible ID and satin tape after Brother's raster command
+# reference of the PT-P900 series
 MEDIA_TYPES = {
     0x00: ('No media', 'No media'),
     0x01: ('Laminated tape', 'TZe'),
     0x03: ('Non-laminated type', 'TZe'),
+    0x04: ('Fabric tape', 'TZe'),
     0x11: ('Heat-Shrink Tube (HS 2:1)', 'TZe'),
+    0x13: ('FLe tape', 'FLe'),
+    0x14: ('Flexible ID tape', 'TZe'),
+    0x15: ('Satin tape', 'TZe'),
     0x17: ('Heat-Shrink Tube (HS 3:1)', 'TZe'),
     0x0A: ('Continuous length tape', 'DK'),
     0x0B: ('Die-cut labels', 'DK'),
