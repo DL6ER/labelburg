@@ -1522,7 +1522,7 @@ def get_printer_status():
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
-        printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
         printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
@@ -1548,7 +1548,7 @@ def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
     kept = _kept_settings()
     calibration = printer_settings.calibration_of(kept, device)
     queue.offset = (calibration['across'], calibration['along'])
-    queue.sensing = printer_settings.of_printer(kept, device).get('sensing')
+    queue.sensing = printer_settings.of_printer(kept, device, model).get('sensing')
     return queue
 
 
@@ -1585,15 +1585,10 @@ def _settings_of(device: str) -> dict:
     return printer_settings.of_printer(_kept_settings(), device)
 
 
-def _told_how(model: str) -> bool:
-    """Whether a printer of the model is told how it finds the labels."""
-    return model in drivers.MODELS and drivers.for_model(model).capabilities(model)['sensing']
-
-
 def _as_set(state: dict, model: str, settings: dict) -> dict:
     """The status of a printer with its roll as set in its settings, see
     diecut.as_set(), where it is told how it finds the labels."""
-    return diecut.as_set(state, settings.get('sensing')) if _told_how(model) else state
+    return diecut.as_set(state, settings.get('sensing')) if printer_settings.told_how(model) else state
 
 
 def _tape_of(state: dict, model: str, settings: dict) -> tape.Tape:
@@ -1602,7 +1597,7 @@ def _tape_of(state: dict, model: str, settings: dict) -> tape.Tape:
     a printer told how it finds the labels with its roll as set."""
     state = _as_set(state, model, settings)
     found = tape.in_printer(state, model, settings.get('label_size', ''), current_app.config['LABEL_DEFAULT_SIZE'])
-    return dataclasses.replace(found, roll=state['media_type']) if _told_how(model) else found
+    return dataclasses.replace(found, roll=state['media_type']) if printer_settings.told_how(model) else found
 
 
 def _loaded_tape(device: str, model: str, settings: dict) -> tape.Tape:
@@ -1656,7 +1651,7 @@ def printer_settings_route():
     try:
         requested = values.pop('printer', None), values.pop('model', None)
         if request.method == 'GET':
-            return jsonify(printer_settings.of_printer(_kept_settings(), _printer(*requested)[0]))
+            return jsonify(printer_settings.of_printer(_kept_settings(), *_printer(*requested)))
         # Checked against the model the prints use
         device, model = _resolved_printer(*requested)
         changes = printer_settings.checked(values, model, is_simulation(device))
@@ -1677,7 +1672,7 @@ def printer_settings_route():
         return _fail(refusals.SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
         return _refused('Saving the settings', e, refusals.INVALID_INPUT)
-    settings = printer_settings.of_printer(data, device)
+    settings = printer_settings.of_printer(data, device, model)
     # Shown at once, from the last answer of the printer: asking it may take
     # long, the next status asks it
     last = devices.status_cache.get(devices.lock_key(device), {})

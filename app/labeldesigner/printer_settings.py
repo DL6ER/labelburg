@@ -138,14 +138,25 @@ def demo_model(data: dict) -> str | None:
     return model if model in MODELS else None
 
 
-def of_printer(data: dict, device: str) -> dict:
-    """The settings of a printer, the common ones with its own."""
+def told_how(model: str) -> bool:
+    """Whether a printer of the model is told how it finds its labels, see
+    Driver.capabilities()."""
+    return model in MODELS and for_model(model).capabilities(model)['sensing']
+
+
+def of_printer(data: dict, device: str, model: str | None = None) -> dict:
+    """The settings of a printer, the common ones with its own. How it
+    finds its labels only where it is one of SENSINGS, e.g. not after a hand
+    edit, and, given its model, where that is told it."""
     printer = _key(data, device)
     own = data['printers'].get(printer)
-    model = demo_model(data) if printer == DEMO else None
-    return {**{name: data[name] for name in COMMON if name in data},
-            **({DEMO_MODEL: model} if model else {}),
-            **{name: own[name] for name in OWN if isinstance(own, dict) and name in own}}
+    demo = demo_model(data) if printer == DEMO else None
+    settings = {**{name: data[name] for name in COMMON if name in data},
+                **({DEMO_MODEL: demo} if demo else {}),
+                **{name: own[name] for name in OWN if isinstance(own, dict) and name in own}}
+    if settings.get('sensing') not in SENSINGS or model is not None and not told_how(model):
+        settings.pop('sensing', None)
+    return settings
 
 
 def checked(changes: dict, model: str, demo: bool = False) -> dict:
@@ -176,7 +187,7 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
         elif name == 'sensing':
             if value not in SENSINGS:
                 raise ValueError(SETTINGS_MESSAGE)
-            if not for_model(model).capabilities(model)['sensing']:
+            if not told_how(model):
                 raise ValueError(NO_SENSING)
         elif value not in QUALITIES:
             raise ValueError(SETTINGS_MESSAGE)
@@ -227,7 +238,7 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
     own['label_size'] = hand_set(own.get('label_size', ''), model) or assumed_size(model, default_size)
     if own.get('cut') and for_model(model).cut_problem(own['cut'], model):
         own.pop('cut')
-    if not for_model(model).capabilities(model)['sensing']:
+    if not told_how(model):
         own.pop('sensing', None)
     data['printers'][printer] = own
     return data
@@ -315,18 +326,35 @@ def added(data: dict) -> list[dict]:
             if isinstance(entry, dict) and isinstance(entry.get('address'), str) and entry.get('model') in MODELS]
 
 
+def _without_roll(data: dict, address: str):
+    """Forget how the printer at the address finds its labels: another
+    printer or roll may be there."""
+    printer = _key(data, address)
+    own = data['printers'].get(printer)
+    if isinstance(own, dict) and 'sensing' in own:
+        own = {name: value for name, value in own.items() if name != 'sensing'}
+        if own:
+            data['printers'][printer] = own
+        else:
+            data['printers'].pop(printer)
+
+
 def with_added(data: dict, address: str, model: str, name: str) -> dict:
-    """data with the printer added, ValueError for more than MAX_ADDED."""
+    """data with the printer added, ValueError for more than MAX_ADDED. It
+    starts without how it finds its labels."""
     entries = added(data)
     if len(entries) >= MAX_ADDED:
         raise ValueError(TOO_MANY_ADDED)
     data[ADDED] = entries + [{'address': address, 'model': model, 'name': name}]
+    _without_roll(data, address)
     return data
 
 
 def without_added(data: dict, address: str) -> dict:
-    """data without the printer added at address."""
+    """data without the printer added at address, nor how it finds its
+    labels."""
     data[ADDED] = [entry for entry in added(data) if entry['address'] != address]
+    _without_roll(data, address)
     return data
 
 
