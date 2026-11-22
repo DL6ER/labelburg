@@ -210,7 +210,7 @@ def test_serial_port_on_usb_that_refuses_its_setup_is_used_as_it_is(pyusb, monke
 
 def test_serial_port_on_usb_no_driver_lists_is_no_printer(pyusb):
     # As before: only devices with a printer interface are printed on
-    assert all(driver.usb_serial_ids == () for driver in drivers.DRIVERS)
+    assert all((0x3513, 0x0001) not in driver.usb_serial_ids for driver in drivers.DRIVERS)
     pyusb.append(SerialDevice(0x0001))
     with pytest.raises(FileNotFoundError):
         backends.open_printer('usb://0x3513:0x0001')
