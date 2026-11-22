@@ -127,6 +127,8 @@ class Escpos(Driver):
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
+        if name := self.device_name(device):
+            state['device_name'] = name
         key = devices.lock_key(device)
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:

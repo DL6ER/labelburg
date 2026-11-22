@@ -179,11 +179,17 @@ class Zpl(Driver):
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
+    def device_name(self, device):
+        # Zebra's models start with ZTC, Zebra Technologies Corporation
+        return re.sub(r'\bZTC\s+', '', super().device_name(device), count=1)
+
     def status(self, device, model, unconfirmed=False):
         path = device.removeprefix('file://')
         if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type='Die-cut labels')
+        if name := self.device_name(device):
+            state['device_name'] = name
         key = devices.lock_key(device)
         cached = devices.status_cache.get(key)
         if _asked_lately(key):

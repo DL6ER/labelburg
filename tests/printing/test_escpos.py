@@ -709,3 +709,22 @@ def test_printer_that_answered_before_is_not_printed_on_without_an_answer(client
     assert outcome(client, response) == ('failed', 'The printer does not answer')
     assert protocol.INIT not in printer.sent
 
+
+def test_status_names_the_printer_by_its_device_id(client, fake, monkeypatch, tmp_path):
+    # As usblp read it when the printer was plugged in, with its serial number
+    (tmp_path / 'sys' / 'lp3').mkdir(parents=True)
+    (tmp_path / 'sys' / 'lp3' / 'ieee1284_id').write_text('MFG:Xprinter;CMD:ESC/POS;MDL:XP-58IIH;SN:XP0123456789;')
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'sys' / '{name}' / 'ieee1284_id'))
+    printer = fake()
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (told['model'], told['device_name']) == ('Epson/ESC-POS', 'Xprinter XP-58IIH')
+    # Kept while it does not answer
+    printer.silent = True
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert told['status_type'] == devices.FAILED_STATUS_TYPE and told['device_name'] == 'Xprinter XP-58IIH'
+
+
+def test_status_of_a_printer_without_a_device_id_names_none(client, fake):
+    fake()
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert 'device_name' not in told

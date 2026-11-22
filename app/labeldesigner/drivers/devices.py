@@ -7,6 +7,7 @@ import errno
 import hashlib
 import logging
 import os
+import re
 import stat
 import tempfile
 import threading
@@ -199,6 +200,15 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
         return ''
 
 
+def known_device_id(device_specifier: str) -> str:
+    """The device ID usb_device_id() tells without asking the printer: the
+    one usblp read, else the one a printer on usb:// or usbip:// told
+    before, empty if none."""
+    if device_specifier.startswith('usb://'):
+        return _usb_device_ids.get(_usb_key(device_specifier), '')
+    return usb_device_id(device_specifier, connect=False)
+
+
 def device_id_fields(device_id: str) -> dict:
     """The fields of an IEEE 1284 device ID by their short names, MFG, CMD,
     MDL, also when it spells them out (MANUFACTURER, COMMAND SET, MODEL)."""
@@ -210,6 +220,32 @@ def device_id_fields(device_id: str) -> dict:
             name = name.strip().upper()
             fields[long_names.get(name, name)] = value.strip()
     return fields
+
+
+# Makers some printers name that name none
+NO_MAKER = ('printer', 'generic', 'unknown')
+# A resolution in the model, e.g. ZD611-300dpi
+_RESOLUTION = re.compile(r'[-_\s]*\b\d+\s*dpi\b', re.IGNORECASE)
+DEVICE_NAME_LENGTH = 40
+
+
+def device_name(device_id: str, vendor: str = '') -> str:
+    """Maker and model as a device ID names them, e.g. Xprinter XP-58IIH, the
+    maker as vendor spells it where it starts so (Epson for EPSON), without
+    a resolution or the command set in the model. Empty where it names no
+    model or the name is longer than DEVICE_NAME_LENGTH."""
+    fields = device_id_fields(device_id)
+    plain = {name: ' '.join(''.join(c for c in fields.get(name, '') if c.isprintable()).split())
+             for name in ('MFG', 'MDL', 'CMD')}
+    commands = {command.strip().upper() for command in plain['CMD'].split(',')}
+    model = ' '.join(word for word in _RESOLUTION.sub('', plain['MDL']).split() if word.upper() not in commands)
+    maker = plain['MFG']
+    if vendor and maker.casefold().startswith(vendor.casefold()):
+        maker = vendor
+    if maker.casefold() in NO_MAKER or model.casefold().startswith(maker.casefold()):
+        maker = ''
+    name = f'{maker} {model}'.strip() if model else ''
+    return name if len(name) <= DEVICE_NAME_LENGTH else ''
 
 
 def found_usb_printers() -> tuple[list[str], list[str]]:
@@ -373,10 +409,10 @@ def unanswered(error: Exception) -> str:
 
 
 def failed_printer_state(device_specifier: str, error: Exception, model: str = 'Unknown') -> dict:
-    """Status of a printer that did not answer the status query: model and
-    media from its last answer, if there was one, and the error."""
+    """Status of a printer that did not answer the status query: model,
+    media and name from its last answer, if there was one, and the error."""
     known = status_cache.get(lock_key(device_specifier), {})
-    return {
+    state = {
         'path': device_specifier,
         'model': known.get('model', model),
         'media_width': known.get('media_width'),
@@ -387,3 +423,6 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',
     }
+    if known.get('device_name'):
+        state['device_name'] = known['device_name']
+    return state

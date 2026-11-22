@@ -486,3 +486,19 @@ def test_status_of_a_300_dpi_printer(monkeypatch):
     assert (state['media_width'], state['media_length']) == (102, 152)
     assert tape.in_printer(state, 'Zebra/ZPL-300', '', '62').id == 'zpl300-102x152'
 
+
+@pytest.mark.parametrize('device_id, name', [
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra ZD611'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420t;SN:12J123456;', 'Zebra GX420t'),
+    ('MFG:4BARCODE;CMD:CEZD;MDL:4B-2054A;', '4BARCODE 4B-2054A'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'HP KE103'),
+    ('CMD:ZPL;', None)])
+def test_status_names_the_printer_by_its_device_id(monkeypatch, device_id, name):
+    from app.labeldesigner import drivers
+    device = 'usb://0x0a5f:0x0080/12J123456'
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(backends, 'device_id', lambda device: device_id)
+    monkeypatch.setattr(protocol, 'host_status', lambda device: b'')
+    driver, model = drivers.resolve(device, 'Zebra/ZPL')
+    state = driver.status(device, model)
+    assert state.get('device_name') == name

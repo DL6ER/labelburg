@@ -164,3 +164,43 @@ def test_every_name_before_ends_at_a_model():
     # canonical() looks a name up once
     for name in drivers._ALIASES:
         assert drivers.canonical(name) in drivers.MODELS, name
+
+
+@pytest.mark.parametrize('device_id, vendor, name', [
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;SN:X5JK012345;', 'Epson', 'Epson TM-T20II'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra', 'Zebra ZTC ZD611'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra', 'Zebra ZD420'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra', 'HP KE103'),
+    ('MFG:Xprinter;CMD:ESC/POS;MDL:Xprinter XP-58IIH;', 'Epson', 'Xprinter XP-58IIH'),
+    ('MFG:Printer;CMD:ESC/POS,Raster;MDL:POS58;', 'Epson', 'POS58'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', '', 'Thermal Printer'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', '', 'VEVOR Y428BT'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II\x00\x1b  ;', 'Epson', 'Epson TM-T20II'),
+    # Too long to be a name, or none
+    ('MFG:Some Printer Manufacturing Company;CMD:ESC/POS;MDL:Thermal Receipt Printer 80;', 'Epson', ''),
+    ('MFG:EPSON;CMD:ESC/POS;', 'Epson', ''),
+    ('', 'Epson', '')])
+def test_device_name(device_id, vendor, name):
+    assert devices.device_name(device_id, vendor) == name
+
+
+def test_known_device_id_asks_no_printer(monkeypatch, tmp_path):
+    from app.labeldesigner.drivers import backends, usbip
+    told = 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;'
+    # As usblp read it when the printer was plugged in
+    (tmp_path / 'lp7').mkdir()
+    (tmp_path / 'lp7' / 'ieee1284_id').write_text(told)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / '{name}' / 'ieee1284_id'))
+    assert devices.known_device_id('file:///dev/usb/lp7') == devices.known_device_id('/dev/usb/lp7') == told
+    # On usb:// only once it was read
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(backends, 'device_id', lambda device: pytest.fail('asked the printer'))
+    assert devices.known_device_id('usb://0x04b8:0x0e15/5443') == ''
+    monkeypatch.setattr(backends, 'device_id', lambda device: told)
+    devices.usb_device_id('usb://0x04b8:0x0e15/5443')
+    assert devices.known_device_id('usb://0x04B8:0x0E15/05443') == told
+    # Shared over USB/IP, the one it told last, it is not imported for it
+    monkeypatch.setattr(usbip, 'device_id', lambda device: pytest.fail('imported the printer'))
+    monkeypatch.setattr(usbip, 'known_device_id', lambda device: told)
+    assert devices.known_device_id('usbip://192.0.2.1') == told
+    assert devices.known_device_id('tcp://192.0.2.1') == ''

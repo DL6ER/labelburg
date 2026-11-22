@@ -178,6 +178,12 @@ class Driver:
         answer."""
         raise NotImplementedError
 
+    def device_name(self, device: str) -> str:
+        """Maker and model a printer on USB names in its device ID, e.g.
+        Xprinter XP-58IIH, which status() may tell as device_name where its
+        model is one for printers of many makers; empty if it names none."""
+        return devices.device_name(devices.known_device_id(device), self.vendor)
+
     def noted_status(self, device: str, query) -> dict:
         """The status query() tells, noted whether the printer answered, see
         devices.note_answer(). One that did not answer is not looked for at
