@@ -5,8 +5,8 @@
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
-    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
+    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
@@ -145,15 +145,62 @@ function qualityHTML(p) {
     return `<div class="set-stack">${seg('quality', opts, on, 'Quality')}<small class="muted">${esc(about)} The same for all printers.</small></div>`;
 }
 
+// What feeding the paper does with the tape in the printer, as the server
+// tells it: the button, its hint and what is said meanwhile
+const FEEDS = {
+    cut: ['Feed and cut', 'Cuts off the last label.', 'Feeding and cutting...'],
+    cut_paper: ['Feed and cut', '', 'Feeding and cutting...'],
+    cut_label: ['Feed one label', 'Cuts off the last label, uses one empty label.', 'Feeding one label...'],
+    label: ['Feed one label', 'Feeds one empty label.', 'Feeding one label...'],
+};
+// Printers feeding their paper, by path: one at a time, a second click would feed again
+const feeding = new Set();
+function feedHTML(p) {
+    if (!Object.hasOwn(FEEDS, p.feed || '')) return '';
+    const [name, hint] = FEEDS[p.feed];
+    const off = unreachable(p) ? ' disabled title="The printer cannot be reached"' : feeding.has(p.path) ? ' disabled' : '';
+    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(p.feed === 'label' ? 'down' : 'scissors')}${esc(name)}</button>
+        ${hint ? `<small class="muted">${esc(hint)}</small>` : ''}`;
+}
+
+// Through the queue of printer p; the toast tells while it waits there and why it failed
+async function feed(p) {
+    const [name, , doing] = FEEDS[p.feed], path = p.path, behind = lineBusy(p);
+    feeding.add(path);
+    drawCards(true);
+    let shown = toast(doing, null, 120000), message = '';
+    try {
+        const fd = new FormData();
+        fd.set('printer', path);
+        if (C.models[p.model]) fd.set('model', p.model);
+        const r = await post('/feed', fd);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.success === false) message = j.message || `The printer answered ${r.status}`;
+        else if (j.job && j.state !== 'printed') {
+            const entry = { job: j.job, start: j.start, seen: j.state, seenAt: Date.now(), path };
+            if (behind && j.state === 'waiting') shown = toast(`${name} waits in the queue.`, null, 120000);
+            QUEUE.follow();
+            await followJob(entry);
+            if (entry.state !== 'printed') message = entry.message || 'It was not done';
+        }
+    } catch (e) {
+        message = UNREACHABLE;
+    }
+    feeding.delete(path);
+    drawCards(true);
+    hideToast(shown);
+    if (message) toast(message, { label: 'Try again', run: () => feed(p) }, 10000);
+}
+
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')
         + (caps.chain ? `<label class="set-check"${chainWhy ? ` title="${esc(chainWhy)}"` : ''}><input type="checkbox" data-k="chain"${chainOf(c, caps) ? ' checked' : ''}${chainWhy ? ' disabled' : ''}>Chain printing</label>` : '');
     return `<div class="set-stack"><div class="row">${seg('cut', cuts, c.cut, 'Cutting')}${checks}</div>
-        <small class="muted">${esc(cutText(c, caps))} Labels saved with their own cutting keep it.</small></div>`;
+        <small class="muted">${esc(cutText(c, caps))} Labels saved with their own cutting keep it.</small>${feedHTML(p)}</div>`;
 }
 
 function cardHTML(p, i) {
@@ -220,6 +267,7 @@ function bindCards(box) {
         else if ('show' in b.dataset) { shownAnyway.add(cardKey(p)); drawCards(true); }
         else if ('hide' in b.dataset) { shownAnyway.delete(cardKey(p)); drawCards(true); }
         else if ('test' in b.dataset) testLabel(p);
+        else if ('feed' in b.dataset) feed(p);
         else if ('calOpen' in b.dataset) openCalibration(p, () => drawCards(true));
         else if ('calDismiss' in b.dataset) dismissCalibration(p, () => drawCards(true));
         else if ('remove' in b.dataset) removePrinter(p);
@@ -481,12 +529,15 @@ async function keepLabels(box, changes, told) {
 }
 
 DRAW.labels = box => {
-    const server = familyOf(C.default_font), chosen = chosenFamily();
+    const server = familyOf(C.default_font), chosen = chosenFamily(), names = dateCodeExamples();
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>Labels</h2><p class="muted">Kept on the server, the same in every browser.</p></div></header>
         <section class="set-card"><div class="set-grid">
             <label class="k" for="setDate">Dates on labels</label>
             <div class="set-stack"><select class="in set-sel" id="setDate">${DATES().map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_format || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
                 <small class="muted">For dates put on labels from now on and for date blanks. A date already on a label keeps its format.</small></div>
+            <label class="k" for="setDateLang">Language of dates</label>
+            <div class="set-stack"><select class="in set-sel" id="setDateLang">${C.date_languages.map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_language || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+                <small class="muted">For dates with the name of the month or weekday, e.g. ${esc(names['%B'])} or ${esc(names['%A'])}.</small></div>
             <span class="k">Copies of several files</span>
             <div class="set-stack">${seg('collate', [['1', 'As sets: ABC ABC'], ['0', 'Grouped: AA BB CC']], S.settings.collate === '0' ? '0' : '1', 'Copies of several files')}
                 <small class="muted">For several images or PDF pages printed more than once.</small></div>
@@ -498,6 +549,10 @@ DRAW.labels = box => {
         const f = e.target.value;
         keepLabels(box, { date_format: f }, () => 'Dates on new labels are written as ' + formatDate('2026-11-01', f || browserDateFormat()));
     };
+    $('#setDateLang').onchange = e => keepLabels(box, { date_language: e.target.value }, () => {
+        const named = dateCodeExamples();
+        return `Months and weekdays are written like ${named['%B']} and ${named['%A']}`;
+    });
     $$('[data-k="collate"]', box).forEach(b => b.onclick = () => keepLabels(box, { collate: b.dataset.v },
         () => b.dataset.v === '0' ? 'Copies of several files are grouped' : 'Copies of several files are printed as sets'));
     // A family only, new labels start with its regular style
@@ -561,7 +616,7 @@ async function nextThumb() {
     if (!img.isConnected || !h) return nextThumb();
     thumbsRunning++;
     try {
-        const p = await preview(h.design, h.values || {});
+        const p = await preview(h.design, h.values || {}, 1, 0, h.labels || 0);
         if (img.isConnected) { img.src = p.url; img.parentElement.classList.add('shown'); }
     } catch (e) {
         if (img.isConnected) img.parentElement.classList.add('none');
@@ -670,7 +725,7 @@ async function copy(code) {
 
 // --- About -----------------------------------------------------------------------------
 
-DRAW.about = box => {
+DRAW.about = (box, report) => {
     const b = window.DESIGNER_BUILD || {};
     const theme = document.documentElement.getAttribute('data-theme') || '';
     const version = b.release ? `<a href="${esc(SOURCE)}/releases/tag/${esc(b.release)}" target="_blank" rel="noopener">${esc(b.release)}</a>${b.commit ? `, commit ${esc(b.commit.slice(0, 7))}` : ''}`
@@ -685,6 +740,23 @@ DRAW.about = box => {
             <div class="set-stack"><span class="set-val" id="setVersion">${version}</span>${b.date ? `<small class="muted">Built ${esc(b.date)}</small>` : ''}</div>
             <span class="k">Source code</span>
             <div class="set-stack"><a href="${esc(SOURCE)}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
+            <span class="k">Problems</span>
+            <div class="set-stack"><div class="set-report"><a class="btn soft sm" id="setReport" href="${esc(SOURCE)}/issues/new?template=bug_report.yml" target="_blank" rel="noopener">Report a problem${ic('out')}</a>
+                <button class="btn ghost sm" type="button" id="setReportCopy" hidden>${ic('copy')}Copy details</button></div>
+                <div class="set-details" id="setDetails" hidden></div>
+                <small class="muted">Opens a GitHub form with these details filled in.</small></div>
         </div></section>`;
-    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box); });
+    let shown = report;
+    // From the server, which knows the printers, see /api/problem_report
+    const show = answer => {
+        shown = answer;
+        $('#setReport', box).href = answer.url;
+        $('#setDetails', box).textContent = answer.text;
+        $('#setDetails', box).hidden = $('#setReportCopy', box).hidden = false;
+        $('#setReportCopy', box).onclick = () => copy($('#setDetails', box));
+    };
+    if (report) show(report);
+    else fetch(API + '/problem_report').then(r => r.ok ? r.json() : null)
+        .then(answer => answer && $('#setReport', box) && show(answer)).catch(() => { });
+    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box, shown); });
 };

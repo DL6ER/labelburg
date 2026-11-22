@@ -57,12 +57,17 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                        "description": "Number of labels to be printed, for `X-Label-Sheet` and `{{total}}`."
                       },
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, as the files sent print: of an image label one of each file, of a PDF one of each page `pdf_pages` selects, else 1."
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
                       }
                     }
                   }
@@ -102,12 +107,17 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                        "description": "Number of labels to be printed, for `X-Label-Sheet` and `{{total}}`."
                       },
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, as the files sent print: of an image label one of each file, of a PDF one of each page `pdf_pages` selects, else 1."
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
                       }
                     }
                   }
@@ -121,7 +131,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
                 "schema": {
                   "type": "string"
                 }
@@ -610,6 +620,85 @@
         }
       }
     },
+    "/labeldesigner/api/feed": {
+      "post": {
+        "summary": "Feed and cut",
+        "description": "Feeds the paper of a printer that offers it and cuts it, e.g. to cut off the last label of a job printed without a cut or chain printed, as `feed` of the printer in `/labeldesigner/api/printer_status` tells: `cut` prints the shortest empty label the tape takes and cuts it (Brother QL and P-touch printers, which then end chain printing), `cut_paper` feeds the paper to the cutter and cuts it (ESC/POS printers, which cut after the last receipt anyway); `cut_label` feeds one empty die-cut label and cuts it (Brother QL printers); `label` feeds one empty label (ZPL, as the feed button of the printer). It waits in the line of the printer like a label.",
+        "operationId": "feed",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted: the job waits in the line of its printer, or runs at once if the line is empty. `success` tells that the job was accepted, not that it was done: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown printer or label size, or a printer that offers no feed and cut.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
@@ -650,7 +739,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -714,7 +803,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -1057,6 +1146,54 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/problem_report": {
+      "get": {
+        "summary": "Details for a problem report",
+        "description": "The version and each listed printer with its model, kind of connection (USB, network, Bluetooth, USB on another device or demo printer), whether it answered and its labels, in plain words, and the bug form on GitHub with them filled in. The demo printer is left out next to other printers unless it is configured. Nothing is sent anywhere: the label designer opens `url` in a new tab only when the user clicks \"Report a problem\". Addresses, host names, serial numbers, the names of printers, files and label texts are never included.",
+        "operationId": "problemReport",
+        "responses": {
+          "200": {
+            "description": "The details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "details": {
+                      "type": "object",
+                      "description": "The fields of the bug form by their id. Several printers are separated by `; `, those beyond a few hundred characters counted.",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "example": "v8.0.0, commit 42ef2db, built 2026-11-20 21:17 UTC"
+                        },
+                        "printer": {
+                          "type": "string",
+                          "example": "QL-810W over the network; QL-800 as the demo printer"
+                        },
+                        "label_size": {
+                          "type": "string",
+                          "example": "QL-810W: 62 mm endless (DK-22205 / DK-2205), reported by the printer; Demo printer: 29 x 90 mm die-cut (DK-11201 / DK-1201), chosen in the Settings"
+                        }
+                      }
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The details as lines named like the fields of the form, to copy."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The bug form on GitHub with the details filled in.",
+                      "example": "https://github.com/DL6ER/labelburg/issues/new?template=bug_report.yml&version=v8.0.0%2C%20commit%2042ef2db&printer=QL-810W%20over%20the%20network&label_size=62%20mm%20endless%20%28DK-22205%20%2F%20DK-2205%29%2C%20reported%20by%20the%20printer"
+                    }
+                  }
                 }
               }
             }
@@ -1408,7 +1545,7 @@
     "/labeldesigner/api/settings/labels": {
       "get": {
         "summary": "Settings of labels",
-        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
+        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written and the language of their names, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
         "operationId": "getLabelSettings",
         "responses": {
           "200": {
@@ -1850,7 +1987,7 @@
             "name": "name",
             "in": "query",
             "required": true,
-            "description": "File name of the saved label, e.g. `EAN-Label.json`.",
+            "description": "The saved label: the name it is saved under in the label designer, e.g. `Frozen on`, or its file name, e.g. `Frozen_on.json`, also without `.json`.",
             "schema": {
               "type": "string"
             }
@@ -2003,7 +2140,7 @@
             "name": "name",
             "in": "query",
             "required": true,
-            "description": "File name of the saved label, e.g. `EAN-Label.json`.",
+            "description": "The saved label: the name it is saved under in the label designer, e.g. `Frozen on`, or its file name, e.g. `Frozen_on.json`, also without `.json`.",
             "schema": {
               "type": "string"
             }
@@ -2044,6 +2181,16 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "responses": {
@@ -2051,7 +2198,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }
@@ -2119,7 +2266,7 @@
             "name": "name",
             "in": "query",
             "required": true,
-            "description": "File name of the saved label, e.g. `EAN-Label.json`.",
+            "description": "The saved label: the name it is saved under in the label designer, e.g. `Frozen on`, or its file name, e.g. `Frozen_on.json`, also without `.json`.",
             "schema": {
               "type": "string"
             }
@@ -2144,10 +2291,20 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "requestBody": {
-          "description": "name and blanks may also be sent in the body instead of the query.",
+          "description": "name, blanks and print_count may also be sent in the body instead of the query.",
           "required": false,
           "content": {
             "application/json": {
@@ -2159,6 +2316,10 @@
                   },
                   "blanks": {
                     "$ref": "#/components/schemas/SavedLabelBlanks"
+                  },
+                  "print_count": {
+                    "type": "integer",
+                    "minimum": 1
                   }
                 }
               }
@@ -2172,6 +2333,10 @@
                   },
                   "blanks": {
                     "$ref": "#/components/schemas/SavedLabelBlanks"
+                  },
+                  "print_count": {
+                    "type": "integer",
+                    "minimum": 1
                   }
                 }
               }
@@ -2183,7 +2348,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }
@@ -2262,7 +2427,7 @@
             "name": "name",
             "in": "query",
             "required": false,
-            "description": "File name of the saved label, also accepted as `name` in a JSON body or form.",
+            "description": "The saved label: the name it is saved under in the label designer, e.g. `Frozen on`, or its file name, e.g. `Frozen_on.json`, also without `.json`. Also accepted as `name` in a JSON body or form.",
             "schema": {
               "type": "string"
             }
@@ -2272,15 +2437,72 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "high_res": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "fast_printing": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
+                      },
+                      "printer": {
+                        "type": "string",
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>` or `tcp://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                      },
+                      "model": {
+                        "type": "string",
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
+                      },
+                      "collate": {
+                        "type": "integer",
+                        "enum": [0, 1],
+                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Default: as saved with the label, else as set in the label settings (`/labeldesigner/api/settings/labels`), else 1."
+                      },
+                      "cut_once": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ],
+                        "default": 0,
+                        "description": "1 cuts only after the last label, like `cut` `last`."
+                      },
+                      "blanks": {
+                        "$ref": "#/components/schemas/SavedLabelBlanks"
+                      }
+                    }
                   },
-                  "blanks": {
-                    "$ref": "#/components/schemas/SavedLabelBlanks"
+                  {
+                    "$ref": "#/components/schemas/Cutting"
                   }
-                }
+                ]
               }
             },
             "application/x-www-form-urlencoded": {
@@ -2326,7 +2548,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2591,6 +2813,16 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "responses": {
@@ -2598,7 +2830,7 @@
             "description": "The label as it is saved.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }
@@ -2726,7 +2958,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -3284,6 +3516,10 @@
             "type": "string",
             "description": "Changes when the server restarts."
           },
+          "labels": {
+            "type": "integer",
+            "description": "Number of labels of the job, which `{{total}}` shows, not its pages on a roll of several labels to a page."
+          },
           "image": {
             "type": "string",
             "description": "The image of the first label as base64 PNG, with `return_format=png`."
@@ -3515,6 +3751,11 @@
             "enum": ["", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y"],
             "description": "How dates are written: of date blanks without a format of their own, and of dates the label designer puts on labels. Empty: as the browser writes dates, `%Y-%m-%d` for date blanks of API requests."
           },
+          "date_language": {
+            "type": "string",
+            "enum": ["", "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl", "pt", "sv"],
+            "description": "The language of the names of months and weekdays (`%a`, `%A`, `%b` or `%h`, `%B`, in capitals with `^` or `#`) in dates on labels, as CLDR writes them: a month as in a date where the format has the day of the month (Polish `22 listopada 2026`), else on its own (`listopad 2026`). A name with a width (`%10B`) or the `E` or `O` modifier, and `%c`, `%x` and `%p`, stay as `strftime()` writes them, in English. Empty: English."
+          },
           "collate": {
             "type": "string",
             "enum": ["", "0", "1"],
@@ -3536,7 +3777,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years; names of months and weekdays in the `date_language` of the label settings), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{total}}` (the number of labels of the print job, which the counter counts, e.g., `Box {{counter}} of {{total}}` for Box 1 of 6 to Box 6 of 6), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
@@ -3591,6 +3832,18 @@
             "type": "boolean",
             "default": false,
             "description": "The text of the line underlined, in the color of the line."
+          },
+          "caps": {
+            "type": "boolean",
+            "default": false,
+            "description": "The line drawn in capitals, once its templates and blanks are filled in, e.g., `ß` as `SS`. A style only: the text, and a code that takes it, keep it as written. Icons and symbols stay as they are."
+          },
+          "letter_spacing": {
+            "type": "number",
+            "minimum": -0.2,
+            "maximum": 1,
+            "default": 0,
+            "description": "Room added between the characters of the line, in parts of its size, e.g., `0.1`: a tenth of the size. Negative values move them closer. The label designer offers -0.05 (narrow), 0 (normal), 0.1 (wide) and 0.2 (wider). Spaced, letters are not kerned."
           },
           "color": {
             "type": "string",
@@ -4173,6 +4426,11 @@
           "calibration": {
             "$ref": "#/components/schemas/Calibration",
             "description": "Of a printer that offers calibration (the Niimbot B1): how its labels are moved, see /api/calibration."
+          },
+          "feed": {
+            "type": "string",
+            "enum": ["cut", "cut_paper", "cut_label", "label"],
+            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
           },
           "queue": {
             "type": "object",
