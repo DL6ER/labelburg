@@ -16,7 +16,8 @@ import pytest
 from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import backends, devices, niimbot, transports
 from app.labeldesigner.drivers.base import Driver
-from tests.helpers import EXAMPLE_FORMDATA, make_client
+from app.labeldesigner.drivers.brother import usb as brother_usb
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_bluetooth import Management, found
 from tests.printing.test_niimbot import FakePrinter
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
@@ -293,6 +294,26 @@ def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer=DEVICE, model='Unknown'))
     assert (response.status_code, response.get_json()['message']) == (400, refusals.UNKNOWN_MODEL)
     assert off.tries == 0
+
+
+def test_brother_printer_on_bluetooth_that_is_off_is_not_paged_again(tmp_path, off):
+    # Paging it takes the radio for seconds, as for the other printers on Bluetooth
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    for _ in range(2):
+        assert client.get(STATUS).get_json()['printers'][0]['errors'] == ['The printer cannot be reached']
+    assert off.tries == 1
+    client.get(STATUS + '?look=1')
+    assert off.tries == 2
+
+
+def test_brother_printer_on_bluetooth_is_asked_again_once_it_printed(tmp_path, off, monkeypatch):
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    client.get(STATUS)
+    monkeypatch.setattr(brother_usb, 'send_job', lambda data, device, lengths: {'did_print': True, 'ready_for_next_job': True})
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='62'))
+    assert outcome(client, response) == ('printed', '')
+    client.get(STATUS)
+    assert off.tries == 2
 
 
 class Refused(Exception):

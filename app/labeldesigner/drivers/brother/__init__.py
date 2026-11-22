@@ -91,6 +91,9 @@ class BrotherRaster(Driver):
     def status(self, device, model, unconfirmed=False):
         if device.startswith('tcp://'):
             return network.query_network_status(device, model, label_printers_only=unconfirmed)
+        if device.startswith('bt://'):
+            # One switched off is not paged at every status query, it takes the radio
+            return self.noted_status(device, lambda: usb.query_status(device, model))
         return usb.query_status(device, model)
 
     def announced(self, service):
@@ -135,6 +138,8 @@ class BrotherRaster(Driver):
                     return message
                 return ""
             info = usb.send_job(job.data, device, job.page_lengths)
+            # Asked again at the next status query, see noted_status()
+            devices.note_answer(device)
             logger.info('Sent %d bytes to printer %s', len(job.data), device)
             logger.info('Printer response: %s', str(info))
             if info.get('did_print') and info.get('ready_for_next_job'):
