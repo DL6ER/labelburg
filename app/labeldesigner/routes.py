@@ -1042,6 +1042,10 @@ def _print_restored(record: dict) -> str:
     """Print a job restored at the start, checked as a request naming its
     printer is today, e.g. by ADD_PRINTERS."""
     kept = record['printer']
+    printers, configured, _ = _known_printers()
+    if kept['device'] not in (configured, 'simulation', '?', *(device for _, device, _ in printers)) and kept['device'] not in found_devices():
+        # Not searched for since the start, the search may find it again
+        get_ptr_status(current_app.config, _added_printers())
     printer = _rebuilt(record, *_printer(kept['device'], kept['model']))
     return printer.print_calibration() if record['kind'] == 'calibration' else printer.process_queue()
 

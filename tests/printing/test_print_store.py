@@ -363,16 +363,31 @@ def test_a_restored_job_keeps_its_archive_serial_number(server, tmp_path, monkey
     assert open(next_asn).read().strip() == '4'
 
 
-def test_a_restored_job_is_checked_as_printers_are_today(server, tmp_path, monkeypatch):
+NETWORK_PRINTER = 'tcp://192.168.2.50:9100'
+
+
+@pytest.mark.parametrize('found', [False, True])
+def test_a_restored_job_is_checked_as_printers_are_today(server, tmp_path, monkeypatch, found):
     without_status(monkeypatch)
     print_queue.stop()
     # A network printer named by its address, allowed while ADD_PRINTERS is local
-    response = server.post(f'{API}/print', data=dict(LABEL, printer='tcp://192.168.2.50:9100', model='QL-810W'))
+    response = server.post(f'{API}/print', data=dict(LABEL, printer=NETWORK_PRINTER, model='QL-810W'))
     assert response.status_code == 200, response.get_json()
     monkeypatch.setenv('ADD_PRINTERS', 'off')
+    searched = []
+
+    def search(config, added=()):
+        # The search finds it again, as before the restart
+        searched.append(True)
+        if found:
+            monkeypatch.setattr(printer, '_cached_printers', [{'path': NETWORK_PRINTER, 'model': 'QL-810W'}])
+        return {}
+    monkeypatch.setattr(routes, 'get_ptr_status', search)
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda queue: '')
     restart(tmp_path)
     job = ended(response.get_json()['job'])
-    assert (job.state, job.message) == ('failed', adding.NAMED_OFF)
+    assert searched == [True]
+    assert (job.state, job.message) == (('printed', '') if found else ('failed', adding.NAMED_OFF))
 
 
 def test_an_image_from_the_webhook_and_homebox_print_after_a_restart(server, tmp_path, monkeypatch):
