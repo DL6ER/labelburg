@@ -7,6 +7,7 @@ import pytest
 
 from app.labeldesigner import dates
 from app.labeldesigner.dates import format_date
+from app.labeldesigner.label import SimpleLabel, datetime_codes
 
 SATURDAY = date(2026, 3, 7)
 SUNDAY = date(2026, 11, 22)
@@ -75,3 +76,28 @@ def test_the_languages_of_dates():
         every = [name for context in names['months'].values() for width in context.values() for name in width]
         every += [name for width in names['days'].values() for name in width]
         assert all(name and '%' not in name for name in every)
+
+
+def _text(date_language: str, text: str, **kwargs) -> str:
+    label = SimpleLabel(text=[{'text': text, 'size': '40'}], timestamp=int(datetime(2026, 3, 7, 14, 5).timestamp()),
+                        date_language=date_language, **kwargs)
+    label.process_templates()
+    return label.text[0]['text']
+
+
+def test_dates_of_templates_and_blanks_are_written_in_the_language():
+    assert _text('de', '{{datetime:%A, %-d. %B}} bis {{datetime+1m:%B %Y}}') == 'Samstag, 7. März bis April 2026'
+    assert _text('', '{{datetime:%A, %-d. %B}}') == 'Saturday, 7. March'
+    fields = {'Due': {'type': 'date', 'format': '%-d %B %Y'}, 'Made': {'type': 'date'}}
+    assert _text('pl', '{{blank:Due}}|{{blank:Made}}', blank_fields=fields, blanks={'Made': '2026-11-22'},
+                 date_format='%B %Y') == '7 marca 2026|listopad 2026'
+
+
+def test_the_codes_of_names_have_examples_in_each_language():
+    codes = datetime_codes()
+    assert codes['example'] == 'Saturday, 7 March 2026, 14:05:09'
+    assert {code: example for code, _, example in codes['codes'] if code in ('%a', '%A', '%b', '%B')} == {
+        '%a': 'Sat', '%A': 'Saturday', '%b': 'Mar', '%B': 'March'}
+    assert set(codes['languages']) == set(dates.LANGUAGES)
+    assert codes['languages']['de'] == {'%a': 'Sa.', '%A': 'Samstag', '%b': 'Mär', '%B': 'März'}
+    assert codes['languages']['pl'] == {'%a': 'sob.', '%A': 'sobota', '%b': 'mar', '%B': 'marzec'}

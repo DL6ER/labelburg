@@ -5,7 +5,7 @@
 
 import {
     $, $$, esc, icon, clone, S, C, L, plainFont, templateOf, blanksOf, fieldType, blankChoices, choicesOf, blankStart, startOf,
-    BLANK_KINDS, guessKind, isVariable, dateFormat, DATE_OFFSET_RE, loadSymbols, loadIcons, loadSymbolSets, findIcons, SYMBOL_SETS, today,
+    BLANK_KINDS, guessKind, isVariable, dateFormat, dateCodeExamples, DATE_OFFSET_RE, loadSymbols, loadIcons, loadSymbolSets, findIcons, SYMBOL_SETS, today,
     openLayer
 } from './core.js';
 
@@ -772,8 +772,8 @@ const VARS_HELP = `<p>Variables put content into the label when it is printed. T
 
 // The codes of {{datetime:<format>}}, with examples the server made
 function showDateCodes() {
-    const dc = C.datetime_codes || { example: '', codes: [] };
-    const rows = dc.codes.map(([code, meaning, example]) => `<tr><td><code>${esc(code)}</code></td><td>${esc(meaning)}</td><td>${esc(example)}</td></tr>`).join('');
+    const dc = C.datetime_codes || { example: '', codes: [] }, examples = dateCodeExamples();
+    const rows = dc.codes.map(([code, meaning]) => `<tr><td><code>${esc(code)}</code></td><td>${esc(meaning)}</td><td>${esc(examples[code])}</td></tr>`).join('');
     openLayer(`<div class="dialog narrow codes" role="dialog" aria-label="Date and time codes">
         <div class="dialog-h"><div><h2>Date and time codes</h2><p class="muted">For a date of its own format, e.g. <code>%d.%m.%Y</code>. The examples are for ${esc(dc.example)}.</p></div><span class="sp"></span>
             <button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>

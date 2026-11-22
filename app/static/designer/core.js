@@ -276,6 +276,12 @@ export function browserDateFormat() {
     } catch (e) { return '%Y-%m-%d'; }
 }
 export const dateFormat = () => S.settings.date_format || browserDateFormat();
+// The examples of the date and time codes, those of names in the language of
+// dates, as the server wrote them
+export function dateCodeExamples() {
+    const dc = C.datetime_codes || { codes: [] };
+    return Object.assign(Object.fromEntries(dc.codes.map(([code, , example]) => [code, example])), (dc.languages || {})[S.settings.date_language] || {});
+}
 
 // [today], [today+5d], [now+2h], dates typed between brackets
 export const TODAY_RE = /^(?:today|now)(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?|h|hours?|min|minutes?))?$/i;
@@ -542,7 +548,7 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
-    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
+    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format, S.settings.date_language,
         sheet ? [copies, perCopy] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
@@ -600,8 +606,8 @@ export const S = {
     demos: [], demoList: [], saved: [], codes: C.codes,
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
-    // Of labels, kept on the server for every browser: date_format, collate
-    // and font_family, see /api/settings/labels
+    // Of labels, kept on the server for every browser: date_format,
+    // date_language, collate and font_family, see /api/settings/labels
     settings: Object.assign({}, C.label_settings),
     edit: null,
     // The colors of the label in the editor its tape prints otherwise, as its

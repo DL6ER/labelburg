@@ -1,6 +1,7 @@
 from .enums import LabelContent, LabelOrientation, LabelType
 from . import codes, icons
 from .cable_flag import flag_box, flag_strip
+from .dates import LANGUAGES as DATE_LANGUAGES, format_date
 import os
 import uuid
 from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
@@ -148,8 +149,8 @@ def long_code_warning(length: int) -> str:
 
 
 # The codes of {{datetime:<format>}} the label designer explains. Their
-# examples come from the strftime() that fills in the labels, for a day that
-# tells day and month apart.
+# examples come from what fills in the labels, for a day that tells day and
+# month apart; those of names also in each language of dates.
 DATETIME_CODES = (
     ('%d', 'Day of the month'),
     ('%-d', 'Day of the month, no leading zero'),
@@ -174,14 +175,17 @@ DATETIME_CODES = (
     ('%%', 'A % sign'),
 )
 DATETIME_EXAMPLE = datetime.datetime(2026, 3, 7, 14, 5, 9)
+NAME_CODES = ('%a', '%A', '%b', '%B')
 
 
 def datetime_codes() -> dict:
-    """The codes with what they stand for and their example, and the time of
-    the examples."""
+    """The codes with what they stand for and their example, the examples of
+    the codes of names in each language of dates, and the time of the
+    examples."""
     when = DATETIME_EXAMPLE
     return {'example': f'{when:%A}, {when.day} {when:%B %Y, %H:%M:%S}',
-            'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
+            'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES],
+            'languages': {language: {code: format_date(when, code, language) for code in NAME_CODES} for language in DATE_LANGUAGES}}
 
 
 # {{asn}}, an archive serial number of Paperless-ngx (paperless.py), or
@@ -355,6 +359,7 @@ class SimpleLabel:
         vertical_align: str = 'center',
         mirror: bool = False,
         date_format: str = '%Y-%m-%d',
+        date_language: str = '',
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -371,7 +376,8 @@ class SimpleLabel:
         the center or at the bottom of a label that does not grow with it in
         height. dpi tells the length of the label in mm, which warnings
         name. date_format writes the dates of blanks without a format of
-        their own."""
+        their own, date_language names months and weekdays in its language
+        (see dates.py), English if empty."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -476,6 +482,7 @@ class SimpleLabel:
         self._blanks = blanks or {}
         self._blank_fields = blank_fields or {}
         self._date_format = date_format
+        self._date_language = date_language
         self._mark_blanks = mark_blanks
         self._shown_code = code_text
         # The value of each blank, made once for the label
@@ -634,7 +641,7 @@ class SimpleLabel:
         # {{datetime+2h:<format>}} 2 hours later (see shift_date)
         def datetime_replacer(match):
             when = self._now()
-            return (shift_date(when, match.group(1)) if match.group(1) else when).strftime(match.group(2))
+            return format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language)
         substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
@@ -794,7 +801,7 @@ class SimpleLabel:
         if len(date_format) > MAX_DATE_FORMAT_LENGTH:
             raise TextTooLong("The date format of a blank is too long")
         try:
-            return date.strftime(date_format)
+            return format_date(date, date_format, self._date_language)
         except ValueError:
             return date.isoformat()
 

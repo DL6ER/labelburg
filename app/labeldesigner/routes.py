@@ -28,6 +28,7 @@ from .drivers.devices import flock_within, look_again
 from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
+from .dates import LANGUAGES as DATE_LANGUAGES
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
 from .printer_settings import CUTS
@@ -250,6 +251,8 @@ def _designer_config() -> dict:
         # Kept on the server for every browser, see /api/settings/labels
         'label_settings': _label_settings(),
         'date_formats': list(printer_settings.DATE_FORMATS),
+        # Each named in itself, English is the empty one
+        'date_languages': [['', 'English'], *map(list, DATE_LANGUAGES.items())],
     }
 
 
@@ -1679,9 +1682,9 @@ def _label_settings() -> dict:
 @bp.route('/api/settings/labels', methods=['GET', 'POST'])
 def label_settings_route():
     """The settings of labels, the same for every browser and the API: how
-    dates are written, the order of copies of several files and the font of
-    new labels. POST changes only the ones named, an empty value removes
-    one, and answers all."""
+    dates are written and the language of their names, the order of copies
+    of several files and the font of new labels. POST changes only the ones
+    named, an empty value removes one, and answers all."""
     if request.method == 'GET':
         return jsonify(_label_settings())
     # JSON numbers and true or false as for printing, e.g. 0
@@ -2453,6 +2456,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
         date_format=settings['date_format'] or '%Y-%m-%d',
+        date_language=settings['date_language'],
     )
     # In "standard" orientation die-cut labels are landscape, so a portrait
     # image (e.g. a shipping label on a 103 x 164 mm label) came out small and
