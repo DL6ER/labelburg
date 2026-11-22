@@ -99,6 +99,15 @@ def test_pt_p710bt_cuts_after_each_page_told_to_cut(cut_every, cuts):
     assert b'\x1b\x69\x41' not in raster.data
 
 
+def test_pt_p710bt_cuts_after_the_last_of_more_than_255_labels():
+    # Cut after every 255 labels as ESC i A counts them, and after the last
+    raster = Raster('PT-P710BT')
+    convert(raster, [Image.new('1', (70, 2), 1)] * 300, 'pt12', rotate=0, cut_every=255)
+    cuts = [raster.data[at + 3] for at in _found(raster.data, b'\x1b\x69\x4d')]
+    assert len(cuts) == 300 and [i for i, flag in enumerate(cuts) if flag == 0x40] == [254, 299]
+    assert set(cuts) == {0x00, 0x40}
+
+
 def test_pt_p750w_still_counts_the_labels_it_cuts_after():
     raster = Raster('PT-P750W')
     convert(raster, [Image.new('1', (70, 2), 1)] * 3, 'pt12', rotate=0, cut_every=3)
