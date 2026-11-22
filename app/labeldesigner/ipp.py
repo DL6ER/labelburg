@@ -101,6 +101,11 @@ class IPPError(Exception):
         self.status = status
 
 
+class Unanswered(IPPError):
+    """The printer took a request, e.g. a job it may print, but gave no
+    answer to it."""
+
+
 class Printer(NamedTuple):
     """A printer on IPP: whether it is asked over TLS, its host, port and path."""
     tls: bool
@@ -362,10 +367,11 @@ def get_printer_attributes(host: str, port: int = PORT, path: str = DEFAULT_PATH
 
 
 def print_job(printer: Printer, document_format: str, media_size: tuple[int, int], document: bytes,
-              timeout: float = 10.0) -> dict:
-    """Print a document, see encode_print_job() and ask(). The answer has
-    job-id and job-state."""
-    return ask(printer, encode_print_job(printer.uri, document_format, media_size) + document, timeout)
+              wait: float, timeout: float = 10.0) -> dict:
+    """Print a document, see encode_print_job() and ask(): the printer may
+    take wait seconds, it may read the document while it prints. The answer
+    has job-id and job-state."""
+    return ask(printer, encode_print_job(printer.uri, document_format, media_size) + document, timeout, wait)
 
 
 def get_job_attributes(printer: Printer, job_id: int, timeout: float = 3.0) -> dict:
@@ -373,13 +379,15 @@ def get_job_attributes(printer: Printer, job_id: int, timeout: float = 3.0) -> d
     return ask(printer, encode_get_job_attributes(printer.uri, job_id), timeout)
 
 
-def ask(printer: Printer, body: bytes, timeout: float) -> dict:
+def ask(printer: Printer, body: bytes, timeout: float, wait: float | None = None) -> dict:
     """Send a request to a printer and decode its answer. Raises OSError if
     it does not answer, e.g. ConnectionRefusedError without IPP, and
     IPPError for an answer that is not one, refuses the request, is longer
     than MAX_ANSWER, or not there within twice the timeout after
-    connecting, also when it trickles in."""
-    # Here, the drivers import this module
+    connecting, also when it trickles in. With wait, the request may take
+    that long once connected, and Unanswered is raised for anything but an
+    answer once the request was sent."""
+    # Imported here: the drivers import this module
     from .drivers import reach
     if printer.tls:
         connection = http.client.HTTPSConnection(printer.host, printer.port, timeout=timeout, context=_tls())
@@ -395,10 +403,14 @@ def ask(printer: Printer, body: bytes, timeout: float) -> dict:
     # From the connection on: a name may take its time to resolve, the
     # socket the timer ends must be there
     ended = threading.Event()
-    stop = threading.Timer(2 * timeout, _end, (connection, ended))
+    if wait is not None:
+        connection.sock.settimeout(wait)
+    stop = threading.Timer(2 * timeout if wait is None else wait, _end, (connection, ended))
     stop.start()
+    sent = False
     try:
         connection.request('POST', printer.path, body, {'Content-Type': 'application/ipp'})
+        sent = True
         response = connection.getresponse()
         length = response.getheader('Content-Length') or ''
         if length.strip().isdigit() and int(length) > MAX_ANSWER:
@@ -408,7 +420,9 @@ def ask(printer: Printer, body: bytes, timeout: float) -> dict:
             data += chunk
             if len(data) > MAX_ANSWER:
                 raise IPPError('The answer is too long')
-    except (OSError, http.client.HTTPException):
+    except (OSError, http.client.HTTPException, IPPError) as e:
+        if sent and wait is not None:
+            raise Unanswered(f'No answer to the request: {e!r}') from e
         if ended.is_set():
             raise IPPError('The printer took too long to answer') from None
         raise
@@ -416,7 +430,12 @@ def ask(printer: Printer, body: bytes, timeout: float) -> dict:
         stop.cancel()
         connection.close()
     if ended.is_set():
-        raise IPPError('The printer took too long to answer')
+        raise (Unanswered if wait is not None else IPPError)('The printer took too long to answer')
     if response.status != 200:
         raise IPPError(f'The printer answers with HTTP status {response.status}')
-    return decode_response(data)
+    try:
+        return decode_response(data)
+    except IPPError as e:
+        if wait is not None and e.status is None:
+            raise Unanswered(f'No answer to the request: {e}') from e
+        raise

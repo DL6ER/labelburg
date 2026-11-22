@@ -8,7 +8,8 @@ import re
 import socket
 import struct
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from PIL import Image
@@ -63,14 +64,20 @@ def split(body: bytes) -> tuple[bytes, bytes]:
 class FakePrinter:
     """An IPP printer on localhost. It answers Get-Printer-Attributes with
     the answers in printer, takes a job as job 42 unless refusal is a
-    status code, and tells the states of its job in states, one after the
-    other, the last one again and again; 'gone' for a job it forgot. Each
-    request is kept as (operation, attributes, document)."""
+    status code, after job_delay seconds, or answers none for it with
+    silent, and tells the states of its job in states, one after the
+    other, the last one again and again; 'gone' for a job it forgot, a
+    tuple for a state with its reason. An operation in http answers with
+    that HTTP status. Each request is kept as (operation, attributes,
+    document)."""
 
     def __init__(self, *printer: bytes):
         self.printer = list(printer) or [printer_attributes()]
         self.states = [ipp.COMPLETED]
         self.refusal = 0
+        self.job_delay = 0.0
+        self.silent = False
+        self.http = {}
         self.requests = []
         self.paths = []
         fake = self
@@ -81,6 +88,16 @@ class FakePrinter:
                 operation = struct.unpack('>H', header[2:4])[0]
                 fake.requests.append((operation, ipp.decode_response(header), document))
                 fake.paths.append(self.path)
+                if operation == ipp.PRINT_JOB:
+                    if fake.silent:
+                        self.close_connection = True
+                        return
+                    time.sleep(fake.job_delay)
+                if operation in fake.http:
+                    self.send_response(fake.http[operation])
+                    self.send_header('Content-Length', '0')
+                    self.end_headers()
+                    return
                 answer = fake.answer(operation)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/ipp')
@@ -91,7 +108,8 @@ class FakePrinter:
             def log_message(self, *args):
                 pass
 
-        self.server = HTTPServer(('127.0.0.1', 0), Handler)
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.server.daemon_threads = True
         self.port = self.server.server_port
         self.address = f'ipp://127.0.0.1:{self.port}/ipp/print'
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -106,7 +124,10 @@ class FakePrinter:
         if operation == ipp.PRINT_JOB:
             return response(status=self.refusal) if self.refusal else job(42, ipp.PENDING)
         told = self._next(self.states)
-        return response(status=ipp.NOT_FOUND) if told == 'gone' else job(42, told)
+        if told == 'gone':
+            return response(status=ipp.NOT_FOUND)
+        state, reason = told if isinstance(told, tuple) else (told, 'none')
+        return job(42, state)[:-1] + keywords('job-state-reasons', reason) + b'\x03'
 
     def operations(self) -> list[int]:
         return [operation for operation, _, _ in self.requests]
@@ -510,7 +531,8 @@ def test_printer_that_stops_while_the_job_waits(tmp_path, fake):
 
 
 def test_job_that_never_ends(tmp_path, fake, monkeypatch):
-    monkeypatch.setattr(other, 'JOB_WAIT', 0)
+    # Time enough to take it, not to print it
+    monkeypatch.setattr(other, 'JOB_WAIT', 0.5)
     monkeypatch.setattr(other, 'SLOWEST', 1e6)
     fake.states = [ipp.JOB_PROCESSING]
     client = client_of(tmp_path, fake)
@@ -525,6 +547,39 @@ def test_refused_jobs(tmp_path, fake, status, message):
     fake.refusal = status
     client = client_of(tmp_path, fake)
     assert outcome(client, print_label(client)) == ('failed', message)
+
+
+def test_job_answered_late_is_printed(tmp_path, fake, monkeypatch):
+    # Later than it takes to connect, as a printer that reads the job while it prints
+    monkeypatch.setattr(other, 'JOB_TIMEOUT', 0.2)
+    fake.job_delay = 0.6
+    client = client_of(tmp_path, fake)
+    assert outcome(client, print_label(client)) == ('printed', '')
+
+
+@pytest.mark.parametrize('silent', [True, False])
+def test_job_the_printer_took_without_answering(tmp_path, fake, monkeypatch, silent):
+    # Closed without an answer, or no answer within the time the job may take
+    monkeypatch.setattr(other, 'JOB_WAIT', 0.3)
+    monkeypatch.setattr(other, 'SLOWEST', 1e6)
+    fake.silent, fake.job_delay = silent, 1.5
+    client = client_of(tmp_path, fake)
+    assert outcome(client, print_label(client)) == ('failed', other.NO_ANSWER)
+    assert len(fake.jobs()) == 1
+
+
+def test_a_job_may_take_as_long_as_its_labels(tmp_path, fake, monkeypatch):
+    waits = []
+    real = ipp.print_job
+
+    def kept(printer, kind, media, document, wait, timeout):
+        waits.append(wait)
+        return real(printer, kind, media, document, wait, timeout)
+    monkeypatch.setattr(ipp, 'print_job', kept)
+    client = client_of(tmp_path, fake)
+    assert outcome(client, print_label(client, print_count='2')) == ('printed', '')
+    # Two labels of 152 mm, at SLOWEST mm/s
+    assert waits == [other.JOB_WAIT + 2 * 152 / other.SLOWEST]
 
 
 def test_printer_that_does_not_answer_after_the_job(tmp_path, fake, monkeypatch):

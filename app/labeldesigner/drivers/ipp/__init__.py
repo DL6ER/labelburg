@@ -39,7 +39,7 @@ ASKED = (*ipp.STATUS_ATTRIBUTES, 'document-format-supported', 'pwg-raster-docume
          'pwg-raster-document-resolution-supported')
 OFFERED = (*ASKED, 'printer-resolution-default')
 TIMEOUT = 3.0
-# Sending a job takes longer than a status query
+# Seconds to connect for a job, which may then take as long as _waited() tells
 JOB_TIMEOUT = 10.0
 # How long a job may take besides printing its labels at SLOWEST mm/s, and
 # how often its state is asked meanwhile
@@ -141,7 +141,16 @@ def media_size(label: Label, ready) -> tuple[int, int]:
     return label.tape_size[0] * 100, label.tape_size[1] * 100
 
 
+def _waited(lengths: list[float]) -> float:
+    """How long a job of labels of lengths in mm may take."""
+    return JOB_WAIT + sum(lengths) / SLOWEST
+
+
 def _refusal(error: ipp.IPPError) -> str:
+    """Why a job was not taken. One the printer answered without a reason
+    did not reach it in time."""
+    if error.status is None:
+        return devices.not_sent(error)
     if error.status in ipp.LOGIN:
         return LOGIN
     return NOT_TAKING if error.status in ipp.NOT_TAKING else REFUSED
@@ -154,7 +163,7 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
     if not isinstance(job_id, int):
         logger.warning('%s took a job without telling its ID: %s', device, answer)
         return NOT_FINISHED
-    deadline = time.monotonic() + JOB_WAIT + sum(lengths) / SLOWEST
+    deadline = time.monotonic() + _waited(lengths)
     job = answer
     while True:
         state = job.get('job-state')
@@ -278,16 +287,20 @@ class Ipp(Driver):
         made = documents.documents(chosen, job.images, media)
         for i, document in enumerate(made):
             logger.info('Sending %d bytes of %s %s to %s', len(document), chosen.kind, chosen.raster_type, device)
+            # A document of each label, or one of them all
+            printed = [lengths[i]] if len(made) > 1 else lengths
             try:
-                answer = ipp.print_job(printer, chosen.kind, media, document, JOB_TIMEOUT)
+                answer = ipp.print_job(printer, chosen.kind, media, document, _waited(printed), JOB_TIMEOUT)
+            except ipp.Unanswered as e:
+                logger.warning('%s took the label without answering: %s', device, e)
+                return NO_ANSWER
             except ipp.IPPError as e:
                 logger.warning('Printing on %s failed: %s', device, e)
                 return _refusal(e)
             except (OSError, http.client.HTTPException) as e:
                 logger.warning('Printing on %s failed: %s', device, e)
                 return devices.not_sent(e)
-            # A document of each label, or one of them all
-            message = _outcome(device, printer, answer, [lengths[i]] if len(made) > 1 else lengths)
+            message = _outcome(device, printer, answer, printed)
             if message:
                 return message
         return ''

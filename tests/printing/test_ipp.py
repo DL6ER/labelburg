@@ -1,6 +1,7 @@
 """Status of network printers over IPP, with answers recorded from a
 QL-810W and a fake printer for the network part."""
 import datetime
+import http.client
 import os
 import socket
 import ssl
@@ -276,7 +277,7 @@ def test_a_document_is_printed_after_its_request(recording, monkeypatch):
     monkeypatch.setattr(ipp, '_request_ids', count(7))
     request = ipp.encode_print_job(printer.uri, 'image/png', (10160, 15240))
     monkeypatch.setattr(ipp, '_request_ids', count(7))
-    answer = ipp.print_job(printer, 'image/png', (10160, 15240), b'PNG data')
+    answer = ipp.print_job(printer, 'image/png', (10160, 15240), b'PNG data', 5)
     assert (answer['job-id'], answer['job-state']) == (42, ipp.PENDING)
     (path, kind, body), = recording.requests
     assert (path, kind, body) == ('/ipp/print/zebra', 'application/ipp', request + b'PNG data')
@@ -650,3 +651,19 @@ def test_an_added_printer_whose_name_resolves_slowly_is_asked(fake_printer, name
     slowly(names, 1.2)
     monkeypatch.setattr(reach, '_watched', {'slow.test': 'local'})
     assert ipp.get_printer_attributes('slow.test', network.IPP_PORT, timeout=0.5)['printer-make-and-model'] == 'Brother QL-810W'
+
+
+@pytest.mark.parametrize('send', [lambda connection: None, too_long])
+def test_a_request_taken_without_an_answer_is_told_apart(send):
+    # Closed after the request, or no answer within the time given
+    printer = Answering(send)
+    target = ipp.Printer(False, '127.0.0.1', printer.port, '/ipp/print')
+    try:
+        with pytest.raises(ipp.Unanswered):
+            within(5, lambda: ipp.print_job(target, 'image/png', (5000, 3000), b'PNG data', 0.5))
+        # Without the time a job may take, as before
+        with pytest.raises((OSError, http.client.HTTPException, ipp.IPPError)) as told:
+            within(5, lambda: ipp.get_printer_attributes('127.0.0.1', printer.port, timeout=0.5))
+        assert not isinstance(told.value, ipp.Unanswered)
+    finally:
+        printer.close()
