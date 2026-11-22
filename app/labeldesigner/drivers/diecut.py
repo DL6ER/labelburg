@@ -21,6 +21,8 @@ GAP = 3
 # How the printer finds the start of each label: by the gaps between the
 # labels, by black marks on their back, or not at all on a continuous roll
 SENSINGS = ('gap', 'mark', 'endless')
+# The roll as a status names it, by how the printer finds the labels
+ROLLS = {'gap': 'Die-cut labels', 'mark': 'Labels with black marks', 'endless': 'Continuous roll'}
 # A measured length further off than this from all sizes is not taken
 LENGTH_TOLERANCE = 2
 # Printers of 203 dpi, which some name 200 dpi, have 8 dots per mm
@@ -66,6 +68,17 @@ def loaded(length: int, dpi: int = 203) -> tuple[int, int] | None:
     mm = measured(length, dpi)
     sizes = [size for size in SIZES if size[1] == mm]
     return sizes[0] if len(sizes) == 1 else None
+
+
+def as_set(state: dict, sensing: str | None) -> dict:
+    """The status of a printer told how it finds the labels, see SENSINGS:
+    its roll named as set, die-cut labels where nothing is. On a continuous
+    roll it measured no labels, the length it tells is the one it was sent
+    last."""
+    state = dict(state, media_type=ROLLS.get(sensing, ROLLS['gap']))
+    if sensing == 'endless':
+        state.update(media_width=None, media_length=0)
+    return state
 
 
 def oriented(img: Image.Image, across: int, top_first: bool) -> Image.Image:

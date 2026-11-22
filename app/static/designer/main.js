@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, toast, own, load, storeQuiet, refreshPrinters, tapeState, printerState, printerLabel, printerName, isDemo, sizeShort,
-    sizeName, tapeKnown, tapeLeft, loadDemos, loadSaved, demoItem, savedItem, itemDesign, thumbUrl, drawThumb, detectTape, fitsTape, placed,
+    sizeName, rollOf, tapeKnown, tapeLeft, loadDemos, loadSaved, demoItem, savedItem, itemDesign, thumbUrl, drawThumb, detectTape, fitsTape, placed,
     allTags, tagsOf, hasTag, openLayer, closeLayer, layerOpen, entryName, savedAs, thePrinter, L, isEmptyDesign, originOf, carryOverLabelSettings,
     loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending
 } from './core.js';
@@ -54,7 +54,7 @@ function renderChip() {
     const st = printerState(S.printer);
     const chip = $('#printerChip');
     chip.innerHTML = `<span class="d ${esc(st.cls)}"></span><b>${esc(S.printer ? printerLabel(S.printer) : 'No printer')}</b>${S.printer ? `<small>${esc(sizeShort(S.tape))}</small>` : ''}`;
-    chip.title = `${S.printer ? printerLabel(S.printer) + ': ' : ''}${st.text}, ${sizeName(S.tape)}${tapeKnown() ? '' : ', the printer does not say'}`;
+    chip.title = `${S.printer ? printerLabel(S.printer) + ': ' : ''}${st.text}, ${[sizeName(S.tape), rollOf(S.printer)].filter(Boolean).join(', ')}${tapeKnown() ? '' : ', the printer does not say'}`;
 }
 
 // The printer chosen in this browser that is not there: said once, until it
@@ -110,7 +110,7 @@ function drawPrinters() {
         const tape = gone || !t.id ? '' : isDemo(p) ? sizeName(t.id) : t.known ? `${sizeName(t.id)} ${t.manual ? 'set by hand' : 'in the printer'}`
             : (t.candidates || []).length ? `measures labels ${t.unknown}` : t.unknown ? `reports ${t.unknown} tape` : 'does not say which tape it has';
         return `<button class="prow${on ? ' on' : ''}" type="button" data-p="${esc(k)}"${gone ? ` title="${esc(st.text)}"` : ''}><span class="d ${esc(st.cls)}"></span>
-            <span class="grow"><b>${esc(printerLabel(p))}</b><small>${esc([p.name ? printerName(p) : '', gone ? 'Cannot be reached' : st.text, tape, tapeLeft(p), p.battery != null ? `Battery ${p.battery}%` : ''].filter(Boolean).join(', '))}</small>
+            <span class="grow"><b>${esc(printerLabel(p))}</b><small>${esc([p.name ? printerName(p) : '', gone ? 'Cannot be reached' : st.text, tape, gone ? '' : rollOf(p), tapeLeft(p), p.battery != null ? `Battery ${p.battery}%` : ''].filter(Boolean).join(', '))}</small>
                 ${p.weak_connection ? '<small class="warn">The Wi-Fi connection seems weak, try moving the printer closer to the Wi-Fi router.</small>' : ''}
                 ${p.battery_low ? '<small class="warn">The battery is low, charge the printer.</small>' : ''}</span>
             ${on ? icon('check') : ''}</button>`;

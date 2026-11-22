@@ -123,6 +123,8 @@ export function sizeName(id) {
     if (isSheet(id)) return `${s.tape[0]} x ${s.tape[1]} mm, ${s.pieces[0] * s.pieces[1]} labels of ${s.piece[0]} x ${s.piece[1]}`;
     return `${s.tape[0]} x ${s.tape[1]} mm`;
 }
+// The roll as the server names it where the printer is told how it finds the labels, e.g. "continuous roll"
+export const rollOf = p => ((p && p.tape && p.tape.roll) || '').toLowerCase();
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"

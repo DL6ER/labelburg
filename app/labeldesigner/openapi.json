@@ -4022,6 +4022,10 @@
             "type": "boolean",
             "description": "The printer cannot tell whether the roll is a black and red one."
           },
+          "roll": {
+            "type": "string",
+            "description": "Of a printer told how it finds its labels (`sensing` in its settings), e.g. a ZPL printer: `Die-cut labels`, `Labels with black marks` or `Continuous roll`, as set. Empty for other printers."
+          },
           "candidates": {
             "type": "array",
             "items": {
@@ -4098,7 +4102,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The kind of roll, e.g. `Continuous length tape`. Of a printer told how it finds its labels (`sensing` in its settings) the roll as set, see `roll` of `tape`; on a continuous roll it then tells no `media_width` and `media_length`."
           },
           "media_width": {
             "type": [

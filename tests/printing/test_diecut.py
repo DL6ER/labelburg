@@ -72,3 +72,16 @@ def test_the_end_of_a_label_drawn_lying_leaves_first(top_first, start, white):
     assert img.size == (20, 60)
     # Turned, not mirrored
     assert img.getpixel(start) == 0 and img.getpixel(white) == 1
+
+
+@pytest.mark.parametrize('sensing, roll', [(None, 'Die-cut labels'), ('gap', 'Die-cut labels'), ('mark', 'Labels with black marks')])
+def test_the_roll_is_named_as_set(sensing, roll):
+    state = {'media_type': 'Die-cut labels', 'media_width': None, 'media_length': 152}
+    assert diecut.as_set(state, sensing) == dict(state, media_type=roll)
+
+
+def test_a_continuous_roll_has_no_labels_measured():
+    # The length a printer on it tells is the one it was sent last
+    state = {'media_type': 'Die-cut labels', 'media_width': 102, 'media_length': 152, 'errors': []}
+    assert diecut.as_set(state, 'endless') == {'media_type': 'Continuous roll', 'media_width': None, 'media_length': 0, 'errors': []}
+    assert state['media_length'] == 152

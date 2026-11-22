@@ -551,3 +551,35 @@ def test_each_label_tells_how_the_printer_finds_them_as_set_for_it(tmp_path, sen
     assert data.count(b'^XA\n' + command + b'^PW456\n^LL256\n') == 2
     job = [(label, 203) for label in data.split(b'^XZ\n')[:-1]]
     assert zpl.DRIVER.label_lengths(job) == [32, 32]
+
+
+def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
+    # 4 x 6 in labels measured, or sent last on a continuous roll
+    monkeypatch.setattr(protocol, 'host_status', lambda device: DATAMAX_HS.replace(b'0235', b'1214'))
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+
+    def status():
+        found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+        return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
+    shown = status()
+    assert (shown['media_type'], shown['media_length'], shown['tape']['id'], shown['tape']['roll']) == (
+        'Die-cut labels', 152, 'zpl102x152', 'Die-cut labels')
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'mark'})
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with black marks')
+    shown = status()
+    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Labels with black marks', 152, True)
+    # The labels are as long as the label size, set by hand or of the label
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert (r.get_json()['tape']['known'], r.get_json()['tape']['roll']) == (False, 'Continuous roll')
+    shown = status()
+    assert (shown['media_type'], shown['media_width'], shown['media_length'], shown['tape']['known']) == ('Continuous roll', None, 0, False)
+    client.post('/labeldesigner/api/settings', data={'label_size': 'zpl102x76'})
+    assert status()['tape']['id'] == 'zpl102x76' and status()['tape']['manual']
+    # The label size ids stay
+    assert status()['label_size'] == 'zpl102x76'
+
+
+def test_printers_that_find_their_labels_by_themselves_name_no_roll(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert next(p for p in found if p['path'] == 'simulation')['tape']['roll'] == ''

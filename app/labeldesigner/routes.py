@@ -11,6 +11,7 @@ import threading
 import contextlib
 import datetime
 import functools
+import dataclasses
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
@@ -23,7 +24,7 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
+from .drivers import DEVICE_PATTERNS, devices, diecut, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
 from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
@@ -1520,6 +1521,7 @@ def get_printer_status():
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
         # Labels are shown and printed on the tape in the printer
@@ -1581,10 +1583,24 @@ def _settings_of(device: str) -> dict:
     return printer_settings.of_printer(_kept_settings(), device)
 
 
+def _told_how(model: str) -> bool:
+    """Whether a printer of the model is told how it finds the labels."""
+    return model in drivers.MODELS and drivers.for_model(model).capabilities(model)['sensing']
+
+
+def _as_set(state: dict, model: str, settings: dict) -> dict:
+    """The status of a printer with its roll as set in its settings, see
+    diecut.as_set(), where it is told how it finds the labels."""
+    return diecut.as_set(state, settings.get('sensing')) if _told_how(model) else state
+
+
 def _tape_of(state: dict, model: str, settings: dict) -> tape.Tape:
     """The tape a printer of the model prints on, as its status state tells
-    it, else the one set by hand in its settings, see tape.in_printer()."""
-    return tape.in_printer(state, model, settings.get('label_size', ''), current_app.config['LABEL_DEFAULT_SIZE'])
+    it, else the one set by hand in its settings, see tape.in_printer(). Of
+    a printer told how it finds the labels with its roll as set."""
+    state = _as_set(state, model, settings)
+    found = tape.in_printer(state, model, settings.get('label_size', ''), current_app.config['LABEL_DEFAULT_SIZE'])
+    return dataclasses.replace(found, roll=state['media_type']) if _told_how(model) else found
 
 
 def _loaded_tape(device: str, model: str, settings: dict) -> tape.Tape:

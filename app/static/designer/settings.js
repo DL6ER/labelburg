@@ -427,7 +427,7 @@ function saveSettings(p, changes) {
         answered();
         if (!r.ok) throw new Error(answer.message || 'The settings could not be saved');
         const model = 'demo_model' in changes;
-        if (!tape && !model) return;
+        if (!tape && !model && !('sensing' in changes)) return;
         // The tape the server finds now, the status of all printers follows.
         // Another model comes with a roll and cutting it takes.
         settingsSaves.tapes++;

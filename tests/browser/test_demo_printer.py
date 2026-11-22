@@ -132,3 +132,28 @@ def test_a_zpl_printer_is_told_how_it_finds_its_labels(designer):
     designer.reload()
     open_settings(designer)
     assert designer.inner_text(f'{choice}.on') == 'Continuous roll'
+
+
+def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'Zebra/ZPL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
+    size = designer.evaluate("() => labelEditor.S.printers[0].tape.id")
+    designer.wait_for_function("() => document.querySelector('#printerChip').title.endsWith(' mm, die-cut labels')")
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="endless"]')
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Continuous roll'")
+    back_to_the_editor(designer)
+    # The label size stays, the roll is named
+    assert designer.evaluate("() => labelEditor.S.printers[0].tape.id") == size
+    assert designer.get_attribute('#printerChip', 'title').endswith(' mm, continuous roll')
+    designer.click('#printerChip')
+    shown = designer.inner_text('.pp [data-p="0"] small')
+    assert shown.startswith('Zebra ZPL, Ready, prints nothing, ') and shown.endswith(' mm, continuous roll')
+    designer.keyboard.press('Escape')
+    open_settings(designer)
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="mark"]')
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks'")
+    back_to_the_editor(designer)
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, labels with black marks')

@@ -162,7 +162,7 @@ class Zpl(Driver):
         path = device.removeprefix('file://')
         if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
-        state = dict(network_status(device, model), media_type='Die-cut labels')
+        state = dict(network_status(device, model), media_type=diecut.ROLLS['gap'])
         if name := self.device_name(device):
             state['device_name'] = name
         key = devices.lock_key(device)
