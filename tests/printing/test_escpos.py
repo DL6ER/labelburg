@@ -644,6 +644,10 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     ('MFG:EPSON;CMD:ESC/PAGE,PJL;MDL:AL-M200;', None),
     ('MFG:EPSON;CMD:ESC/P-R;MDL:ET-2810;', None),
     ('MFG:Printer;CMD:ESC/POSX;MDL:POS-58;', None),
+    # Impact printers, which print no raster images, as LPrint lists them
+    ('MFG:EPSON;MDL:TM-U220;CMD:ESC/POS;', None),
+    ('MFG:EPSON;MDL:TM-U220II;CMD:ESC/POS;', None),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-U295;', None),
     ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None)])
 def test_model_in_device_ids(device_id, model):
     from app.labeldesigner import drivers

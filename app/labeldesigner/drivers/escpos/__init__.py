@@ -21,6 +21,8 @@ MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
 HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
 # ESC/POS in the command sets of a device ID, also as other makers spell it
 COMMAND_SET = re.compile(r'ESC/?POS|ESC/POS-.*', re.IGNORECASE)
+# Epson's impact printers, e.g. the TM-U220, print no raster images
+IMPACT = re.compile(r'TM-U\d', re.IGNORECASE)
 DPI = {MODELS[0]: 203, MODELS[1]: 180}
 # Paper width in mm and the dots across it, the first one assumed, as the
 # printer does not tell. 384 on 58 mm paper as most printers print, a
@@ -94,6 +96,8 @@ class Escpos(Driver):
     def model_in(self, device_id):
         fields = devices.device_id_fields(device_id)
         if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
+            return None
+        if IMPACT.match(fields.get('MDL', '')):
             return None
         return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
 
