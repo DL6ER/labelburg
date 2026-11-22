@@ -1302,7 +1302,9 @@ export async function keptLabel(h) {
 
 // What a label printed before is listed with: its copies, the values
 // printed, when
-export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
+// Whether name shows value as words of their own
+const shows = (name, value) => new RegExp(`(^|[^\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(name);
+export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && !shows(entryName(h), String(v).trim())), fmtTime(h.time)].join(', ');
 
 // --- Overlays ----------------------------------------------------------------
 

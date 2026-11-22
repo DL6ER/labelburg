@@ -370,3 +370,18 @@ def test_a_saved_label_of_a_picture_alone_is_named_by_its_title(page, server):
     with page.expect_response('**/api/print') as answer:
         page.click('#print')
     assert answer.value.json()['title'] == 'Rack'
+
+
+def test_a_label_printed_before_is_told_without_the_values_its_name_shows(page, server):
+    type_label(page, 'Jar [What] [Where]')
+    page.fill('#fill [data-blank="What"]', 'Beans')
+    page.fill('#fill [data-blank="Where"]', 'Larder')
+    with page.expect_request('**/api/print'):
+        page.click('#print')
+    page.wait_for_function("() => labelEditor.S.history.every(h => h.state !== 'printing')")
+    page.keyboard.press('Control+k')
+    page.wait_for_selector('.palette #palQ:focus')
+    page.keyboard.type('Jar')
+    row = page.locator('#palRes .res:has-text("Jar Beans Larder")')
+    assert row.locator('small').inner_text().startswith('1 x, ')
+    assert 'Beans' not in row.locator('small').inner_text() and 'Larder' not in row.locator('small').inner_text()
