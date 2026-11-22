@@ -636,7 +636,9 @@ def searches(tmp_path, monkeypatch):
     return search, kinds
 
 
-def test_classic_bluetooth_is_not_searched_while_no_driver_names_printers_there(searches):
+def test_classic_bluetooth_is_not_searched_while_no_driver_names_printers_there(searches, monkeypatch):
+    for driver in drivers.DRIVERS:
+        monkeypatch.setattr(driver, 'bluetooth_names', {})
     search, kinds = searches
     assert search() is False
     assert search(look=True) is False and kinds == [False, False]

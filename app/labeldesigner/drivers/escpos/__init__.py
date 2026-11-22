@@ -46,6 +46,20 @@ BESIDES = 0.5
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
+# Epson's printers on classic Bluetooth by the name they have at first, the
+# model and the last 6 digits of the serial number, e.g. TM-P20_123456, as
+# their Technical Reference Guides give it (https://files.support.epson.com/pdf/pos/bulk/
+# tm-p20_trg_en_revi.pdf, tm-p20ii_trg_en_reve.pdf, tm-p60ii_trg_en_revh.pdf,
+# tm-p80_trg_en_rev_j.pdf, tm-p80ii_trg_en_revg.pdf, tm-m10_trg_en_revg.pdf,
+# tm-m30_trg_en_revh.pdf, tm-m30ii_trg_en_reva.pdf, tm-m30iii_trg_en_revi.pdf,
+# tm-m50_trg_en_reva.pdf), all of 203 dpi. Those of the TM-P20II and TM-P80II
+# also spell it with "-"; theirs and that of the TM-m30III add "-L" for the
+# name on Bluetooth LE, which a printer found on both kinds may tell.
+BLUETOOTH_NAMES = {
+    **{rf'{model}_[0-9]{{6}}': MODELS[0] for model in ('TM-P20', 'TM-P60II', 'TM-P80', 'TM-m10', 'TM-m30', 'TM-m30II', 'TM-m50')},
+    **{rf'{model}[_-][0-9]{{6}}(-L)?': MODELS[0] for model in ('TM-P20II', 'TM-P80II')},
+    r'TM-m30III_[0-9]{6}(-L)?': MODELS[0],
+}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
@@ -99,6 +113,8 @@ class Escpos(Driver):
     reports_tape = False
     # Its models are those of many makers
     names_devices = True
+    bluetooth_names = BLUETOOTH_NAMES
+    bluetooth_kind = 'classic'
 
     def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...

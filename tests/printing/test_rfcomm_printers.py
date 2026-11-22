@@ -8,10 +8,11 @@ import os
 import socket
 import threading
 import time
+import types
 
 import pytest
 
-from app.labeldesigner import bluetooth, printer, refusals
+from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import devices, escpos, progress, transports, tspl
 from app.labeldesigner.drivers.escpos import protocol as escpos_protocol
 from app.labeldesigner.drivers.tspl import protocol as tspl_protocol
@@ -280,3 +281,71 @@ def test_printer_on_bluetooth_that_is_off_when_printing(tmp_path, on_bluetooth, 
     response = client.post('/labeldesigner/api/print', data=label)
     message = 'Could not send the label to the printer: The printer cannot be reached'
     assert outcome(client, response) == ('failed', message) and message in refusals.MESSAGES
+
+
+@pytest.mark.parametrize('name', [
+    'TM-P20_123456', 'TM-P60II_123456', 'TM-P80_123456', 'TM-m10_123456', 'TM-m30_123456', 'TM-m30II_123456',
+    'TM-m50_123456', 'TM-P20II_123456', 'TM-P80II_123456', 'TM-m30III_123456',
+    # As the tables of the TM-P20II and TM-P80II spell it, and the name a
+    # printer of both kinds of Bluetooth has on LE
+    'TM-P20II-123456', 'TM-P80II-123456', 'TM-P20II-123456-L', 'TM-P80II-123456-L', 'TM-m30III_123456-L',
+])
+def test_epson_printers_on_classic_bluetooth_are_known_by_their_names(name):
+    device = {'address': MAC, 'name': name, 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS}
+    assert escpos.DRIVER.found_on_bluetooth(device) == (DEVICE, 'Epson/ESC-POS')
+    # Reached on classic Bluetooth only
+    assert escpos.DRIVER.found_on_bluetooth(dict(device, le=True, classic=False)) is None
+
+
+@pytest.mark.parametrize('name', ['TM-P20', 'TM-P20_12345', 'TM-m30-123456', 'TM-P20_123456-L', 'TM-T20II_123456',
+                                  'Printer001', 'Phone'])
+def test_other_names_on_classic_bluetooth_are_no_epson_printers(name):
+    device = {'address': MAC, 'name': name, 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS}
+    assert all(driver.found_on_bluetooth(device) is None for driver in drivers.DRIVERS)
+
+
+@pytest.fixture
+def nearby(tmp_path, monkeypatch):
+    """The automatic detection with the kernel's management channel as a
+    fake that finds the devices given."""
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', True)
+    monkeypatch.setattr(printer, 'BLUETOOTH_INTERVAL', 0)
+    monkeypatch.setattr(printer, '_bluetooth', {})
+    monkeypatch.setattr(printer, '_bluetooth_searched', None)
+    monkeypatch.setattr(printer, '_bluetooth_thread', None)
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([], []))
+    monkeypatch.setattr(devices, 'looked', 0.0)
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+
+    def install(*found_devices):
+        fake = Management(found_devices)
+        monkeypatch.setattr(bluetooth, 'socket', Sockets(fake))
+        monkeypatch.setattr(bluetooth, 'select', types.SimpleNamespace(
+            select=lambda r, w, x, t=None: (r if fake.incoming else [], [], [])))
+        return client, fake
+    return install
+
+
+def listed(client, look=False):
+    """The printers the detection lists once its search on Bluetooth ended."""
+    client.get(STATUS + ('?look=1' if look else ''))
+    printer._bluetooth_thread.join(5)
+    printer._last_scan_ts = 0
+    return [(p['path'], p['model'], p['errors']) for p in client.get(STATUS).get_json()['printers'] if p['path'] != 'simulation']
+
+
+def test_epson_printer_found_on_classic_bluetooth_prints_as_on_usb(tmp_path, monkeypatch, nearby, on_bluetooth):
+    client, management = nearby(found(MAC, kind=0, name='TM-P20_123456', raw=class_of_device(PRINTER_CLASS)))
+    fake = on_bluetooth(FakeEscpos())
+    # Classic Bluetooth is searched only when the label designer looks for printers
+    assert listed(client) == []
+    assert listed(client, look=True) == [(DEVICE, 'Epson/ESC-POS', [])]
+    assert [params for op, _, params in management.sent if op == 0x0023] == [b'\x06', b'\x07']
+    response = client.post('/labeldesigner/api/print', data=dict(ESCPOS_LABEL, printer=DEVICE, model='Epson/ESC-POS'))
+    assert outcome(client, response) == ('printed', '')
+    job = fake.all_received()[-1]
+    assert escpos_on_usb(tmp_path, monkeypatch, ESCPOS_LABEL).endswith(job)
+    assert job.startswith(escpos_protocol.OFFLINE + escpos_protocol.PAPER + escpos_protocol.INIT)
