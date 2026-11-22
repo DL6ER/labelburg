@@ -8,7 +8,6 @@ import time
 
 from .. import backends, devices, reach
 
-DPI = 203
 # Port of raw printing on the network, and how long connecting may take
 PORT = 9100
 CONNECT_WAIT = 10
