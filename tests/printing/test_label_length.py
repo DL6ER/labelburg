@@ -14,8 +14,10 @@ from tests.helpers import EXAMPLE_FORMDATA, make_client, TEXT
 @pytest.mark.parametrize('model, label_size, longest, millimeters', [
     ('QL-800', '62', 11811, 1000),
     ('QL-1100', '102', 35434, 3000),
-    ('PT-E550W', 'pt12', 14172, 2000),
-    ('PT-P900W', 'pt36', 28346, 2000),
+    # 1000 mm on TZe tape after Brother's raster command references of the
+    # PT-E550W, PT-P750W and PT-P710BT and of the PT-P900 series
+    ('PT-E550W', 'pt12', 7086, 1000),
+    ('PT-P900W', 'pt36', 14173, 1000),
 ])
 def test_longest_label_of_a_model(model, label_size, longest, millimeters):
     width = BY_ID[label_size].dots_printable[0]

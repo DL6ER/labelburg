@@ -55,17 +55,18 @@ MODELS = {model.identifier: model for model in (
     Model('QL-1110NWB', speed=110, max_length_dots=35434, number_bytes_per_row=162, additional_offset_r=44, series_code=0x34, model_code=0x44),
     Model('QL-1115NWB', speed=110, max_length_dots=35434, number_bytes_per_row=162, additional_offset_r=44, series_code=0x34, model_code=0x45),
     # Model codes after Brother's raster command reference of the PT-E550W,
-    # PT-P750W and PT-P710BT: 66h is the PT-E550W, 68h the PT-P750W
+    # PT-P750W and PT-P710BT: 66h is the PT-E550W, 68h the PT-P750W. TZe
+    # tape is at most 1000 mm long there and in that of the PT-P900 series.
     # https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
-    Model('PT-E550W', speed=30, max_length_dots=14172, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x66),
+    Model('PT-E550W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x66),
     Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x67),
     Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x68),
     # The same reference names no model code of the PT-P710BT. It takes no
     # ESC i A, and Brother's driver turns its status while printing off.
     Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=False,
           status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
-    Model('PT-P900W', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
-    Model('PT-P950NW', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
+    Model('PT-P900W', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
+    Model('PT-P950NW', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
     # After Brother's raster command reference of the PT-P900 series: model
     # code 78h, it sends its status while printing only when told so
     # https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf

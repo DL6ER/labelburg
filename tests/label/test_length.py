@@ -149,10 +149,11 @@ def test_the_shortest_length_depends_on_the_tape(tmp_path, label_size, shortest,
 
 @pytest.mark.parametrize('label_size, refused, longest', [
     # The longest label of the printers of the tape: the QL-1100 series,
-    # the QL-800 series for black and red tape, the PT-E550W for TZe tape
+    # the QL-800 series for black and red tape, the P-touch printers for TZe tape
     ('62', '3000.5', '3000'),
     ('62red', '1000.5', '1000'),
-    ('pt12', '2000.5', '2000'),
+    ('pt12', '1000.5', '1000'),
+    ('pt36', '1000.5', '1000'),
 ])
 def test_the_longest_length_depends_on_the_printers_of_the_tape(tmp_path, label_size, refused, longest):
     client = make_client(tmp_path)
