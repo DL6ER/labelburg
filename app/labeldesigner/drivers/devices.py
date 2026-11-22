@@ -15,6 +15,7 @@ import time
 
 from werkzeug.security import safe_join
 
+from .. import ipp
 from . import reach, usbip
 from .backends import NoLibusb
 
@@ -123,7 +124,8 @@ def lock_key(device_specifier: str) -> str:
     one on port 9100, also an IPv6 address in brackets. A Bluetooth printer
     is one device whatever RFCOMM channel names it, and drivers differ in the
     channel they take when none is named, so its key is its MAC address only.
-    A printer shared over USB/IP is one on port 3240."""
+    A printer shared over USB/IP is one on port 3240, one on IPP is one
+    at its printer URI over IPP."""
     key = device_specifier.strip()
     if key.startswith('file://'):
         key = key[len('file://'):]
@@ -131,6 +133,12 @@ def lock_key(device_specifier: str) -> str:
         key = usbip.key(key)
     elif key.lower().startswith('bt://'):
         key = 'bt://' + key.lower().split('/')[2]
+    elif ipp.is_address(key):
+        # ipp://, ipps:// and cups:// may name the same printer
+        try:
+            key = ipp.printer_at(key)._replace(tls=False).uri.lower()
+        except ValueError:
+            key = key.lower()
     elif '://' in key:
         key = key.lower()
         address = key.split('://', 1)[1]

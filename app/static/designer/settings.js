@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
-    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
+    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter, cutShort,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
 } from './core.js';
@@ -167,7 +167,7 @@ function sideHTML(p) {
 
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${esc(cutShort(c, caps))}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')

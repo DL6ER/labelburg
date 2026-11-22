@@ -102,7 +102,7 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '' };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '', cut_on_printer: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 export const printerCaps = (p = S.printer) => capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
@@ -379,7 +379,7 @@ export const sizeCaps = (id, p = S.printer) => {
 };
 export const neverWhy = k => k.never_cut || '';
 export const noCutter = k => k.cutter === false;
-export const noCutterWhy = k => k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
+export const noCutterWhy = k => k.cut_on_printer ? 'The printer cuts as it is set up' : k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
 const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 export const kept = (p = S.printer) => (p && p.settings) || {};
@@ -392,14 +392,15 @@ export const chainOf = (c, k) => k.chain && (c.chain === '1' || c.cut === 'none'
 export const halfOf = (c, k) => k.half_cut && c.half_cut === '1';
 export const cutOf = (d, p = S.printer) => d && d.cut ? usableCut({ cut: d.cut, half_cut: d.half_cut || '1', chain: d.chain || '0' }, sizeCaps(d.label_size, p)) : printerCut(p);
 export function cutShort(c, k) {
-    if (noCutter(k)) return k.manual_cutter ? 'Cut by hand' : 'Torn off';
+    if (noCutter(k)) return k.cut_on_printer ? 'As set on the printer' : k.manual_cutter ? 'Cut by hand' : 'Torn off';
     const half = halfOf(c, k) && c.cut !== 'each';
     return { each: 'After each label', last: 'After the last label', none: 'Not cut' }[c.cut] + (half ? ', half cuts' : '') + (k.chain && c.chain === '1' && c.cut !== 'none' ? ', chain' : '');
 }
 export const collated = () => S.settings.collate !== '0';
 // What happens to the copies, in words
 export function cutText(c, k) {
-    if (noCutter(k)) return k.manual_cutter ? 'No automatic cutter, cut the labels off with the lever on the printer.' : 'No cutter, the labels are torn off.';
+    if (noCutter(k)) return k.cut_on_printer ? 'The printer cuts or tears off the labels as it is set up, this cannot be chosen here.'
+        : k.manual_cutter ? 'No automatic cutter, cut the labels off with the lever on the printer.' : 'No cutter, the labels are torn off.';
     const half = halfOf(c, k), chain = chainOf(c, k);
     const text = c.cut === 'each' ? 'Cut after each label'
         : (half ? 'Half cut between the labels, ' : '') + (c.cut === 'last' ? (half ? 'cut after the last' : 'Cut after the last label') : (half ? 'not cut' : 'Not cut'));

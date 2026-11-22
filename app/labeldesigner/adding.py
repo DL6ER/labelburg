@@ -125,6 +125,11 @@ def host_of(device: str) -> str | None:
             return None
     if device.startswith(('tcp://', 'vc500w://')):
         return urlsplit(device).hostname
+    if ipp.is_address(device):
+        try:
+            return ipp.printer_at(device).host
+        except ValueError:
+            return None
     return None
 
 

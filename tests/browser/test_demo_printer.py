@@ -63,9 +63,10 @@ def test_the_demo_printer_offers_every_model(designer):
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == [
         'Brother', 'DYMO', 'Epson', 'Niimbot', 'PUQU', 'TSC', 'Zebra']
-    # Once each name: not the models shown as another one
+    # Once each name: not the models shown as another one, nor "Other printer"
     shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
-    assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450'}
+    assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450',
+                        'Other/IPP', 'Other/IPP-203'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
     for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL']),
                            ('DYMO', ['LabelWriter 4XL', 'LabelWriter 450', 'LabelWriter 450 Twin Turbo'])):
