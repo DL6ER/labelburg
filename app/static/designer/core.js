@@ -371,7 +371,7 @@ export const sizeCaps = (id, p = S.printer) => {
 };
 export const neverWhy = k => k.never_cut || '';
 export const noCutter = k => k.cutter === false;
-export const noCutterWhy = k => k.cutter_unused ? 'Labelburg does not use the cutter of this printer' : k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
+export const noCutterWhy = k => k.cutter_unused ? 'Cut by hand' : k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
 const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 export const kept = (p = S.printer) => (p && p.settings) || {};
@@ -384,15 +384,14 @@ export const chainOf = (c, k) => k.chain && (c.chain === '1' || c.cut === 'none'
 export const halfOf = (c, k) => k.half_cut && c.half_cut === '1';
 export const cutOf = (d, p = S.printer) => d && d.cut ? usableCut({ cut: d.cut, half_cut: d.half_cut || '1', chain: d.chain || '0' }, sizeCaps(d.label_size, p)) : printerCut(p);
 export function cutShort(c, k) {
-    if (noCutter(k)) return k.cutter_unused ? 'Cut at the printer' : k.manual_cutter ? 'Cut by hand' : 'Torn off';
+    if (noCutter(k)) return k.manual_cutter ? 'Cut by hand' : 'Torn off';
     const half = halfOf(c, k) && c.cut !== 'each';
     return { each: 'After each label', last: 'After the last label', none: 'Not cut' }[c.cut] + (half ? ', half cuts' : '') + (k.chain && c.chain === '1' && c.cut !== 'none' ? ', chain' : '');
 }
 export const collated = () => S.settings.collate !== '0';
 // What happens to the copies, in words
 export function cutText(c, k) {
-    if (noCutter(k)) return k.cutter_unused ? 'Labelburg does not use the cutter of this printer, cut the labels off at the printer.'
-        : k.manual_cutter ? 'No automatic cutter, cut the labels off with the lever on the printer.' : 'No cutter, the labels are torn off.';
+    if (noCutter(k)) return k.cutter_unused ? '' : k.manual_cutter ? 'No automatic cutter, cut the labels off with the lever on the printer.' : 'No cutter, the labels are torn off.';
     const half = halfOf(c, k), chain = chainOf(c, k);
     const text = c.cut === 'each' ? 'Cut after each label'
         : (half ? 'Half cut between the labels, ' : '') + (c.cut === 'last' ? (half ? 'cut after the last' : 'Cut after the last label') : (half ? 'not cut' : 'Not cut'));
@@ -414,7 +413,7 @@ export function cutStrip(c, k, files = 1) {
     const end = noCutter(k) ? 'none' : chainOf(c, k) || c.cut === 'none' ? 'chain' : 'full';
     const [third, second, first] = printOrder(files).slice(0, 3).reverse().map(i => `<span class="lab">${esc('ABC'[Math.min(i, 2)])}</span>`);
     const mark = m => `<span class="cm ${esc(m)}"></span>`;
-    const text = esc(cutText(c, k));
+    const text = esc(cutText(c, k) || cutShort(c, k));
     const waste = k.feed_waste ? `${mark(half || c.cut === 'each' ? 'half' : 'full')}<span class="waste"></span>` : '';
     return `<span class="cut-strip" title="${text}" role="img" aria-label="${text}"><span class="out"></span>${mark(end)}${third}${mark(between)}${second}${mark(between)}${first}${waste}</span>`;
 }

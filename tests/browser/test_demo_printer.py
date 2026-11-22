@@ -98,10 +98,9 @@ def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
     assert designer.input_value(MODEL) == 'VC-500W'
 
 
-@pytest.mark.parametrize('model, tapes, cutting', [
-    ('PT-D610BT', ['pt6', 'pt9', 'pt12', 'pt18', 'pt24'], 'Cut at the printer'),
-    ('PT-E310BT', ['pt6', 'pt9', 'pt12', 'pt18'], 'Cut by hand')])
-def test_the_demo_printer_offers_the_pt_d460bt_family_with_its_tapes(designer, model, tapes, cutting):
+@pytest.mark.parametrize('model, tapes, lever', [
+    ('PT-D610BT', ['pt6', 'pt9', 'pt12', 'pt18', 'pt24'], False), ('PT-E310BT', ['pt6', 'pt9', 'pt12', 'pt18'], True)])
+def test_the_demo_printer_offers_the_pt_d460bt_family_with_its_tapes(designer, model, tapes, lever):
     open_settings(designer)
     with designer.expect_response('**/api/settings') as answer:
         designer.select_option(MODEL, model)
@@ -110,7 +109,8 @@ def test_the_demo_printer_offers_the_pt_d460bt_family_with_its_tapes(designer, m
     offered = designer.eval_on_selector_all('[data-card="0"] select[data-k="label_size"] option', 'os => os.map(o => o.value)')
     assert offered == [''] + tapes
     card = designer.inner_text('[data-card="0"]')
-    assert f'Brother {model}' in card and cutting in card
+    # Cut by hand, the hint about the lever only where the printer has one
+    assert f'Brother {model}' in card and 'Cut by hand' in card and ('lever' in card) == lever
     assert 'This printer prints in one quality only.' in card
     back_to_the_editor(designer)
     assert designer.text_content('#slot .model') == f'Demo Brother {model}'

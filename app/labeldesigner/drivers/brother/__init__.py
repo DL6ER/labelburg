@@ -145,7 +145,7 @@ class BrotherRaster(Driver):
         # The PT-D460BT family is told no print quality
         qualities = ['quality'] if MODELS[model].d460bt_family else ['fast', 'quality', 'high']
         return dict(super().capabilities(model), qualities=qualities,
-                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting and not unused,
+                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting,
                     cutter_unused=unused, half_cut=model in HALF_CUTTERS, chain=ptouch and cutting, feed_waste=ptouch,
                     # The top of a label leaves a QL or P-touch printer first
                     leaves_turned=True)

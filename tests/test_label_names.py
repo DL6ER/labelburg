@@ -105,10 +105,10 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert (models['PUQU/Q00']['manual_cutter'], models['QL-500']['cutter'], models['QL-500']['manual_cutter']) == (False, False, True)
     assert {model for model, caps in models.items() if not caps['cutter']} == {
         'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'Zebra/ZPL', 'PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT'}
-    # The PT-D610BT and the PT-E560BT have a cutter that is not told to cut,
-    # the others of the PT-D460BT family a lever
+    # The PT-D460BT family is cut by hand, the PT-D610BT and the PT-E560BT
+    # without a lever: their cutter is not told to cut
     assert {model for model, caps in models.items() if caps['cutter_unused']} == {'PT-D610BT', 'PT-E560BT'}
-    assert all(models[model]['manual_cutter'] for model in ('PT-D410', 'PT-D460BT', 'PT-E310BT'))
+    assert all(models[model]['manual_cutter'] for model in ('PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT'))
     assert models['Zebra/ZPL']['leaves_turned'] is True
     assert models['PUQU/Q00']['vendor'] == 'PUQU'
 

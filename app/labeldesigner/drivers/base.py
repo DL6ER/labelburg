@@ -138,8 +138,8 @@ class Driver:
         """What the label designer offers for the model: the qualities it
         shows (fast, quality, high for 600 dpi), whether the model prints at
         600 dpi, whether it has a cutter, else whether its labels are cut
-        off by hand with a lever, or whether it has a cutter that is not told
-        to cut (cutter_unused), half cuts between labels and chain prints,
+        off by hand with a lever, or by hand where it has a cutter that is not
+        told to cut (cutter_unused), half cuts between labels and chain prints,
         whether it feeds tape before the first label, its colors, why it does
         not leave labels uncut, if it does not, whether labels leave it top
         first, the label designer then shows the printer below them, the
