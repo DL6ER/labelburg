@@ -115,6 +115,32 @@ def test_a_line_picked_on_the_label_changes_its_size_and_is_inverted(editor):
     assert int(editor.evaluate('() => labelEditor.S.edit.design.text[1].size')) == size + 1
 
 
+# Previews wait in window.waiting until let go, the oldest first
+HOLD_ALL = """() => {
+    const original = window.fetch;
+    window.waiting = [];
+    window.fetch = (url, options) => String(url).endsWith('/api/preview')
+        ? new Promise(resolve => waiting.push(() => resolve(original(url, options)))) : original(url, options);
+}"""
+
+
+def test_the_label_stays_busy_until_the_preview_of_the_last_change(editor):
+    type_label(editor, 'Shelf')
+    editor.evaluate(HOLD_ALL)
+    editor.keyboard.type('3')
+    editor.wait_for_function('() => waiting.length === 1')
+    # Typed while the preview of "Shelf3" is on its way
+    editor.keyboard.type('4')
+    editor.evaluate('() => waiting.shift()()')
+    editor.wait_for_function('() => waiting.length === 1')
+    assert editor.evaluate("() => document.querySelector('#labelbox').classList.contains('busy')")
+    assert editor.get_attribute('#labelbox', 'data-laid') is None
+    shown = editor.get_attribute('#labelImg', 'src')
+    editor.evaluate('() => waiting.shift()()')
+    wait_for_preview(editor)
+    assert editor.get_attribute('#labelImg', 'src') != shown
+
+
 def test_advanced_changes_reach_the_preview(editor):
     type_label(editor, 'A rather long line of text for the label')
     editor.click('#advBtn')
