@@ -48,6 +48,9 @@ MEDIA_TYPES = {
     0xFF: ('Incompatible tape', 'Incompatible'),
 }
 
+# Heat-shrink tube, HS 2:1 and 3:1
+TUBES = {MEDIA_TYPES[0x11][0], MEDIA_TYPES[0x17][0]}
+
 TAPE_COLORS = {
     0x01: 'White', 0x02: 'Other', 0x03: 'Clear', 0x04: 'Red', 0x05: 'Blue', 0x06: 'Yellow', 0x07: 'Green',
     0x08: 'Black', 0x09: 'Clear(White text)', 0x20: 'Matte White', 0x21: 'Matte Clear', 0x22: 'Matte Silver',

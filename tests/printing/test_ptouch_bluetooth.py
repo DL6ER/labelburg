@@ -41,12 +41,12 @@ def socket_pair() -> tuple[socket.socket, socket.socket]:
     return tuple(SOCKET(socket.AF_UNIX, socket.SOCK_STREAM, 0, end.detach()) for end in _socket.socketpair())
 
 
-def told(model_code: int, status_type: int = 0x00, phase: int = 0x00, width: int = 12) -> bytes:
-    """A status as the references lay it out: series code 30h, laminated tape,
-    white with black text."""
+def told(model_code: int, status_type: int = 0x00, phase: int = 0x00, width: int = 12, media: int = 0x01) -> bytes:
+    """A status as the references lay it out: series code 30h, laminated tape
+    unless media says otherwise, white with black text."""
     packet = bytearray(32)
     packet[0:6] = b'\x80\x20\x42\x30' + bytes([model_code]) + b'\x30'
-    packet[10], packet[11], packet[18], packet[19] = width, 0x01, status_type, phase
+    packet[10], packet[11], packet[18], packet[19] = width, media, status_type, phase
     packet[24], packet[25] = 0x01, 0x08
     return bytes(packet)
 
@@ -223,8 +223,8 @@ class FakeBrother:
     a socket pair for each connection, whose far end answers a status request
     with its status and a job with the status messages of printing it."""
 
-    def __init__(self, model_code: int, width: int = 12, refused: int | None = None):
-        self.model_code, self.width, self.refused = model_code, width, refused
+    def __init__(self, model_code: int, width: int = 12, refused: int | None = None, media: int = 0x01):
+        self.model_code, self.width, self.refused, self.media = model_code, width, refused, media
         self.addresses, self.jobs, self.requests = [], [], 0
 
     def __call__(self, family, kind, proto):
@@ -244,7 +244,7 @@ class FakeBrother:
                     self.jobs.append(received)
                     received = b''
                     for status_type, phase in ((0x06, 0x01), (0x01, 0x00), (0x06, 0x00)):
-                        end.sendall(told(self.model_code, status_type, phase, self.width))
+                        end.sendall(told(self.model_code, status_type, phase, self.width, self.media))
                     continue
                 if not data:
                     return
@@ -252,7 +252,7 @@ class FakeBrother:
                 if received == b'\x1b\x69\x53':
                     self.requests += 1
                     received = b''
-                    end.sendall(told(self.model_code, width=self.width))
+                    end.sendall(told(self.model_code, width=self.width, media=self.media))
 
 
 class Connection:
@@ -275,8 +275,8 @@ class Connection:
 
 @pytest.fixture
 def brother_on_bluetooth(monkeypatch):
-    def install(model_code=UNNAMED, width=12, refused=None):
-        fake = FakeBrother(model_code, width, refused)
+    def install(model_code=UNNAMED, width=12, refused=None, media=0x01):
+        fake = FakeBrother(model_code, width, refused, media)
         monkeypatch.setattr(transports.socket, 'socket', fake)
         monkeypatch.setattr(devices, '_unanswered', {})
         return fake
@@ -305,6 +305,18 @@ def test_printing_on_bluetooth(tmp_path, brother_on_bluetooth, model, code, widt
     assert b'\x1b\x69\x21\x00' in job and (b'\x1b\x69\x41' in job) == (model == 'PT-P910BT')
     # On channel 1, which neither reference names otherwise
     assert set(fake.addresses) == {(MAC, 1)}
+
+
+@pytest.mark.parametrize('media', [0x11, 0x17])
+def test_labels_too_long_for_heat_shrink_tube_are_refused(tmp_path, brother_on_bluetooth, media):
+    # HS 2:1 and 3:1 in the status, at most 500 mm long
+    fake = brother_on_bluetooth(media=media)
+    client = make_client(tmp_path, model='PT-P710BT', printer=DEVICE)
+    assert client.get(STATUS).get_json()['printers'][0]['media_type'].startswith('Heat-Shrink Tube')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12', label_length='600'))
+    assert (response.status_code, response.get_json()['message']) == (400, 'Labels on heat-shrink tube can be at most 500 mm long')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12', label_length='400'))
+    assert outcome(client, response) == ('printed', '') and len(fake.jobs) == 1
 
 
 def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, brother_on_bluetooth, clock):

@@ -6,10 +6,12 @@ import logging
 from PIL import Image, ImageChops, ImageOps
 
 from ...label import LabelContent, LabelOrientation, LabelType
+from .. import devices
 from ..labels import FormFactor
 from .commands import Raster, RasterError
 from .labels import BY_ID
-from .models import length_problem
+from .models import TUBE_LENGTH, TUBE_TOO_LONG, length_problem
+from .status import TUBES
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,8 @@ def _add_job(queue, raster, job):
         # cuts it off and saves the tape fed before it.
         options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(len(job['images']), 255),
                    'half_cut': queue.half_cut, 'chain': queue.chain}
+    # Heat-shrink tube in the printer, as its last status tells
+    tube = devices.status_cache.get(devices.lock_key(queue.device_specifier or ''), {}).get('media_type') in TUBES
     # Unless printing fast, the printer gives priority to print quality. A
     # QL-810W printed a 29 x 90 mm label in 3.0 s instead of 1.8 s with it, a
     # little sharper. PT printers get compressed raster lines, as from
@@ -71,17 +75,18 @@ def _add_job(queue, raster, job):
     # half cut the tape and hung in the printing state.
     convert(raster, job['images'], queue.label_size, red='red' in str(queue.label_size), dither=dither,
             cut=raster.ptouch or any(job['cuts']), dpi_600=high_res, hq=not fast, rotate=rotate,
-            compress=raster.ptouch, **options)
+            compress=raster.ptouch, tube=tube, **options)
 
 
 def convert(raster: Raster, images: list, label_size: str, *, red: bool = False, dither: bool = False,
             cut: bool = True, dpi_600: bool = False, hq: bool = True, rotate='auto', compress: bool = False,
-            autocut: bool = True, cut_every: int = 1, half_cut: bool = True, chain: bool = False):
+            autocut: bool = True, cut_every: int = 1, half_cut: bool = True, chain: bool = False, tube: bool = False):
     """Add the images to the raster as the pages of one job. rotate is 0, 90,
     180, 270 or 'auto', which turns die-cut labels made the other way round.
     On P-touch printers autocut says whether the tape is cut at all,
     cut_every after how many labels, half_cut whether it is half cut between
-    them and chain whether the last label stays in the printer."""
+    them, chain whether the last label stays in the printer and tube whether
+    it prints on heat-shrink tube."""
     label = BY_ID[label_size]
     dots_printable = label.dots_printable
     right_margin = label.offset_r + raster.spec.additional_offset_r
@@ -133,6 +138,8 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         # At 600 dpi a label has twice the lines
         if im.size[1] // (2 if dpi_600 else 1) > raster.spec.max_length_dots:
             raise ValueError(length_problem(raster.model))
+        if tube and im.size[1] // (2 if dpi_600 else 1) > round(TUBE_LENGTH / 25.4 * raster.spec.dpi):
+            raise ValueError(TUBE_TOO_LONG)
 
         if red:
             hsv = im.convert('HSV').split()

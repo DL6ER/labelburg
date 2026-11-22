@@ -13,7 +13,7 @@ from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, length_problem, longest_label, resolution_problem)
+                     RED_SPEED, TUBE_TOO_LONG, length_problem, longest_label, resolution_problem)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class BrotherRaster(Driver):
     # PT-P710BT1234, as Brother's User's Guide names it
     bluetooth_names = {re.escape(model) + r'\d*': model for model, spec in MODELS.items() if spec.bluetooth}
     bluetooth_kind = 'classic'
-    refusals = tuple(length_problem(model) for model in MODELS)
+    refusals = (*(length_problem(model) for model in MODELS), TUBE_TOO_LONG)
 
     def model_of(self, device, device_id=None):
         # Over USB/IP the device ID read at the import names the model, on USB

@@ -98,6 +98,9 @@ HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape
 MIN_PRINT_LENGTH = 12.7
 MIN_PTOUCH_PRINT_LENGTH = 4.4
+# Heat-shrink tube takes at most 500 mm, after the references of the P-touch printers
+TUBE_LENGTH = 500
+TUBE_TOO_LONG = f'Labels on heat-shrink tube can be at most {TUBE_LENGTH} mm long'
 
 
 def longest_label(model: str) -> int:
