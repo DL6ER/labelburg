@@ -98,15 +98,16 @@ def test_serial_port_that_is_not_there():
 
 
 class SerialDevice:
-    """A printer that is a serial port on USB: a communications interface (0)
-    and a data interface (1) with its endpoints."""
+    """A printer that is a serial port on USB: a communications interface and
+    a data interface with its endpoints, numbered 0 and 1 unless numbers says
+    otherwise. Drivers of the kernel hold the interfaces of bound."""
 
-    def __init__(self, product, reads=(), vendor=0x3513, refuses_setup=False):
+    def __init__(self, product, reads=(), vendor=0x3513, refuses_setup=False, numbers=(0, 1), bound=(0, 1)):
         self.idVendor, self.idProduct, self.bDeviceClass, self.iSerialNumber = vendor, product, 0xef, 3
-        self.control = types.SimpleNamespace(bInterfaceClass=0x02, bInterfaceNumber=0, endpoints=[Endpoint(0x83)])
-        self.data = types.SimpleNamespace(bInterfaceClass=0x0a, bInterfaceNumber=1,
+        self.control = types.SimpleNamespace(bInterfaceClass=0x02, bInterfaceNumber=numbers[0], endpoints=[Endpoint(0x83)])
+        self.data = types.SimpleNamespace(bInterfaceClass=0x0a, bInterfaceNumber=numbers[1],
                                           endpoints=[Endpoint(0x81, reads), Endpoint(0x02)])
-        self.refuses_setup, self.calls, self.requests = refuses_setup, [], []
+        self.refuses_setup, self.calls, self.requests, self.bound = refuses_setup, [], [], set(bound)
 
     def __iter__(self):
         return iter([self])
@@ -115,12 +116,14 @@ class SerialDevice:
         return [self.control, self.data]
 
     def is_kernel_driver_active(self, interface):
-        return interface == 0
+        return interface in self.bound
 
     def detach_kernel_driver(self, interface):
+        self.bound.discard(interface)
         self.calls.append(('detach', interface))
 
     def attach_kernel_driver(self, interface):
+        self.bound.add(interface)
         self.calls.append(('attach', interface))
 
     def set_configuration(self):
@@ -178,7 +181,20 @@ def test_printer_a_driver_lists_is_reached_through_its_serial_interface(pyusb, m
     # A read that times out is tried once more
     assert printer_.read() == b'\x55\x55'
     printer_.dispose()
-    assert device.calls == [('detach', 0), 'configure', 'dispose', ('attach', 0)]
+    # The kernel's serial driver holds both interfaces
+    assert device.calls == [('detach', 0), ('detach', 1), 'configure', 'dispose', ('attach', 0), ('attach', 1)]
+
+
+def test_serial_port_on_usb_next_to_other_interfaces(pyusb, monkeypatch):
+    # Interface 0 of another function, e.g. a keyboard, is left to its driver
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    device = SerialDevice(0x0001, numbers=(1, 2), bound=(0, 1, 2))
+    pyusb.append(device)
+    printer_ = backends.open_printer('usb://0x3513:0x0001')
+    assert device.requests[0][3] == 1
+    printer_.dispose()
+    assert device.calls == [('detach', 1), ('detach', 2), 'configure', 'dispose', ('attach', 1), ('attach', 2)]
+    assert device.bound == {0, 1, 2}
 
 
 def test_serial_port_on_usb_that_refuses_its_setup_is_used_as_it_is(pyusb, monkeypatch):

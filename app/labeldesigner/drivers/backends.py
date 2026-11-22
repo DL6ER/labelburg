@@ -109,13 +109,15 @@ class UsbPrinter(Printer):
         import usb.util
         self._usb = usb
         self.dev = _find(usb, device_specifier, self.interface_class)
-        self.was_kernel_driver_active = False
-        try:
-            if self.dev.is_kernel_driver_active(0):
-                self.dev.detach_kernel_driver(0)
-                self.was_kernel_driver_active = True
-        except NotImplementedError:
-            pass
+        # The interfaces it took from drivers of the kernel, given back at dispose
+        self.detached = []
+        for number in self._held():
+            try:
+                if self.dev.is_kernel_driver_active(number):
+                    self.dev.detach_kernel_driver(number)
+                    self.detached.append(number)
+            except NotImplementedError:
+                pass
         self.dev.set_configuration()
         interface = usb.util.find_descriptor(self.dev.get_active_configuration(), bInterfaceClass=self.interface_class)
         if interface is None:
@@ -127,6 +129,10 @@ class UsbPrinter(Printer):
             interface, custom_match=lambda e: direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT)
         if self.read_dev is None or self.write_dev is None:
             raise ValueError(f'The {self.interface_name} interface has no endpoints to read and write')
+
+    def _held(self) -> list[int]:
+        """The interfaces it takes from the drivers of the kernel."""
+        return [0]
 
     def _write(self, data: bytes):
         self.write_dev.write(data, int(self.write_timeout))
@@ -149,8 +155,12 @@ class UsbPrinter(Printer):
     def _dispose(self):
         self._usb.util.dispose_resources(self.dev)
         del self.write_dev, self.read_dev
-        if self.was_kernel_driver_active:
-            self.dev.attach_kernel_driver(0)
+        for number in self.detached:
+            try:
+                self.dev.attach_kernel_driver(number)
+            except self._usb.core.USBError:
+                # Taken back already with another one, e.g. by cdc_acm
+                logger.debug('Interface %d was not given back to the kernel', number, exc_info=True)
         del self.dev
 
 
@@ -177,6 +187,16 @@ class UsbSerialPrinter(UsbPrinter):
         except usb.core.USBError:
             # Taken as it is by a port that does not know these requests
             logger.debug('The serial port of %s was not set up', device_specifier, exc_info=True)
+
+    def _held(self) -> list[int]:
+        # cdc_acm holds the communications and the data interface
+        try:
+            config = self.dev.get_active_configuration()
+        except self._usb.core.USBError:
+            # Not configured, no driver holds it
+            return []
+        found = (self._usb.util.find_descriptor(config, bInterfaceClass=kind) for kind in (0x02, self.interface_class))
+        return sorted({interface.bInterfaceNumber for interface in found if interface is not None})
 
 
 class UsbipPrinter(Printer):
