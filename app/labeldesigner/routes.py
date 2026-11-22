@@ -2184,9 +2184,12 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     if requested_model:
         model = drivers.canonical(requested_model)
     else:
-        # The model a printer tells, e.g. in its device ID, else the configured one
-        chosen = next((m for m, d, _ in printers if d == device), model)
-        model = drivers.resolve(device, chosen, isinstance(chosen, Default))[1]
+        # The model a printer tells, e.g. in its device ID, else the configured
+        # one; PRINTER_MODEL is that of PRINTER_PRINTER only
+        listed_model = next((m for m, d, _ in printers if d == device), None)
+        chosen = listed_model or model
+        assumed = not listed_model and (device != configured or isinstance(model, Default))
+        model = drivers.resolve(device, chosen, assumed)[1]
         if is_simulation(device):
             model = _demo_model(_kept_settings())
     if ask and model == 'Unknown' and not is_simulation(device):

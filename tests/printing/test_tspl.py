@@ -24,6 +24,8 @@ from tests.printing.test_ipp import fake_printer  # noqa: F401
 from tests.printing.test_snmp import agent  # noqa: F401
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
+# The Rollo X1038 as LPrint lists it
+ROLLO = 'MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;'
 
 
 @pytest.fixture(autouse=True)
@@ -653,8 +655,32 @@ def test_a_printer_of_lprints_list_is_tspl_unless_another_model_is_given(tmp_pat
     monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
     monkeypatch.delenv('PRINTER_MODEL', raising=False)
     client = make_client(tmp_path, model=configured, printer='usb://0x0483:0x5720')
+    # Asked for this printer alone first, its last status would tell its model
+    one = client.get('/labeldesigner/api/printer_status', query_string={'printer': 'usb://0x0483:0x5720'}).get_json()
+    assert one['printers'][0]['model'] == model
     assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == model
     if configured is None:
         response = client.post('/labeldesigner/api/print', data={'label_size': 'tspl57x32', 'print_type': 'text', 'text': TEXT})
         assert outcome(client, response) == ('printed', '')
         assert sent[0][1].startswith(b'\r\nSIZE 57 mm,32 mm\r\n')
+
+
+@pytest.mark.parametrize('configured', [None, 'QL-800'])
+def test_a_found_printer_prints_as_the_status_names_it(tmp_path, monkeypatch, sent, configured):
+    # PRINTER_MODEL is the model of PRINTER_PRINTER only, not of a printer
+    # the search found
+    from app.labeldesigner import printer
+    found = 'usb://0x0483:0x5720'
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: ROLLO if device == found else '')
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([found], []))
+    monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, '_cached_printers', [])
+    monkeypatch.delenv('PRINTER_MODEL', raising=False)
+    client = make_client(tmp_path, model=configured, printer='?')
+    shown = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert next(p['model'] for p in shown if p['path'] == found) == 'TSC/TSPL'
+    response = client.post('/labeldesigner/api/print', data={'printer': found, 'label_size': 'tspl57x32', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'\r\nSIZE 57 mm,32 mm\r\n')
