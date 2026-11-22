@@ -617,7 +617,7 @@ def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
         return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
     # No roll named while none is set
     assert (shown()['media_type'], shown()['tape']['roll']) == ('Die-cut labels', '')
-    for sensing, media_type in (('endless', 'Continuous roll'), ('mark', 'Labels with black marks on the back'),
+    for sensing, media_type in (('endless', 'Continuous roll'), ('mark', 'Black marks on the back'),
                                 ('gap', 'Die-cut labels')):
         assert client.post('/labeldesigner/api/settings', data={'sensing': sensing}).status_code == 200
         told = shown()

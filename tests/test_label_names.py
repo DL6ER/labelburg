@@ -109,7 +109,7 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert models['Zebra/ZPL']['leaves_turned'] is True and models['TSC/TSPL']['leaves_turned'] is True
     # Told how they find their labels, the others find them by themselves
     assert {model for model, caps in models.items() if caps['sensing']} == {'TSC/TSPL', 'TSC/TSPL-300', 'Zebra/ZPL', 'Zebra/ZPL-300'}
-    assert config['rolls'] == [['gap', 'Labels with gaps'], ['mark', 'Labels with black marks on the back'], ['endless', 'Continuous roll']]
+    assert config['rolls'] == [['gap', 'Labels with gaps'], ['mark', 'Black marks on the back'], ['endless', 'Continuous roll']]
     assert models['PUQU/Q00']['vendor'] == 'PUQU'
 
 

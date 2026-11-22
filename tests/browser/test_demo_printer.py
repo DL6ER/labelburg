@@ -122,15 +122,15 @@ def test_a_zpl_printer_is_told_how_it_finds_its_labels(designer):
     designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
     designer.wait_for_selector(choice)
     assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
-        'Labels with gaps', 'Labels with black marks on the back', 'Continuous roll']
+        'Labels with gaps', 'Black marks on the back', 'Continuous roll']
     # None is chosen while none is set, the printer goes on as last told
     assert designer.query_selector(f'{choice}.on') is None
-    assert 'Choose what is on the roll. Until then the printer finds the labels as before.' in designer.inner_text('[data-card="0"]')
+    assert 'Choose what is on the roll.' in designer.inner_text('[data-card="0"]')
     assert setting(designer, f'{choice}[data-v="gap"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'gap'}
     assert designer.inner_text(f'{choice}.on') == 'Labels with gaps'
     assert 'How the printer finds where each label starts.' in designer.inner_text('[data-card="0"]')
     assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'mark'}
-    assert designer.inner_text(f'{choice}.on') == 'Labels with black marks on the back'
+    assert designer.inner_text(f'{choice}.on') == 'Black marks on the back'
     setting(designer, f'{choice}[data-v="endless"]')
     assert 'Each label is as long as the tape chosen above.' in designer.inner_text('[data-card="0"]')
     # Kept on the server, another visit shows it
@@ -161,10 +161,10 @@ def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
     designer.keyboard.press('Escape')
     open_settings(designer)
     setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="mark"]')
-    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks on the back'")
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Black marks on the back'")
     back_to_the_editor(designer)
     designer.click('#printerChip')
-    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, labels with black marks on the back')
+    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, black marks on the back')
 
 
 def test_a_tspl_printer_offers_4x6_labels_and_the_roll(designer):
@@ -182,13 +182,13 @@ def test_a_tspl_printer_offers_4x6_labels_and_the_roll(designer):
         'Die-cut', '102 x 152 mm']
     choice = '[data-card="0"] button[data-k="sensing"]'
     assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
-        'Labels with gaps', 'Labels with black marks on the back', 'Continuous roll']
+        'Labels with gaps', 'Black marks on the back', 'Continuous roll']
     # None is chosen while none is set
     assert designer.query_selector(f'{choice}.on') is None
     with designer.expect_response('**/api/settings'):
         designer.select_option(sizes, 'tspl102x152')
     assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'TSC/TSPL', 'sensing': 'mark'}
-    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks on the back'")
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Black marks on the back'")
     back_to_the_editor(designer)
     assert designer.text_content('#slot .model') == 'Demo TSC TSPL'
     type_label(designer, 'Parcel 7')
