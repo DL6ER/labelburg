@@ -771,3 +771,17 @@ def test_one_of_its_labels_printed_again_counts_as_it_did_after_a_restart(server
     monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: (totals.append(kwargs.get('total')), create(*args, **kwargs))[1])
     restart(tmp_path)
     assert ended(again).state == 'printed' and set(totals) == {3}
+
+
+def test_a_photo_printed_again_is_made_of_its_smaller_copy_fitted_as_the_photo(server, monkeypatch):
+    job = server.post(f'{API}/print', data=dict(LABEL, print_type='image', image=photo(2004, 1500)), content_type='multipart/form-data').get_json()['job']
+    assert ended(job).state == 'printed'
+    made, create = [], routes.create_label_from_request
+
+    def recorded(d={}, files={}, counter=0, image=None, *args, **kwargs):
+        made.append((image.size, tuple(kwargs.get('image_size') or ())))
+        return create(d, files, counter, image, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
+    assert server.post(f'{API}/history/{job}/print', data={'printer': 'simulation'}).status_code == 200
+    # Not scaled up to the photo first, which takes its memory again
+    assert set(made) == {((1860, 1392), (2004, 1500))}
