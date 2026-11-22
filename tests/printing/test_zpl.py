@@ -583,3 +583,24 @@ def test_printers_that_find_their_labels_by_themselves_name_no_roll(tmp_path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert next(p for p in found if p['path'] == 'simulation')['tape']['roll'] == ''
+
+
+def test_the_roll_set_leaves_the_status_the_printer_told(tmp_path, monkeypatch, sent):
+    # Asked once within 10 s, a continuous roll set meanwhile does not
+    # change what it measured
+    asked = []
+    monkeypatch.setattr(protocol, 'host_status', lambda device: asked.append(device) or DATAMAX_HS.replace(b'0235', b'1214'))
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+
+    def shown(**query):
+        found = client.get('/labeldesigner/api/printer_status', query_string=query).get_json()['printers']
+        return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert shown()['media_length'] == shown(printer='tcp://127.0.0.1')['media_length'] == 0
+    client.post('/labeldesigner/api/settings', data={'sensing': 'gap'})
+    for told in (shown(), shown(printer='tcp://127.0.0.1')):
+        assert (told['media_length'], told['tape']['id'], told['tape']['known']) == (152, 'zpl102x152', True)
+    response = client.post('/labeldesigner/api/print', data={'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^MNY\n^PW816\n^LL1216\n')
+    assert len(asked) == 1

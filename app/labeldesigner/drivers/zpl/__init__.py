@@ -188,7 +188,7 @@ class Zpl(Driver):
                 state.update(cached)
                 state.update({'errors': [NO_ANSWER], 'status_type': 'Error occurred'})
                 devices.status_cache[devices.lock_key(device)] = state
-            return state
+            return dict(state)
         state['errors'] = protocol.errors(answer)
         state['status_type'] = devices.status_type(state['errors'])
         state['phase_type'] = 'Waiting to receive'
@@ -200,8 +200,9 @@ class Zpl(Driver):
             state['media_width'], state['media_length'] = size
         elif length := measured(answer['length'], dpi):
             state['media_length'] = length
+        # A copy, the one kept stays as the printer told it
         devices.status_cache[devices.lock_key(device)] = state
-        return state
+        return dict(state)
 
     def print_speed(self, model, fast, red):
         return SPEED, BESIDES

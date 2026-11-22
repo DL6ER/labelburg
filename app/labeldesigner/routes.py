@@ -1505,11 +1505,13 @@ def get_printer_status():
         one = status_of_printer(current_app.config, request.args['printer'], added)
         if one is None:
             return {'message': 'No such printer'}, 404
-        status = {'printers': [one]}
-        told = [one]
+        status = {'printers': [dict(one)]}
+        told = status['printers']
     else:
         status = get_ptr_status(current_app.config, added)
-        told = [status] + status.get('printers', [])
+        # Copies, the search keeps the states the printers told
+        status['printers'] = [dict(printer) for printer in status.get('printers', [])]
+        told = [status] + status['printers']
     kept = _kept_settings()
     demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors
