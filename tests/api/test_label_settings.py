@@ -17,7 +17,7 @@ from app.labeldesigner.routes import create_label_from_request
 from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client, outcome
 
 URL = '/labeldesigner/api/settings/labels'
-NONE_SET = {'date_format': '', 'collate': '', 'font_family': ''}
+NONE_SET = {'date_format': '', 'collate': '', 'font_family': '', 'history': ''}
 
 
 def test_label_settings_are_kept_for_every_browser(tmp_path):
@@ -28,10 +28,10 @@ def test_label_settings_are_kept_for_every_browser(tmp_path):
     assert r.get_json() == {'success': True, 'settings': {**NONE_SET, 'date_format': '%d.%m.%Y', 'font_family': 'DejaVu Sans'}}
     # Only what is named changes, another browser's change stays
     assert client.post(URL, json={'collate': 0}).get_json()['settings'] == {
-        'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
+        **NONE_SET, 'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
     # Kept in the folder of the labels, also for the next start of the server
     again = make_client(tmp_path, empty_repo=True)
-    assert again.get(URL).get_json() == {'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
+    assert again.get(URL).get_json() == {**NONE_SET, 'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': 'DejaVu Sans'}
     # An empty value removes one
     assert client.post(URL, data={'font_family': '', 'collate': ''}).get_json()['settings'] == {**NONE_SET, 'date_format': '%d.%m.%Y'}
 
@@ -54,7 +54,7 @@ def test_label_settings_are_kept_with_the_printer_settings(tmp_path, monkeypatch
 
 def test_label_settings_are_checked(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
-    for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'},
+    for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'}, {'history': 'off'},
                   {'font_family': 'No Such Font'}, {'font_family': 'DejaVu Sans,Book'}, {'quality': 'fast'},
                   {'date_format': '%d.%m.%Y', 'colour': 'red'}, {}):
         r = client.post(URL, data=wrong)
@@ -77,7 +77,7 @@ def test_label_settings_written_by_hand_that_are_wrong_are_not_set(tmp_path):
     # The file may be edited by hand, a font may be gone since
     client = make_client(tmp_path, empty_repo=True)
     path = tmp_path / 'label_repo' / printer_settings.FILE
-    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'collate': 0, 'font_family': 'Gone Sans'}}))
+    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'collate': 0, 'font_family': 'Gone Sans', 'history': False}}))
     assert client.get(URL).get_json() == NONE_SET
     path.write_text(json.dumps({'printers': {}, 'labels': ['collate', '0']}))
     assert client.get(URL).get_json() == NONE_SET

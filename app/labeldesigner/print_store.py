@@ -56,6 +56,9 @@ NO_IMAGE = 'Its image is no longer kept'
 NOT_MADE_HERE = 'Only labels made here can be opened'
 NOT_KEPT = 'Printed labels are not kept'
 NOT_CLEARED = 'The printed labels could not be cleared, the log of the server names the reason'
+# At most this many entries are read at a time
+MAX_LIMIT = 200
+LIMIT_REFUSED = f'limit must be a whole number from 1 to {MAX_LIMIT}'
 
 _lock = threading.Lock()
 # The folder opened, None while the store is closed
@@ -435,6 +438,10 @@ def entry(job_id: str) -> dict | None:
     if _base is None:
         return None
     return next((entry for entry in entries(HISTORY_KEEP * 2) if entry['id'] == job_id), None)
+
+
+def history_folder() -> str:
+    return _history_path('')
 
 
 def image_path(job_id: str, number: int) -> str | None:
