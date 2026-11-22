@@ -407,7 +407,8 @@ class Tools:
         found, label_size = self._expected(printer, label_size, saved['label_size'])
         self._same_size(saved, found, label_size)
         printer, device = found.get('name') or found['path'], found['path']
-        specs = [{'path': '/repository/preview', 'json': {'name': name, 'printer': device, 'blanks': blanks}}
+        # Checked as printed, e.g. with the number of labels of {{total}}
+        specs = [{'path': '/repository/preview', 'json': {'name': name, 'printer': device, 'blanks': blanks, 'print_count': count}}
                  for blanks in fillings]
         # All of them are checked before the first one is added, each page
         # of a saved PDF prints as a label of its own
@@ -417,7 +418,7 @@ class Tools:
         images = []
         for done, spec in enumerate(specs):
             try:
-                images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count, source='mcp')))
+                images.append(self._printed('/repository/print', json=dict(spec['json'], source='mcp')))
             except ToolError as e:
                 raise ToolError(f'{e} ({done * labels // len(specs)} of {_labels(labels)} added to the queue)') from None
         return _noted(f'Added {_labels(labels)} of {name} to the queue of {printer}', told), specs, images
@@ -431,10 +432,10 @@ class Tools:
         self._cap(count)
         found, label_size = self._expected(printer, label_size)
         printer = found.get('name') or found['path']
-        form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'])
+        form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'], print_count=count)
         spec = {'path': '/preview', 'data': form}
         self.checked(spec, small_code_ok)
-        image = self._printed('/print', data=dict(form, print_count=count, source='mcp'))
+        image = self._printed('/print', data=dict(form, source='mcp'))
         return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
 
 

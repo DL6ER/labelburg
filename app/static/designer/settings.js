@@ -561,7 +561,7 @@ async function nextThumb() {
     if (!img.isConnected || !h) return nextThumb();
     thumbsRunning++;
     try {
-        const p = await preview(h.design, h.values || {});
+        const p = await preview(h.design, h.values || {}, 1, 0, h.labels || 0);
         if (img.isConnected) { img.src = p.url; img.parentElement.classList.add('shown'); }
     } catch (e) {
         if (img.isConnected) img.parentElement.classList.add('none');

@@ -452,6 +452,21 @@ def test_the_image_returned_is_the_one_printed(client, tmp_path):
     assert returned.convert('L').tobytes() == label.convert('L').tobytes()
 
 
+def test_labels_are_checked_with_the_number_of_labels(client, tmp_path, monkeypatch):
+    # As printed, e.g. Box 1 of 3, also in the preview the assistant gets
+    from app.labeldesigner.label import SimpleLabel
+    drawn = set()
+    process = SimpleLabel.process_templates
+    monkeypatch.setattr(SimpleLabel, 'process_templates', lambda self: process(self) or drawn.update(line['text'] for line in self.text))
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'text': [{'text': 'Box {{counter}} of {{total}}', 'size': '60'}]}).status_code == 200
+    assert not tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=3).get('isError')
+    assert not tool(client, 'print_text', printer='Kitchen', label_size='62', count=2, lines=['Jar {{counter}}/{{total}}']).get('isError')
+    assert printed(tmp_path) == 5
+    assert drawn == {'Box 1 of 3', 'Box 2 of 3', 'Box 3 of 3', 'Jar 1/2', 'Jar 2/2'}
+
+
 def test_home_assistant_gets_the_addresses_without_the_image_data(client):
     status, answer = call(client, 'tools/call', {'name': 'preview_label', 'arguments': {'lines': ['Chili'], 'label_size': '62'}},
                           **{'User-Agent': 'HomeAssistant/2026.11.0 httpx2/1.0.0 Python/3.14'})
