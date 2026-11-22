@@ -15,7 +15,7 @@ from tests.browser.test_editor import sent, wait_for_preview
 from tests.browser.test_settings import open_settings
 
 CARD = '#setPrinters [data-card="0"]'
-CUTS_OFF = 'Cuts off the last label, e.g. after printing without a cut.'
+CUTS_OFF = 'Cuts off the last label.'
 
 
 @pytest.fixture
@@ -50,17 +50,20 @@ def _demo(page, server, **settings):
 
 @pytest.mark.parametrize('model, label_size, button, hint', [
     ('QL-800', '62', 'Feed and cut', CUTS_OFF),
-    ('QL-800', '62x29', 'Feed one label', CUTS_OFF + ' This uses one empty label.'),
+    ('QL-800', '62x29', 'Feed one label', 'Cuts off the last label, uses one empty label.'),
     ('PT-E550W', 'pt12', 'Feed and cut', CUTS_OFF),
-    # A receipt printer cuts after the last receipt anyway
-    ('Epson/ESC-POS', 'escpos80', 'Feed and cut', 'Feeds the paper to the cutter and cuts it.'),
-    ('Zebra/ZPL', 'zpl57x32', 'Feed one label', 'Feeds one empty label, e.g. to tear off the last one.'),
+    # A receipt printer cuts after the last receipt anyway, the button says it all
+    ('Epson/ESC-POS', 'escpos80', 'Feed and cut', None),
+    ('Zebra/ZPL', 'zpl57x32', 'Feed one label', 'Feeds one empty label.'),
 ])
 def test_the_button_says_what_it_does_with_the_tape(designer, server, model, label_size, button, hint):
     _demo(designer, server, demo_model=model, label_size=label_size)
     feed = designer.locator(f'{CARD} [data-feed]')
     assert feed.inner_text() == button
-    assert designer.inner_text(f'{CARD} [data-feed] + small') == hint
+    if hint is None:
+        assert designer.locator(f'{CARD} [data-feed] + small').count() == 0
+    else:
+        assert designer.inner_text(f'{CARD} [data-feed] + small') == hint
     with designer.expect_response('**/api/feed') as answer:
         feed.click()
     assert answer.value.ok

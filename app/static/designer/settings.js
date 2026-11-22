@@ -148,10 +148,10 @@ function qualityHTML(p) {
 // What feeding the paper does with the tape in the printer, as the server
 // tells it: the button, its hint and what is said meanwhile
 const FEEDS = {
-    cut: ['Feed and cut', 'Cuts off the last label, e.g. after printing without a cut.', 'Feeding and cutting...'],
-    cut_paper: ['Feed and cut', 'Feeds the paper to the cutter and cuts it.', 'Feeding and cutting...'],
-    cut_label: ['Feed one label', 'Cuts off the last label, e.g. after printing without a cut. This uses one empty label.', 'Feeding one label...'],
-    label: ['Feed one label', 'Feeds one empty label, e.g. to tear off the last one.', 'Feeding one label...'],
+    cut: ['Feed and cut', 'Cuts off the last label.', 'Feeding and cutting...'],
+    cut_paper: ['Feed and cut', '', 'Feeding and cutting...'],
+    cut_label: ['Feed one label', 'Cuts off the last label, uses one empty label.', 'Feeding one label...'],
+    label: ['Feed one label', 'Feeds one empty label.', 'Feeding one label...'],
 };
 // Printers feeding their paper, by path: one at a time, a second click would feed again
 const feeding = new Set();
@@ -160,7 +160,7 @@ function feedHTML(p) {
     const [name, hint] = FEEDS[p.feed];
     const off = unreachable(p) ? ' disabled title="The printer cannot be reached"' : feeding.has(p.path) ? ' disabled' : '';
     return `<button class="btn soft sm" type="button" data-feed${off}>${icon(p.feed === 'label' ? 'down' : 'scissors')}${esc(name)}</button>
-        <small class="muted">${esc(hint)}</small>`;
+        ${hint ? `<small class="muted">${esc(hint)}</small>` : ''}`;
 }
 
 // Through the queue of printer p; the toast tells while it waits there and why it failed
