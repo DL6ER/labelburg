@@ -199,6 +199,30 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
         return ''
 
 
+# The USB interface of a printer usblp holds, in the folder of its device
+USB_INTERFACE = '/sys/class/usbmisc/{name}/device'
+
+
+def usb_ids(device_specifier: str) -> tuple[int, int] | None:
+    """Vendor and product ID of a printer on USB, usb://... or /dev/usb/lp<N>,
+    None for other printers or where the kernel does not tell."""
+    if device_specifier.startswith('usb://'):
+        vendor, _, product = device_specifier.removeprefix('usb://').partition('/')[0].partition(':')
+        try:
+            return int(vendor, 16), int(product, 16)
+        except ValueError:
+            return None
+    path = os.path.normpath(device_specifier.removeprefix('file://'))
+    if not path.startswith('/dev/usb/lp'):
+        return None
+    folder = os.path.dirname(os.path.realpath(USB_INTERFACE.format(name=os.path.basename(path))))
+    try:
+        with open(os.path.join(folder, 'idVendor')) as vendor, open(os.path.join(folder, 'idProduct')) as product:
+            return int(vendor.read(), 16), int(product.read(), 16)
+    except (OSError, ValueError):
+        return None
+
+
 def device_id_fields(device_id: str) -> dict:
     """The fields of an IEEE 1284 device ID by their short names, MFG, CMD,
     MDL, also when it spells them out (MANUFACTURER, COMMAND SET, MODEL)."""

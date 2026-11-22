@@ -61,7 +61,7 @@ def test_the_demo_printer_names_its_roll_without_a_warning(designer):
 def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
-    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'Phomemo', 'PUQU', 'Zebra']
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(MODELS)
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
@@ -95,6 +95,27 @@ def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
     designer.reload()
     open_settings(designer)
     assert designer.input_value(MODEL) == 'VC-500W'
+
+
+def test_the_demo_printer_offers_phomemo_models_with_their_labels(designer):
+    open_settings(designer)
+    phomemo = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Phomemo"] option', 'os => os.map(o => o.textContent)')
+    assert phomemo == ['D30', 'D35', 'M02', 'M02Pro', 'M110', 'M120', 'M220', 'M421', 'Q30', 'T02']
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'Phomemo/D30')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Phomemo/D30'")
+    offered = designer.eval_on_selector_all('[data-card="0"] select[data-k="label_size"] option', 'os => os.map(o => o.value)')
+    assert offered == [''] + tape.takes('Phomemo/D30')
+    assert 'Phomemo D30' in designer.inner_text('[data-card="0"]')
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo Phomemo D30'
+    type_label(designer, 'Spices')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['model'], fields['label_size']) == ('Phomemo/D30', designer.evaluate('() => labelEditor.S.tape'))
+    assert fields['label_size'].startswith('phomemo-')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
 def test_a_model_the_server_refuses_is_taken_back(designer):
