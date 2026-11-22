@@ -94,6 +94,8 @@ def test_broken_settings_print_without_calibration(tmp_path, offsets):
 
 URL = '/labeldesigner/api/calibration'
 B1 = {'printer': 'bt://00:00:5E:00:53:01', 'model': 'Niimbot/B1'}
+# Read with the roll named, the printer is not asked which one it holds
+KEPT = {**B1, 'label_size': 'niimbot40x30'}
 
 
 @pytest.fixture
@@ -133,7 +135,7 @@ def test_refused_calibrations_keep_the_one_before(b1, values, message):
     b1.post(URL, data={**B1, 'across': '0.5'})
     r = b1.post(URL, data={**B1, **values})
     assert r.status_code == 400 and r.get_json()['message'] == getattr(printer_settings, message)
-    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.5
+    assert b1.get(URL, query_string=KEPT).get_json()['across'] == 0.5
 
 
 def test_printers_without_calibration_are_refused(tmp_path):
@@ -227,7 +229,7 @@ def test_settings_that_are_not_text_print_without_calibration(tmp_path, offsets)
 def test_readings_left_empty_are_refused(b1, values):
     r = b1.post(URL, data={**B1, **values, 'roll': 'PZ1TEST00001'})
     assert r.status_code == 400 and r.get_json()['message'] == printer_settings.CALIBRATION_MESSAGE
-    assert b1.get(URL, query_string=B1).get_json()['roll'] is None
+    assert b1.get(URL, query_string=KEPT).get_json()['roll'] is None
 
 
 def test_moving_further_than_5_mm_is_refused_plainly(b1):
@@ -251,7 +253,7 @@ def test_a_failing_calibration_print_answers_plainly(b1, monkeypatch):
 def test_calibration_is_tried_without_saving(b1):
     r = b1.post(URL, data={**B1, 'across': '0.5', 'along': '-0.25', 'save': '0'})
     assert r.get_json()['calibration'] == {'across': 0.5, 'along': -0.25, 'roll': None}
-    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
+    assert b1.get(URL, query_string=KEPT).get_json()['across'] == 0.0
 
 
 def test_readings_count_from_the_offset_the_label_was_printed_with(b1):
@@ -286,7 +288,7 @@ def test_calibration_without_a_label_size_is_for_the_roll_in_the_printer(b1, mon
 def test_calibration_tried_with_save_false_is_not_kept(b1, save):
     r = b1.post(URL, json={**B1, 'across': 0.5, 'save': save})
     assert r.get_json()['calibration']['across'] == 0.5
-    assert b1.get(URL, query_string=B1).get_json()['across'] == 0.0
+    assert b1.get(URL, query_string=KEPT).get_json()['across'] == 0.0
 
 
 def test_a_broken_settings_file_is_left_as_it_is(b1, tmp_path):
