@@ -611,3 +611,29 @@ def test_a_process_without_the_queue_takes_it_once_the_other_one_left(store, mon
         os.close(other)
     assert taken.wait(5)
     assert found == ['left'] and print_store.queued(record('new'), [], None) is True
+
+
+def test_the_history_is_cut_back_while_another_process_adds_to_it(store, monkeypatch):
+    import subprocess
+    import sys
+    monkeypatch.setattr(print_store, 'HISTORY_KEEP', 10)
+    script = f"""
+import time
+from app.labeldesigner import print_store
+print_store.ENABLED, print_store.HISTORY_KEEP = True, 10
+print_store.start({str(store)!r})
+for number in range(150):
+    print_store.ended({{'v': 1, 'id': f'other{{number}}', 'queued_at': time.time(), 'kind': 'request', 'images': 0,
+                       'printer': {{'device': 'simulation', 'model': 'QL-800', 'label_size': '62'}}}}, 'printed', '', keep=True)
+"""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    other = subprocess.Popen([sys.executable, '-c', script], cwd=root)
+    for number in range(150):
+        print_store.ended(record(f'mine{number}', images=0), 'printed', '', keep=True)
+    assert other.wait(60) == 0
+    print_store.ended(record('last', images=0), 'printed', '', keep=True)
+    with open(store / print_store.HISTORY / print_store.HISTORY_FILE) as fh:
+        lines = fh.read().splitlines()
+    ids = [json.loads(line)['id'] for line in lines]
+    # Every line whole, none twice, cut back to the newest
+    assert len(ids) == len(set(ids)) and 1 <= len(ids) <= 15 and ids[-1] == 'last'
