@@ -38,8 +38,8 @@ def test_label_printers():
     assert label_printers(_label('103')) == []
     assert 'QL-1100' in label_printers(_label('104'))
     # TZe tapes only on P-touch printers with a wide enough print head
-    assert label_printers(_label('pt36')) == ['PT-P900W', 'PT-P950NW', 'PT-P910BT']
-    assert label_printers(_label('18')) == ['PT-P900W', 'PT-P950NW', 'PT-P910BT']
+    assert label_printers(_label('pt36')) == ['PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT']
+    assert label_printers(_label('18')) == ['PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT']
     assert 'PT-P700' in label_printers(_label('pt24'))
     assert 'PT-P900W' not in label_printers(_label('62'))
     # The black/red roll only on printers that print red
@@ -72,7 +72,7 @@ def test_label_designer_shows_brother_codes_and_printers(tmp_path):
     assert sizes['103x164']['name'] == '103 x 164 mm die-cut (DK-11247 / DK-1247)'
     assert sizes['103x164']['models'] == ['QL-1100', 'QL-1110NWB']
     assert sizes['103']['models'] == []
-    assert sizes['pt36']['models'] == ['PT-P900W', 'PT-P950NW', 'PT-P910BT']
+    assert sizes['pt36']['models'] == ['PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT']
 
 
 def test_printers_of_a_brother_label_size_share_one_dpi():

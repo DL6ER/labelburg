@@ -65,6 +65,8 @@ MODELS = {model.identifier: model for model in (
     # ESC i A, and Brother's driver turns its status while printing off.
     Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=False,
           status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
+    # "q" (71h) on USB as 2083h in the reference of the PT-P900 series (pp. 24, 49)
+    Model('PT-P900', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x71),
     Model('PT-P900W', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
     Model('PT-P950NW', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
     # After Brother's raster command reference of the PT-P900 series: model
@@ -92,7 +94,7 @@ PTOUCH_BESIDES = 2.0
 QUALITY_SLOWER = 1.7
 
 # P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
-HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
+HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
 
 # Brother's raster command references: a print of at least 12.7 mm (150
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape

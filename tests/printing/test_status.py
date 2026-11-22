@@ -422,7 +422,7 @@ def test_printer_answering_only_after_esc_at_polled_for_a_minute(monkeypatch):
     assert len([at for at, data in printer.writes if data.endswith(b'\x1b\x40')]) == 3
 
 
-@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W')])
+@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W'), (0x71, 'PT-P900')])
 def test_ptouch_models_are_told_apart(code, model):
     # brother_ql gave the PT-E550W the code of the PT-P750W, a PT-E550W was
     # an unknown printer and a PT-P750W was taken for a PT-E550W
