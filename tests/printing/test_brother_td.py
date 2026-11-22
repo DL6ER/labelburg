@@ -305,9 +305,14 @@ def test_quality_is_slower_only_where_the_printer_takes_it():
     assert DRIVER.print_speed('TD-2120N', False, False) == (152.4 / QUALITY_SLOWER, QL_BESIDES * QUALITY_SLOWER)
 
 
-def test_names_of_the_rolls():
-    assert DRIVER.label_names['td4-102x152'] == '102 x 152 mm die-cut (RD)'
-    assert DRIVER.label_names['td2-300-58'] == '58 mm endless (RD)'
+@pytest.mark.parametrize('label_size, name', [
+    # With Brother's codes where its pages name them
+    ('td4-102x152', '102 x 152 mm die-cut (RD-S02E1)'), ('td4-300-102x50', '102 x 50 mm die-cut (RD-S03E1)'),
+    ('td4-76x26', '76 x 26 mm die-cut (RD-S04E1)'), ('td23-51x26', '51 x 26 mm die-cut (RD-S05E1)'),
+    ('td4-102', '102 mm endless (RD-S01E2)'), ('td2-300-58', '58 mm endless (RD-S07E5)'),
+    ('td4-90', '90 mm endless (RD)'), ('td2-30x30', '30 x 30 mm die-cut (RD)')])
+def test_names_of_the_rolls(label_size, name):
+    assert DRIVER.label_names[label_size] == name
 
 
 @pytest.mark.parametrize('label_size, limits', [
@@ -327,7 +332,7 @@ def test_label_too_long_is_refused():
     assert DRIVER.length_problem('TD-2310D-300', 35434, False) == 'Labels on the TD-2310D can be at most 3000 mm long'
     assert 'Labels on the TD-2120N can be at most 1000 mm long' in refusals.MESSAGES
     assert 'The TD-4420DN cannot print at 600 dpi, turn off 600 dpi printing' in refusals.MESSAGES
-    assert 'The label size 102 x 152 mm die-cut (RD) cannot be printed on a QL-1100' in refusals.MESSAGES
+    assert 'The label size 90 mm endless (RD) cannot be printed on a QL-1100' in refusals.MESSAGES
 
 
 @pytest.mark.parametrize('saved, model, printed', [

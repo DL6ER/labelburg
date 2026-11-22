@@ -57,8 +57,14 @@ LABELS = tuple(_label(series, dpi, *roll) for (series, dpi), rolls in ROLLS.item
 BY_ID = {label.identifier: label for label in LABELS}
 MODELS = frozenset(model for resolutions in TD_SERIES.values() for models in resolutions.values() for model in models)
 SHORTEST = {label.identifier: SHORTEST_MM[label.identifier.partition('-')[0]] for label in LABELS}
-NAMES = {label.identifier: (f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (RD)' if label.tape_size[1]
-                            else f'{label.tape_size[0]} mm endless (RD)') for label in LABELS}
+# Brother's codes of the rolls, as its pages name them, e.g.
+# https://www.brother.co.uk/supplies/mobile-printing/label-rolls/rd/rds02e1, RD-S07E5 as
+# https://www.brother.ee/labelling-and-receipts/td-2120n does; RD for the others
+CODES = {(102, 152): 'RD-S02E1', (102, 50): 'RD-S03E1', (76, 26): 'RD-S04E1', (51, 26): 'RD-S05E1',
+         (102, 0): 'RD-S01E2', (58, 0): 'RD-S07E5'}
+NAMES = {label.identifier: (f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut' if label.tape_size[1]
+                            else f'{label.tape_size[0]} mm endless') + f" ({CODES.get(label.tape_size, 'RD')})"
+         for label in LABELS}
 # A label of another driver's die-cut size, or another TD series', prints on
 # the same paper here
 diecut.note_papers(LABELS)
