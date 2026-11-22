@@ -255,12 +255,14 @@ def _designer_config() -> dict:
 
 # --- Label repository utilities and API -------------------------------------------------
 def _get_repo_dir():
-    repo = current_app.config.get('LABEL_REPOSITORY_DIR')
-    if not repo:
-        # default to a folder inside the app root
-        repo = os.path.join(current_app.root_path, 'labels')
+    repo = _repo_dir_name()
     os.makedirs(repo, exist_ok=True)
     return repo
+
+
+def _repo_dir_name() -> str:
+    # default to a folder inside the app root
+    return current_app.config.get('LABEL_REPOSITORY_DIR') or os.path.join(current_app.root_path, 'labels')
 
 
 def _remove_repo_images(repo: str, base: str, keep: str | None = None):
@@ -1013,7 +1015,8 @@ def restore_print_queue(app):
     left in it once more. The one that printed as the server stopped may not
     have printed, it is not printed again."""
     with app.app_context():
-        left = print_store.start(_get_repo_dir())
+        # Made by the store, which tells where it cannot be made
+        left = print_store.start(_repo_dir_name())
         keep = _keeping() if left else True
     for record in left:
         try:

@@ -12,7 +12,9 @@ import time
 import pytest
 from PIL import Image
 
+from app import create_app
 from app.labeldesigner import adding, paperless, print_queue, print_store, printer, routes
+from config import Config
 from tests.helpers import EXAMPLE_FORMDATA, make_client, without_status
 
 
@@ -441,3 +443,15 @@ def test_files_a_crash_left_half_written_go(store):
     (store / print_store.HISTORY / '.0123.tmp').write_bytes(b'half')
     print_store.start(str(store))
     assert files(store / print_store.HISTORY) == []
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_a_folder_of_labels_that_cannot_be_made_does_not_stop_the_server(tmp_path, monkeypatch, caplog, enabled):
+    monkeypatch.setattr(print_store, 'ENABLED', enabled)
+    monkeypatch.setattr(print_store, 'FOLDER', None)
+    (tmp_path / 'file').write_text('not a folder')
+    config = type('Unwritable', (Config,), {'LABEL_REPOSITORY_DIR': str(tmp_path / 'file' / 'labels')})
+    client = create_app(config).test_client()
+    assert client.get('/labeldesigner/api/openapi.json').status_code == 200
+    assert not print_store.is_open()
+    assert any('not kept' in message for message in caplog.messages) == enabled
