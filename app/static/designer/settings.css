@@ -53,6 +53,9 @@
 .set-unused { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 0; }
 .set-unused b, .set-unused small { display: block; }
 
+/* A printer found that no driver prints on */
+.set-unknown .set-card-h:last-child { border-bottom: 0; }
+
 /* Printed labels */
 .set-hist { padding: 6px; }
 .set-hrow { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; }

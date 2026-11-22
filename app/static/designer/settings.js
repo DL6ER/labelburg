@@ -188,9 +188,20 @@ function cardHTML(p, i) {
     </section>`;
 }
 
+// A label printer the search found that Labelburg cannot print on yet, with
+// the form for new printers on GitHub, its report filled in by the server
+function unknownHTML(u) {
+    return `<section class="set-card set-unknown">
+        <div class="set-card-h"><span class="set-add-ic">${icon('printer')}</span>
+            <div class="grow"><b>${esc(u.name)}</b><small class="muted">Not supported yet, a report helps to add it.</small></div>
+            <a class="btn soft sm" href="${esc(u.report_url)}" target="_blank" rel="noopener">${ic('out')}Report it</a></div>
+    </section>`;
+}
+
 function cardsHTML() {
     const hints = S.printerHints.map(h => `<p class="muted small">${esc(h)}</p>`).join('');
-    return (S.printers.map(cardHTML).join('') || `<section class="set-card"><p class="set-empty muted">No printer answered. Check that it is switched on and connected, then look for printers.</p></section>`) + hints;
+    return (S.printers.map(cardHTML).join('') || `<section class="set-card"><p class="set-empty muted">No printer answered. Check that it is switched on and connected, then look for printers.</p></section>`)
+        + S.unknownPrinters.map(unknownHTML).join('') + hints;
 }
 
 // Drawn again keeps the focus on the control that had it

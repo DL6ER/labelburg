@@ -141,6 +141,8 @@ def tcp_address(device_specifier: str, port: int) -> tuple[str, int]:
 # The IEEE 1284 device ID of a printer on USB, which usblp read when it was
 # plugged in
 USB_DEVICE_ID = '/sys/class/usbmisc/{name}/device/ieee1284_id'
+# Its vendor and product ID, of the USB device its interface belongs to
+USB_DESCRIPTOR = '/sys/class/usbmisc/{name}/device/../{field}'
 
 
 # The device IDs of printers on usb://, which do not change, asked once
@@ -189,14 +191,40 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
                 return ''
             _usb_device_ids[key] = told
         return _usb_device_ids[key]
-    path = os.path.normpath(device_specifier[len('file://'):] if device_specifier.startswith('file://') else device_specifier)
-    if not path.startswith('/dev/usb/lp'):
+    name = _usblp_name(device_specifier)
+    if name is None:
         return ''
     try:
-        with open(USB_DEVICE_ID.format(name=os.path.basename(path))) as file:
+        with open(USB_DEVICE_ID.format(name=name)) as file:
             return file.read()
     except OSError:
         return ''
+
+
+def _usblp_name(device_specifier: str) -> str | None:
+    """The name usblp gives the device, lp<N>, None for other devices."""
+    path = os.path.normpath(device_specifier.removeprefix('file://'))
+    return os.path.basename(path) if path.startswith('/dev/usb/lp') else None
+
+
+def usb_ids(device_specifier: str) -> tuple[int, int] | None:
+    """Vendor and product ID of a printer on USB, /dev/usb/lp<N> as Linux
+    read them when it was plugged in, or usb://<vendor>:<product>[/<serial>];
+    None for other printers or where they are unknown."""
+    try:
+        if device_specifier.startswith('usb://'):
+            vendor, _, product = device_specifier.removeprefix('usb://').partition('/')[0].partition(':')
+            return int(vendor, 16), int(product, 16)
+        name = _usblp_name(device_specifier)
+        if name is None:
+            return None
+        told = []
+        for field in ('idVendor', 'idProduct'):
+            with open(USB_DESCRIPTOR.format(name=name, field=field)) as file:
+                told.append(int(file.read().strip(), 16))
+        return told[0], told[1]
+    except (OSError, ValueError):
+        return None
 
 
 def device_id_fields(device_id: str) -> dict:
@@ -224,6 +252,13 @@ def found_usb_printers() -> tuple[list[str], list[str]]:
             _usb_device_ids[_usb_key(spec)] = told
         found.append(spec)
     return found, shared
+
+
+def found_usb_devices(vendors) -> list[tuple[int, int]]:
+    """Vendor and product ID of the devices of the makers PyUSB finds that
+    have no printer interface, see backends.found_devices()."""
+    from . import backends
+    return backends.found_devices(vendors)
 
 
 def _private_lock_dir() -> str:

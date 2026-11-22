@@ -4349,6 +4349,31 @@
                   "type": "string"
                 },
                 "description": "What the search for printers (`PRINTER_PRINTER` `?`) could not do, e.g. \"Printers on usb:// need libusb, please install it\", or left alone, e.g. a printer the computer shares over USB/IP."
+              },
+              "unknown": {
+                "type": "array",
+                "description": "Label printers the search for printers (`PRINTER_PRINTER` `?`) found that Labelburg cannot print on yet, each kind once: on USB those no driver claims and devices of makers of label printers, on Bluetooth those known by their name or service. Printers on USB are only asked for their device ID and serial number, as by the search for printers, nothing else is sent to them, nothing to other devices. Empty where printers are configured, left out where `printer` names one.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "where": {
+                      "type": "string",
+                      "enum": ["usb", "bluetooth"]
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Maker and model as far as the printer tells them, e.g. `DYMO LabelWriter 450` or `Niimbot B21`."
+                    },
+                    "report": {
+                      "type": "string",
+                      "description": "What a report on GitHub needs, a line each: the version, the connection, the USB IDs and the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID (`DES` only where it repeats maker and model), or the Bluetooth name without its serial number and the 128-bit UUIDs of the services it advertises. Never serial numbers, addresses, host names, paths or names the printer was given."
+                    },
+                    "report_url": {
+                      "type": "string",
+                      "description": "The form for new printers on GitHub with the report filled in."
+                    }
+                  }
+                }
               }
             }
           }

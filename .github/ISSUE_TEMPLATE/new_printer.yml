@@ -1,0 +1,38 @@
+name: New printer
+description: A label printer Labelburg cannot print on yet.
+title: "New printer: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: '"Report it" at the printer in the Settings of Labelburg fills in what it found: the kind of printer, never its serial number, an address or the name you gave it. Nothing is sent before you send this form. [New printers](https://github.com/DL6ER/labelburg/blob/master/docs/new-printer.md) tells what else helps, e.g. recordings of what the app of its maker sends to it.'
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in the Settings under About, e.g. "v8.0.0, commit 42ef2db".
+    validations:
+      required: true
+  - type: input
+    id: printer
+    attributes:
+      label: Printer
+      description: Maker and model as written on the printer, e.g. "DYMO LabelWriter 450".
+    validations:
+      required: true
+  - type: textarea
+    id: found
+    attributes:
+      label: What Labelburg found
+      description: How the printer is connected and what it tells about itself. "Report it" fills it in, without serial numbers or addresses.
+      render: text
+  - type: input
+    id: labels
+    attributes:
+      label: Labels
+      description: The labels or tape you print on, e.g. "DYMO 99012, 36 x 89 mm".
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The app or driver of the maker you print with now, over USB, Bluetooth or Wi-Fi, and recordings of what it sends to the printer, see the guide linked above.

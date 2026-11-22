@@ -595,7 +595,7 @@ function colorsOf(header) {
 // --- State -------------------------------------------------------------------
 
 export const S = {
-    printers: [], printerHints: [], printer: null, tape: C.default_label_size, tapeKnown: false, tapeAssumed: true,
+    printers: [], printerHints: [], unknownPrinters: [], printer: null, tape: C.default_label_size, tapeKnown: false, tapeAssumed: true,
     tapeFits: [], tapeMoves: [], tapePlace: {}, tapeCandidates: [], tapeManual: false, tapeUnknown: '',
     demos: [], demoList: [], saved: [], codes: C.codes,
     history: load(own('designer_history'), []),
@@ -817,6 +817,8 @@ export async function refreshPrinters(look = false) {
         }
         S.printers = printers;
         S.printerHints = Array.isArray(data.hints) ? data.hints : [];
+        // Label printers found that Labelburg cannot print on, see settings.js
+        S.unknownPrinters = Array.isArray(data.unknown) ? data.unknown : [];
         S.printer = kept || printers.find(p => p.path === data.selected) || printers[0] || null;
         if (S.printer && !S.printer.missing) {
             const { path, name: shownName, model, tape, settings } = S.printer;

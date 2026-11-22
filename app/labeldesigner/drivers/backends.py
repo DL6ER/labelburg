@@ -221,16 +221,19 @@ class UsbipPrinter(Printer):
         usbip.release(self.dev)
 
 
+def _has_interface(usb, device, interface_class: int) -> bool:
+    if device.bDeviceClass == interface_class:
+        return True
+    return any(usb.util.find_descriptor(config, bInterfaceClass=interface_class) is not None for config in device)
+
+
 def _usb_printers(usb, vendor: int | None = None, interface_class: int = 7):
     """The devices with a printer interface (class 7), or one of
     interface_class, of a maker or all."""
-    def is_printer(device):
-        if device.bDeviceClass == interface_class:
-            return True
-        return any(usb.util.find_descriptor(config, bInterfaceClass=interface_class) is not None for config in device)
     maker = {} if vendor is None else {'idVendor': vendor}
     try:
-        return usb.core.find(find_all=True, custom_match=is_printer, backend=_libusb(), **maker)
+        return usb.core.find(find_all=True, custom_match=lambda device: _has_interface(usb, device, interface_class),
+                             backend=_libusb(), **maker)
     except usb.core.NoBackendError as e:
         raise NoLibusb(str(e)) from e
 
@@ -336,6 +339,24 @@ def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
             spec += f'/{serial}'
         found.append((spec, _device_id(usb, printer)))
     return found, shared
+
+
+def found_devices(vendors) -> list[tuple[int, int]]:
+    """Vendor and product ID of the devices of the makers PyUSB finds that
+    have no printer interface, e.g. a printer reached as a serial port, and
+    that Linux does not share over USB/IP. Only the descriptors the system
+    keeps are read, nothing is sent to the devices. Empty where PyUSB finds
+    none, e.g. without libusb, which the printer list tells already."""
+    try:
+        import usb.core
+        import usb.util
+        found = list(usb.core.find(find_all=True, backend=_libusb(), custom_match=lambda device:
+                                   device.idVendor in vendors and not _has_interface(usb, device, 7)))
+    except Exception:
+        logger.debug('No other USB devices through PyUSB', exc_info=True)
+        return []
+    shared = _shared_bus_ids()
+    return [(device.idVendor, device.idProduct) for device in found if not (shared and _bus_id(device) in shared)]
 
 
 def _libusb():
