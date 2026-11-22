@@ -26,10 +26,12 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing', 'side')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
 ENDS = ('top', 'bottom')
+# The rolls of a printer of two, see Driver.capabilities()
+SIDES = ('left', 'right')
 # Printers come and go, a few hundred are a lot already
 MAX_PRINTERS = 200
 # What a print request names a setting by: one that names any of them is
@@ -42,10 +44,12 @@ DEMO_MODEL = 'demo_model'
 DEMO = 'simulation'
 
 SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1), '
-                    'leaves_first (top or bottom) and sensing (gap, mark or endless) of a printer, demo_model (a supported '
+                    'leaves_first (top or bottom), sensing (gap, mark or endless) and side (left or right) of a printer, demo_model (a supported '
                     'model) of the demo printer simulation, and quality (quality, high or fast), an empty value removes one')
 # Of a printer that is not told how it finds its labels, see Driver.capabilities()
 NO_SENSING = 'This printer finds the start of each label by itself'
+# Of a printer of one roll
+NO_SIDES = 'This printer has one roll'
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # The printers added in the Settings, each with its address, model and name
 ADDED = 'added'
@@ -145,11 +149,34 @@ def told_how(model: str) -> bool:
     return model in MODELS and for_model(model).capabilities(model)['sensing']
 
 
+def two_rolls(model: str) -> bool:
+    """Whether a printer of the model has two rolls, see
+    Driver.capabilities()."""
+    return model in MODELS and for_model(model).capabilities(model)['two_rolls']
+
+
 def of_printer(data: dict, device: str, model: str | None = None) -> dict:
     """The settings of a printer, the common ones with its own. How it
     finds its labels only where it is one of SENSINGS, e.g. not after a hand
-    edit, and, given its model, where that is told it."""
-    printer = _key(data, device)
+    edit, and, given its model, where that is told it; its roll likewise."""
+    return _settings(data, _key(data, device), model)
+
+
+def by_device(data: dict) -> dict[str, dict]:
+    """The settings of every printer kept, see of_printer(), by its lock key:
+    the device they were kept for, or where the printer was seen last, as
+    _key() takes it without asking the printer, e.g. to tell the drivers
+    before the first status after a restart."""
+    printers = data['printers']
+    keys = {key: key for key in printers if not key.startswith(('usb:', 'serial:')) and key != DEMO}
+    seen = data.get('seen')
+    if isinstance(seen, dict):
+        keys.update({device: printer for device, printer in seen.items() if isinstance(printer, str) and printer in printers})
+    return {device: _settings(data, printer, None) for device, printer in keys.items()}
+
+
+def _settings(data: dict, printer: str, model: str | None) -> dict:
+    """The settings of the printer of the key, see of_printer()."""
     own = data['printers'].get(printer)
     demo = demo_model(data) if printer == DEMO else None
     settings = {**{name: data[name] for name in COMMON if name in data},
@@ -157,6 +184,8 @@ def of_printer(data: dict, device: str, model: str | None = None) -> dict:
                 **{name: own[name] for name in OWN if isinstance(own, dict) and name in own}}
     if settings.get('sensing') not in SENSINGS or model is not None and not told_how(model):
         settings.pop('sensing', None)
+    if settings.get('side') not in SIDES or model is not None and not two_rolls(model):
+        settings.pop('side', None)
     return settings
 
 
@@ -190,6 +219,11 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
                 raise ValueError(SETTINGS_MESSAGE)
             if not told_how(model):
                 raise ValueError(NO_SENSING)
+        elif name == 'side':
+            if value not in SIDES:
+                raise ValueError(SETTINGS_MESSAGE)
+            if not two_rolls(model):
+                raise ValueError(NO_SIDES)
         elif value not in QUALITIES:
             raise ValueError(SETTINGS_MESSAGE)
     return changes
@@ -232,7 +266,8 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
     model was chosen for the demo printer: the one kept if the model takes
     it or its paper, else the one it is assumed to have, see
     tape.assumed_size(). A cutting the model cannot do is left out, as how
-    the printer finds its labels where the model is not told."""
+    the printer finds its labels where the model is not told, and a roll
+    where it has one."""
     printer = _key(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}
@@ -241,6 +276,8 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
         own.pop('cut')
     if not told_how(model):
         own.pop('sensing', None)
+    if not two_rolls(model):
+        own.pop('side', None)
     data['printers'][printer] = own
     return data
 
@@ -249,10 +286,10 @@ def for_printing(kept: dict, model: str, values: dict) -> dict:
     """values of a print request, what it leaves out as set for the printer
     in kept, its settings as of_printer() gives them: 600 dpi and fast
     printing only where the model prints them. How the printer finds its
-    labels goes to the job, see PrinterQueue.sensing."""
+    labels and its roll go to the job, see PrinterQueue.sensing and side."""
     def named(name):
         return any(values.get(k) not in (None, '') for k in NAMED_BY.get(name, (name,)))
-    taken = {name: kept[name] for name in OWN if name in kept and name != 'sensing' and not named(name)}
+    taken = {name: kept[name] for name in OWN if name in kept and name not in ('sensing', 'side') and not named(name)}
     if 'quality' in kept and not named('quality'):
         caps = for_model(model).capabilities(model)
         taken['high_res'] = '1' if kept['quality'] == 'high' and caps['high_res'] else '0'

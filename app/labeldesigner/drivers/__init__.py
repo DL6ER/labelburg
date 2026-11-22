@@ -9,10 +9,11 @@ from .niimbot import DRIVER as NIIMBOT
 from .escpos import DRIVER as ESCPOS
 from .tspl import DRIVER as TSPL
 from .zpl import DRIVER as ZPL
+from .dymo import DRIVER as DYMO
 
 # In the order the label designer lists their models and label sizes, and
 # asks them which printer a device ID names: one naming TSPL and ZPL is TSPL
-DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL)
+DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL, DYMO)
 
 MODELS = tuple(model for driver in DRIVERS for model in driver.models)
 LABELS = tuple(label for driver in DRIVERS for label in driver.labels)
@@ -54,6 +55,13 @@ def _unprinted(device_id: str) -> bool:
     """Whether a device ID names a printer of a driver at a resolution it
     does not print, e.g. a TSC TX600 that also names ZPL, see Told."""
     return any(told is not None and told.model is None for told in (driver.told(device_id) for driver in DRIVERS))
+
+
+def note_settings(device: str, settings: dict):
+    """Tell every driver the settings of a printer whose model is not known
+    yet, see Driver.note_settings()."""
+    for driver in DRIVERS:
+        driver.note_settings(device, settings)
 
 
 def told_model(device_id: str) -> str | None:

@@ -1539,6 +1539,11 @@ def openapi_spec():
     return jsonify(OPENAPI_SPEC)
 
 
+# The folders of labels whose printer settings the drivers were told, all
+# of them once, see Driver.note_settings()
+_NOTED: set[str] = set()
+
+
 @bp.route('/api/printer_status', methods=['GET'])
 def get_printer_status():
     # Printers on Bluetooth that did not answer are looked for again only
@@ -1546,6 +1551,16 @@ def get_printer_status():
     if request.args.get('look') == '1':
         look_again()
     added = _added_printers()
+    kept = _kept_settings()
+    # Also before the first status after a restart: a Twin Turbo is asked for
+    # the roll chosen, also one the search finds
+    repo = _get_repo_dir()
+    if repo not in _NOTED:
+        _NOTED.add(repo)
+        for device, settings in printer_settings.by_device(kept).items():
+            drivers.note_settings(device, settings)
+    for device in [device for device, _ in _configured_devices()] + [device for _, device, _ in added]:
+        drivers.note_settings(device, printer_settings.of_printer(kept, device))
     # One printer, e.g. on USB, which the label designer asks every 2 s
     if 'printer' in request.args:
         one = status_of_printer(current_app.config, request.args['printer'], added)
@@ -1576,6 +1591,7 @@ def _described(told: list[dict]):
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
+        drivers.for_model(model).note_settings(printer.get('path', ''), printer['settings'])
         printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
@@ -1614,12 +1630,13 @@ def problem_report_route():
 
 def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
     """A print queue for the printer, resolved before, its labels moved as
-    it is calibrated and found as set for it."""
+    it is calibrated, found as set for it and printed on the roll chosen."""
     queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
     kept = _kept_settings()
     calibration = printer_settings.calibration_of(kept, device)
     queue.offset = (calibration['across'], calibration['along'])
-    queue.sensing = printer_settings.of_printer(kept, device, model).get('sensing')
+    settings = printer_settings.of_printer(kept, device, model)
+    queue.sensing, queue.side = settings.get('sensing'), settings.get('side')
     return queue
 
 
@@ -1746,6 +1763,7 @@ def printer_settings_route():
     except ValueError as e:
         return _refused('Saving the settings', e, refusals.INVALID_INPUT)
     settings = printer_settings.of_printer(data, device, model)
+    drivers.for_model(model).note_settings(device, settings)
     # Shown at once, from the last answer of the printer: asking it may take
     # long, the next status asks it
     last = devices.status_cache.get(devices.lock_key(device), {})

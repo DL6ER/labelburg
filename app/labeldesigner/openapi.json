@@ -3722,6 +3722,11 @@
             "enum": ["gap", "mark", "endless"],
             "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL and TSPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as last told or as set up on the printer."
           },
+          "side": {
+            "type": "string",
+            "enum": ["left", "right"],
+            "description": "The roll a printer of two prints on, a DYMO LabelWriter 450 Twin Turbo; printers of one roll refuse it. Not set, the left one."
+          },
           "quality": {
             "type": "string",
             "enum": ["quality", "high", "fast"],
@@ -4249,7 +4254,7 @@
       },
       "Tape": {
         "type": "object",
-        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
+        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer, or `dymo102x152` for `zpl102x152` on a DYMO LabelWriter 4XL. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
         "properties": {
           "id": {
             "type": "string",
@@ -4342,7 +4347,7 @@
           },
           "device_name": {
             "type": "string",
-            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS` or `Zebra GX420t` for a `Zebra/ZPL`, where its model is one for printers of many makers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
+            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS`, `Zebra GX420t` for a `Zebra/ZPL` or `DYMO LabelWriter 450 Turbo` for a `DYMO/LabelWriter-450`, where its model is one for printers of many makers or for several printers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
           },
           "errors": {
             "type": "array",

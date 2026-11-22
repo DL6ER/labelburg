@@ -52,9 +52,10 @@ class Told:
 
 def shown(model: str) -> str:
     """A model as texts name it, PUQU Q00 for PUQU/Q00, by the name its
-    driver shows it with."""
+    driver gives it or shows it with."""
     from . import for_model
-    return for_model(model).shown_as.get(model, model).replace('/', ' ')
+    driver = for_model(model)
+    return driver.names.get(model) or driver.shown_as.get(model, model).replace('/', ' ')
 
 
 class Driver:
@@ -73,6 +74,9 @@ class Driver:
     label_names: dict = {}
     # Models shown by the name of another one, e.g. one for each resolution
     shown_as: dict = {}
+    # Models as texts name them, with their maker, where not as their ids
+    # do, e.g. DYMO LabelWriter 450 for DYMO/LabelWriter-450
+    names: dict = {}
     # Label sizes the label designer shows only while they are selected
     hidden_labels: frozenset = frozenset()
     # Regular expressions for the addresses of its printers a request may
@@ -89,8 +93,8 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
-    # Whether each of its models is one for printers of many makers, whose
-    # name its status tells, see device_name()
+    # Whether each of its models is one for printers of many makers or for
+    # several printers, whose name its status tells, see device_name()
     names_devices: bool = False
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
@@ -163,12 +167,14 @@ class Driver:
         first, the label designer then shows the printer below them, the
         blank paper in mm before each label that is cut, which was between
         printhead and cutter, the maker of the model, whether its print
-        position is calibrated with a calibration label and whether it is
-        told how it finds its labels, see diecut.SENSINGS."""
+        position is calibrated with a calibration label, whether it is
+        told how it finds its labels, see diecut.SENSINGS, whether it
+        has two rolls to print on, the one chosen in its settings (side),
+        and the model it is shown as, see shown_as, empty for none."""
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False,
-                'sensing': False}
+                'sensing': False, 'two_rolls': False, 'shown_as': self.shown_as.get(model, '')}
 
     def calibration_kind(self, model: str, label_size: str) -> str:
         """The calibration label of the model for the label size: narrow,
@@ -247,6 +253,12 @@ class Driver:
             raise
         devices.note_answer(device)
         return state
+
+    def note_settings(self, device: str, settings: dict):
+        """Take the settings of a printer as the server read them last, see
+        printer_settings.of_printer(), where its status depends on them, e.g.
+        the roll chosen for a Twin Turbo. The status queries run apart from
+        the requests that read them."""
 
     def followed_status(self, device: str, model: str) -> dict | None:
         """Status of a printer the label designer follows, see followed():

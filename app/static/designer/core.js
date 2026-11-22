@@ -102,7 +102,7 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '' };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 export const printerCaps = (p = S.printer) => capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();

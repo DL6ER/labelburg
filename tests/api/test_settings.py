@@ -404,3 +404,48 @@ def test_a_printer_that_finds_its_labels_itself_is_not_told_how(tmp_path):
 def test_how_a_printer_finds_its_labels_goes_to_the_job_not_to_the_label():
     # A print request does not name it, see PrinterQueue.sensing
     assert printer_settings.for_printing({'sensing': 'mark', 'cut': 'none'}, 'Zebra/ZPL', {}) == {'cut': 'none'}
+
+
+def test_the_roll_is_a_setting_of_a_printer_of_two(tmp_path):
+    from app.labeldesigner import refusals
+    client = make_client(tmp_path, empty_repo=True, model='DYMO/LabelWriter-450-Twin-Turbo', printer='file:///dev/usb/lp_dymo')
+    for side in ('right', 'left'):
+        r = client.post(URL, data={'side': side})
+        assert (r.status_code, r.get_json()['settings']) == (200, {'side': side})
+    r = client.post(URL, data={'side': 'middle'})
+    assert (r.status_code, r.get_json()['message']) == (400, printer_settings.SETTINGS_MESSAGE)
+    assert client.post(URL, data={'side': ''}).get_json()['settings'] == {}
+    # A printer of one roll refuses it
+    r = client.post(URL, data={'printer': 'file:///dev/usb/lp_other', 'model': 'DYMO/LabelWriter-450', 'side': 'right'})
+    assert (r.status_code, r.get_json()['message']) == (400, printer_settings.NO_SIDES)
+    assert printer_settings.NO_SIDES in refusals.MESSAGES
+
+
+def test_a_roll_kept_for_a_printer_of_two_is_not_another_ones():
+    # E.g. written by hand, or kept for a Twin Turbo plugged in where another printer is now
+    data = {'printers': {'/dev/usb/lp_dymo': {'side': 'right', 'cut': 'none'}, '/dev/usb/lp_hand': {'side': ['right']}}}
+    assert printer_settings.of_printer(data, '/dev/usb/lp_dymo', 'DYMO/LabelWriter-450-Twin-Turbo') == {'side': 'right', 'cut': 'none'}
+    assert printer_settings.of_printer(data, '/dev/usb/lp_dymo', 'DYMO/LabelWriter-450') == {'cut': 'none'}
+    assert printer_settings.of_printer(data, '/dev/usb/lp_hand', 'DYMO/LabelWriter-450-Twin-Turbo') == {}
+    # It goes to the job, not to the label
+    assert printer_settings.for_printing({'side': 'right', 'cut': 'none'}, 'DYMO/LabelWriter-450-Twin-Turbo', {}) == {'cut': 'none'}
+
+
+def test_a_demo_printer_of_another_model_forgets_the_roll(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'demo_model': 'DYMO/LabelWriter-450-Twin-Turbo'})
+    assert client.post(URL, data={'printer': 'simulation', 'side': 'right'}).status_code == 200
+    r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'DYMO/LabelWriter-450'})
+    assert 'side' not in r.get_json()['settings']
+
+
+def test_the_settings_of_every_printer_kept_by_its_device():
+    data = {'printers': {'/dev/usb/lp0': {'side': 'right', 'cut': 'none'}, 'tcp://192.0.2.1:9100': {'side': ['right']},
+                         'usb:LabelWriter 450 Twin Turbo/01010112345': {'side': 'left'}, 'simulation': {'demo_model': 'QL-800'},
+                         'usb:QL-700/000L9Z378866': {'cut': 'last'}},
+            'seen': {'usb://0x0922:0x0022/01010112345': 'usb:LabelWriter 450 Twin Turbo/01010112345', '/dev/usb/lp1': 7},
+            'quality': 'fast'}
+    # Without asking a printer: one of a serial number where it was seen last, a value written wrong by hand left out
+    assert printer_settings.by_device(data) == {
+        '/dev/usb/lp0': {'side': 'right', 'cut': 'none', 'quality': 'fast'}, 'tcp://192.0.2.1:9100': {'quality': 'fast'},
+        'usb://0x0922:0x0022/01010112345': {'side': 'left', 'quality': 'fast'}}
