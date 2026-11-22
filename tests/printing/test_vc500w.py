@@ -338,10 +338,22 @@ def test_label_in_the_printer_before_the_job(fake):
     assert len(fake.images) == 1
 
 
-def test_label_that_is_not_taken_out(fake, monkeypatch):
-    monkeypatch.setattr(vc500w, 'TAKE_OUT_TIMEOUT', 0.1)
+def test_label_left_in_the_printer_is_waited_for_as_long_as_the_printer_answers(fake, monkeypatch):
+    monkeypatch.setattr(vc500w, 'POLL_INTERVAL', 0.01)
+    monkeypatch.setattr(vc500w, 'TAKE_OUT_SILENCE', 0.2)
+    fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')] * 100 + [
+        status_xml('IDLE', 'SUCCESS'), status_xml('BUSY', 'PRINTING'), status_xml('IDLE', 'SUCCESS')]
+    assert vc500w.print_image(fake.target, IMAGE, port=fake.port) == ''
+    assert len(fake.images) == 1
+
+
+def test_label_left_in_a_printer_that_stops_answering(fake, monkeypatch):
+    monkeypatch.setattr(vc500w, 'TIMEOUT', 0.05)
+    monkeypatch.setattr(vc500w, 'POLL_INTERVAL', 0.01)
+    monkeypatch.setattr(vc500w, 'TAKE_OUT_SILENCE', 0.3)
     fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')]
-    assert vc500w.print_image(fake.target, IMAGE, port=fake.port) == vc500w.TAKE_OUT
+    fake.unanswered = set(range(5, 1000))
+    assert vc500w.print_image(fake.target, IMAGE, port=fake.port) == vc500w.NO_ANSWER
     assert fake.images == []
 
 
@@ -1010,14 +1022,18 @@ def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
 
 
 def test_label_left_in_the_printer_through_the_label_designer(client, fake, monkeypatch):
-    monkeypatch.setattr(vc500w, 'TAKE_OUT_TIMEOUT', 0.1)
-    fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')]
-    response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert outcome(client, response) == ('failed', 'Take the printed label out of the printer (label 1 of 2)')
+    monkeypatch.setattr(vc500w, 'POLL_INTERVAL', 0.01)
     # The printer keeps reporting it until the label is taken out
+    fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')]
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['errors'] == ['Take the printed label out of the printer']
+    # A print waits until then
+    fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')] * 100 + [
+        status_xml('IDLE', 'SUCCESS'), status_xml('BUSY', 'PRINTING'), status_xml('IDLE', 'SUCCESS')]
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert len(fake.images) == 1
 
 
 def test_qr_code_and_border_in_color(tmp_path):
