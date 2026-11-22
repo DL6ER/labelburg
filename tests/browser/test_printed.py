@@ -279,3 +279,12 @@ def test_a_label_printed_earlier_today_with_a_date_asks_nothing(page, server):
     with page.expect_request('**/api/history/*/print'):
         page.click('#setHist [data-again]')
     assert page.locator('[role=alertdialog]').count() == 0
+
+
+def test_the_line_under_a_label_printed_wraps_on_a_phone(page, server):
+    print_over_the_api(server, 'Flour')
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.goto(server + '/labeldesigner/#settings/printed')
+    page.wait_for_selector('#setHist .set-hrow small')
+    # Whole, from another program, not cut off
+    assert page.evaluate("() => { const small = document.querySelector('#setHist .set-hrow small'); return small.scrollWidth <= small.clientWidth; }")
