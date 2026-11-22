@@ -2500,6 +2500,15 @@ def history_label(job_id):
     # The saved label it was printed from, also printed again since
     if entry.get('named'):
         label['name'] = entry['named']
+    # Shown as it printed: the time of its dates and the days of its date blanks that followed it
+    printed = entry.get('data') or {}
+    label['printed_for'] = _timestamp(printed) or int(_dates_of(entry))
+    try:
+        then = create_label_from_request(dict(printed, timestamp=label['printed_for']), {}, 0, None, dates=entry.get('dates'))
+        label['printed_dates'] = {name: then.blank_date(name).isoformat() for name in _date_blanks(printed) if then.blank_date(name)}
+    except Exception:
+        current_app.logger.debug('The dates of printed label %s were not made', job_id, exc_info=True)
+        label['printed_dates'] = {}
     if 'image_name' in label:
         label['image_name'] = 'image.png'
     return jsonify(dict(label, title=entry.get('title') or 'Label'))

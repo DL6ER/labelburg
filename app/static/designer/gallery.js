@@ -253,7 +253,9 @@ async function showDetail(item, values = null) {
     } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
     if (G.sel !== item) return;
     const starts = defaults({ design });
-    const work = applyTyped(item, design, values || item.values || Object.assign({}, starts));
+    // A label printed shows the days its date blanks showed as it printed
+    const printedDates = item.kind === 'printed' ? item.opened.printedDates : {};
+    const work = applyTyped(item, design, values || item.values || Object.assign({}, starts, printedDates));
     const blanks = blanksOf(work.design), saved = item.kind === 'saved', before = item.kind === 'printed' ? item.entry : null;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(item.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div>
         <div class="tpl-shot"><img alt="Preview" id="tplShot"></div>
@@ -273,9 +275,11 @@ async function showDetail(item, values = null) {
     $('[data-unsel]', box).onclick = hideDetail;
     // Only the answer to the last preview asked is shown, earlier ones may come later
     let asked = 0;
+    // A label printed is shown as "Same date" prints it, at the time it printed
+    const shown = () => before ? Object.assign({}, work.design, { timestamp: String(item.opened.printedFor) }) : work.design;
     const shot = () => {
         const mine = ++asked;
-        return perCopyOf(work.design).then(n => preview(work.design, work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
+        return perCopyOf(work.design).then(n => preview(shown(), work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
     };
     const shotDone = (p, mine) => {
         const img = $('#tplShot'), note = $('#tplSheet');
@@ -301,7 +305,10 @@ async function showDetail(item, values = null) {
         const now = valuesNow(work.values, starts, { design: work.design });
         // Printed again by the server with the values and copies set here
         if (before) {
-            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, ask: askHere, accepted };
+            // A day as printed follows the date the question chooses, one typed is printed as typed
+            const blanks = blankRequest(work.design, now).blanks;
+            for (const [name, day] of Object.entries(printedDates)) if (now[name] === day) delete blanks[name];
+            const opts = { copies, blanks, design: work.design, ask: askHere, accepted };
             await printKeptAgain(before, printedDone, opts);
             return;
         }

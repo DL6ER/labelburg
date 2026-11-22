@@ -1286,14 +1286,15 @@ export function announceKept(entry, h) {
 }
 // A label printed as the editor opens it, with the values it was printed with,
 // as the saved label it was printed from: told by the print of this browser,
-// else by the name of a saved label printed by name, e.g. by Grocy
+// else by the name of a saved label printed by name, e.g., by Grocy. With the
+// time its dates were printed for and the days its date blanks showed then.
 export async function keptLabel(h) {
     const r = await reached(fetch(`${API}/history/${encodeURIComponent(h.id)}/label`));
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The label could not be loaded');
     const raw = await r.json(), design = normalize(raw);
     const own = S.history.find(x => x.job === h.id), saved = typeof raw.name === 'string' && S.saved.find(x => x.name === raw.name);
     const origin = own && own.source && own.source.kind === 'saved' ? own.source : saved ? originOf('saved', saved.name, saved.mtime) : null;
-    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin };
+    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin, printedFor: raw.printed_for, printedDates: raw.printed_dates || {} };
 }
 
 // What a label printed before is listed with: its copies, the values

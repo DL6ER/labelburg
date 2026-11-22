@@ -310,3 +310,25 @@ def test_a_label_printed_is_told_by_the_name_the_server_gave_it(page, server):
     page.fill('#tplFields [data-blank="What"]', 'Soup')
     page.click('#tplPrint')
     page.wait_for_selector('#toast:has-text("Printed 1 label: Jar Soup")')
+
+
+def test_a_label_printed_days_ago_shows_its_dates_as_printed_in_templates(page, server):
+    job = print_over_the_api(server, 'Opened {{blank:Day}}', fields=json.dumps({'Day': {'type': 'date'}}))
+    printed_days_ago(job, 3)
+    with urlopen(f'{server}/labeldesigner/api/history/{job}/label') as r:
+        told = json.load(r)
+    day = told['printed_dates']['Day']
+    page.click('#templates')
+    page.click('.tpl-nav [data-cat="printed"]')
+    with page.expect_request(lambda r: r.url.endswith('/api/preview') and 'Opened' in (r.post_data or '')) as previewed:
+        page.click('.tpl-grid .thumb >> nth=0')
+    # As "Same date" prints it
+    page.wait_for_selector('#tplFields [data-blank="Day"]')
+    assert page.input_value('#tplFields [data-blank="Day"]') == day
+    assert sent(previewed.value)['timestamp'] == str(told['printed_for'])
+    page.click('#tplPrint')
+    page.wait_for_selector('#tplAsk:not([hidden])')
+    with page.expect_request('**/api/history/*/print') as request:
+        page.click('#againSame')
+    fields = sent(request.value)
+    assert fields['as_before'] == '1' and 'Day' not in json.loads(fields['blanks'])

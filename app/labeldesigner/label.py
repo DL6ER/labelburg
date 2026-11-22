@@ -860,13 +860,7 @@ class SimpleLabel:
             return value
         if value == '' and given:
             return ''
-        # Without a value the same date as the other templates
-        if value == '':
-            date = self._now().date()
-        elif DATE_OFFSET.fullmatch(value.strip()):
-            date = shift_date(self._now().date(), value.strip())
-        else:
-            date = _iso_date(value)
+        date = self.blank_date(name)
         if date is None:
             return value
         date_format = str(field.get('format') or self._date_format)
@@ -876,6 +870,23 @@ class SimpleLabel:
             return format_date(date, date_format, self._date_language)
         except ValueError:
             return date.isoformat()
+
+    def blank_date(self, name: str) -> datetime.date | None:
+        """The date the date blank name shows: its value, else its default,
+        else the date of the label, also moved from it, e.g. +5d. None for
+        one left empty, not a date or no date blank."""
+        field = self._blank_fields.get(name)
+        field = field if isinstance(field, dict) else {}
+        given = name in self._blanks
+        value = str(self._blanks[name]) if given else '' if field.get('default') is None else str(field['default'])
+        if field.get('type') != 'date' or (value == '' and given):
+            return None
+        # Without a value the same date as the other templates
+        if value == '':
+            return self._now().date()
+        if DATE_OFFSET.fullmatch(value.strip()):
+            return shift_date(self._now().date(), value.strip())
+        return _iso_date(value)
 
     # Turned by 180 degrees for printing, set by the queue
     turned = False

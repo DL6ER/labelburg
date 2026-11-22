@@ -1,6 +1,7 @@
 """The labels printed, from every browser and program: listed, opened in
 the label designer, printed again and cleared."""
 import base64
+import datetime
 import io
 import json
 import os
@@ -454,3 +455,16 @@ def test_a_label_printed_again_with_other_values_counts_anew(client, monkeypatch
     # The same values, as the label designer sends them: one of the three
     printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 1, 'blanks': {'What': 'Peas'}})
     assert set(totals) == {3}
+
+
+def test_a_label_printed_is_opened_with_the_dates_it_printed_with(client):
+    fields = {'Day': {'type': 'date'}, 'Best': {'type': 'date', 'default': '+5d'}, 'Made': {'type': 'date'}}
+    job = printed(client, data=dict(LABEL, text=lines('{{blank:Day}} {{blank:Best}} {{blank:Made}} {{datetime:%Y}}'), fields=json.dumps(fields),
+                                    blanks=json.dumps({'Made': '2026-11-03'})))
+    printed_days_ago(job, 3)
+    told = client.get(f'{API}/history/{job}/label').get_json()
+    when = print_store.entry(job)['started_at']
+    day = datetime.date.fromtimestamp(when)
+    # The days that followed the print date as printed, the time to show the others as printed
+    assert told['printed_dates'] == {'Day': day.isoformat(), 'Best': (day + datetime.timedelta(days=5)).isoformat()}
+    assert told['printed_for'] == int(when)
