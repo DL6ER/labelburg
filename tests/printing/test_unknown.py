@@ -121,42 +121,58 @@ def test_devices_of_makers_of_label_printers():
     assert not unknown.label_maker((0x0922, 0x8003)) and not unknown.label_maker((0x04b8, 0x0e15))
 
 
+def le(name, *services):
+    return {'address': MAC, 'name': name, 'le': True, 'services': list(services)}
+
+
+def classic(name):
+    return {'address': MAC, 'name': name, 'le': False, 'services': [], 'classic': True, 'device_class': 0x040680}
+
+
+NIIMBOT_UUID = 'e7810a71-73ae-499d-8c15-faa9aef0c3f2'
+
+
 @pytest.mark.parametrize('device, found', [
-    ({'address': MAC, 'name': 'B21-H425040311', 'le': True, 'services': [NIIMBOT]},
-     {'where': 'bluetooth', 'name': 'Niimbot B21', 'connection': 'Bluetooth LE', 'bluetooth_name': 'B21',
-      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
-    ({'address': MAC, 'name': 'D11_H-G1234567', 'le': True, 'services': []},
+    (le('B21-H425040311', NIIMBOT),
+     {'where': 'bluetooth', 'name': 'Niimbot B21', 'connection': 'Bluetooth LE', 'bluetooth_name': 'B21', 'services': [NIIMBOT_UUID]}),
+    (le('D11_H-G1234567'),
      {'where': 'bluetooth', 'name': 'Niimbot D11_H', 'connection': 'Bluetooth LE', 'bluetooth_name': 'D11_H', 'services': []}),
-    # Found by Niimbot's service, the model before the serial number
-    ({'address': MAC, 'name': 'K3-H1234567', 'le': True, 'services': [NIIMBOT]},
+    # A model of two characters with Niimbot's service only
+    (le('K3-H1234567', NIIMBOT, bytes(range(16))),
      {'where': 'bluetooth', 'name': 'Niimbot K3', 'connection': 'Bluetooth LE', 'bluetooth_name': 'K3',
-      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
-    ({'address': MAC, 'name': '', 'le': True, 'services': [NIIMBOT, bytes(range(16))]},
-     {'where': 'bluetooth', 'name': 'Niimbot printer', 'connection': 'Bluetooth LE', 'bluetooth_name': '',
-      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2', '0f0e0d0c-0b0a-0908-0706-050403020100']}),
-    ({'address': MAC, 'name': 'H1234567890', 'le': True, 'services': [NIIMBOT]},
-     {'where': 'bluetooth', 'name': 'Niimbot printer', 'connection': 'Bluetooth LE', 'bluetooth_name': '',
-      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
-    ({'address': MAC, 'name': 'PT-P710BT6795', 'le': False, 'services': [], 'classic': True, 'device_class': 0x040680},
-     {'where': 'bluetooth', 'name': 'Brother PT-P710BT', 'connection': 'classic Bluetooth', 'bluetooth_name': 'PT-P710BT',
-      'services': []}),
-    # Models Labelburg prints on, and other devices
-    ({'address': MAC, 'name': 'D110-H1234567', 'le': True, 'services': [NIIMBOT]}, None),
-    ({'address': MAC, 'name': 'D110_M-H1234567', 'le': True, 'services': [NIIMBOT]}, None),
-    ({'address': MAC, 'name': 'S1-H1234567', 'le': True, 'services': []}, None),
-    ({'address': MAC, 'name': 'B21', 'le': True, 'services': []}, None),
-    ({'address': MAC, 'name': 'Phone', 'le': True, 'services': []}, None),
-    ({'address': MAC, 'name': 'QL-820NWB1234', 'le': False, 'services': [], 'classic': True, 'device_class': 0x040680}, None),
+      'services': [NIIMBOT_UUID, '0f0e0d0c-0b0a-0908-0706-050403020100']}),
+    # Niimbot's service and a name as Niimbot gives them, of no model known
+    (le('ANNA-H1234567', NIIMBOT),
+     {'where': 'bluetooth', 'name': 'Niimbot printer', 'connection': 'Bluetooth LE', 'bluetooth_name': '', 'services': [NIIMBOT_UUID]}),
+    (classic('PT-P710BT6795'),
+     {'where': 'bluetooth', 'name': 'Brother PT-P710BT', 'connection': 'classic Bluetooth', 'bluetooth_name': 'PT-P710BT', 'services': []}),
+    # A model Labelburg prints on over USB and the network only
+    (classic('QL-820NWB1234'),
+     {'where': 'bluetooth', 'name': 'Brother QL-820NWB over Bluetooth', 'connection': 'classic Bluetooth',
+      'bluetooth_name': 'QL-820NWB', 'services': []}),
+    # Models Labelburg prints on, names of other devices with Niimbot's
+    # service, e.g. one renamed, and other devices
+    (le('D110-H1234567', NIIMBOT), None), (le('D110_M-H1234567', NIIMBOT), None),
+    (le('KITCHEN', NIIMBOT), None), (le('ANNA', NIIMBOT), None), (le('MPT-II', NIIMBOT), None),
+    (le('H1234567890', NIIMBOT), None), (le('', NIIMBOT), None), (le('B21-SHELF', NIIMBOT), None),
+    (le('S1-H1234567'), None), (le('B21'), None), (le('Phone'), None), (le('ANNA-H1234567'), None),
 ])
 def test_label_printers_on_bluetooth_by_their_name_or_service(device, found):
     assert unknown.on_bluetooth(device) == found
 
 
+def test_a_brother_model_printed_on_over_bluetooth_is_left_out(monkeypatch):
+    from app.labeldesigner.drivers.brother.models import MODELS, Model
+    monkeypatch.setitem(MODELS, 'PT-P710BT', Model('PT-P710BT', bluetooth=True))
+    assert unknown.on_bluetooth(classic('PT-P710BT6795')) is None
+    assert unknown.on_bluetooth(classic('PT-P910BT6795'))['name'] == 'Brother PT-P910BT'
+
+
 @pytest.mark.parametrize('name, secret', [('B21-H425040311', 'H425040311'), ('B21-H425040311', 'H425'),
-                                          ('PT-P710BT6795', '6795'), ('H1234567890', '1234567890'),
-                                          ('ABCDEF-' + MAC, '5E:00'), ('', MAC)])
+                                          ('PT-P710BT6795', '6795'), ('ANNA-H1234567', 'ANNA'),
+                                          ('ANNA-H1234567', 'H1234567'), ('D11_H-' + MAC.replace(':', ''), '5E00')])
 def test_no_bluetooth_report_tells_the_serial_number_or_the_address(name, secret):
-    found = unknown.on_bluetooth({'address': MAC, 'name': name, 'le': True, 'services': [NIIMBOT]})
+    found = unknown.on_bluetooth(le(name, NIIMBOT))
     assert secret not in told(found)
     assert MAC not in told(found) and MAC.replace(':', '') not in told(found)
 

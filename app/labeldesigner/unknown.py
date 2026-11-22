@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 
 from .adding import FIELDS
 from .drivers import MODELS, devices
+from .drivers.brother import models as brother_models
 from .drivers.niimbot.protocol import NIIMBOT_SERVICE
 
 FORM = 'https://github.com/DL6ER/labelburg/issues/new'
@@ -29,17 +30,19 @@ NOT_PRINTERS = {0x0922: range(0x8000, 0x10000)}
 # Commands of office printers, which are no label printers: PCL, PostScript,
 # PDF, AirPrint, IPP Everywhere, Epson and Canon inkjets, Canon lasers
 OFFICE = re.compile(r'(PCL|POSTSCRIPT|PDF|URF|PWG|ESCPL2|ESCPR|BJ|LIPS)', re.IGNORECASE)
-# Niimbot's models by niimbluelib (MIT), whose names they tell on Bluetooth
-# as <model>-<serial number>; names of two characters are found by
-# Niimbot's service only, they may be those of other devices
-NIIMBOT_NAMES = frozenset(('A1_PRO', 'A20', 'A203', 'A63', 'A8_P', 'B1_PRO', 'B1_SE', 'B11', 'B16', 'B18', 'B18S',
-                           'B2_PRO', 'B203', 'B21', 'B21_PRO', 'B21_C2B', 'B21_L2B', 'B21S', 'B21S_C2B', 'B31',
-                           'B32', 'B32R', 'B3S', 'B3S_A', 'B3S_P', 'B4_PRO', 'B50', 'B50W', 'D101', 'D11',
-                           'D11_H', 'D11_PRO', 'D11S', 'EP1C', 'EP2M_H', 'EP3M', 'ET10', 'H1S', 'JC_M90',
-                           'K3_ITD', 'K3_W', 'M2_H', 'MP3K', 'MP3K_W', 'P18', 'P1S', 'S6_P', 'T2S', 'T8S',
-                           'TP2M_H', 'Z401'))
-NIIMBOT_NAME = re.compile(r'(?P<model>[A-Z0-9_]+)-[A-Z0-9]{4,}', re.IGNORECASE)
-# Brother's P-touch printers on classic Bluetooth, e.g. PT-P710BT<serial>
+# Niimbot's models by niimbluelib (MIT) that no driver prints on. They tell
+# <model>-<serial number> as their name; models of two characters count
+# only with Niimbot's service, other devices may be named so.
+NIIMBOT_MODELS = frozenset((
+    'A1_PRO', 'A20', 'A203', 'A63', 'A8', 'A8_P', 'B1_PRO', 'B1_SE', 'B11', 'B16', 'B18', 'B18S', 'B2', 'B2_PRO',
+    'B203', 'B21', 'B21_PRO', 'B21_C2B', 'B21_L2B', 'B21S', 'B21S_C2B', 'B3', 'B31', 'B32', 'B32R', 'B3S', 'B3S_A',
+    'B3S_P', 'B4', 'B4_PRO', 'B50', 'B50W', 'C1', 'D101', 'D11', 'D11_H', 'D11_PRO', 'D11S', 'EP1C', 'EP2M_H', 'EP3M',
+    'ET10', 'H1', 'H1S', 'JC_M90', 'K2', 'K3', 'K3_ITD', 'K3_W', 'K4', 'M2_H', 'M3', 'MP3K', 'MP3K_W', 'N1', 'P1', 'P18',
+    'P1S', 'S1', 'S3', 'S6', 'S6_P', 'T2S', 'T6', 'T7', 'T8', 'T8S', 'TP2M_H', 'Z401'))
+NIIMBOT_NAMES = frozenset(model for model in NIIMBOT_MODELS if len(model) > 2)
+NIIMBOT_NAME = re.compile(r'(?P<model>[A-Z0-9_]+)-(?=[A-Z]*[0-9])[A-Z0-9]{4,}', re.IGNORECASE)
+# Brother's printers tell their model and serial number, e.g.
+# PT-P710BT<serial>: P-touch printers of other models by this
 PTOUCH_NAME = re.compile(r'(?P<model>PT-[A-Z][0-9]{3}BT)[A-Z0-9]*', re.IGNORECASE)
 # What a field must not tell: everything after a word that names a serial
 # number, an address or an owner, MAC addresses as 12 hex digits with or
@@ -103,32 +106,46 @@ def on_usb(device_id: str, ids: tuple[int, int] | None) -> dict:
             'usb_id': f'{ids[0]:04x}:{ids[1]:04x}' if ids else '', 'device_id': told}
 
 
+def _brother(name: str) -> tuple[str, bool] | None:
+    """The model of a Brother printer a Bluetooth name tells and whether
+    Labelburg prints on it, None for other names."""
+    known = next((model for model in sorted(brother_models.MODELS, key=len, reverse=True)
+                  if re.fullmatch(re.escape(model) + '[A-Z0-9]*', name, re.IGNORECASE)), None)
+    if known:
+        return known, True
+    ptouch = PTOUCH_NAME.fullmatch(name)
+    return (ptouch['model'].upper(), False) if ptouch else None
+
+
 def on_bluetooth(device: dict) -> dict | None:
     """A label printer on Bluetooth as bluetooth.discover() found it that no
-    driver prints on, by its name or Niimbot's service; None for other
-    devices."""
+    driver prints on there, by its name, or by Niimbot's service and a name
+    Niimbot gives; None for other devices."""
     name = str(device.get('name') or '').strip()
-    niimbot = NIIMBOT_NAME.fullmatch(name)
-    ptouch = PTOUCH_NAME.fullmatch(name)
-    if niimbot and niimbot['model'].upper() in NIIMBOT_NAMES:
-        maker, model = 'Niimbot', niimbot['model'].upper()
-    elif ptouch:
-        maker, model = 'Brother', ptouch['model'].upper()
-    elif NIIMBOT_SERVICE in device.get('services', []):
-        maker, model = 'Niimbot', name.partition('-')[0].upper()
+    niimbot, brother = NIIMBOT_NAME.fullmatch(name), _brother(name)
+    service = NIIMBOT_SERVICE in device.get('services', [])
+    model = niimbot['model'].upper() if niimbot else ''
+    shown = ''
+    if niimbot and (model in NIIMBOT_NAMES or service and model in NIIMBOT_MODELS):
+        maker = 'Niimbot'
+    elif niimbot and service:
         # A model Labelburg prints on, e.g. a D110_M on classic Bluetooth
-        if model and any(known.upper().startswith(f'NIIMBOT/{model}') for known in MODELS):
+        if any(known.upper().startswith(f'NIIMBOT/{model}') for known in MODELS):
             return None
-        # Niimbot's models have at most 3 digits, more are of a serial number
-        if not re.fullmatch(r'[A-Z][A-Z0-9_]{1,7}', model) or sum(c.isdigit() for c in model) > 3:
-            model = ''
+        maker, model = 'Niimbot', ''
+    elif brother:
+        maker, (model, known) = 'Brother', brother
+        if known and brother_models.MODELS[model].bluetooth:
+            return None
+        # One Labelburg prints on over USB or the network only
+        shown = ' over Bluetooth' if known else ''
     else:
         return None
     model = clean(model)
     kinds = [kind for kind, on in (('Bluetooth LE', device.get('le')), ('classic Bluetooth', device.get('classic'))) if on]
     services = [str(uuid.UUID(bytes=bytes(service[::-1]))) for service in device.get('services', [])
                 if len(service) == 16][:MOST_SERVICES]
-    return {'where': 'bluetooth', 'name': f'{maker} {model}' if model else f'{maker} printer',
+    return {'where': 'bluetooth', 'name': (f'{maker} {model}' if model else f'{maker} printer') + shown,
             'connection': ' and '.join(kinds) or 'Bluetooth', 'bluetooth_name': model, 'services': services}
 
 
