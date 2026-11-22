@@ -1365,8 +1365,9 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
             return _line_full(printer, full)
         images = [_kept_size(image, data) for image in images if image is not None]
         order = _copies(list(range(len(images))) or [None], print_count, collate)
-        # Written while the label is drawn
-        staged = print_store.stage(job_id, images)
+        # Written while the label is drawn, as copies loaded here: two
+        # threads must not read one picture from its file at once
+        staged = print_store.stage(job_id, [image.copy() for image in images])
         # Taken before printing: labels of a job that fails may have come out
         asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(order)) if paperless.uses_asn(data) else None
         _queue_labels(printer, data, images, order, high_res, fast, [asn])

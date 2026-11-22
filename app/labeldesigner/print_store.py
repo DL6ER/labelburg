@@ -267,7 +267,8 @@ def queued(record: dict, images: list, preview: bytes | None, staged: concurrent
             _write(written[-1], preview)
         _write(_queue_path(f'{job_id}.json'), json.dumps(record, ensure_ascii=False, default=str).encode('utf-8'))
         return True
-    except (OSError, ValueError) as e:
+    except Exception as e:
+        # Also an image that cannot be saved, e.g. one cut off
         _remove(written)
         if not _warned:
             _warned = True

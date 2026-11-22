@@ -637,3 +637,32 @@ for number in range(150):
     ids = [json.loads(line)['id'] for line in lines]
     # Every line whole, none twice, cut back to the newest
     assert len(ids) == len(set(ids)) and 1 <= len(ids) <= 15 and ids[-1] == 'last'
+
+
+@pytest.mark.parametrize('mode', ['colored', 'grayscale'])
+def test_the_images_written_are_never_those_the_request_draws(server, monkeypatch, mode):
+    staged, drawn, stage, create = [], [], print_store.stage, routes.create_label_from_request
+    monkeypatch.setattr(print_store, 'stage', lambda job_id, images: (staged.extend(images), stage(job_id, images))[1])
+
+    def recorded(d={}, files={}, counter=0, image=None, *args, **kwargs):
+        drawn.append(image)
+        return create(d, files, counter, image, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
+    jpeg = io.BytesIO()
+    Image.effect_noise((300, 200), 60).convert('RGB').save(jpeg, 'JPEG')
+    upload = dict(LABEL, print_type='image', image_mode=mode, image=(io.BytesIO(jpeg.getvalue()), 'photo.jpg'))
+    assert server.post(f'{API}/print', data=upload, content_type='multipart/form-data').status_code == 200
+    # Loaded before they are written: two threads must not read one file at once
+    assert staged and drawn and not {id(image) for image in staged} & {id(image) for image in drawn}
+    assert all(getattr(image, 'fp', None) is None for image in staged)
+
+
+def test_a_job_whose_images_fail_in_any_way_prints_from_memory(server, monkeypatch, caplog):
+    def fails(job_id, images):
+        raise AssertionError('image file is truncated')
+    monkeypatch.setattr(print_store, '_write_images', fails)
+    upload = dict(LABEL, print_type='image', image=photo(300, 200))
+    response = server.post(f'{API}/print', data=upload, content_type='multipart/form-data')
+    assert response.status_code == 200 and ended(response.get_json()['job']).state == 'printed'
+    assert files(os.path.join(repo(server), print_store.QUEUE)) == []
+    assert any('kept in memory only' in message for message in caplog.messages)
