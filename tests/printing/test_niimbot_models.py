@@ -322,15 +322,27 @@ def test_b1_found_by_its_name_is_asked_as_before(fake, monkeypatch):
     assert fake.packets == [p(0xdc, [1]), p(0x1a, [1]), p(0x40, [0x0b])]
 
 
-@pytest.mark.parametrize('name', ['', 'B1-PRO-L123'])
-def test_printer_whose_name_names_no_single_model_is_the_model_it_tells(fake, monkeypatch, name):
-    # Without a name, or one like a B1's and a B1 Pro's: asked once
+@pytest.mark.parametrize('name, guess', [('', 'Niimbot/B1'), ('B1-PRO-L123', 'Niimbot/B1'),
+                                         ('B21_PRO-L123', 'Niimbot/B21_PRO')])
+def test_printer_whose_name_is_a_guess_is_the_model_it_tells(fake, monkeypatch, name, guess):
+    # Without a name, one like a B1's and a B1 Pro's, or one of another
+    # model than the B1: asked once
     told(monkeypatch, 4097)
     monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
-    assert found(name) == (DEVICE, 'Niimbot/B1')
+    assert found(name) == (DEVICE, guess)
     for _ in range(2):
-        assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)['model'] == 'Niimbot/B1_PRO'
+        assert niimbot.DRIVER.status(DEVICE, guess, fresh=True)['model'] == 'Niimbot/B1_PRO'
     assert fake.commands.count(0x40) == 1 and fake.commands.count(0xdc) == 2
+
+
+def test_b21_pro_found_by_its_name_is_asked_once(fake, monkeypatch):
+    told(monkeypatch, 785)
+    monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
+    assert found('B21_PRO-L123') == (DEVICE, 'Niimbot/B21_PRO')
+    for _ in range(2):
+        assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B21_PRO', fresh=True)['model'] == 'Niimbot/B21_PRO'
+    p = niimbluelib_packet
+    assert fake.packets == [p(0x40, [0x08]), p(0xdc, [1]), p(0x1a, [1]), p(0xdc, [1]), p(0x1a, [1])]
 
 
 def test_printer_found_by_niimbots_service_alone_is_no_b1_until_it_says_so(fake, monkeypatch):

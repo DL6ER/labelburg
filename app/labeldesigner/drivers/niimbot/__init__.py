@@ -68,9 +68,12 @@ _no_serial: set[str] = set()
 # model ID, by device, and when they were asked. One that told none is asked
 # again once the label designer looks for printers.
 _told_models: dict[str, tuple[models.Model | None, float]] = {}
-# Printers found on Bluetooth LE whose name names no single model, e.g. by
-# Niimbot's service alone without a name: their model is the one they tell
+# Printers found on Bluetooth LE whose name is no B1's, e.g. by Niimbot's
+# service alone without a name: their model is the one they tell
 _to_ask: set[str] = set()
+# The models whose name on Bluetooth LE was seen on a printer, B1-<serial>;
+# the others' are guesses
+NAMES_SEEN = {'Niimbot/B1'}
 # Printers on Bluetooth LE, the others paired
 _LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
@@ -347,8 +350,8 @@ class Niimbot(Driver):
         if name and not named:
             return None
         found = super().found_on_bluetooth(device)
-        # One whose name names no single model is asked for it, see _status()
-        if found and len(named) != 1:
+        # One whose name is a guess is asked for its model, see _status()
+        if found and not (len(named) == 1 and named <= NAMES_SEEN):
             _to_ask.add(devices.lock_key(found[0]))
         elif found:
             _to_ask.discard(devices.lock_key(found[0]))
@@ -379,7 +382,7 @@ class Niimbot(Driver):
             if not acquired:
                 return devices.busy_state(device, network_status(device, model))
             with protocol.connect(device, _over_le(model)) as c:
-                # Its name names no single model: the one it tells is used
+                # Its name was a guess: the model it tells is used
                 if devices.lock_key(device) in _to_ask:
                     named = _told(c, device)
                     if named is None:
