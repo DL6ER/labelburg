@@ -174,7 +174,7 @@ const printedItems = () => S.history.filter(h => h.state !== 'printing').slice(0
 // Saved labels and those with the text typed are drawn here, ready-made
 // ones as typed come from the server, printed ones with their values
 const typedThumb = item => (design, values) => applyTyped(item, clone(design), values);
-const printedThumb = item => design => ({ design, values: item.values });
+const printedThumb = item => design => ({ design, values: item.values, total: item.entry.labels });
 let shownItems = [];
 function drawGrid() {
     const grid = $('#tplGrid');

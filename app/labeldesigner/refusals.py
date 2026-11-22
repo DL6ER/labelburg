@@ -17,8 +17,8 @@ from PIL import Image
 from . import adding
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
 from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
-from .label import (MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH,
-                    PARTS_DIRECTION_REFUSED, PARTS_ORDER_REFUSED, PARTS_TWICE_REFUSED, TextTooLong)
+from .label import (LETTER_SPACING_REFUSED, MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR,
+                    MAX_RANDOM_LENGTH, PARTS_DIRECTION_REFUSED, PARTS_ORDER_REFUSED, PARTS_TWICE_REFUSED, TextTooLong)
 from .label_names import cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
@@ -50,6 +50,7 @@ MESSAGES = (
     'Unknown label_size',
     'Font size is required',
     'Font size must be at least 1',
+    LETTER_SPACING_REFUSED,
     'Text is too long',
     'The date format of a blank is too long',
     'shrink_text must be 0 or 1',

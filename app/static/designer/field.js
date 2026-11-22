@@ -5,7 +5,7 @@
 
 import {
     $, $$, esc, icon, clone, S, C, L, plainFont, templateOf, blanksOf, fieldType, blankChoices, choicesOf, blankStart, startOf,
-    BLANK_KINDS, guessKind, isVariable, dateFormat, DATE_OFFSET_RE, loadSymbols, loadIcons, loadSymbolSets, findIcons, SYMBOL_SETS, today,
+    BLANK_KINDS, guessKind, isVariable, dateFormat, dateCodeExamples, DATE_OFFSET_RE, loadSymbols, loadIcons, loadSymbolSets, findIcons, SYMBOL_SETS, today,
     openLayer
 } from './core.js';
 
@@ -72,6 +72,7 @@ export function chipInfo(tpl) {
         const label = m[1] || m[2] ? `counter ${m[1] || '1'}${m[2] && m[2] !== '1' ? `, step ${m[2]}` : ''}` : 'counter';
         return { kind: 'counter', label, icon: 'hash', start: m[1] || '', step: m[2] || '' };
     }
+    if (tpl === '{{total}}') return { kind: 'total', label: 'total', icon: 'hash' };
     if ((m = tpl.match(/^\{\{asn(?::(\d{1,2}))?\}\}$/))) return { kind: 'variable', label: m[1] ? `ASN, ${m[1]} digits` : 'ASN', icon: 'braces', digits: m[1] || '' };
     if (tpl === '{{short-uuid}}') return { kind: 'variable', label: 'ID', icon: 'braces' };
     if (tpl === '{{uuid}}') return { kind: 'variable', label: 'UUID', icon: 'braces' };
@@ -410,6 +411,7 @@ const MENU = [
     { id: 'blank', name: 'Blank', icon: 'blank', note: 'filled in when printing', words: 'blank name field fill' },
     { id: 'date', name: 'Date', icon: 'cal', note: 'today, or a day from now', words: 'date today now time day' },
     { id: 'counter', name: 'Counter', icon: 'hash', note: '1, 2, 3 ...', words: 'counter number count' },
+    { id: 'total', name: 'Total', icon: 'hash', note: 'the 6 in 1 of 6', words: 'number labels total of all count copies' },
     { id: 'symbol', name: 'Symbol', icon: 'star', note: '', words: 'symbol icon sign' },
     { id: 'variable', name: 'Variable', icon: 'braces', note: 'e.g. the ASN', words: 'variable asn id uuid' },
 ];
@@ -502,6 +504,7 @@ function pickMenu(k) {
         if (!m.named) openChip(place, true, true);
     } else if (m.id === 'date') put(`{{datetime:${dateFormat()}}}`);
     else if (m.id === 'counter') put('{{counter}}');
+    else if (m.id === 'total') put('{{total}}');
     else if (m.id === 'symbol') { const place = drop(); openSymbols(place, null); }
     else if (m.id === 'variable') { const place = drop(); openVariables(place, null); }
 }
@@ -590,6 +593,12 @@ export function openChip(place, naming = false, focus = false) {
     if (c.kind === 'blank') return blankPop(place, c.name, naming);
     if (c.kind === 'date') return datePop(place, c.date);
     if (c.kind === 'counter') return counterPop(place, c);
+    if (c.kind === 'total') {
+        const el = openPop(place, `<h4>Total</h4><p class="muted">How many labels print, set with the copies.</p>
+            <div class="pop-acts"><span></span>${removeBtn}</div>`);
+        $('[data-remove]', el).onclick = () => removeChip(place);
+        return;
+    }
     if (c.kind === 'symbol') return openSymbols(place, tpl);
     if (c.kind === 'break') {
         const el = openPop(place, `<h4>Line break</h4><p class="muted">The text after it is a line of its own on the label, in the style of this line.</p>
@@ -758,13 +767,14 @@ const VARS_HELP = `<p>Variables put content into the label when it is printed. T
         <li><code>[today]</code> - today's date, in the date format of the settings. <code>[now]</code> - the date and the time.</li>
         <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d, w, m or y for days, weeks, months or years, with the time h or min, e.g., <code>[now+30min]</code>.</li>
         <li><code>[counter]</code> - a number that counts up, each copy gets the next one: <code>[counter:001]</code> 001, 002, <code>[counter:A]</code> A, B, C, <code>[counter:10:5]</code> 10, 15, 20.</li>
+        <li>Total, from the [ menu - <code>Box [counter] of [total]</code> prints Box 1 of 6 to Box 6 of 6.</li>
         <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx, <code>[ASN:5]</code> with 5 digits, e.g., 00042.</li>
         <li><code>[id]</code> - a short random ID.</li>
     </ul>
     <p>The variables of the server work as well:</p>
     <ul>
         <li><code>{{datetime:&lt;format&gt;}}</code> - the date and time in a format of <button type="button" class="custom" data-codes>date and time codes</button>, <code>{{datetime+5d:&lt;format&gt;}}</code> 5 days later.</li>
-        <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code>, <code>{{asn[:&lt;digits&gt;]}}</code>, <code>{{uuid}}</code>, <code>{{short-uuid}}</code> - as above.</li>
+        <li><code>{{counter[:&lt;start&gt;[:&lt;step&gt;]]}}</code>, <code>{{total}}</code>, <code>{{asn[:&lt;digits&gt;]}}</code>, <code>{{uuid}}</code>, <code>{{short-uuid}}</code> - as above.</li>
         <li><code>{{mdi:&lt;name&gt;}}</code>, <code>{{fastener:&lt;name&gt;}}</code>, <code>{{electronic:&lt;name&gt;}}</code> - an icon or symbol, Symbol finds the names.</li>
         <li><code>{{env:&lt;var&gt;}}</code> - the environment variable &lt;var&gt;, if it is listed in <code>LABEL_TEMPLATE_ENV_VARS</code>.</li>
         <li><code>{{random[:&lt;len&gt;][:shift]}}</code> - random text of &lt;len&gt; characters (64 unless given), <code>shift</code> shifts it around to fill gaps.</li>
@@ -772,8 +782,8 @@ const VARS_HELP = `<p>Variables put content into the label when it is printed. T
 
 // The codes of {{datetime:<format>}}, with examples the server made
 function showDateCodes() {
-    const dc = C.datetime_codes || { example: '', codes: [] };
-    const rows = dc.codes.map(([code, meaning, example]) => `<tr><td><code>${esc(code)}</code></td><td>${esc(meaning)}</td><td>${esc(example)}</td></tr>`).join('');
+    const dc = C.datetime_codes || { example: '', codes: [] }, examples = dateCodeExamples();
+    const rows = dc.codes.map(([code, meaning]) => `<tr><td><code>${esc(code)}</code></td><td>${esc(meaning)}</td><td>${esc(examples[code])}</td></tr>`).join('');
     openLayer(`<div class="dialog narrow codes" role="dialog" aria-label="Date and time codes">
         <div class="dialog-h"><div><h2>Date and time codes</h2><p class="muted">For a date of its own format, e.g. <code>%d.%m.%Y</code>. The examples are for ${esc(dc.example)}.</p></div><span class="sp"></span>
             <button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>

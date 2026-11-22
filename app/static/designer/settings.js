@@ -5,7 +5,7 @@
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
-    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
+    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
@@ -529,12 +529,15 @@ async function keepLabels(box, changes, told) {
 }
 
 DRAW.labels = box => {
-    const server = familyOf(C.default_font), chosen = chosenFamily();
+    const server = familyOf(C.default_font), chosen = chosenFamily(), names = dateCodeExamples();
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>Labels</h2><p class="muted">Kept on the server, the same in every browser.</p></div></header>
         <section class="set-card"><div class="set-grid">
             <label class="k" for="setDate">Dates on labels</label>
             <div class="set-stack"><select class="in set-sel" id="setDate">${DATES().map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_format || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
                 <small class="muted">For dates put on labels from now on and for date blanks. A date already on a label keeps its format.</small></div>
+            <label class="k" for="setDateLang">Language of dates</label>
+            <div class="set-stack"><select class="in set-sel" id="setDateLang">${C.date_languages.map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_language || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+                <small class="muted">For dates with the name of the month or weekday, e.g. ${esc(names['%B'])} or ${esc(names['%A'])}.</small></div>
             <span class="k">Copies of several files</span>
             <div class="set-stack">${seg('collate', [['1', 'As sets: ABC ABC'], ['0', 'Grouped: AA BB CC']], S.settings.collate === '0' ? '0' : '1', 'Copies of several files')}
                 <small class="muted">For several images or PDF pages printed more than once.</small></div>
@@ -546,6 +549,10 @@ DRAW.labels = box => {
         const f = e.target.value;
         keepLabels(box, { date_format: f }, () => 'Dates on new labels are written as ' + formatDate('2026-11-01', f || browserDateFormat()));
     };
+    $('#setDateLang').onchange = e => keepLabels(box, { date_language: e.target.value }, () => {
+        const named = dateCodeExamples();
+        return `Months and weekdays are written like ${named['%B']} and ${named['%A']}`;
+    });
     $$('[data-k="collate"]', box).forEach(b => b.onclick = () => keepLabels(box, { collate: b.dataset.v },
         () => b.dataset.v === '0' ? 'Copies of several files are grouped' : 'Copies of several files are printed as sets'));
     // A family only, new labels start with its regular style
@@ -609,7 +616,7 @@ async function nextThumb() {
     if (!img.isConnected || !h) return nextThumb();
     thumbsRunning++;
     try {
-        const p = await preview(h.design, h.values || {});
+        const p = await preview(h.design, h.values || {}, 1, 0, h.labels || 0);
         if (img.isConnected) { img.src = p.url; img.parentElement.classList.add('shown'); }
     } catch (e) {
         if (img.isConnected) img.parentElement.classList.add('none');
@@ -718,7 +725,7 @@ async function copy(code) {
 
 // --- About -----------------------------------------------------------------------------
 
-DRAW.about = box => {
+DRAW.about = (box, report) => {
     const b = window.DESIGNER_BUILD || {};
     const theme = document.documentElement.getAttribute('data-theme') || '';
     const version = b.release ? `<a href="${esc(SOURCE)}/releases/tag/${esc(b.release)}" target="_blank" rel="noopener">${esc(b.release)}</a>${b.commit ? `, commit ${esc(b.commit.slice(0, 7))}` : ''}`
@@ -733,6 +740,23 @@ DRAW.about = box => {
             <div class="set-stack"><span class="set-val" id="setVersion">${version}</span>${b.date ? `<small class="muted">Built ${esc(b.date)}</small>` : ''}</div>
             <span class="k">Source code</span>
             <div class="set-stack"><a href="${esc(SOURCE)}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
+            <span class="k">Problems</span>
+            <div class="set-stack"><div class="set-report"><a class="btn soft sm" id="setReport" href="${esc(SOURCE)}/issues/new?template=bug_report.yml" target="_blank" rel="noopener">Report a problem${ic('out')}</a>
+                <button class="btn ghost sm" type="button" id="setReportCopy" hidden>${ic('copy')}Copy details</button></div>
+                <div class="set-details" id="setDetails" hidden></div>
+                <small class="muted">Opens a GitHub form with these details filled in.</small></div>
         </div></section>`;
-    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box); });
+    let shown = report;
+    // From the server, which knows the printers, see /api/problem_report
+    const show = answer => {
+        shown = answer;
+        $('#setReport', box).href = answer.url;
+        $('#setDetails', box).textContent = answer.text;
+        $('#setDetails', box).hidden = $('#setReportCopy', box).hidden = false;
+        $('#setReportCopy', box).onclick = () => copy($('#setDetails', box));
+    };
+    if (report) show(report);
+    else fetch(API + '/problem_report').then(r => r.ok ? r.json() : null)
+        .then(answer => answer && $('#setReport', box) && show(answer)).catch(() => { });
+    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box, shown); });
 };
