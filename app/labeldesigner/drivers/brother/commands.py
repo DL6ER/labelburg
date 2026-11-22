@@ -75,16 +75,17 @@ class Raster:
 
     def add_expanded_mode(self, cut_at_end: bool, dpi_600: bool, two_color: bool, half_cut: bool, chain: bool):
         """ESC i K: on P-touch printers half cuts between labels and chain
-        printing, on QL printers the cut after the last label, 600 dpi and
-        printing in red."""
+        printing, on QL printers the cut after the last label and printing in
+        red, on both 600 dpi (high resolution)."""
         if not self.spec.expanded_mode:
             return
         if self.ptouch:
             # A printer without a half cutter is not told to half cut
-            flags = (half_cut and self.model in HALF_CUTTERS) << 2 | (not chain) << 3 | dpi_600 << 5
+            flags = (half_cut and self.model in HALF_CUTTERS) << 2 | (not chain) << 3
         else:
-            flags = cut_at_end << 3 | dpi_600 << 6 | two_color
-        self.data += b'\x1b\x69\x4b' + bytes([flags])
+            flags = cut_at_end << 3 | two_color
+        # Bit 6 in the references of the QL-800 and of the P-touch printers
+        self.data += b'\x1b\x69\x4b' + bytes([flags | dpi_600 << 6])
 
     def add_margins(self, dots: int):
         """Feed before and after the label (ESC i d)."""
