@@ -71,7 +71,7 @@ services:
 
 Switch the printer on and start Labelburg in that folder with `docker compose up -d`. Then open `http://<computer>:8013` in a browser, e.g., `http://192.168.1.10:8013`.
 
-Your labels are saved in the folder `labels` next to the file. To get a new version, run `docker compose pull && docker compose up -d` in the folder. The version you run is shown at the top left, please add it when you report a problem.
+Your labels are saved in the folder `labels` next to the file. To get a new version, run `docker compose pull && docker compose up -d` in the folder. To report a problem, click "Report a problem" in the Settings under About: it opens the form on GitHub with the version and your printers filled in.
 
 ## Technical details
 

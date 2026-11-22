@@ -670,7 +670,7 @@ async function copy(code) {
 
 // --- About -----------------------------------------------------------------------------
 
-DRAW.about = box => {
+DRAW.about = (box, report) => {
     const b = window.DESIGNER_BUILD || {};
     const theme = document.documentElement.getAttribute('data-theme') || '';
     const version = b.release ? `<a href="${esc(SOURCE)}/releases/tag/${esc(b.release)}" target="_blank" rel="noopener">${esc(b.release)}</a>${b.commit ? `, commit ${esc(b.commit.slice(0, 7))}` : ''}`
@@ -685,6 +685,23 @@ DRAW.about = box => {
             <div class="set-stack"><span class="set-val" id="setVersion">${version}</span>${b.date ? `<small class="muted">Built ${esc(b.date)}</small>` : ''}</div>
             <span class="k">Source code</span>
             <div class="set-stack"><a href="${esc(SOURCE)}" target="_blank" rel="noopener">github.com/DL6ER/labelburg</a><small class="muted">Free software under the GNU GPL v3. Questions, ideas and printers that do not work yet are welcome there.</small></div>
+            <span class="k">Problems</span>
+            <div class="set-stack"><div class="set-report"><a class="btn soft sm" id="setReport" href="${esc(SOURCE)}/issues/new?template=bug_report.yml" target="_blank" rel="noopener">Report a problem${ic('out')}</a>
+                <button class="btn ghost sm" type="button" id="setReportCopy" hidden>${ic('copy')}Copy details</button></div>
+                <div class="set-details" id="setDetails" hidden></div>
+                <small class="muted">Opens the form on GitHub with these details filled in. Nothing is sent until you send the form. Without a GitHub account, copy the details into your question.</small></div>
         </div></section>`;
-    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box); });
+    let shown = report;
+    // From the server, which knows the printers, see /api/problem_report
+    const show = answer => {
+        shown = answer;
+        $('#setReport', box).href = answer.url;
+        $('#setDetails', box).textContent = answer.text;
+        $('#setDetails', box).hidden = $('#setReportCopy', box).hidden = false;
+        $('#setReportCopy', box).onclick = () => copy($('#setDetails', box));
+    };
+    if (report) show(report);
+    else fetch(API + '/problem_report').then(r => r.ok ? r.json() : null)
+        .then(answer => answer && $('#setReport', box) && show(answer)).catch(() => { });
+    $$('[data-theme]', box).forEach(btn => btn.onclick = () => { host.theme(btn.dataset.theme || null); DRAW.about(box, shown); });
 };
