@@ -906,6 +906,11 @@ function stepper() {
 }
 const sizeStep = stepper(), spacingStep = stepper(), allStep = stepper();
 const ALIGNS = { left: ['left', 'Left'], center: ['center', 'Centered'], right: ['right', 'Right'] };
+// The steps of the letter spacing of a line, in parts of its size
+const LETTER_SPACINGS = [[-0.05, 'Narrow'], [0, 'Normal'], [0.1, 'Wide'], [0.2, 'Wider']];
+const letterSpacing = l => +l.letter_spacing || 0;
+// Another value, e.g. sent to the API, is named as the step nearest to it
+const letterSpacingName = v => LETTER_SPACINGS.reduce((a, b) => Math.abs(b[0] - v) < Math.abs(a[0] - v) ? b : a)[1];
 
 // While a button of the toolbar is pressed, a preview neither moves nor
 // redraws it, so the click lands where the press began
@@ -981,7 +986,7 @@ export function renderToolbar() {
         <button type="button" class="tb" data-align title="Alignment: ${esc(al[1])}" aria-label="Alignment: ${esc(al[1])}">${icon(al[0])}</button>
         ${swatchHTML('data-lcolor', l.color, onTape(d), 'the line')}
         <span class="sep"></span>
-        <button type="button" class="tb${l.inverted || l.checkbox || +l.line_spacing !== 100 ? ' dot' : ''}" data-more aria-expanded="false" title="More for this line" aria-label="More for this line">${icon('more')}</button>`;
+        <button type="button" class="tb${l.inverted || l.checkbox || l.caps || letterSpacing(l) || +l.line_spacing !== 100 ? ' dot' : ''}" data-more aria-expanded="false" title="More for this line" aria-label="More for this line">${icon('more')}</button>`;
     $('[data-font]', bar).onclick = () => openFontMenu({
         owner: 'line', anchor: () => $('#ltb [data-font]'), label: `Font of line ${i + 1}`,
         state: () => { const m = S.edit.design.text[i], f = m && faceOf(m.font); return { family: m ? familyOf(m.font) : '', faces: [f] }; },
@@ -1019,7 +1024,8 @@ export function renderToolbar() {
     refreshFontMenu();
 }
 
-// "..." of a line: white on black, the to-do box, line spacing, removing it
+// "..." of a line: white on black, the to-do box, capitals, line and letter
+// spacing, removing it
 function lineMenu(btn, i) {
     const d = S.edit.design, l = d.text[i];
     const old = $('.line-menu');
@@ -1029,7 +1035,9 @@ function lineMenu(btn, i) {
     const spacing = +(l.line_spacing || 100);
     el.innerHTML = `<button type="button" data-act="invert" class="${l.inverted ? 'on' : ''}">${icon('contrast')}<span>White on black</span>${l.inverted ? icon('check') : ''}</button>
         <button type="button" data-act="todo" class="${l.checkbox ? 'on' : ''}">${icon('todo')}<span>To-do box</span><small>in front</small>${l.checkbox ? icon('check') : ''}</button>
+        <button type="button" data-act="caps" class="${l.caps ? 'on' : ''}">${icon('caps')}<span>All capitals</span>${l.caps ? icon('check') : ''}</button>
         <div class="mi">${icon('spacing')}<span>Line spacing</span><span class="az sm"><button type="button" class="azb" data-sp="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-spv>${esc(spacing)} %</span><button type="button" class="azb" data-sp="1" aria-label="More">${icon('plus', '')}</button></span></div>
+        <div class="mi">${icon('tracking')}<span>Letter spacing</span><span class="az sm"><button type="button" class="azb" data-ls="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-lsv></span><button type="button" class="azb" data-ls="1" aria-label="More">${icon('plus', '')}</button></span></div>
         <button type="button" data-act="remove" class="danger"${d.text.length > 1 || String(l.text).length ? '' : ' disabled'}>${icon('trash')}<span>Remove the line</span></button>`;
     $('#center').appendChild(el);
     const r = btn.getBoundingClientRect(), c = $('#center').getBoundingClientRect();
@@ -1052,6 +1060,7 @@ function lineMenu(btn, i) {
             const m = x.text[i];
             if (act === 'invert') m.inverted = !m.inverted;
             if (act === 'todo') m.checkbox = !m.checkbox;
+            if (act === 'caps') { if (m.caps) delete m.caps; else m.caps = true; }
         });
         again();
     });
@@ -1059,6 +1068,20 @@ function lineMenu(btn, i) {
         const v = Math.max(50, Math.min(400, +(S.edit.design.text[i].line_spacing || 100) + +b.dataset.sp * 10 * spacingStep()));
         apply(x => { x.text[i].line_spacing = String(v); }, { merge: 'spacing' + i });
         $('[data-spv]', el).textContent = `${v} %`;
+    });
+    // The next step either way, also from a value between the steps
+    const nextSpacing = (v, dir) => (dir > 0 ? LETTER_SPACINGS.find(([s]) => s > v) : [...LETTER_SPACINGS].reverse().find(([s]) => s < v)) || null;
+    const showSpacing = v => {
+        $('[data-lsv]', el).textContent = letterSpacingName(v);
+        $$('[data-ls]', el).forEach(b => { b.disabled = !nextSpacing(v, +b.dataset.ls); });
+    };
+    showSpacing(letterSpacing(l));
+    $$('[data-ls]', el).forEach(b => b.onclick = () => {
+        const next = nextSpacing(letterSpacing(S.edit.design.text[i]), +b.dataset.ls);
+        if (!next) return;
+        // Normal leaves it out, as labels saved before have it
+        apply(x => { if (next[0]) x.text[i].letter_spacing = next[0]; else delete x.text[i].letter_spacing; }, { merge: 'letters' + i });
+        showSpacing(next[0]);
     });
 }
 
