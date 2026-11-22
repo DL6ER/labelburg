@@ -32,6 +32,8 @@ class _Job:
         self.started = self.printed_at = time.monotonic()
         self.printed = 0
         self.counted = False
+        # Whether it ended when the printer was done, see held()
+        self.measured = True
         self.stage = None
         self.percent = None
         self.unit = 'label'
@@ -81,11 +83,24 @@ def finish(device: str, success: bool):
     key = devices.lock_key(device)
     with _guard:
         job = _jobs.pop(key, None)
-        if not (job and success and job.estimated and job.raw > 0):
+        if not (job and success and job.estimated and job.raw > 0 and job.measured):
             return
         factor = min(max((time.monotonic() - job.started) / job.raw, 1 / SLOWEST), SLOWEST)
         before = _factors.get((key, job.mode))
         _factors[(key, job.mode)] = factor if before is None else (before + factor) / 2
+
+
+def held(device: str):
+    """Wait as long as the job is estimated to print, for a printer that
+    does not tell when it printed it. Such a job tells nothing of how fast
+    the printer prints."""
+    with _guard:
+        job = _jobs.get(devices.lock_key(device))
+        if not job:
+            return
+        job.measured = False
+        left = _seconds_left(job) if job.estimated else 0.0
+    time.sleep(max(left, 0.0))
 
 
 def running(device: str) -> bool:
