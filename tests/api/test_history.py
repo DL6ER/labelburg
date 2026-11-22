@@ -360,3 +360,23 @@ def test_the_same_date_is_written_as_it_was(client, monkeypatch):
     del made[:]
     printed(client, f'history/{job}/print', data={'printer': 'simulation', 'as_before': '0'})
     assert set(made) == {('%Y-%m-%d', '')}
+
+
+def test_a_label_printed_again_as_it_was_counts_as_it_did(client, monkeypatch):
+    totals, create = [], routes.create_label_from_request
+
+    def recorded(d={}, files={}, counter=0, *args, **kwargs):
+        totals.append((counter, kwargs.get('total')))
+        return create(d, files, counter, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
+    job = printed(client, data=dict(LABEL, text=lines('Box {{counter}} of {{total}}', 'ASN{{asn:5}}'), print_count='3'))
+    del totals[:]
+    # Box 1 of 3 that tore, not Box 1 of 1
+    again = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '1'})
+    assert set(totals) == {(0, 3)}
+    del totals[:]
+    printed(client, f'history/{again}/print', data={'printer': 'simulation'})
+    assert set(totals) == {(0, 3)}
+    del totals[:]
+    printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '1', 'as_before': '0'})
+    assert set(totals) == {(0, 1)}

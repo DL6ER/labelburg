@@ -749,3 +749,15 @@ def test_a_feed_waiting_at_a_restart_feeds_after_it_and_is_not_listed(server, tm
     restart(tmp_path)
     assert ended(job).state == 'printed' and fed == ['62']
     assert print_store.entries(10) == []
+
+
+def test_one_of_its_labels_printed_again_counts_as_it_did_after_a_restart(server, tmp_path, monkeypatch):
+    text = json.dumps([{'text': 'Box {{counter}} of {{total}}', 'size': '40'}])
+    first = server.post(f'{API}/print', data=dict(LABEL, text=text, print_count='3')).get_json()['job']
+    assert ended(first).state == 'printed'
+    print_queue.stop()
+    again = server.post(f'{API}/history/{first}/print', data={'printer': 'simulation', 'print_count': '1'}).get_json()['job']
+    totals, create = [], routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: (totals.append(kwargs.get('total')), create(*args, **kwargs))[1])
+    restart(tmp_path)
+    assert ended(again).state == 'printed' and set(totals) == {3}
