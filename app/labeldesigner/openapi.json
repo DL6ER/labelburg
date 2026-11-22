@@ -3785,7 +3785,7 @@
           },
           "title": {
             "type": "string",
-            "description": "What the job prints, as the queue and the labels printed name it: the `title` of the request, else its first line as printed, else its code, else the name of the file of its picture."
+            "description": "What the job prints, as the queue and the labels printed name it: the `title` of the request, else its first line as printed, else its code, else the name of the file of its picture. A Wi-Fi code names it by its network alone, a contact, an event or a one-time password key not at all."
           },
           "image": {
             "type": "string",
@@ -4020,7 +4020,7 @@
               },
               "title": {
                 "type": "string",
-                "description": "The title of the job in the queue. Default: as before, else, with values of its own, its first line."
+                "description": "The title of the job in the queue. Default: as before while it prints as before, else as it prints now, e.g., its first line."
               },
               "source": {
                 "type": "string",

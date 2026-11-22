@@ -974,6 +974,10 @@ def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool
 # The preview of a job in the queue, at most this many pixels on its long side
 PREVIEW_SIZE = 240
 MAX_TITLE_LENGTH = 200
+# Codes that hold more than a name, e.g., a password or a contact: they name
+# no job, a Wi-Fi code by its network alone
+HELD_CODES = re.compile(r'\s*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
+WIFI_FIELD = re.compile(r'([A-Za-z]+):((?:\\.|[^\\;])*);')
 # Where a job comes from as a request may tell it, the routes name the others
 TOLD_SOURCES = ('designer', 'mcp')
 
@@ -1155,17 +1159,31 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', 
     the first line of the first label as printer.check() drew it, its icons
     left out, else its code as printed, else the name of the file of its
     picture (upload), else the name it is saved under, else fallback."""
-    lines = [line for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)
-             for line in str(item.get('text', '')).splitlines()]
+    texts = [str(item.get('text', '')) for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)]
+    code = str(getattr(drawn.label, 'code_text', '') or '') if drawn else ''
+    # Nor do the lines such a code holds, also one that took the lines
+    whole = code or '\n'.join(texts)
+    held = set(whole.splitlines()) if HELD_CODES.match(whole) else set()
+    lines = [line for text in texts for line in _naming(text).splitlines() if line not in held]
     # Icons are drawn with fonts of their own, a title shows them as boxes
     lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
-    code = getattr(drawn.label, 'code_text', '') if drawn else ''
     name = data.get('name')
-    for title in (_requested('title'), *lines, *str(code or '').splitlines()[:1], os.path.splitext(os.path.basename(upload or ''))[0],
+    for title in (_requested('title'), *lines, *_naming(code).splitlines()[:1], os.path.splitext(os.path.basename(upload or ''))[0],
                   data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
         if isinstance(title, str) and (title := ' '.join(title.split())):
             return title[:MAX_TITLE_LENGTH]
     return fallback
+
+
+def _naming(text: str) -> str:
+    """text as it may name a job: of a Wi-Fi code its network, of another
+    of HELD_CODES nothing."""
+    if not HELD_CODES.match(text):
+        return text
+    if text.lstrip()[:5].upper() != 'WIFI:':
+        return ''
+    fields = {key.upper(): value for key, value in WIFI_FIELD.findall(text.lstrip()[5:])}
+    return re.sub(r'\\(.)', r'\1', fields.get('S', ''))
 
 
 def _job_source(default: str) -> str:

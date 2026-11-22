@@ -497,3 +497,25 @@ def test_a_label_printed_with_new_dates_or_numbers_is_named_as_it_prints(client,
     assert entry(client, printed(client, f'history/{dated}/print', json={'printer': 'simulation', 'as_before': 0}))['title'] == f'Made {today}'
     # A title the request told stays
     assert entry(client, printed(client, f'history/{told}/print', json={'printer': 'simulation', 'as_before': 0}))['title'] == 'Pantry'
+
+
+@pytest.mark.parametrize('code, title', [
+    ('WIFI:T:WPA;S:Home;P:secret123;;', 'Home'),
+    (r'WIFI:P:secret123;T:WPA;S:Caf\;e \"Nord\";H:false;;', 'Caf;e "Nord"'),
+    ('WIFI:T:nopass;P:secret123;;', 'Label'),
+    ('BEGIN:VCARD\nVERSION:3.0\nFN:Ann\nTEL:secret123\nEND:VCARD', 'Label'),
+    ('BEGIN:VEVENT\nSUMMARY:secret123\nEND:VEVENT', 'Label'),
+    ('MECARD:N:Ann;TEL:secret123;;', 'Label'),
+    ('otpauth://totp/Shop:ann?secret=secret123&issuer=Shop', 'Label'),
+    # A code left empty takes the lines
+    (['BEGIN:VCARD', 'VERSION:3.0', 'FN:Ann', 'TEL:secret123', 'END:VCARD'], 'Label'),
+    (['WIFI:T:WPA;S:Home;P:secret123;;'], 'Home'),
+])
+def test_a_code_that_holds_more_than_a_name_never_names_a_label(client, code, title):
+    text, code = (lines(*code), '') if isinstance(code, list) else (lines(''), code)
+    answer = client.post(f'{API}/print', data=dict(LABEL, print_type='qrcode', text=text, code_text=code))
+    assert answer.status_code == 200
+    job = answer.get_json()['job']
+    told = [answer.data, client.get(f'{API}/queue/{job}').data, client.get(f'{API}/queue').data, client.get(f'{API}/history').data]
+    assert not any(b'secret123' in body for body in told)
+    assert answer.get_json()['title'] == entry(client, job)['title'] == title
