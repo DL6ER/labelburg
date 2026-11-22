@@ -136,9 +136,8 @@ class Zpl(Driver):
         return label in LABELS and model in label.models
 
     def label_for(self, label_size, model):
-        # zpl102x152 and zpl300-102x152 are the same labels
-        paper = next((label.tape_size for label in LABELS if label.identifier == label_size), None)
-        return next((label.identifier for label in LABELS if label.tape_size == paper and model in label.models), label_size)
+        # zpl102x152, zpl300-102x152 and tspl102x152 are the same labels
+        return diecut.label_for(label_size, LABELS, model)
 
     def dpi(self, high_res):
         return DPI[MODELS[0]]

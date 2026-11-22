@@ -648,11 +648,12 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     ('MFG:EPSON;MDL:TM-U220;CMD:ESC/POS;', None),
     ('MFG:EPSON;MDL:TM-U220II;CMD:ESC/POS;', None),
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-U295;', None),
-    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None)])
+    # A TSPL printer LPrint lists
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'TSC/TSPL')])
 def test_model_in_device_ids(device_id, model):
     from app.labeldesigner import drivers
-    assert escpos.DRIVER.model_in(device_id) == model
-    # No other driver takes it for one of its printers
+    assert escpos.DRIVER.model_in(device_id) == (model if model and model.startswith('Epson/') else None)
+    # No other driver takes an ESC/POS printer for one of its printers
     assert drivers.told_model(device_id) == model
 
 

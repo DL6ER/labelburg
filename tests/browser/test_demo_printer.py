@@ -61,12 +61,13 @@ def test_the_demo_printer_names_its_roll_without_a_warning(designer):
 def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
-    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == [
+        'Brother', 'Epson', 'Niimbot', 'PUQU', 'TSC', 'Zebra']
     # Once each name: not the models shown as another one
     shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
-    assert shown_as == {'Epson/ESC-POS-180', 'Zebra/ZPL-300'}
+    assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
-    for vendor, models in (('Epson', ['ESC-POS']), ('Zebra', ['ZPL'])):
+    for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL'])):
         assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
@@ -164,3 +165,35 @@ def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
     back_to_the_editor(designer)
     designer.click('#printerChip')
     assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, labels with black marks on the back')
+
+
+def test_a_tspl_printer_offers_4x6_labels_and_the_roll(designer):
+    designer.set_viewport_size({'width': 1600, 'height': 924})
+    open_settings(designer)
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'TSC/TSPL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'TSC/TSPL'")
+    assert 'TSC TSPL' in designer.inner_text('[data-card="0"]')
+    sizes = '[data-card="0"] select[data-k="label_size"]'
+    offered = designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.value)')
+    assert offered == [''] + tape.takes('TSC/TSPL') and 'tspl102x152' in offered
+    # 4 x 6 in, among the die-cut labels
+    assert designer.eval_on_selector(f'{sizes} option[value="tspl102x152"]', 'o => [o.parentNode.label, o.textContent]') == [
+        'Die-cut', '102 x 152 mm']
+    choice = '[data-card="0"] button[data-k="sensing"]'
+    assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
+        'Labels with gaps', 'Labels with black marks on the back', 'Continuous roll']
+    # None is chosen while none is set
+    assert designer.query_selector(f'{choice}.on') is None
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(sizes, 'tspl102x152')
+    assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'TSC/TSPL', 'sensing': 'mark'}
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks on the back'")
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo TSC TSPL'
+    type_label(designer, 'Parcel 7')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'TSC/TSPL', 'tspl102x152')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')

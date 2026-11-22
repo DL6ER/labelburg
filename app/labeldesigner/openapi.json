@@ -3484,7 +3484,7 @@
           "sensing": {
             "type": "string",
             "enum": ["gap", "mark", "endless"],
-            "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as last told or as set up on the printer."
+            "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL and TSPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as last told or as set up on the printer."
           },
           "quality": {
             "type": "string",
@@ -4089,7 +4089,7 @@
           },
           "device_name": {
             "type": "string",
-            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS` or `Zebra GX420t` for a `Zebra/ZPL`, where its model is one for printers of many makers. The label designer shows it instead of the model. Missing where the printer names none."
+            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS` or `Zebra GX420t` for a `Zebra/ZPL`, where its model is one for printers of many makers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
           },
           "errors": {
             "type": "array",

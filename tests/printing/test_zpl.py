@@ -413,14 +413,14 @@ def test_asked_right_after_boot(monkeypatch):
     # Other models of the same makers and the TSPL printers of lprint-tspl.h
     ('MFG:4BARCODE;CMD:CEZD;MDL:4B-3064TB;', None),
     ('MFG:HP;CMD:PJL,PCL,PCLXL,URF;MDL:HP LaserJet M110w;', None),
-    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None),
-    ('MFG:Marklife ;MDL:X4;CMD:XPP,XL;', None),
-    ('MFG:;MDL:PM-241-BT;CMD:XPP,XL;', None),
-    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', None)])
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:Marklife ;MDL:X4;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:;MDL:PM-241-BT;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL-300')])
 def test_model_in_device_ids_lprint_publishes(device_id, model):
     from app.labeldesigner import drivers
-    assert zpl.DRIVER.model_in(device_id) == model
-    # No other driver takes it for one of its printers
+    assert zpl.DRIVER.model_in(device_id) == (model if model and model.startswith('Zebra/') else None)
+    # No other driver takes a ZPL printer for one of its printers
     assert drivers.told_model(device_id) == model
 
 

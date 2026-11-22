@@ -10,6 +10,7 @@ from app.labeldesigner import ipp, snmp
 from app.labeldesigner.drivers import devices, reach, usbip
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.escpos import protocol as escpos
+from app.labeldesigner.drivers.tspl import protocol as tspl
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from app.labeldesigner.drivers.zpl import protocol as zpl
 from tests.helpers import within
@@ -238,7 +239,15 @@ def _zpl_status(host):
     return zpl.host_status(f'tcp://{host}')
 
 
-@pytest.mark.parametrize('connect', [_usbip, _ipp, _snmp, _brother, _vc500w, _escpos, _zpl_job, _zpl_status])
+def _tspl_job(host):
+    return tspl.write(f'tcp://{host}', b'CLS\r\n')
+
+
+def _tspl_status(host):
+    return tspl.ask(f'tcp://{host}', name=True)
+
+
+@pytest.mark.parametrize('connect', [_usbip, _ipp, _snmp, _brother, _vc500w, _escpos, _zpl_job, _zpl_status, _tspl_job, _tspl_status])
 def test_every_connection_to_a_printer_is_checked(names, connect):
     names['printer.test'] = ['8.8.8.8']
     reach.watch(['printer.test'], 'local')

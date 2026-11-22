@@ -55,7 +55,8 @@ def test_device_id_is_read_once_for_all_drivers(monkeypatch, device):
 
 @pytest.mark.parametrize('driver, device, model', [
     (drivers.BROTHER, 'file:///dev/usb/lp0', 'QL-800'), (drivers.VC500W, 'vc500w://192.0.2.1', 'VC-500W'),
-    (drivers.PUQU, 'bt://CD:AC:BB:E0:46:4C', 'PUQU/Q00'), (drivers.NIIMBOT, 'bt://CD:AC:BB:E0:46:4C', 'Niimbot/B1')])
+    (drivers.PUQU, 'bt://CD:AC:BB:E0:46:4C', 'PUQU/Q00'), (drivers.NIIMBOT, 'bt://CD:AC:BB:E0:46:4C', 'Niimbot/B1'),
+    (drivers.TSPL, 'tcp://192.0.2.1', 'TSC/TSPL')])
 def test_printer_a_job_holds_is_told_as_printing(monkeypatch, driver, device, model):
     monkeypatch.setattr(devices, 'device_lock', lambda device, timeout=None: contextlib.nullcontext(False))
     busy = {'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'}
