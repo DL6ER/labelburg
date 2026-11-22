@@ -56,8 +56,12 @@ KNOWN_IDS = {
     ('', 'PM-241-BT', 'XPP,XL'): MODELS[0],
     ('VEVOR', 'Y428BT', ''): MODELS[1],
 }
-# A network printer of TSC by its SNMP system description
+# TSC in a device ID or the SNMP system description of a network printer
 MAKER = re.compile(r'\bTSC\b')
+# The resolution in the leading digit of the number of a TSC model, e.g.
+# TE200, TTP-345 or TX600; Alpha-3R and TDM-30 name their width so
+TSC_MODEL = re.compile(r'\b[A-Za-z]+-?([236])\d{2}')
+OF_DIGIT = {'2': MODELS[0], '3': MODELS[1], '6': None}
 
 
 def _plain(text: str) -> str:
@@ -72,13 +76,16 @@ def _id_key(maker: str, model: str, commands: str) -> tuple[str, str, str]:
 _KNOWN = {_id_key(*fields): known for fields, known in KNOWN_IDS.items()}
 
 
-def _of_resolution(text: str) -> Told | None:
-    """The model of the resolution text names, 203 dpi where it names none.
-    None for another resolution, e.g. 600 dpi."""
-    resolution = RESOLUTION.search(text)
-    if not resolution:
+def _of_resolution(text: str, tsc: bool) -> Told | None:
+    """The model of the resolution text names, also by the model of TSC it
+    names where tsc, 203 dpi where it names none. None for another
+    resolution, e.g. 600 dpi."""
+    if resolution := RESOLUTION.search(text):
+        model = OF_RESOLUTION.get(int(resolution[1]))
+    elif tsc and (number := TSC_MODEL.search(text)):
+        model = OF_DIGIT[number[1]]
+    else:
         return Told(MODELS[0], resolution=False)
-    model = OF_RESOLUTION.get(int(resolution[1]))
     return Told(model) if model else None
 
 
@@ -145,10 +152,10 @@ class Tspl(Driver):
             return Told(known, command_set=named)
         if not named:
             return None
-        return _of_resolution(fields.get('MDL', ''))
+        return _of_resolution(fields.get('MDL', ''), bool(MAKER.search(fields.get('MFG', ''))))
 
     def described(self, description):
-        told = _of_resolution(description) if MAKER.search(description) else None
+        told = _of_resolution(description, tsc=True) if MAKER.search(description) else None
         return told.model if told else None
 
     def fits(self, label, model):

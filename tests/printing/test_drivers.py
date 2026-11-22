@@ -71,7 +71,11 @@ def test_driver_of_a_printer():
     ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'QL-800', 'QL-800'),
     ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'Unknown', 'TSC/TSPL'),
     ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Epson/ESC-POS', 'Epson/ESC-POS'),
-    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Unknown', 'Zebra/ZPL-300')])
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Unknown', 'Zebra/ZPL-300'),
+    # TSC's models give the resolution in their leading digit
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE310;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'TSC/TSPL-300', 'TSC/TSPL')])
 def test_driver_and_model_of_a_configured_printer(monkeypatch, device_id, configured, model):
     monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
     driver, known = drivers.resolve('file:///dev/usb/lp0', configured)

@@ -270,6 +270,18 @@ def test_every_status_the_printer_tells(monkeypatch, answer, errors, status_type
     ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE210;', 'TSC/TSPL'),
     ('MFG:TSC;CMD:tspl2;MDL:TE300 300 dpi;', 'TSC/TSPL-300'),
     ('MFG:TSC;CMD:TSPL2;MDL:TE200-203dpi;', 'TSC/TSPL'),
+    # TSC's models give the resolution in their leading digit
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TTP-345;', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TTP-2410M;', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TX200;', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:DA310;', 'TSC/TSPL-300'),
+    ('MFG:TSC Auto ID Technology;CMD:TSPL2;MDL:DA210;', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TX600;', None),
+    # Of others the width, or a printer of another maker
+    ('MFG:TSC;CMD:TSPL2;MDL:Alpha-3R;', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TDM-30;', 'TSC/TSPL'),
+    ('MFG:Printer;CMD:TSPL;MDL:XP-365B;', 'TSC/TSPL'),
     # A printer naming both is taken for TSPL
     ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'TSC/TSPL'),
     # As LPrint lists them in lprint-tspl.h, also spelled otherwise
@@ -309,6 +321,9 @@ def test_known_by_the_device_id_of_its_usb_device(monkeypatch):
     ('TSC TE200', 'TSC/TSPL'),
     ('TSC Auto ID Technology TX300 300 dpi', 'TSC/TSPL-300'),
     ('TSC MH640 600 dpi', None),
+    ('TSC TTP-345', 'TSC/TSPL-300'),
+    ('TSC DA310', 'TSC/TSPL-300'),
+    ('TSC TX600', None),
     ('Brother NC-18002w, Firmware Ver.1.10', None),
     ('Linux printserver 6.1.0', None),
     ('TSCHUESS', None)])
@@ -619,7 +634,7 @@ def test_network_device_of_another_maker_gets_nothing(fake_printer, agent, on_ne
 
 def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
     # Its device ID names no resolution
-    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:TSC;CMD:TSPL2;MDL:TE300;')
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:Printer;CMD:TSPL;MDL:LP-420;')
     monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
     client = make_client(tmp_path, model='TSC/TSPL-300', printer='usb://0x1203:0x0230')
     assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == 'TSC/TSPL-300'
