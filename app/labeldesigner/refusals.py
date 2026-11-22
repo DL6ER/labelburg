@@ -192,8 +192,8 @@ def _limits() -> tuple:
     # At least a whole sheet of labels
     counts = sorted({max_count} | {sheets.per_sheet(label) for label in LABELS if sheets.is_paper(label) and sheets.per_sheet(label) > max_count})
     return (tuple(f'print_count must not exceed {count}' for count in counts),
-            ((re.compile(r'(?s)A print job must not have more than \d+ labels, .*'),
-              f'A print job must not have more than {max_count} labels'),))
+            tuple((re.compile(rf'(?s)A print job must not have more than {count} labels, .*'), f'A print job must not have more than {count} labels')
+                  for count in counts))
 
 
 def message(error: Exception, fallback: str) -> str:

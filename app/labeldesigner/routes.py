@@ -111,12 +111,14 @@ def _is_pdf(file: FileStorage | BinaryIO, filename: str) -> bool:
 
 
 def open_images(file: FileStorage | BinaryIO, filename: str, dpi: int, pdf_pages: str = '',
-                first_only: bool = False, copies: int = 1, page_count: int | None = None) -> tuple[list[Image.Image], int | None]:
+                first_only: bool = False, copies: int = 1, page_count: int | None = None,
+                max_count: int | None = None) -> tuple[list[Image.Image], int | None]:
     """Open an uploaded or stored image. PDFs are rendered with the given
     resolution, one image for each page pdf_pages selects (only the first of
-    them with first_only). The second value is the page count of a PDF,
-    None for other files; page_count where it was read before. Files without
-    extension are left to Pillow to identify."""
+    them with first_only), at most max_count labels of copies of them,
+    PRINT_MAX_COUNT where it is left out. The second value is the page
+    count of a PDF, None for other files; page_count where it was read
+    before. Files without extension are left to Pillow to identify."""
     ext = os.path.splitext(filename or '')[1].lower()
     if page_count is not None or _is_pdf(file, filename):
         if page_count is None:
@@ -124,9 +126,9 @@ def open_images(file: FileStorage | BinaryIO, filename: str, dpi: int, pdf_pages
         pages = selected_pdf_pages(pdf_pages, page_count)
         if first_only:
             pages = pages[:1]
-        elif len(pages) * copies > current_app.config['PRINT_MAX_COUNT']:
+        elif len(pages) * copies > (max_count := max_count or current_app.config['PRINT_MAX_COUNT']):
             # Checked before any page is rendered
-            raise PageSelectionError(f"A print job must not have more than {current_app.config['PRINT_MAX_COUNT']} labels, "
+            raise PageSelectionError(f"A print job must not have more than {max_count} labels, "
                                      f"{len(pages)} pages and {copies} copies would be {len(pages) * copies}")
         return [pdffile_to_image(file, dpi, page) for page in pages], page_count
     if ext and ext not in {ex for ex, f in Image.registered_extensions().items() if f in Image.OPEN}:
@@ -2879,13 +2881,13 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
             # Checked before any file is rendered
             counts = [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
             labels = sum(len(selected_pdf_pages(pdf_pages, count)) if count is not None else 1 for count in counts)
-            max_count = current_app.config['PRINT_MAX_COUNT']
+            max_count = _max_count(d.get('label_size'))
             if labels * copies > max_count:
                 raise PageSelectionError(f"A print job must not have more than {max_count} labels, {len(uploads)} files "
                                          f"with {labels} labels and {copies} copies would be {labels * copies}")
         images, page_count = [], None
         for i, (upload, count) in enumerate(zip(uploads, counts)):
-            opened, count = open_images(upload, upload.filename, dpi, pdf_pages, first_only, copies, count)
+            opened, count = open_images(upload, upload.filename, dpi, pdf_pages, first_only, copies, count, _max_count(d.get('label_size')))
             images += [_convert_image(image, image_mode, bw_threshold, contrast) for image in opened]
             if i == 0:
                 page_count = count
@@ -2900,7 +2902,8 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
             image_path = os.path.join(image_dir or _get_repo_dir(), secure_filename(image_ref))
             if image_bytes is not None or os.path.exists(image_path):
                 with (io.BytesIO(image_bytes) if image_bytes is not None else open(image_path, 'rb')) as fh:
-                    images, page_count = open_images(fh, image_path, dpi, pdf_pages, first_only, copies)
+                    images, page_count = open_images(fh, image_path, dpi, pdf_pages, first_only, copies,
+                                                     max_count=_max_count(d.get('label_size')))
                     return [_convert_image(image, image_mode, bw_threshold, contrast) for image in images], page_count
         except PageSelectionError:
             raise
@@ -3084,7 +3087,10 @@ def webhook_print():
     # for its tape.
     uploaded_files = [f for f in request.files.getlist('images') if f.filename]
     json_images = jdata.get('images') if isinstance(jdata.get('images'), list) else []
-    max_count = current_app.config['PRINT_MAX_COUNT']
+    # A whole sheet of labels may be more: without a label size as on the
+    # largest sheet, checked again once the label size is known
+    asked_size = _requested('label_size')
+    max_count = _max_count(asked_size) if label_of(asked_size) else max(_max_count(size.identifier) for size in LABELS)
     if len(uploaded_files or json_images) > max_count:
         return _fail(f'Too many images, at most {max_count} per request', 400)
     # Plain base64 strings or objects with them as data
@@ -3136,6 +3142,8 @@ def webhook_print():
         if problem:
             return _fail(problem, 400)
         on_sheet = _sheet_options(label_size, _requested, settings)
+        if len(uploaded_files or json_images) > (max_count := _max_count(label_size)):
+            return _fail(f'Too many images, at most {max_count} per request', 400)
 
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
 

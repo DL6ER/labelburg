@@ -2,6 +2,7 @@
 fake IPP printer, where a print starts on a sheet and where it goes on,
 lines to cut plain paper along, the offset of a printer and its test sheet,
 and how a printer typed by its address becomes one."""
+import base64
 import io
 import json
 import re
@@ -445,8 +446,8 @@ def on_demo(client, **data) -> str:
     return response.get_json()['job']
 
 
-def labels_of(page: Image.Image) -> list[int]:
-    return [i + 1 for i, printed in enumerate(inked(page)) if printed]
+def labels_of(page: Image.Image, label: str = 'sheet-l7160') -> list[int]:
+    return [i + 1 for i, printed in enumerate(inked(page, label)) if printed]
 
 
 def test_demo_printer_starts_a_sheet_and_goes_on(tmp_path, monkeypatch):
@@ -543,3 +544,49 @@ def test_a_job_that_fails_leaves_the_sheet_where_it_was(tmp_path, monkeypatch, q
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: 'The printer is offline')
     assert ended(client, on_demo(client, print_count=4, sheet_start='next')) == 'failed'
     assert going_on(client) == {'sheet-l7160': 3}
+
+
+def one_page_pdf() -> bytes:
+    out = io.BytesIO()
+    Image.new('L', (300, 120), 0).save(out, 'PDF', resolution=300)
+    return out.getvalue()
+
+
+def test_a_whole_sheet_of_pdf_pages_and_files_is_more_than_print_max_count(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    client.application.config['PRINT_MAX_COUNT'] = 100
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'label_size': 'sheet-l4731rev'}).status_code == 200
+    asn = {'printer': 'simulation', 'model': OFFICE, 'label_size': 'sheet-l4731rev', 'print_type': 'image'}
+    response = client.post(f'{API}/print', data={**asn, 'print_count': 189, 'image': (io.BytesIO(one_page_pdf()), 'a.pdf')},
+                           content_type='multipart/form-data')
+    assert response.status_code == 200, response.get_json()
+    # Two files, 189 labels of them
+    files = [(io.BytesIO(one_page_pdf()), 'a.pdf'), (io.BytesIO(one_page_pdf()), 'b.pdf')]
+    response = client.post(f'{API}/print', data={**asn, 'print_count': 94, 'image': files}, content_type='multipart/form-data')
+    assert response.status_code == 200, response.get_json()
+    too_many = client.post(f'{API}/print', data={**asn, 'print_count': 95, 'image': [(io.BytesIO(one_page_pdf()), 'a.pdf'),
+                                                                                    (io.BytesIO(one_page_pdf()), 'b.pdf')]},
+                           content_type='multipart/form-data')
+    assert too_many.get_json()['message'] == 'A print job must not have more than 189 labels'
+    assert [len(labels_of(page, 'sheet-l4731rev')) for page in shots] == [189, 188]
+
+
+def test_a_whole_sheet_of_webhook_images(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    client.application.config.update(PRINT_MAX_COUNT=100, WEBHOOK_PASSWORD='secret')
+    black = io.BytesIO()
+    Image.new('L', (100, 40), 0).save(black, 'PNG')
+    image = base64.b64encode(black.getvalue()).decode()
+    asn = {'password': 'secret', 'printer': 'simulation', 'model': OFFICE, 'label_size': 'sheet-l4731rev'}
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'label_size': 'sheet-l4731rev'}).status_code == 200
+    answer = client.post(f'{API}/webhook/print', json={**asn, 'images': [image] * 189})
+    assert answer.status_code == 200, answer.get_json()
+    refused = client.post(f'{API}/webhook/print', json={**asn, 'images': [image] * 190})
+    assert refused.get_json()['message'] == 'Too many images, at most 189 per request'
+    # Placed on the sheet in the printer, of 21 labels
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'label_size': 'sheet-l7160'}).status_code == 200
+    refused = client.post(f'{API}/webhook/print', json={**asn, 'images': [image] * 101})
+    assert refused.get_json()['message'] == 'Too many images, at most 100 per request'
+    assert [len(labels_of(page, 'sheet-l4731rev')) for page in shots] == [189]
