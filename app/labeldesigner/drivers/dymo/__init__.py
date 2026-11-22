@@ -65,6 +65,11 @@ VENDOR_ID = 0x0922
 PRODUCT_IDS = {0x0020: LW450, 0x0021: LW450, 0x0022: TWIN_TURBO, 0x001f: XL, 0x0400: SE450}
 
 
+# The roll chosen for each printer, by lock key, as its settings were read
+# last: a Twin Turbo tells the status of the roll selected
+_sides: dict[str, str] = {}
+
+
 def _plain(text: str) -> str:
     return ' '.join(text.split()).casefold()
 
@@ -155,6 +160,10 @@ class Dymo(Driver):
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
                     model_shown=MODEL_NAMES[model], two_rolls=model == TWIN_TURBO)
 
+    def note_settings(self, device, settings):
+        # Not set, jobs go to the left roll
+        _sides[devices.lock_key(device)] = settings.get('side') or 'left'
+
     def status(self, device, model, unconfirmed=False):
         state = dict(network_status(device, model), media_type=diecut.MEDIA_TYPE, phase_type='Waiting to receive')
         if name := self.device_name(device):
@@ -166,7 +175,8 @@ class Dymo(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                errors = _problems(c, device, model)
+                # Of the roll chosen, once its settings were read
+                errors = _problems(c, device, model, _sides.get(key) if model == TWIN_TURBO else None)
         if errors is None:
             return state
         state['errors'] = errors

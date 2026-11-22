@@ -1526,6 +1526,7 @@ def get_printer_status():
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
+        drivers.for_model(model).note_settings(printer.get('path', ''), printer['settings'])
         printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
@@ -1679,6 +1680,7 @@ def printer_settings_route():
     except ValueError as e:
         return _refused('Saving the settings', e, refusals.INVALID_INPUT)
     settings = printer_settings.of_printer(data, device, model)
+    drivers.for_model(model).note_settings(device, settings)
     # Shown at once, from the last answer of the printer: asking it may take
     # long, the next status asks it
     last = devices.status_cache.get(devices.lock_key(device), {})

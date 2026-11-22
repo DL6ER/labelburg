@@ -26,6 +26,7 @@ READY = 0x03
 def asked_afresh(monkeypatch):
     monkeypatch.setattr(protocol, '_asked', {})
     monkeypatch.setattr(protocol, '_answered', {})
+    monkeypatch.setattr(dymo, '_sides', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_usb_device_ids', {})
 
@@ -656,3 +657,24 @@ def test_refusals_name_the_printer_plainly(tmp_path, printer):
     assert r.get_json()['message'] == 'The DYMO LabelWriter SE450 printer cannot print at 600 dpi, turn off 600 dpi printing'
     assert message in refusals.MESSAGES and r.get_json()['message'] in refusals.MESSAGES
     assert printer.written == []
+
+
+@pytest.mark.parametrize('followed', [False, True], ids=['list', 'followed'])
+def test_the_status_of_a_twin_turbo_is_that_of_the_roll_chosen(tmp_path, printer, followed):
+    # The right roll is empty, the left one loaded and selected
+    printer.by_roll, printer.roll = {b'1': READY, b'2': 0xa1}, b'1'
+    device = 'file:///dev/usb/lp_dymo'
+    client = make_client(tmp_path, empty_repo=True, model='DYMO/LabelWriter-450-Twin-Turbo', printer=device)
+
+    def errors():
+        found = client.get('/labeldesigner/api/printer_status', query_string={'printer': device} if followed else {})
+        return next(p for p in found.get_json()['printers'] if p['path'] == device)['errors']
+    assert errors() == []
+    # Before its settings were read the roll is left as selected
+    assert printer.written[-1] == ASK
+    client.post('/labeldesigner/api/settings', data={'side': 'right'})
+    assert errors() == ['No labels are in the printer']
+    assert printer.written[-1] == ESC * 85 + b'\x1bq2\x1bA'
+    client.post('/labeldesigner/api/settings', data={'side': ''})
+    assert errors() == []
+    assert printer.written[-1] == ESC * 85 + b'\x1bq1\x1bA'

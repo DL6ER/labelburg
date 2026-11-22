@@ -240,6 +240,12 @@ class Driver:
         devices.note_answer(device)
         return state
 
+    def note_settings(self, device: str, settings: dict):
+        """Take the settings of a printer as the server read them last, see
+        printer_settings.of_printer(), where its status depends on them, e.g.
+        the roll chosen for a Twin Turbo. The status queries run apart from
+        the requests that read them."""
+
     def followed_status(self, device: str, model: str) -> dict | None:
         """Status of a printer the label designer follows, see followed():
         asked of the printer itself where status() may tell its last state."""
