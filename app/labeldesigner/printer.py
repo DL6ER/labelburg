@@ -61,7 +61,8 @@ BLUETOOTH_DISCOVERY = True
 BLUETOOTH_SEARCH = 5.0
 BLUETOOTH_INTERVAL = 60
 _bluetooth: dict[str, str] = {}
-# Label printers found there that no driver prints on, see unknown.py, by address
+# Label printers the last search found there that no driver prints on, see
+# unknown.py, by address
 _bluetooth_unknown: dict[str, dict] = {}
 # time.monotonic() of the last search started, None before the first; the
 # search running
@@ -315,7 +316,7 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
 
 
 def _search_bluetooth(classic: bool = False):
-    global _last_scan_ts
+    global _last_scan_ts, _bluetooth_unknown
     found, other = {}, {}
     nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
     for device in nearby:
@@ -326,7 +327,7 @@ def _search_bluetooth(classic: bool = False):
             other[device['address']] = unclaimed
     with _bluetooth_lock:
         _bluetooth.update(found)
-        _bluetooth_unknown.update(other)
+        _bluetooth_unknown = other
         # Listed at the next status query
         _last_scan_ts = 0
 

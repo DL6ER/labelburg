@@ -347,13 +347,14 @@ def nearby(tmp_path, monkeypatch):
     monkeypatch.setattr(printer, '_bluetooth_searched', None)
     monkeypatch.setattr(printer, '_bluetooth_thread', None)
     monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(devices, 'looked', 0.0)
     monkeypatch.setattr(niimbot.DRIVER, 'status', lambda device, model, unconfirmed=False: {
         'errors': [], 'path': device, 'model': model, 'status_type': 'Reply to status request'})
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = '?'
 
-    def status():
-        client.get('/labeldesigner/api/printer_status')
+    def status(query=''):
+        client.get('/labeldesigner/api/printer_status' + query)
         printer._bluetooth_thread.join(5)
         # The search may end before the scan that started it
         printer._last_scan_ts = 0
@@ -371,6 +372,15 @@ def test_label_printers_on_bluetooth_no_driver_prints_on_are_reported(nearby):
     [b21] = told['unknown']
     assert (b21['where'], b21['name']) == ('bluetooth', 'Niimbot B21')
     assert 'Bluetooth name: B21\n' in b21['report'] and MAC not in str(b21) and 'H425040311' not in str(b21)
+
+
+def test_a_printer_on_bluetooth_the_next_search_does_not_find_is_no_longer_reported(nearby, monkeypatch):
+    devices_found, status = nearby
+    monkeypatch.setattr(printer, 'BLUETOOTH_INTERVAL', 0)
+    devices_found.append({'address': MAC, 'name': 'B21-H425040311', 'le': True, 'services': []})
+    assert [found['name'] for found in status()['unknown']] == ['Niimbot B21']
+    devices_found.clear()
+    assert status('?look=1')['unknown'] == []
 
 
 def test_searching_for_other_devices_without_libusb_finds_none(monkeypatch):
