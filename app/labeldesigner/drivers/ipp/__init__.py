@@ -98,6 +98,23 @@ def ask(device: str, attributes=ASKED) -> dict:
     return ipp.get_printer_attributes(printer.host, printer.port, printer.path, attributes, TIMEOUT, printer.tls)
 
 
+def printer_errors(attributes: dict) -> list[str]:
+    """Messages for the reasons why the printer cannot print: those of
+    REASON_MESSAGES, and the keyword of any other with the suffix -error.
+    CUPS tells reasons of no suffix while it prints, e.g.
+    cups-waiting-for-job-completed."""
+    reasons = attributes.get('printer-state-reasons') or []
+    found = []
+    for reason in reasons if isinstance(reasons, list) else [reasons]:
+        if not isinstance(reason, str):
+            continue
+        keyword = reason.removesuffix('-error')
+        message = ipp.REASON_MESSAGES.get(keyword, keyword if reason.endswith('-error') else '')
+        if message and message not in found:
+            found.append(message)
+    return found
+
+
 def told_status(device: str, model: str, attributes: dict) -> dict:
     """Status of the printer of the attributes it told, kept for when it
     does not answer."""
@@ -106,7 +123,7 @@ def told_status(device: str, model: str, attributes: dict) -> dict:
     if isinstance(name, str) and name.strip():
         state['device_name'] = ' '.join(name.split())[:MAX_NAME]
     state['media_width'], state['media_length'], state['media_type'] = ipp.loaded_media(attributes.get('media-col-ready'))
-    state['errors'] = ipp.state_errors(attributes)
+    state['errors'] = printer_errors(attributes)
     printer_state = attributes.get('printer-state')
     devices.set_state(state, printer_state == ipp.PROCESSING, printer_state == ipp.STOPPED)
     devices.status_cache[devices.lock_key(device)] = state
@@ -149,9 +166,9 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
             return {ipp.CANCELED: CANCELED, ipp.ABORTED: ABORTED, ipp.HELD: HELD}[state]
         try:
             # Waiting or printing: the printer may tell why it does not go on
-            errors = ipp.state_errors(ask(device, ipp.STATUS_ATTRIBUTES))
-            if errors:
-                return f"The printer reports: {', '.join(errors)}, it prints the label once this is fixed"
+            problems = printer_errors(ask(device, ipp.STATUS_ATTRIBUTES))
+            if problems:
+                return f"The printer reports: {', '.join(problems)}, it prints the label once this is fixed"
             if time.monotonic() > deadline:
                 return NOT_FINISHED
             time.sleep(JOB_POLL)

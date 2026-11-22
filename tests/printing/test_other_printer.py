@@ -359,6 +359,11 @@ def test_printer_that_does_not_tell_its_roll(tmp_path, fake):
     (ipp.PROCESSING, ('none',), devices.BUSY_STATUS_TYPE, []),
     (ipp.STOPPED, ('media-empty-error', 'media-low-warning'), 'Error occurred', ['There are no labels in the printer']),
     (ipp.STOPPED, ('paused',), 'Error occurred', ['The printer is paused']),
+    # Other reasons count only as errors, named by their keyword
+    (ipp.STOPPED, ('toner-gone-error', 'marker-supply-low-report'), 'Error occurred', ['toner-gone']),
+    # A queue of CUPS while it prints
+    (ipp.PROCESSING, ('cups-waiting-for-job-completed', 'connecting-to-device'), devices.BUSY_STATUS_TYPE, []),
+    (ipp.IDLE, ('offline-report', 'cups-insecure-filter-warning'), 'Reply to status request', []),
 ])
 def test_status_of_the_printer(fake, printer_state, reasons, status_type, errors):
     fake.printer = [printer_attributes(printer_state=printer_state, reasons=reasons)]
@@ -459,11 +464,25 @@ def test_printer_that_takes_none_of_the_formats(tmp_path, fake):
     assert fake.jobs() == []
 
 
-def test_job_is_not_sent_to_a_printer_with_an_error(tmp_path, fake):
-    fake.printer = [printer_attributes(printer_state=ipp.STOPPED, reasons=('cover-open-error',))]
+@pytest.mark.parametrize('reasons, message', [
+    (('cover-open-error',), 'The printer reports: The cover is open'),
+    (('toner-gone-error',), 'The printer reports: toner-gone'),
+])
+def test_job_is_not_sent_to_a_printer_with_an_error(tmp_path, fake, reasons, message):
+    fake.printer = [printer_attributes(printer_state=ipp.STOPPED, reasons=reasons)]
     client = client_of(tmp_path, fake)
-    assert outcome(client, print_label(client)) == ('failed', 'The printer reports: The cover is open')
+    assert outcome(client, print_label(client)) == ('failed', message)
     assert fake.jobs() == []
+
+
+def test_queue_of_cups_prints_while_it_waits_for_its_jobs(tmp_path, fake):
+    # CUPS tells these while a job prints and for a while after it
+    fake.printer = [printer_attributes(printer_state=ipp.PROCESSING, reasons=('cups-waiting-for-job-completed', 'connecting-to-device'))]
+    fake.states = [ipp.JOB_PROCESSING, ipp.COMPLETED]
+    client = client_of(tmp_path, fake)
+    for _ in range(2):
+        assert outcome(client, print_label(client)) == ('printed', '')
+    assert len(fake.jobs()) == 2
 
 
 @pytest.mark.parametrize('states, expected', [
