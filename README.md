@@ -11,7 +11,8 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Vendor | Printers | Labels |
 |---|---|---|
 | Brother | PT-E550W, PT-P700, PT-P710BT (USB, Bluetooth), PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
-| Brother | PT-P900W, PT-P910BT (USB, Bluetooth), PT-P950NW | TZe tapes 18 and 36 mm wide |
+| Brother | PT-P900, PT-P900W, PT-P910BT (USB, Bluetooth), PT-P950NW | TZe tapes 18 and 36 mm wide |
+| Brother | PT-D410 (USB), PT-D460BT, PT-D610BT, PT-E310BT, PT-E560BT (USB, Bluetooth) | TZe tapes 6 to 18 mm wide, up to 24 mm on the PT-D610BT and PT-E560BT, cut by hand |
 | Brother | QL-500, QL-550, QL-560, QL-570, QL-580N, QL-600, QL-650TD, QL-700, QL-710W, QL-720NW | up to 62 mm wide |
 | Brother | QL-800, QL-810W, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
