@@ -8,19 +8,22 @@ import socket
 import struct
 import sys
 import termios
+import threading
 import time
 import types
+from dataclasses import replace
 
 import pytest
 
 from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import backends, devices, niimbot, transports
 from app.labeldesigner.drivers.base import Driver
-from app.labeldesigner.drivers.brother import usb as brother_usb
+from app.labeldesigner.drivers.brother import models as brother_models, usb as brother_usb
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_bluetooth import Management, event, found
 from tests.printing.test_niimbot import FakePrinter
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
+from tests.printing.test_printer import _status_packet
 from tests.printing.test_usb_backends import Endpoint, USBError, USBTimeoutError
 
 MAC = '00:00:5E:00:53:01'
@@ -312,7 +315,40 @@ def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
     assert off.tries == 0
 
 
-def test_brother_printer_on_bluetooth_that_is_off_is_not_paged_again(tmp_path, off):
+@pytest.fixture
+def brother_bluetooth(monkeypatch):
+    """The QL-820NWB as a model with Bluetooth, which no row tells yet."""
+    monkeypatch.setitem(brother_models.MODELS, 'QL-820NWB', replace(brother_models.MODELS['QL-820NWB'], bluetooth=True))
+
+
+def test_brother_model_without_bluetooth_is_not_reached_on_bluetooth(tmp_path, off):
+    # Told at once as before Bluetooth was taken, e.g. with the default model
+    client = make_client(tmp_path, printer=DEVICE)
+    for _ in range(2):
+        assert client.get(STATUS).get_json()['printers'][0]['errors'] == ['The printer is switched off or not connected']
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='62'))
+    assert outcome(client, response) == ('failed', 'Could not send the label to the printer: The printer is switched off or not connected')
+    assert off.tries == 0
+
+
+def test_brother_model_with_bluetooth_is_reached_over_rfcomm(tmp_path, rfcomm, brother_bluetooth):
+    peer, theirs = rfcomm
+    told = bytearray(_status_packet(0x00))
+    told[3], told[4] = 0x34, 0x41
+
+    def answer():
+        theirs.settimeout(5)
+        if theirs.recv(64) == b'\x1b\x69\x53':
+            theirs.sendall(bytes(told))
+    thread = threading.Thread(target=answer, daemon=True)
+    thread.start()
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    state = client.get(STATUS).get_json()['printers'][0]
+    thread.join(5)
+    assert (state['errors'], state['model']) == ([], 'QL-820NWB') and peer.addresses == [(MAC, 1)]
+
+
+def test_brother_printer_on_bluetooth_that_is_off_is_not_paged_again(tmp_path, off, brother_bluetooth):
     # Paging it takes the radio for seconds, as for the other printers on Bluetooth
     client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
     for _ in range(2):
@@ -322,7 +358,7 @@ def test_brother_printer_on_bluetooth_that_is_off_is_not_paged_again(tmp_path, o
     assert off.tries == 2
 
 
-def test_brother_printer_on_bluetooth_is_asked_again_once_it_printed(tmp_path, off, monkeypatch):
+def test_brother_printer_on_bluetooth_is_asked_again_once_it_printed(tmp_path, off, brother_bluetooth, monkeypatch):
     client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
     client.get(STATUS)
     monkeypatch.setattr(brother_usb, 'send_job', lambda data, device, lengths: {'did_print': True, 'ready_for_next_job': True})

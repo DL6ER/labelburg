@@ -3,6 +3,7 @@
 (network.py). Based on brother_ql by Philipp Klaus and its fork
 brother_ql-inventree by Matthias Mair, both GPLv3."""
 
+import errno
 import logging
 import re
 
@@ -14,6 +15,13 @@ from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MO
                      RED_SPEED, length_problem, longest_label, resolution_problem)
 
 logger = logging.getLogger(__name__)
+
+
+def _without_bluetooth(device: str, model: str):
+    """Refuse a printer on bt:// of a model without Bluetooth, without
+    contacting it, as a device file that is not there."""
+    if device.startswith('bt://') and not getattr(MODELS.get(model), 'bluetooth', False):
+        raise FileNotFoundError(errno.ENOENT, 'No such file or directory', device)
 
 
 class BrotherRaster(Driver):
@@ -92,6 +100,7 @@ class BrotherRaster(Driver):
         if device.startswith('tcp://'):
             return network.query_network_status(device, model, label_printers_only=unconfirmed)
         if device.startswith('bt://'):
+            _without_bluetooth(device, model)
             # One switched off is not paged at every status query, it takes the radio
             return self.noted_status(device, lambda: usb.query_status(device, model))
         return usb.query_status(device, model)
@@ -119,6 +128,7 @@ class BrotherRaster(Driver):
         IPP status of a network printer tell whether it was printed."""
         device = queue.device_specifier
         try:
+            _without_bluetooth(device, queue.model)
             network_printer = device.startswith('tcp://')
             if network_printer:
                 # Not sent to a printer that cannot take it, e.g. with an
