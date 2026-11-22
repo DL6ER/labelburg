@@ -2410,11 +2410,25 @@ def _date_blanks(data: dict) -> list[str]:
     return names
 
 
+def _other_dates_now(entry: dict) -> bool:
+    """Whether a label printed shows other dates or times made now, with the
+    label settings of now, than as it printed, e.g. not printed earlier
+    today with a date alone."""
+    data = entry.get('data') or {}
+    try:
+        then = create_label_from_request(dict(data, timestamp=int(_dates_of(entry))), {}, 0, None, dates=entry.get('dates'))
+        return then.dates_shown() != create_label_from_request(data, {}, 0, None).dates_shown()
+    except Exception:
+        current_app.logger.debug('The dates of printed label %s were not made', entry.get('id'), exc_info=True)
+        return True
+
+
 def _entry_told(entry: dict) -> dict:
     """A label printed as /api/history lists it."""
     told_from, detail = print_queue.SOURCES.get(entry.get('source'), ('', ''))
     request_kind, data = entry.get('kind') == 'request', entry.get('data') or {}
-    asks = [ask for ask, asked in (('date', _dated(data)), ('asn', entry.get('asn') is not None)) if request_kind and asked]
+    asks = [ask for ask, asked in (('date', _dated(data) and _other_dates_now(entry)), ('asn', entry.get('asn') is not None))
+            if request_kind and asked]
     return {'id': entry['id'], 'time': datetime.datetime.fromtimestamp(_printed_at(entry), datetime.UTC).strftime('%Y-%m-%dT%H:%M:%SZ'),
             'title': entry.get('title') or 'Label', 'labels': entry.get('labels') or 1, 'copies': entry.get('copies') or 1,
             'date_blanks': _date_blanks(data) if request_kind else [], 'from': told_from, 'from_detail': detail,

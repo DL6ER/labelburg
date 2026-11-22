@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import paperless, print_queue, print_store, refusals, routes
-from tests.helpers import EXAMPLE_FORMDATA, make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client, printed_days_ago
 
 API = '/labeldesigner/api'
 
@@ -126,6 +126,8 @@ def test_printed_again_on_the_printer_chosen_with_the_same_number(client, monkey
         return create(d, files, counter, *args, **kwargs)
     monkeypatch.setattr(routes, 'create_label_from_request', recorded)
     job = printed(client, data=dict(LABEL, text=lines('ASN{{asn:5}}', '{{datetime:%H:%M}}'), print_count='2'))
+    # Printed half a day ago, its time comes out otherwise now
+    printed_days_ago(job, 0.5)
     told = entry(client, job)
     assert told['again_asks'] == ['date', 'asn']
     started = print_store.entry(job)['started_at']
@@ -137,6 +139,7 @@ def test_printed_again_on_the_printer_chosen_with_the_same_number(client, monkey
     assert calls == [(1, 0, int(started)), (1, 1, int(started))]
     assert paperless.next_asn(client.application.config, repo) == 3
     # Printed again, it still asks: the date it printed is kept apart from the label
+    printed_days_ago(same, 0.5)
     assert entry(client, same)['again_asks'] == ['date', 'asn']
     del calls[:]
     printed(client, f'history/{same}/print', data={'printer': 'simulation'})
@@ -146,6 +149,7 @@ def test_printed_again_on_the_printer_chosen_with_the_same_number(client, monkey
     assert calls == [(3, 0, None), (3, 1, None)]
     assert paperless.next_asn(client.application.config, repo) == 5
     assert entry(client, fresh)['from'] == ''
+    printed_days_ago(fresh, 0.5)
     assert entry(client, fresh)['again_asks'] == ['date', 'asn']
 
 
@@ -165,6 +169,7 @@ def test_a_label_with_a_time_of_its_own_keeps_it(client, monkeypatch):
 def test_a_date_blank_left_to_the_day_asks_for_the_date(client):
     def asks(blanks, fields, text='Made {{blank:Day}}'):
         job = printed(client, data=dict(LABEL, text=lines(text), blanks=json.dumps(blanks), fields=json.dumps(fields)))
+        printed_days_ago(job, 1)
         return entry(client, job)['again_asks']
     assert asks({}, {'Day': {'type': 'date'}}) == ['date']
     assert asks({'Day': '+5d'}, {'Day': {'type': 'date'}}) == ['date']
@@ -299,6 +304,7 @@ def test_the_date_blanks_that_follow_the_day_are_told(client):
     fields = {'Day': {'type': 'date'}, 'Best': {'type': 'date', 'default': '+5d'}, 'Made': {'type': 'date'}}
     job = printed(client, data=dict(LABEL, text=lines('{{blank:Day}} {{blank:Best}} {{blank:Made}}'), fields=json.dumps(fields),
                                     blanks=json.dumps({'Made': '2026-11-03'})))
+    printed_days_ago(job, 1)
     told = entry(client, job)
     assert (told['again_asks'], told['date_blanks']) == (['date'], ['Day', 'Best'])
     # A date of its own for each of them, nothing follows the day
@@ -397,3 +403,17 @@ def test_a_label_printed_is_named_by_its_saved_name_else_by_its_first_line_as_pr
     assert entry(client, printed(client, f'history/{by_name}/print', json={'printer': 'simulation', 'blanks': {'Other': 'x'}}))['title'] == 'Pantry jar'
     again = printed(client, f'history/{filled}/print', json={'printer': 'simulation', 'blanks': {'Day': '2026-12-24'}})
     assert entry(client, again)['title'] == 'Opened 12/24/2026'
+
+
+def test_the_date_is_asked_for_only_where_it_comes_out_otherwise_today(client):
+    def asks(text, days=0):
+        job = printed(client, data=dict(LABEL, text=lines(text)))
+        printed_days_ago(job, days)
+        return entry(client, job)['again_asks']
+    # Printed earlier today, the same date comes out
+    assert asks('{{datetime:%d.%m.%Y}}') == []
+    assert asks('{{datetime:%d.%m.%Y}}', days=1) == ['date']
+    # A time comes out otherwise a minute later
+    assert asks('{{datetime:%H:%M}}', days=1 / 1440) == ['date']
+    # Neither a date nor a time
+    assert asks('Jar', days=1) == []

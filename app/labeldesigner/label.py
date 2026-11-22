@@ -82,6 +82,8 @@ _REFUSED_ENV_VARS: set = set()
 _MAX_REFUSED_ENV_VARS = 100
 # A blank, filled in when the label is printed, as the label designer stores it
 BLANK_TEMPLATE = re.compile(r"\{\{blank:([^}]+)\}\}")
+# {{datetime:<format>}}, {{datetime+5d:<format>}} moved from now, see shift_date
+DATETIME_TEMPLATE = re.compile(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}")
 
 
 class TextTooLong(ValueError):
@@ -699,7 +701,7 @@ class SimpleLabel:
         def datetime_replacer(match):
             when = self._now()
             return format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language)
-        substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
+        substitute(DATETIME_TEMPLATE, datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
         if any("{{uuid}}" in piece for piece in pieces):
@@ -788,6 +790,19 @@ class SimpleLabel:
         """The text of a line as printed: a preview may show marks for its
         blanks."""
         return line.get('unmarked', line.get('text', ''))
+
+    def dates_shown(self) -> list[str]:
+        """The dates and times the label shows, made for its time: of
+        {{datetime}} and of its date blanks, e.g. to tell whether it shows
+        others on another day."""
+        shown = []
+        for text in [line.get('text', '') for line in self.input_text or [] if isinstance(line, dict)] + [self._code_text or '']:
+            for match in DATETIME_TEMPLATE.finditer(str(text)):
+                when = self._now()
+                shown.append(format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language))
+            shown += [self._fill_blank(name) for name in BLANK_TEMPLATE.findall(str(text))
+                      if (self._blank_fields.get(name) or {}).get('type') == 'date']
+        return shown
 
     def has_text(self) -> bool:
         """Whether the label has text. A line of blanks left empty has none."""

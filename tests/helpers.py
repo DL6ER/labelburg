@@ -205,3 +205,18 @@ class Answering:
     def close(self):
         self.closed.set()
         self.server.close()
+
+
+def printed_days_ago(job_id: str, days: float):
+    """The label printed of a job kept as printed days ago, e.g. to tell
+    whether it shows another date today."""
+    from app.labeldesigner import print_store
+    path = os.path.join(print_store.history_folder(), print_store.HISTORY_FILE)
+    with print_store._history_locked():
+        with open(path, encoding='utf-8') as fh:
+            entries = [json.loads(line) for line in fh]
+        for entry in entries:
+            if entry['id'] == job_id:
+                entry['started_at'] = entry.get('started_at', entry['ended_at']) - days * 86400
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(''.join(json.dumps(entry) + '\n' for entry in entries))

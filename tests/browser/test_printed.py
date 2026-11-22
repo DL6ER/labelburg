@@ -12,6 +12,7 @@ import pytest
 
 from app.labeldesigner import printer_settings
 from tests.browser.helpers import clear_printed, png
+from tests.helpers import printed_days_ago
 from tests.browser.test_editor import sent, type_label, wait_for_preview
 from tests.browser.test_settings import open_settings
 
@@ -107,8 +108,8 @@ def test_print_again_asks_only_what_would_change(page, server, asks, same, other
 
 
 def test_a_label_printed_with_a_date_asks_for_it(page, server):
-    # As the server tells it, without a stand-in
-    print_over_the_api(server, 'Opened {{datetime:%d.%m.%Y}}')
+    # As the server tells it, without a stand-in, printed on another day
+    printed_days_ago(print_over_the_api(server, 'Opened {{datetime:%d.%m.%Y}}'), 1)
     open_settings(page, 'printed')
     rows(page)
     page.click('#setHist [data-again]')
@@ -200,6 +201,9 @@ def test_a_date_blank_printed_from_the_editor_follows_the_day(page, server, blan
     # The preview asks the same, so that both show the same day
     assert json.loads(sent(previewed.value)['blanks']) == sent_blanks
     page.wait_for_selector('#toast:has-text("Printed 1 label")')
+    # Printed on another day, a date that follows the day comes out otherwise
+    with urlopen(server + '/labeldesigner/api/history?limit=1') as r:
+        printed_days_ago(json.load(r)['entries'][0]['id'], 1)
     with urlopen(server + '/labeldesigner/api/history?limit=1') as r:
         assert json.load(r)['entries'][0]['again_asks'] == asks
 
@@ -266,3 +270,12 @@ def test_labels_printed_are_listed_by_their_saved_name_else_by_their_first_line(
     print_jar(page, 'Beans')
     open_settings(page, 'printed')
     assert [row.split('\n')[0] for row in rows(page)] == ['Jar Beans', 'Rice jar']
+
+
+def test_a_label_printed_earlier_today_with_a_date_asks_nothing(page, server):
+    print_over_the_api(server, 'Opened {{datetime:%d.%m.%Y}}')
+    open_settings(page, 'printed')
+    rows(page)
+    with page.expect_request('**/api/history/*/print'):
+        page.click('#setHist [data-again]')
+    assert page.locator('[role=alertdialog]').count() == 0

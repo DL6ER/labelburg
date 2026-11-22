@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 
 from tests.browser.helpers import clear_printed, png
+from tests.helpers import printed_days_ago
 from tests.browser.test_demo_printer import MODEL, designer  # noqa: F401
 from tests.browser.test_editor import changed_preview, editor, sent, type_label, wait_for_preview  # noqa: F401
 from tests.browser.test_settings import back_to_the_editor, open_settings
@@ -498,6 +499,8 @@ def test_a_label_printed_with_the_day_asks_in_the_templates_unless_its_date_is_s
     with editor.expect_request('**/api/print'):
         editor.click('#print')
     editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+    # Printed on another day, its date comes out otherwise today
+    printed_days_ago(editor.evaluate('() => labelEditor.S.history[0].job'), 1)
     editor.click('#templates')
     editor.click('.tpl-nav [data-cat="printed"]')
     editor.wait_for_function("() => location.hash === '#templates/printed'")
