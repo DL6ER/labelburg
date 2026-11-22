@@ -698,3 +698,33 @@ def test_the_first_status_after_a_restart_is_that_of_the_roll_chosen(tmp_path, m
     shown = next(p for p in found.get_json()['printers'] if p['path'] == device)
     assert (shown['model'], shown['errors']) == ('DYMO/LabelWriter-450-Twin-Turbo', ['No labels are in the printer'])
     assert printer.written == [ESC * 85 + b'\x1bq2\x1bA']
+
+
+@pytest.mark.parametrize('serial', [True, False], ids=['kept by serial number', 'kept by device'])
+def test_the_first_status_after_a_restart_of_a_twin_turbo_the_search_finds(tmp_path, monkeypatch, printer, serial):
+    from app.labeldesigner import printer as printer_module, routes
+    printer.by_roll, printer.roll = {b'1': READY, b'2': 0xa1}, b'1'
+    device_id = 'MFG:DYMO;MDL:LabelWriter 450 Twin Turbo;' + ('SERN:01010112345;' if serial else '')
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: device_id)
+    if serial:
+        device = 'usb://0x0922:0x0022/01010112345'
+        monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([device], []))
+    else:
+        (tmp_path / 'lp0').write_bytes(b'')
+        device = f'file://{tmp_path}/lp0'
+        monkeypatch.setattr(printer_module, 'USB_PRINTER_DEVICES', [str(tmp_path / 'lp0')])
+    client = make_client(tmp_path, empty_repo=True, printer='?')
+    if serial:
+        assert client.post('/labeldesigner/api/settings', data={'printer': device, 'side': 'right'}).status_code == 200
+    else:
+        from app.labeldesigner import printer_settings
+        (tmp_path / 'label_repo' / printer_settings.FILE).write_text(json.dumps({'printers': {str(tmp_path / 'lp0'): {'side': 'right'}}}))
+    # The server starts again
+    monkeypatch.setattr(dymo, '_sides', {})
+    monkeypatch.setattr(routes, '_NOTED', set())
+    monkeypatch.setattr(printer_module, '_cached_printers', [])
+    monkeypatch.setattr(printer_module, '_last_scan_ts', 0)
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    shown = next(p for p in found if p['path'] == device)
+    assert (shown['model'], shown['errors']) == ('DYMO/LabelWriter-450-Twin-Turbo', ['No labels are in the printer'])
+    assert printer.written == [ESC * 85 + b'\x1bq2\x1bA']

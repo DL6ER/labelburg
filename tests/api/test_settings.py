@@ -437,3 +437,15 @@ def test_a_demo_printer_of_another_model_forgets_the_roll(tmp_path):
     assert client.post(URL, data={'printer': 'simulation', 'side': 'right'}).status_code == 200
     r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'DYMO/LabelWriter-450'})
     assert 'side' not in r.get_json()['settings']
+
+
+def test_the_settings_of_every_printer_kept_by_its_device():
+    data = {'printers': {'/dev/usb/lp0': {'side': 'right', 'cut': 'none'}, 'tcp://192.0.2.1:9100': {'side': ['right']},
+                         'usb:LabelWriter 450 Twin Turbo/01010112345': {'side': 'left'}, 'simulation': {'demo_model': 'QL-800'},
+                         'usb:QL-700/000L9Z378866': {'cut': 'last'}},
+            'seen': {'usb://0x0922:0x0022/01010112345': 'usb:LabelWriter 450 Twin Turbo/01010112345', '/dev/usb/lp1': 7},
+            'quality': 'fast'}
+    # Without asking a printer: one of a serial number where it was seen last, a value written wrong by hand left out
+    assert printer_settings.by_device(data) == {
+        '/dev/usb/lp0': {'side': 'right', 'cut': 'none', 'quality': 'fast'}, 'tcp://192.0.2.1:9100': {'quality': 'fast'},
+        'usb://0x0922:0x0022/01010112345': {'side': 'left', 'quality': 'fast'}}

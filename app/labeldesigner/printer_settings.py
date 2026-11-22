@@ -158,7 +158,24 @@ def of_printer(data: dict, device: str, model: str | None = None) -> dict:
     """The settings of a printer, the common ones with its own. How it
     finds its labels only where it is one of SENSINGS, e.g. not after a hand
     edit, and, given its model, where that is told it; its roll likewise."""
-    printer = _key(data, device)
+    return _settings(data, _key(data, device), model)
+
+
+def by_device(data: dict) -> dict[str, dict]:
+    """The settings of every printer kept, see of_printer(), by its lock key:
+    the device they were kept for, or where the printer was seen last, as
+    _key() takes it without asking the printer, e.g. to tell the drivers
+    before the first status after a restart."""
+    printers = data['printers']
+    keys = {key: key for key in printers if not key.startswith(('usb:', 'serial:')) and key != DEMO}
+    seen = data.get('seen')
+    if isinstance(seen, dict):
+        keys.update({device: printer for device, printer in seen.items() if isinstance(printer, str) and printer in printers})
+    return {device: _settings(data, printer, None) for device, printer in keys.items()}
+
+
+def _settings(data: dict, printer: str, model: str | None) -> dict:
+    """The settings of the printer of the key, see of_printer()."""
     own = data['printers'].get(printer)
     demo = demo_model(data) if printer == DEMO else None
     settings = {**{name: data[name] for name in COMMON if name in data},

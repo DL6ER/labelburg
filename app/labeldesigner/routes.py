@@ -1496,6 +1496,11 @@ def openapi_spec():
     return jsonify(OPENAPI_SPEC)
 
 
+# The folders of labels whose printer settings the drivers were told, all
+# of them once, see Driver.note_settings()
+_NOTED: set[str] = set()
+
+
 @bp.route('/api/printer_status', methods=['GET'])
 def get_printer_status():
     # Printers on Bluetooth that did not answer are looked for again only
@@ -1505,7 +1510,12 @@ def get_printer_status():
     added = _added_printers()
     kept = _kept_settings()
     # Also before the first status after a restart: a Twin Turbo is asked for
-    # the roll chosen
+    # the roll chosen, also one the search finds
+    repo = _get_repo_dir()
+    if repo not in _NOTED:
+        _NOTED.add(repo)
+        for device, settings in printer_settings.by_device(kept).items():
+            drivers.note_settings(device, settings)
     for device in [device for device, _ in _configured_devices()] + [device for _, device, _ in added]:
         drivers.note_settings(device, printer_settings.of_printer(kept, device))
     # One printer, e.g. on USB, which the label designer asks every 2 s
