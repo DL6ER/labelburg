@@ -169,8 +169,10 @@ class FakeVC500W:
                 if refusal:
                     connection.sendall(answer(code=1, comment=refusal))
                     continue
-                connection.sendall(answer(comment='ready to receive'))
+                # Taken before it is sent: the label designer cannot read it
+                # earlier, also where this thread is held up after sending
                 self.ready_at.append(time.monotonic())
+                connection.sendall(answer(comment='ready to receive'))
                 size = int(re.search(r'<datasize>(\d+)</datasize>', command).group(1))
                 while not buffer:
                     data = connection.recv(65536)
