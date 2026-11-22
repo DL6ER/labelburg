@@ -2,6 +2,7 @@
 small label written by hand from niimbluelib's source at commit 35110a71
 (https://github.com/MultiMote/niimbluelib), files under src/, how each tells
 that the label was printed, and the task of each model."""
+import socket
 import time
 from types import SimpleNamespace
 
@@ -443,6 +444,35 @@ def test_print_status_unanswered_is_asked_once_more(monkeypatch):
     message, sent = printed(monkeypatch, 'H1S', ROWS_96, {0xa3: [None, p(0xb3, [0, 1, 100, 100])]})
     assert message == ''
     assert sent[-3:] == [p(0xa3, [1]), p(0xa3, [1]), p(0xf3, [1])]
+
+
+class Silent(Printer):
+    """A printer whose read of no answer waits as long as it may."""
+    timeout = None
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def recv(self, size):
+        if not self.pending:
+            time.sleep(self.timeout)
+            raise socket.timeout
+        return super().recv(size)
+
+
+def test_start_of_a_page_unanswered_is_waited_for_as_niimbluelib_waits(monkeypatch):
+    # B21L2BPrintTask.ts:21 pageStart() (protocol.ts:437-440) within the
+    # DEFAULT_PACKET_TIMEOUT of 1 s (protocol.ts:37), not ANSWER_WAIT
+    assert protocol.PACKET_WAIT == 1
+    monkeypatch.setattr(protocol, 'PACKET_WAIT', 0.05)
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 1)
+    printer = Silent({0x40: p(0x48, [3, 1]), 0xdc: B21S_BEAT, **TAKEN, 0x03: None})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B21_L2B', label_size='niimbot40x30')
+    started = time.monotonic()
+    assert niimbot.DRIVER.send(queue, [ROWS_320]) == 'The printer does not answer'
+    assert time.monotonic() - started < 1
+    assert [packet[2] for packet in printer.sent].count(0x03) == 5
 
 
 @pytest.mark.parametrize('model, answers, sent_once', [

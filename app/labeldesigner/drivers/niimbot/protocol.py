@@ -48,10 +48,11 @@ LID_OPEN = 0
 # 4f 00 04 00 01 closed with a roll, 20 17 00 54 00 54 00 00 4f 01 04 01 00
 # open, 20 17 00 85 00 85 00 00 4f 00 04 01 00 closed without a roll.
 # niimbluelib's print tasks wait for each answer up to 10 s within a page,
-# the packet of a printEnd after a failed label up to 1 s, and 10 ms before
-# each packet (pageTimeoutMs, DEFAULT_PACKET_TIMEOUT, packetIntervalMs)
+# up to 1 s in Utils.doUntilTrue() and for a printEnd after a failed label,
+# and 10 ms before each packet (pageTimeoutMs, DEFAULT_PACKET_TIMEOUT of
+# src/packets/protocol.ts:37, packetIntervalMs)
 PAGE_WAIT = 10
-END_WAIT = 1
+PACKET_WAIT = 1
 PACKET_GAP = 0.01
 # The answer to each packet of those tasks, by niimbluelib's commandsMap
 ANSWERS = {0x01: 0x02, 0x03: 0x04, 0x13: 0x14, 0x15: 0x16, 0x20: 0x30, 0x21: 0x31, 0x23: 0x33, 0x86: 0xd3,
@@ -455,11 +456,11 @@ def _request(c: Connection, command: int, data: bytes = b'\x01', wait: float | N
 
 def _until_true(c: Connection, command: int, attempts: int, error: NiimbotError):
     """Utils.doUntilTrue(): the packet until the printer answers 1, attempts
-    times at most, PAGE_POLL seconds apart after an answer of 0. Raises the
-    last error of an attempt, else error."""
+    times at most, PAGE_POLL seconds apart after an answer of 0, each answer
+    waited for PACKET_WAIT. Raises the last error of an attempt, else error."""
     for _ in range(attempts):
         try:
-            if _request(c, command)[:1] == b'\x01':
+            if _request(c, command, wait=PACKET_WAIT)[:1] == b'\x01':
                 return
             time.sleep(PAGE_POLL)
         except NiimbotError as e:
@@ -521,6 +522,6 @@ def _until_page_index(c: Connection):
 def _end_quietly(c: Connection):
     """printEnd after a failed label, its answer not waited for long."""
     try:
-        _request(c, 0xf3, wait=END_WAIT)
+        _request(c, 0xf3, wait=PACKET_WAIT)
     except (NiimbotError, OSError):
         pass
