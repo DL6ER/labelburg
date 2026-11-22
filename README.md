@@ -15,6 +15,8 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Brother | QL-500, QL-550, QL-560, QL-570, QL-580N, QL-600, QL-650TD, QL-700, QL-710W, QL-720NW | up to 62 mm wide |
 | Brother | QL-800, QL-810W, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
+| Brother | TD-2020, TD-2120N, TD-2125N, TD-2125NWB, TD-2130N, TD-2135N, TD-2135NWB, TD-2310D, TD-2320D, TD-2320DSA, TD-2350D, TD-2350DSA (USB or network) | 57 and 58 mm wide rolls and die-cut labels from 30 x 30 to 60 x 60 mm, torn off, on the TD-2310D to TD-2350DSA also cut with the cutter unit |
+| Brother | TD-4210D, TD-4215D, TD-4410D, TD-4415D, TD-4420DN, TD-4425DN, TD-4455DNWB, TD-4520DN, TD-4525DN, TD-4550DNWB, TD-4555DNWB (USB or network) | 58 to 102 mm wide rolls and die-cut labels up to 4 x 6 in, torn off or cut with the cutter unit |
 | Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
 | Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
