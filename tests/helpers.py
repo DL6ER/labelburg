@@ -15,6 +15,7 @@ from werkzeug.datastructures import FileStorage
 from app import create_app
 from config import Config
 from app.labeldesigner import print_queue
+from app.labeldesigner.routes import restore_print_queue
 
 
 UPDATE_IMAGES = False
@@ -69,6 +70,8 @@ def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = No
         os.makedirs(repo_dir, exist_ok=True)
         config = type('EmptyRepo', (Config,), {'LABEL_REPOSITORY_DIR': str(repo_dir)})
     app = create_app(config)
+    # As the server starts, the jobs left in its queue print
+    restore_print_queue(app)
     # Bind app context
     app.app_context().push()
     app.config['TESTING'] = True

@@ -476,7 +476,9 @@ def test_a_folder_of_labels_that_cannot_be_made_does_not_stop_the_server(tmp_pat
     monkeypatch.setattr(print_store, 'FOLDER', None)
     (tmp_path / 'file').write_text('not a folder')
     config = type('Unwritable', (Config,), {'LABEL_REPOSITORY_DIR': str(tmp_path / 'file' / 'labels')})
-    client = create_app(config).test_client()
+    app = create_app(config)
+    routes.restore_print_queue(app)
+    client = app.test_client()
     assert client.get('/labeldesigner/api/openapi.json').status_code == 200
     assert not print_store.is_open()
     assert any('not kept' in message for message in caplog.messages) == enabled
@@ -586,3 +588,26 @@ def routes_pdf() -> bytes:
     out = io.BytesIO()
     Image.new('L', (100, 50), 0).save(out, 'PDF')
     return out.getvalue()
+
+
+def test_a_process_without_the_queue_takes_it_once_the_other_one_left(store, monkeypatch):
+    monkeypatch.setattr(print_store, 'LOCK_RETRY', 0.05)
+    print_store.queued(record('left', images=0), [], None)
+    other = os.open(store / print_store.QUEUE / print_store.LOCK_FILE, os.O_RDWR)
+    taken = threading.Event()
+    found = []
+
+    def restore(records):
+        found.extend(rec['id'] for rec in records)
+        taken.set()
+    try:
+        print_store.close()
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert print_store.start(str(store), restore) == []
+        time.sleep(0.2)
+        assert not taken.is_set() and print_store.queued(record('mine'), [], None) is False
+    finally:
+        # E.g. the worker of gunicorn that is replaced exits
+        os.close(other)
+    assert taken.wait(5)
+    assert found == ['left'] and print_store.queued(record('new'), [], None) is True

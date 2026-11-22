@@ -47,6 +47,9 @@ HISTORY_IMAGE_BYTES = 200 * 1024 * 1024
 # A job is kept in memory only where the disk has less room
 MIN_FREE_BYTES = 50 * 1024 * 1024
 LOCK_TIMEOUT = 10
+# How often a process without the queue tries to take it, e.g. the new worker
+# of gunicorn while the one it replaces still prints
+LOCK_RETRY = 10
 
 # Off in the tests, unless a test opens it
 ENABLED = True
@@ -71,6 +74,8 @@ _base = None
 # The lock of the queue while this process keeps it on disk
 _queue_fd = None
 _warned = False
+# Changes with each start and close, a retry of an earlier one gives up
+_opened = 0
 # Lines in the history file, bytes of the images kept and when the oldest
 # entry ended, as this process counted them
 _lines = 0
@@ -78,10 +83,12 @@ _image_bytes = 0
 _oldest = None
 
 
-def start(folder: str) -> list[dict]:
+def start(folder: str, restore=None) -> list[dict]:
     """Open the store in folder, FOLDER where it is set. The jobs left in the
     queue, oldest first: those waiting and the one that printed. Jobs that
-    cannot be read are moved to broken/, never raised."""
+    cannot be read are moved to broken/, never raised. Where another process
+    keeps the queue, this one takes it once that one left, and calls
+    restore() with the jobs left then."""
     global _base, _queue_fd
     if not ENABLED:
         return []
@@ -95,25 +102,58 @@ def start(folder: str) -> list[dict]:
         return []
     _base = base
     _count_history()
-    fd = None
     try:
-        fd = os.open(_queue_path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
-        if fcntl is not None and not flock_within(fd, 0):
-            os.close(fd)
-            logger.info('Another process of the server keeps the print queue on disk, this one keeps its own in memory')
-            return []
+        _queue_fd = _locked_queue()
     except OSError as e:
-        if fd is not None:
-            os.close(fd)
         logger.warning('The print queue is kept in memory only, it cannot be locked: %s', e)
         return []
-    _queue_fd = fd
+    if _queue_fd is None:
+        logger.info('Another process of the server keeps the print queue on disk, this one keeps its own in memory until it leaves')
+        if restore is not None:
+            threading.Thread(target=_take_queue, args=(_opened, restore), name='print-store-lock', daemon=True).start()
+        return []
     return _left_in_queue()
+
+
+def _locked_queue() -> int | None:
+    """The lock of the queue opened and taken, None where another process
+    holds it."""
+    fd = os.open(_queue_path(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if fcntl is None or flock_within(fd, 0):
+            return fd
+    except BaseException:
+        os.close(fd)
+        raise
+    os.close(fd)
+    return None
+
+
+def _take_queue(opened: int, restore):
+    """Take the queue once the process that holds it left, while the store
+    stays as it was opened, and restore() the jobs left in it."""
+    global _queue_fd
+    while True:
+        time.sleep(LOCK_RETRY)
+        with _lock:
+            if opened != _opened:
+                return
+            try:
+                _queue_fd = _locked_queue()
+            except OSError as e:
+                logger.warning('The print queue is kept in memory only, it cannot be locked: %s', e)
+                return
+            if _queue_fd is not None:
+                left = _left_in_queue()
+                break
+    logger.info('This process keeps the print queue on disk now')
+    restore(left)
 
 
 def close():
     """Close the store, e.g. for the next test."""
-    global _base, _queue_fd, _warned, _lines, _image_bytes, _oldest
+    global _base, _queue_fd, _warned, _lines, _image_bytes, _oldest, _opened
+    _opened += 1
     if _queue_fd is not None:
         os.close(_queue_fd)
     _base = _queue_fd = _oldest = None

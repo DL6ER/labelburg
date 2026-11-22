@@ -1024,12 +1024,20 @@ def _store_hooks(record: dict, images: list, preview: bytes | None, on_disk: boo
 
 def restore_print_queue(app):
     """Open the print queue kept on disk, see print_store, and queue the jobs
-    left in it once more. The one that printed as the server stopped may not
+    left in it once more, once the configuration is final: the server does as
+    it starts to serve. The one that printed as the server stopped may not
     have printed, it is not printed again."""
     with app.app_context():
         # Made by the store, which tells where it cannot be made
-        left = print_store.start(_repo_dir_name())
-        keep = _keeping() if left else True
+        left = print_store.start(_repo_dir_name(), lambda records: _restore(app, records))
+    _restore(app, left)
+
+
+def _restore(app, left: list[dict]):
+    if not left:
+        return
+    with app.app_context():
+        keep = _keeping()
     for record in left:
         try:
             if record['state'] == 'printing':
