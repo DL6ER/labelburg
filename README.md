@@ -21,6 +21,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
+| Office printer | Any office printer (network over IPP, or a queue of CUPS) | A4 sheets of labels, e.g. Avery L7160 or Herma 4226, then US Letter ones, e.g. Avery 5160, and plain paper with thin lines to cut along |
 
 Label printers set up in CUPS, and other printers that take print jobs over IPP, e.g. AirPrint label printers, can be added in the Settings as "Other printer".
 
