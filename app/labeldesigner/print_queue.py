@@ -257,6 +257,8 @@ def _add(device, run, check: bool, *, title, labels, source, preview, size, expl
     key = key_of(device)
     with _lock:
         _prune()
+        if job_id in _jobs:
+            raise ValueError(f'Print job {job_id} is queued already')
         line = _lines.setdefault(key, _Line())
         refused = _no_room(line, size) if check else ''
         if refused:

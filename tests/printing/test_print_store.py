@@ -704,3 +704,23 @@ def test_a_job_whose_images_fail_in_any_way_prints_from_memory(server, monkeypat
     assert response.status_code == 200 and ended(response.get_json()['job']).state == 'printed'
     assert files(os.path.join(repo(server), print_store.QUEUE)) == []
     assert any('kept in memory only' in message for message in caplog.messages)
+
+
+def test_a_job_queued_while_the_queue_is_taken_over_is_not_restored(store, monkeypatch):
+    monkeypatch.setattr(print_store, 'LOCK_RETRY', 0.05)
+    other = os.open(store / print_store.QUEUE / print_store.LOCK_FILE, os.O_RDWR)
+    found, taken, kept = [], threading.Event(), []
+    print_store.close()
+    fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert print_store.start(str(store), lambda records: (found.extend(rec['id'] for rec in records), taken.set())) == []
+    history_ids = print_store._history_ids
+
+    def request_meanwhile():
+        # A request of this process while the jobs left are listed
+        kept.append(print_store.queued(record('mine', images=0), [], None))
+        return history_ids()
+    monkeypatch.setattr(print_store, '_history_ids', request_meanwhile)
+    os.close(other)
+    assert taken.wait(5)
+    # Kept in memory, it prints once
+    assert found == [] and kept == [False]

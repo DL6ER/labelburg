@@ -578,3 +578,14 @@ def test_restored_jobs_keep_their_ids_and_wait_beyond_the_limit():
     assert print_queue.get('kept') is restored and print_queue.full(USB)
     release.set()
     assert restored.done.wait(WAIT) and order == ['restored']
+
+
+def test_a_job_is_never_queued_twice():
+    run, started, release = blocked()
+    job = add(USB, run, job_id='twice')
+    assert started.wait(WAIT)
+    with pytest.raises(ValueError):
+        print_queue.restore(USB, recorder([], 1), job_id='twice', title='Label', labels=1, source='api', explain=explain)
+    release.set()
+    assert job.done.wait(WAIT)
+    assert print_queue.line(USB)['waiting'] == []

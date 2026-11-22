@@ -103,16 +103,19 @@ def start(folder: str, restore=None) -> list[dict]:
     _base = base
     _count_history()
     try:
-        _queue_fd = _locked_queue()
+        fd = _locked_queue()
     except OSError as e:
         logger.warning('The print queue is kept in memory only, it cannot be locked: %s', e)
         return []
-    if _queue_fd is None:
+    if fd is None:
         logger.info('Another process of the server keeps the print queue on disk, this one keeps its own in memory until it leaves')
         if restore is not None:
             threading.Thread(target=_take_queue, args=(_opened, restore), name='print-store-lock', daemon=True).start()
         return []
-    return _left_in_queue()
+    # Listed before jobs of this process are kept, they are not left over
+    left = _left_in_queue()
+    _queue_fd = fd
+    return left
 
 
 def _locked_queue() -> int | None:
@@ -139,12 +142,14 @@ def _take_queue(opened: int, restore):
             if opened != _opened:
                 return
             try:
-                _queue_fd = _locked_queue()
+                fd = _locked_queue()
             except OSError as e:
                 logger.warning('The print queue is kept in memory only, it cannot be locked: %s', e)
                 return
-            if _queue_fd is not None:
+            if fd is not None:
+                # Requests meanwhile keep their jobs in memory, they are not left over
                 left = _left_in_queue()
+                _queue_fd = fd
                 break
     logger.info('This process keeps the print queue on disk now')
     restore(left)
