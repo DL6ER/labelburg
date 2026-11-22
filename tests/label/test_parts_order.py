@@ -10,7 +10,7 @@ import re
 import pytest
 from PIL import Image
 
-from app.labeldesigner.label import check_parts_order
+from app.labeldesigner.label import SMALL_BARCODE_NEXT_TO_IMAGE, check_parts_order
 from tests.helpers import make_client, pixels, verify_image
 from tests.repository.helpers import SAVE_URL
 
@@ -60,8 +60,10 @@ def _overlap(a, b) -> bool:
 
 # Endless tape, endless tape of a fixed length and a die-cut label
 LABELS = {'62': {'label_size': '62'}, '62-80mm': {'label_size': '62', 'label_length': '80'}, '62x29': {'label_size': '62x29'}}
-# Placed in the middle, at the top or bottom, and at 600 dpi
-PLACES = {'center': {}, 'top': {'vertical_align': 'top'}, 'bottom': {'vertical_align': 'bottom'}, 'high_res': {'high_res': '1'}}
+# Placed in the middle, at the top or bottom, and at 600 dpi, where the dots
+# of the code take twice as many dots of the label to scan as well
+PLACES = {'center': {}, 'top': {'vertical_align': 'top'}, 'bottom': {'vertical_align': 'bottom'},
+          'high_res': {'high_res': '1', 'qrcode_size': '8'}}
 
 
 @pytest.mark.parametrize('place', PLACES)
@@ -236,7 +238,9 @@ def test_a_fitted_image_and_code_without_text_keep_their_distance(tmp_path, labe
     client = make_client(tmp_path)
     response = _preview(client, _label(label_size=label_size, orientation=orientation, text='[]', image_text_gap=gap, barcode_type=barcode_type,
                                        code_text='DEF', **values))
-    assert response.status_code == 200 and response.headers.get('X-Label-Warning') is None
+    # Fitted to half of a 29 mm label, the bars of a barcode are too narrow to scan
+    small = barcode_type == 'CODE128' and label_size == '62x29'
+    assert response.status_code == 200 and response.headers.get('X-Label-Warning') == (SMALL_BARCODE_NEXT_TO_IMAGE if small else None)
     distance = int(response.headers['X-Label-Image-Text-Gap'])
     assert distance == int(gap or distance) > 0
     width, height = Image.open(io.BytesIO(response.data)).size

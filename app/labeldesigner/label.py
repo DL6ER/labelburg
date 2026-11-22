@@ -147,6 +147,14 @@ def long_code_warning(length: int) -> str:
     return f"This code makes the label {length} mm long. A QR code, or a fixed size for this code, gives a shorter label."
 
 
+# What the label designer says of a code with dots or bars too narrow to
+# scan, see codes.too_small(). Less text makes larger dots only where the
+# code is fitted, a barcode next to an image is sized with it.
+SMALL_CODE = 'This code may be too small to scan. Make it larger, or put less text into it.'
+SMALL_SIZED_CODE = 'This code may be too small to scan. Make it larger.'
+SMALL_BARCODE_NEXT_TO_IMAGE = 'This code may be too small to scan. Next to an image its size cannot be set: use a QR code, or remove the image.'
+
+
 # The codes of {{datetime:<format>}} the label designer explains. Their
 # examples come from the strftime() that fills in the labels, for a day that
 # tells day and month apart.
@@ -460,6 +468,8 @@ class SimpleLabel:
         self._with_code = with_code
         self._code_scale = 1.0
         self._code_size: tuple[int, int] | None = None
+        # How wide the narrowest dot or bar of the code is, in dots as made
+        self._code_dot = 0.0
         # The distance used, known once the label is generated
         self.image_text_gap = 0
         # Known once the label is generated as well: where the image or code
@@ -1011,6 +1021,14 @@ class SimpleLabel:
             length = round((width if grows_wide else height) / self._dpi * 25.4)
             if length > LONG_CODE_LABEL:
                 self.warnings.append(long_code_warning(length))
+        # A code alone or with text is the image of the label, scaled as one
+        scale = self._code_scale if self._with_code else self._image_scale
+        bar = self.barcode_type not in codes.NAMES
+        if self._draws_code() and not self._code_of_marks and codes.too_small(self._code_dot * scale, self._dpi, bar):
+            if bar and self._with_code:
+                self.warnings.append(SMALL_BARCODE_NEXT_TO_IMAGE)
+            else:
+                self.warnings.append(SMALL_CODE if self._image_fit else SMALL_SIZED_CODE)
 
         logger.debug(f"Image resolution: {width} x {height} px")
         check_image_size(width, height)
@@ -1191,7 +1209,9 @@ class SimpleLabel:
         if not self._code_of_marks:
             codes.check_check_digit(self.barcode_type, value)
         try:
-            return _barcode_image(barcode_class, self.barcode_type, value, self._fore_color)
+            image = _barcode_image(barcode_class, self.barcode_type, value, self._fore_color)
+            self._code_dot = codes.narrowest_bar(self.barcode_type, value)
+            return image
         except BarcodeError:
             # The marks of blanks are no digits, e.g. of an EAN
             if self._code_of_marks:
@@ -1213,6 +1233,7 @@ class SimpleLabel:
             raise ValueError(codes.empty_problem(self.barcode_type))
         # Black and red by name, a color as RGB gives another image mode
         names = {color: name for name, color in COLORS.items()}
+        self._code_dot = self._qr_size
         return _code_image(self.barcode_type, text, codes.correction(self.barcode_type, self.qr_correction), self._qr_size, names.get(self._fore_color, self._fore_color))
 
     def _draw_text(self, img, bboxes, text_offset=(0, 0)):
