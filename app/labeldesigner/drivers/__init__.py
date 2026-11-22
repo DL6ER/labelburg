@@ -1,5 +1,6 @@
 """The printer drivers, see base.py, and which one drives a printer."""
 
+from ..ipp import NotOnIpp
 from . import devices
 from .base import Driver, Told
 from .brother import DRIVER as BROTHER
@@ -10,10 +11,11 @@ from .escpos import DRIVER as ESCPOS
 from .tspl import DRIVER as TSPL
 from .zpl import DRIVER as ZPL
 from .dymo import DRIVER as DYMO
+from .ipp import DRIVER as IPP
 
 # In the order the label designer lists their models and label sizes, and
 # asks them which printer a device ID names: one naming TSPL and ZPL is TSPL
-DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL, DYMO)
+DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL, DYMO, IPP)
 
 MODELS = tuple(model for driver in DRIVERS for model in driver.models)
 LABELS = tuple(label for driver in DRIVERS for label in driver.labels)
@@ -97,7 +99,14 @@ def resolve(device: str, model: str, assumed: bool = False) -> tuple[Driver, str
     Another driver takes it from that model only by its command set, not by
     a device ID of its table alone. An assumed model, e.g. PRINTER_MODEL
     left at its default, is none of these, only what is left. A printer of a
-    resolution its driver does not print is the model given."""
+    resolution its driver does not print is the model given. A printer on
+    IPP is an "Other printer", Other/IPP where its model is assumed,
+    devices.OtherPrinterOnly for a model of another driver; NotOnIpp for
+    an "Other printer" elsewhere, also assumed, but on the demo printer."""
+    if IPP.claims(device):
+        return IPP, IPP.configured('Unknown' if assumed else canonical(model))
+    if canonical(model) in IPP.models and device not in ('simulation', '?'):
+        raise NotOnIpp()
     # Read once for all drivers, it may ask the printer
     device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
     if _unprinted(device_id):

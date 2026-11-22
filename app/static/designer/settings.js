@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
-    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
+    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter, cutShort,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE
 } from './core.js';
@@ -214,7 +214,8 @@ async function feed(p) {
 
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
+    // One that cuts as it is set up says so in its value alone
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${esc(cutShort(c, caps))}</span>${caps.cut_on_printer ? '' : `<small class="muted">${esc(cutText(c, caps))}</small>`}${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')
@@ -308,7 +309,7 @@ function bindCards(box) {
 // asks what answers there before it adds anything, ADD_PRINTERS of its
 // configuration says where it may look.
 const EXAMPLES = [['usbip://192.168.1.50', 'USB printer on another device'], ['tcp://192.168.1.60', 'Network printer'],
-    ['vc500w://192.168.1.70', 'VC-500W']];
+    ['vc500w://192.168.1.70', 'VC-500W'], ['ipp://192.168.1.80/ipp/print', 'Other printer']];
 const adding = { mode: '', allows: '', unused: [], address: '', name: '', asking: false, found: null, error: '' };
 const removeHTML = p => p.added ? `<button class="btn ghost sm" type="button" data-remove title="Remove the printer added here">${icon('trash')}Remove</button>` : '';
 
@@ -332,6 +333,11 @@ async function loadAdded() {
     drawAdd();
 }
 
+// The model it is added as, with the name it tells
+const foundName = f => {
+    const model = printerName({ model: f.model }) || f.model;
+    return f.device_name && f.device_name !== model ? `${model} (${f.device_name})` : model;
+};
 const foundText = f => f.errors.length ? f.errors[0]
     : f.tape && f.tape.known ? `${sizeName(f.tape.id)} in the printer` : 'It does not say which tape it has';
 
@@ -346,7 +352,7 @@ function addHTML() {
     }
     const f = adding.found;
     const found = !f ? '' : `<div class="set-found"><span class="d ${f.errors.length ? 'bad' : ''}"></span>
-            <div class="grow"><b>${esc(printerName(f) || f.model)}</b><small class="muted">${esc(foundText(f))}, ${esc(f.address)}</small></div></div>`
+            <div class="grow"><b>${esc(foundName(f))}</b><small class="muted">${esc(foundText(f))}, ${esc(f.address)}</small></div></div>`
         + (f.listed ? `<small class="muted">It is in the list already as ${esc(f.listed)}.</small>`
             : `<label class="k" for="addName">Name, if you like</label>
             <div class="row"><input class="in set-name" id="addName" maxlength="40" autocomplete="off" placeholder="${esc(printerName(f) || 'e.g. Garage')}" value="${esc(adding.name)}">

@@ -14,7 +14,7 @@ from barcode.errors import BarcodeError, BarcodeNotFoundError, IllegalCharacterE
 from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFPopplerTimeoutError, PDFSyntaxError
 from PIL import Image
 
-from . import adding
+from . import adding, ipp
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
 from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
 from .label import (LETTER_SPACING_REFUSED, MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR,
@@ -103,6 +103,8 @@ MESSAGES = (
     IMAGE_MODE_REFUSED,
     UNKNOWN_MODEL,
     *devices.not_sent_messages(),
+    devices.OTHER_PRINTER_ONLY,
+    ipp.NOT_ON_IPP,
     PRINTER_BUSY,
     WRONG_MODEL,
     NO_FEED,

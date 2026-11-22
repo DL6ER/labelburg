@@ -15,6 +15,7 @@ import time
 
 from werkzeug.security import safe_join
 
+from .. import ipp
 from . import reach, usbip
 from .backends import NoLibusb
 
@@ -69,6 +70,18 @@ def status_type(errors: list) -> str:
     return 'Error occurred' if errors else 'Reply to status request'
 
 
+def set_state(status: dict, printing: bool, stopped: bool):
+    """The status and phase type of a network printer by its errors, whether
+    it prints and whether it is stopped otherwise."""
+    if status['errors']:
+        status['status_type'] = 'Error occurred'
+    elif printing:
+        status['status_type'] = BUSY_STATUS_TYPE
+    else:
+        status['status_type'] = STOPPED_STATUS_TYPE if stopped else 'Reply to status request'
+    status['phase_type'] = 'Printing state' if printing else 'Waiting to receive'
+
+
 def busy_state(device_specifier: str, base: dict) -> dict:
     """Status of a printer a job holds: its last status, else base, in the
     state of the job. Errors from before the job no longer apply."""
@@ -111,7 +124,8 @@ def lock_key(device_specifier: str) -> str:
     one on port 9100, also an IPv6 address in brackets. A Bluetooth printer
     is one device whatever RFCOMM channel names it, and drivers differ in the
     channel they take when none is named, so its key is its MAC address only.
-    A printer shared over USB/IP is one on port 3240."""
+    A printer shared over USB/IP is one on port 3240, one on IPP is one
+    at its printer URI over IPP."""
     key = device_specifier.strip()
     if key.startswith('file://'):
         key = key[len('file://'):]
@@ -119,6 +133,12 @@ def lock_key(device_specifier: str) -> str:
         key = usbip.key(key)
     elif key.lower().startswith('bt://'):
         key = 'bt://' + key.lower().split('/')[2]
+    elif ipp.is_address(key):
+        # ipp://, ipps:// and cups:// may name the same printer
+        try:
+            key = ipp.printer_at(key)._replace(tls=False).uri.lower()
+        except ValueError:
+            key = key.lower()
     elif '://' in key:
         key = key.lower()
         address = key.split('://', 1)[1]
@@ -410,6 +430,15 @@ _UNANSWERED = (
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
+OTHER_PRINTER_ONLY = 'Give this printer the model Other/IPP'
+
+
+class OtherPrinterOnly(ValueError):
+    """A printer on IPP configured or requested as a model of another
+    driver, which would send it what it does not take."""
+
+    def __init__(self):
+        super().__init__(OTHER_PRINTER_ONLY)
 
 
 def unanswered_reason(error: Exception) -> str:
@@ -422,6 +451,12 @@ def unanswered_reason(error: Exception) -> str:
         return NO_LIBUSB
     if isinstance(error, reach.NotAllowed):
         return reach.NOT_ALLOWED
+    if isinstance(error, OtherPrinterOnly):
+        return OTHER_PRINTER_ONLY
+    if isinstance(error, ipp.RawPort):
+        return ipp.RAW_PORT
+    if isinstance(error, ipp.NotOnIpp):
+        return ipp.NOT_ON_IPP
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -438,7 +473,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY, ipp.RAW_PORT, ipp.NOT_ON_IPP])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 

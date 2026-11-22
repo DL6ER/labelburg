@@ -170,11 +170,12 @@ class Driver:
         position is calibrated with a calibration label, whether it is
         told how it finds its labels, see diecut.SENSINGS, whether it
         has two rolls to print on, the one chosen in its settings (side),
-        and the model it is shown as, see shown_as, empty for none."""
+        the model it is shown as, see shown_as, empty for none, and, of one
+        without a cutter here, whether it cuts as it is set up itself."""
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False,
-                'sensing': False, 'two_rolls': False, 'shown_as': self.shown_as.get(model, '')}
+                'sensing': False, 'two_rolls': False, 'shown_as': self.shown_as.get(model, ''), 'cut_on_printer': False}
 
     def calibration_kind(self, model: str, label_size: str) -> str:
         """The calibration label of the model for the label size: narrow,

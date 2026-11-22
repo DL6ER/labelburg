@@ -9,6 +9,7 @@ import pytest
 from app.labeldesigner import adding, printer_settings
 from tests.browser.test_editor import sent, type_label
 from tests.browser.test_settings import back_to_the_editor, designer, open_settings  # noqa: F401
+from tests.printing.test_other_printer import FakePrinter, printer_attributes
 from tests.printing.test_usbip import FakeQL
 from tests.printing.usbip_host import FakeHost, SharedDevice
 
@@ -105,3 +106,59 @@ def test_added_printers_are_not_used_while_adding_is_off(designer, app, shared):
         assert shared.connections == []
     finally:
         app.config['ADD_PRINTERS'] = 'local'
+
+
+@pytest.fixture
+def on_ipp():
+    printer = FakePrinter()
+    yield printer
+    printer.close()
+
+
+def test_a_printer_on_ipp_is_added_as_other_printer(designer, app, on_ipp):  # noqa: F811
+    designer.set_viewport_size({'width': 1600, 'height': 924})
+    open_settings(designer)
+    designer.wait_for_selector('#setAdd:not([hidden]) #addAddress')
+    designer.click('#setAdd [data-example^="ipp"]')
+    assert designer.input_value('#addAddress') == 'ipp://'
+    designer.keyboard.type(on_ipp.address.removeprefix('ipp://'))
+    designer.keyboard.press('Enter')
+    designer.wait_for_selector('.set-found')
+    assert designer.inner_text('.set-found b') == 'Other printer (Zebra ZD421)'
+    assert on_ipp.address in designer.inner_text('.set-found')
+    designer.keyboard.type('Shipping')
+    designer.click('#addSave')
+    designer.wait_for_selector('#toast:has-text("Added Shipping")')
+    card = designer.locator('[data-card]', has_text='Shipping')
+    card.wait_for()
+    # Its roll as it tells it, the cutting as it is set up
+    assert 'read from the printer' in card.inner_text()
+    assert 'As set on the printer' in card.inner_text()
+    assert 'Set on the printer itself.' not in card.inner_text()
+    assert kept(app)['added'] == [{'address': on_ipp.address, 'model': 'Other/IPP-203', 'name': 'Shipping'}]
+
+    back_to_the_editor(designer)
+    designer.click('#printerChip')
+    designer.locator('.pp [data-p]', has_text='Shipping').click()
+    designer.wait_for_selector('#printerChip b:text-is("Shipping")')
+    designer.keyboard.press('Escape')
+    designer.locator('#layer').wait_for(state='hidden')
+    type_label(designer, 'Parcel')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    assert (sent(request.value)['printer'], sent(request.value)['label_size']) == (on_ipp.address, 'ipp203-102x152')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
+    assert len(on_ipp.jobs()) == 1
+
+
+def test_an_other_printer_that_does_not_tell_its_roll(designer, app, on_ipp):  # noqa: F811
+    on_ipp.printer = [printer_attributes(loaded=None)]
+    with open(os.path.join(app.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE), 'w', encoding='utf-8') as fh:
+        json.dump({'printers': {}, 'added': [{'address': on_ipp.address, 'model': 'Other/IPP-203', 'name': 'Shipping'}]}, fh)
+    designer.set_viewport_size({'width': 1600, 'height': 924})
+    designer.reload()
+    open_settings(designer)
+    card = designer.locator('[data-card]', has_text='Shipping')
+    card.wait_for()
+    assert 'This printer does not report its tape' in card.inner_text()
+    assert 'read from the printer' not in card.inner_text()

@@ -16,7 +16,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, problem_report, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, ipp, paperless, print_queue, printer_settings, problem_report, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -1879,7 +1879,8 @@ def identify_printer():
         return _refused('Identifying a printer', e, adding.NOT_ASKED)
     state = found.pop('state')
     found.update(errors=state.get('errors') or [], status_type=state.get('status_type') or '',
-                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()))
+                 tape=tape.describe(_tape_of(state, found['model'], {})), listed=_listed_as(found['address'], _added()),
+                 device_name=state.get('device_name') or '')
     return jsonify({'success': True, 'printer': found})
 
 
@@ -3218,6 +3219,9 @@ def homebox(name: str | None = None):
         return _fail('Not found', 404)
     except LabelsBusy:
         return _busy()
+    except (devices.OtherPrinterOnly, ipp.NotOnIpp) as e:
+        # A printer of a model that cannot print at its address
+        return _refused('Homebox label', e, refusals.INVALID_INPUT)
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to load file', 500)
