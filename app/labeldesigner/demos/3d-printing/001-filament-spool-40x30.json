@@ -1,0 +1,110 @@
+{
+  "label_size": "niimbot40x30",
+  "orientation": "standard",
+  "sync_font_settings": false,
+  "print_color": "black",
+  "barcode_type": "QR",
+  "qrcode_size": "10",
+  "qrcode_correction": "M",
+  "code_text": "",
+  "image_mode": "black_and_white",
+  "image_fit": true,
+  "image_crop": false,
+  "image_scaling_factor": "100",
+  "image_rotation": "0",
+  "image_bw_threshold": "128",
+  "margin_top": "12",
+  "margin_bottom": "12",
+  "margin_left": "16",
+  "margin_right": "16",
+  "border_thickness": "0",
+  "border_roundness": "0",
+  "border_distance_x": "0",
+  "border_distance_y": "0",
+  "border_color": "black",
+  "print_type": "text",
+  "pdf_pages": "",
+  "shrink_text": true,
+  "title": "Filament spool",
+  "language": "en",
+  "text": [
+    {
+      "font": "DejaVu Sans,Bold",
+      "size": "44",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Material}} {{blank:Color}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "26",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Brand}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "24",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "Nozzle {{blank:Nozzle}}{{mdi:temperature-celsius}}, bed {{blank:Bed}}{{mdi:temperature-celsius}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "24",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Opened or dried}} {{datetime:%Y-%m-%d}}"
+    }
+  ],
+  "label_text": "{{blank:Material}} {{blank:Color}}\n{{blank:Brand}}\nNozzle {{blank:Nozzle}}{{mdi:temperature-celsius}}, bed {{blank:Bed}}{{mdi:temperature-celsius}}\n{{blank:Opened or dried}} {{datetime:%Y-%m-%d}}",
+  "fields": {
+    "Material": {
+      "type": "choice",
+      "choices": [
+        "PLA",
+        "PETG",
+        "ABS",
+        "ASA",
+        "TPU",
+        "PA/Nylon",
+        "PC"
+      ]
+    },
+    "Color": {
+      "type": "text",
+      "default": "Black"
+    },
+    "Brand": {
+      "type": "text",
+      "default": "Example"
+    },
+    "Nozzle": {
+      "type": "number",
+      "default": "210"
+    },
+    "Bed": {
+      "type": "number",
+      "default": "60"
+    },
+    "Opened or dried": {
+      "type": "choice",
+      "choices": [
+        "Opened on",
+        "Dried on"
+      ]
+    }
+  }
+}

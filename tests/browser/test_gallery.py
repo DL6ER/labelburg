@@ -11,7 +11,9 @@ import pytest
 from PIL import Image
 
 from tests.browser.helpers import png
+from tests.browser.test_demo_printer import MODEL, designer  # noqa: F401
 from tests.browser.test_editor import changed_preview, editor, sent, type_label, wait_for_preview  # noqa: F401
+from tests.browser.test_settings import back_to_the_editor, open_settings
 
 
 def save_new(page, name, *lines):
@@ -28,6 +30,34 @@ def open_saved(page, title):
     page.click('.tpl-nav [data-cat="saved"]')
     page.click(f'.thumb:has-text("{title}")')
     page.wait_for_selector('#tplPrint')
+
+
+def shown_width(page, group):
+    """The width of the Templates showing the group, once the thumbnails in
+    sight are drawn."""
+    page.click(f'.tpl-nav [data-cat="{group}"]')
+    page.wait_for_selector(f'.tpl-nav [data-cat="{group}"].on')
+    page.wait_for_function("""() => { const g = document.querySelector('.tpl-grid').getBoundingClientRect();
+        return [...document.querySelectorAll('.tpl-grid .thumb img')].filter(i => i.getBoundingClientRect().top < g.bottom)
+            .every(i => i.complete && i.naturalWidth > 0); }""")
+    return page.evaluate("() => document.querySelector('.dialog.tpl').getBoundingClientRect().width")
+
+
+def test_the_templates_keep_their_width_for_every_group_and_tape(designer):  # noqa: F811
+    # As wide as set, whatever the size of the thumbnails shown
+    widths = set()
+    for model, size in (('QL-800', '62'), ('Niimbot/B1', 'niimbot50x30')):
+        if model != 'QL-800':
+            open_settings(designer)
+            designer.select_option(MODEL, model)
+            designer.wait_for_function('m => labelEditor.S.printers[0].model === m', arg=model)
+            designer.select_option('[data-card="0"] select[data-k="label_size"]', size)
+            back_to_the_editor(designer)
+        designer.wait_for_function('t => labelEditor.S.tape === t', arg=size)
+        designer.click('#templates')
+        widths |= {shown_width(designer, group) for group in ('all', 'workshop', 'kitchen', 'office', 'saved')}
+        designer.click('.dialog [data-close]')
+    assert widths == {1060}
 
 
 def test_templates_replace_the_wizard(editor):  # noqa: F811
@@ -440,7 +470,9 @@ def test_labels_printed_here_are_a_group_of_templates(editor):  # noqa: F811
 def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noqa: F811
     type_label(editor, 'Jar [What] [Where]')
     editor.fill('#fill [data-blank="What"]', 'Beans')
-    editor.fill('#fill [data-blank="Where"]', 'Pantry')
+    # Saved labels come first in the search, those of other tests must not
+    # match it
+    editor.fill('#fill [data-blank="Where"]', 'Larder')
     for _ in range(2):
         editor.click('.printbtn [data-step="1"]')
     with editor.expect_request('**/api/print'):
@@ -451,14 +483,14 @@ def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noq
     editor.keyboard.press('Control+k')
     editor.wait_for_selector('.palette #palQ:focus')
     # Found by a value printed besides the one it is named by
-    editor.keyboard.type('pantry')
-    row = editor.locator('#palRes .res:has-text("Beans")')
-    assert 'Pantry' in row.inner_text() and '3 x' in row.inner_text()
+    editor.keyboard.type('larder')
+    row = editor.locator('#palRes .res.on:has-text("Beans")')
+    assert 'Larder' in row.inner_text() and '3 x' in row.inner_text()
     assert 'Enter print again' in editor.inner_text('.pal-foot')
     with editor.expect_request('**/api/print') as request:
         editor.keyboard.press('Enter')
     fields = sent(request.value)
-    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Pantry'} and fields['print_count'] == '3'
+    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Larder'} and fields['print_count'] == '3'
     editor.wait_for_selector('#toast:has-text("Printed 3 labels: Beans")')
     # The editor keeps the label it had
     assert editor.evaluate('() => labelEditor.S.edit.design.text[0].text') == ''

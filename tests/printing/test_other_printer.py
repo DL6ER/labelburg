@@ -781,7 +781,8 @@ def test_printer_on_ipp_of_an_assumed_model_is_an_other_printer():
     assert drivers.resolve('ipp://192.0.2.9/ipp/print', 'QL-800', assumed=True) == (other.DRIVER, 'Other/IPP')
 
 
-def test_printer_on_ipp_as_printer_printer_left_without_a_model(tmp_path, fake):
+def test_printer_on_ipp_as_printer_printer_left_without_a_model(tmp_path, monkeypatch, fake):
+    monkeypatch.delenv('PRINTER_MODEL', raising=False)
     client = make_client(tmp_path, printer=fake.address)
     found = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert (found['model'], found['errors']) == ('Other/IPP', [])
