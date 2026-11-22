@@ -526,11 +526,11 @@ def test_classic_search_finds_devices_with_their_class(management):
                        found(le_only, name='B1-TEST0001'),
                        found(both, kind=0, raw=class_of_device(0x5a020c)), found(both, kind=1, name='Phone')])
     devices_found = {device['address']: device for device in bluetooth.discover(1, classic=True)}
-    assert devices_found[classic] == {'address': classic, 'name': 'PT-P710BT0001', 'le': False, 'services': [],
+    assert devices_found[classic] == {'address': classic, 'name': 'PT-P710BT0001', 'le': False, 'services': [], 'manufacturer': [],
                                       'classic': True, 'device_class': PRINTER_CLASS}
-    assert devices_found[le_only] == {'address': le_only, 'name': 'B1-TEST0001', 'le': True, 'services': [],
+    assert devices_found[le_only] == {'address': le_only, 'name': 'B1-TEST0001', 'le': True, 'services': [], 'manufacturer': [],
                                       'classic': False, 'device_class': None}
-    assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [],
+    assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [], 'manufacturer': [],
                                    'classic': True, 'device_class': 0x5a020c}
     # Classic Bluetooth and LE, and stopped again
     assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]

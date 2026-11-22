@@ -88,8 +88,8 @@ def management(monkeypatch):
 
 def test_devices_on_bluetooth_le_are_found_with_their_names_and_services(management):
     fake = management([found(B1, services=[NIIMBOT]), found(B1, name='B1-TEST0001'), found(OTHER, kind=2)])
-    assert bluetooth.discover(1) == [{'address': B1, 'name': 'B1-TEST0001', 'le': True, 'services': [NIIMBOT]},
-                                     {'address': OTHER, 'name': '', 'le': True, 'services': []}]
+    assert bluetooth.discover(1) == [{'address': B1, 'name': 'B1-TEST0001', 'le': True, 'services': [NIIMBOT], 'manufacturer': []},
+                                     {'address': OTHER, 'name': '', 'le': True, 'services': [], 'manufacturer': []}]
     # Only LE, public and random addresses, and stopped again
     assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x06'), (0x0024, b'\x06')]
 
@@ -100,6 +100,12 @@ def test_a_malformed_advertisement_of_another_device_still_finds_the_b1(manageme
     management([found(OTHER, raw=b'\x02\x01\x06\x02'), event(0x0012, 0, b'\x01\x02\x03'), found(B1, name='B1-TEST0001')])
     assert {device['address']: device['name'] for device in bluetooth.discover(1)} == {OTHER: '', B1: 'B1-TEST0001'}
 
+
+def test_devices_are_found_with_their_manufacturer_data(management):
+    # With the company ID in front, as advertised
+    data = bytes.fromhex('0102030459')
+    management([found(B1, name='MX06', raw=bytes([len(data) + 1, 0xff]) + data), found(B1, name='MX06')])
+    assert bluetooth.discover(1)[0]['manufacturer'] == [data]
 
 @pytest.mark.parametrize('kwargs', [{'start_status': 0x14}, {'controllers': ()}])
 def test_no_search_finds_nothing(management, kwargs):
