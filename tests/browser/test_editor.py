@@ -98,10 +98,10 @@ def test_the_number_of_labels_from_the_bracket_menu(editor):
     editor.click('.pop-menu button:has-text("Counter")')
     editor.wait_for_selector('#field .chip.counter')
     editor.keyboard.type(' of [')
-    assert 'Number of labels\ne.g. the 6 in 1 of 6' in editor.inner_text('.pop-menu')
-    editor.click('.pop-menu button:has-text("Number of labels")')
+    assert 'Total\nthe 6 in 1 of 6' in editor.inner_text('.pop-menu')
+    editor.click('.pop-menu button:has-text("Total")')
     editor.wait_for_selector('#field .chip.total')
-    assert editor.inner_text('#field .chip.total') == 'number of labels'
+    assert editor.inner_text('#field .chip.total') == 'total'
     editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of {{total}}'")
     wait_for_preview(editor)
     # The preview is drawn again for the copies chosen, the server counts them
@@ -113,7 +113,7 @@ def test_the_number_of_labels_from_the_bracket_menu(editor):
     # Its options tell what it is, and remove it
     editor.click('#field .chip.total')
     editor.wait_for_selector('.chip-pop')
-    assert 'How many labels are printed together' in editor.inner_text('.chip-pop')
+    assert editor.text_content('.chip-pop h4') == 'Total' and editor.inner_text('.chip-pop p') == 'How many labels print, set with the copies.'
     editor.click('.chip-pop [data-remove]')
     editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of '")
 
@@ -128,7 +128,7 @@ def thumb_preview(page, action) -> dict:
 def test_printed_labels_show_the_number_of_labels_printed(editor):
     type_label(editor, 'Box [counter] of ')
     editor.keyboard.type('[')
-    editor.click('.pop-menu button:has-text("Number of labels")')
+    editor.click('.pop-menu button:has-text("Total")')
     editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of {{total}}'")
     editor.fill('#copies', '6')
     editor.dispatch_event('#copies', 'input')

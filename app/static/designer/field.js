@@ -72,7 +72,7 @@ export function chipInfo(tpl) {
         const label = m[1] || m[2] ? `counter ${m[1] || '1'}${m[2] && m[2] !== '1' ? `, step ${m[2]}` : ''}` : 'counter';
         return { kind: 'counter', label, icon: 'hash', start: m[1] || '', step: m[2] || '' };
     }
-    if (tpl === '{{total}}') return { kind: 'total', label: 'number of labels', icon: 'hash' };
+    if (tpl === '{{total}}') return { kind: 'total', label: 'total', icon: 'hash' };
     if ((m = tpl.match(/^\{\{asn(?::(\d{1,2}))?\}\}$/))) return { kind: 'variable', label: m[1] ? `ASN, ${m[1]} digits` : 'ASN', icon: 'braces', digits: m[1] || '' };
     if (tpl === '{{short-uuid}}') return { kind: 'variable', label: 'ID', icon: 'braces' };
     if (tpl === '{{uuid}}') return { kind: 'variable', label: 'UUID', icon: 'braces' };
@@ -411,7 +411,7 @@ const MENU = [
     { id: 'blank', name: 'Blank', icon: 'blank', note: 'filled in when printing', words: 'blank name field fill' },
     { id: 'date', name: 'Date', icon: 'cal', note: 'today, or a day from now', words: 'date today now time day' },
     { id: 'counter', name: 'Counter', icon: 'hash', note: '1, 2, 3 ...', words: 'counter number count' },
-    { id: 'total', name: 'Number of labels', icon: 'hash', note: 'e.g. the 6 in 1 of 6', words: 'number labels total of all count copies' },
+    { id: 'total', name: 'Total', icon: 'hash', note: 'the 6 in 1 of 6', words: 'number labels total of all count copies' },
     { id: 'symbol', name: 'Symbol', icon: 'star', note: '', words: 'symbol icon sign' },
     { id: 'variable', name: 'Variable', icon: 'braces', note: 'e.g. the ASN', words: 'variable asn id uuid' },
 ];
@@ -594,7 +594,7 @@ export function openChip(place, naming = false, focus = false) {
     if (c.kind === 'date') return datePop(place, c.date);
     if (c.kind === 'counter') return counterPop(place, c);
     if (c.kind === 'total') {
-        const el = openPop(place, `<h4>Number of labels</h4><p class="muted">How many labels are printed together, e.g. the 6 in Box 1 of 6. Set it with the copies.</p>
+        const el = openPop(place, `<h4>Total</h4><p class="muted">How many labels print, set with the copies.</p>
             <div class="pop-acts"><span></span>${removeBtn}</div>`);
         $('[data-remove]', el).onclick = () => removeChip(place);
         return;
@@ -767,7 +767,7 @@ const VARS_HELP = `<p>Variables put content into the label when it is printed. T
         <li><code>[today]</code> - today's date, in the date format of the settings. <code>[now]</code> - the date and the time.</li>
         <li><code>[today+5d]</code> - a date counted from today: + or -, a number, and d, w, m or y for days, weeks, months or years, with the time h or min, e.g., <code>[now+30min]</code>.</li>
         <li><code>[counter]</code> - a number that counts up, each copy gets the next one: <code>[counter:001]</code> 001, 002, <code>[counter:A]</code> A, B, C, <code>[counter:10:5]</code> 10, 15, 20.</li>
-        <li>Number of labels, chosen after [ - how many labels are printed together: <code>Box [counter] of</code> and the number of labels print Box 1 of 6 to Box 6 of 6.</li>
+        <li>Total, from the [ menu - <code>Box [counter] of [total]</code> prints Box 1 of 6 to Box 6 of 6.</li>
         <li><code>[ASN]</code> - the next archive serial number for Paperless-ngx, <code>[ASN:5]</code> with 5 digits, e.g., 00042.</li>
         <li><code>[id]</code> - a short random ID.</li>
     </ul>
