@@ -485,7 +485,7 @@ def test_label_length_at_300_dpi():
     ('Zebra/ZPL-300', 1214, (102, 102)),
     ('Zebra/ZPL', 1214, (102, 152))])
 def test_labels_by_their_length_in_the_dots_of_the_model(model, length, size):
-    assert zpl.loaded(length, zpl.DOTS_PER_MM[model]) == size
+    assert zpl.loaded(length, zpl.DPI[model]) == size
 
 
 def test_status_of_a_300_dpi_printer(monkeypatch):

@@ -12,9 +12,9 @@ import time
 
 from PIL import Image
 
-from .. import bitmap, devices, progress
+from .. import bitmap, devices, diecut, progress
 from ..base import Driver, network_status, shown
-from ..labels import FormFactor, Label
+from ..diecut import SIZES, loaded, measured
 from . import protocol
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # Printers of 203 dpi and of 300 dpi
 MODELS = ('Zebra/ZPL', 'Zebra/ZPL-300')
 DPI = {MODELS[0]: 203, MODELS[1]: 300}
-DOTS_PER_MM = {MODELS[0]: 8, MODELS[1]: 300 / 25.4}
 # A printhead of 104 mm, as on a GK420t, a 105 mm label loses 1 mm
 HEAD_MM = 104
 # mm/s, 4 in/s, the most a Datamax-O'Neil E-4204B prints and less than the
@@ -30,22 +29,6 @@ HEAD_MM = 104
 # and find the gap to the next label
 SPEED = 102
 BESIDES = 1.0
-# Width x length in mm of common labels, metric ones and inch ones, e.g.
-# 105 x 148 mm (A6) and 102 x 152 mm (4 x 6 in) shipping labels. The printer
-# does not tell which are loaded.
-SIZES = ((105, 148),
-         (102, 152), (102, 102), (102, 76), (102, 51), (102, 25),
-         (100, 150), (100, 100), (100, 70), (100, 50), (100, 30),
-         (80, 50), (76, 51), (76, 25), (60, 40), (58, 40), (57, 32),
-         (51, 25), (50, 30), (50, 25), (40, 30), (40, 20), (38, 25), (30, 20))
-
-
-def _label(width: int, length: int, model: str) -> Label:
-    # The names of the 203 dpi sizes are those from before there were two
-    prefix = 'zpl' if model == MODELS[0] else 'zpl300-'
-    total = (round(width * DOTS_PER_MM[model]), round(length * DOTS_PER_MM[model]))
-    return Label(f'{prefix}{width}x{length}', (width, length), FormFactor.DIE_CUT, total,
-                 (min(total[0], round(HEAD_MM * DOTS_PER_MM[model])), total[1]), 0, models=(model,))
 
 
 # A Datamax-O'Neil E-4204B leaves ~HS unanswered within about 5 s of the one
@@ -94,44 +77,20 @@ def _plain(text: str) -> str:
 
 _KNOWN = {(_plain(maker), _plain(model)): known for (maker, model), known in KNOWN_IDS.items()}
 
-# A measured length further off than this from all sizes is not taken
-LENGTH_TOLERANCE = 2
 
-
-def measured(length: int, dots_per_mm: float = DOTS_PER_MM[MODELS[0]]) -> int | None:
-    """The length in mm of the labels of a length the printer measured in
-    dots, of dots_per_mm, e.g. 235 dots 30 mm, None if no labels have about
-    that length or it is as near to two lengths."""
-    mm = length / dots_per_mm
-    nearest = min(abs(size[1] - mm) for size in SIZES)
-    lengths = {size[1] for size in SIZES if abs(size[1] - mm) == nearest}
-    return lengths.pop() if nearest <= LENGTH_TOLERANCE and len(lengths) == 1 else None
-
-
-def loaded(length: int, dots_per_mm: float = DOTS_PER_MM[MODELS[0]]) -> tuple[int, int] | None:
-    """Width and length in mm of the labels of a length the printer measured
-    in dots, of dots_per_mm, e.g. 1214 dots (152 mm) 102 x 152 mm. None if
-    labels of another width have that length too, the printer does not tell
-    their width."""
-    mm = measured(length, dots_per_mm)
-    sizes = [size for size in SIZES if size[1] == mm]
-    return sizes[0] if len(sizes) == 1 else None
-
-
-LABELS = tuple(_label(width, length, model) for model in MODELS for width, length in SIZES)
+# The names of the 203 dpi sizes are those from before there were two
+LABELS = tuple(label for model, prefix in zip(MODELS, ('zpl', 'zpl300-'))
+               for label in diecut.labels(prefix, DPI[model], diecut.dots(HEAD_MM, DPI[model]), (model,), SIZES))
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (ZPL)' for label in LABELS}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     """A label as the printer prints it: rows of packed dots across the
     printhead, the last one comes out first, and the bytes of each row."""
-    img = label.generate()
     # The bottom of a ZPL label leaves the printer first, on a Zebra GK420t as
-    # on a Datamax-O'Neil E-4204B. Turned upside down its top does, as on the other
-    # printers. Labels longer than wide, which the label designer draws lying,
-    # are turned as by the other drivers, their end leaves first.
+    # on a Datamax-O'Neil E-4204B
     across = next(size.dots_printable[0] for size in LABELS if size.identifier == label_size)
-    img = img.rotate(-90 if img.width != across else 180, expand=True)
+    img = diecut.oriented(label.generate(), across, top_first=False)
     img = bitmap.black_and_white(img, label)
     rows, width = bitmap.packed_rows(img)
     return img, rows, width
@@ -234,11 +193,11 @@ class Zpl(Driver):
         state['phase_type'] = 'Waiting to receive'
         # The label designer then picks the labels. Of a length that labels
         # of several widths have, only the length is told.
-        dots_per_mm = DOTS_PER_MM.get(model, DOTS_PER_MM[MODELS[0]])
-        size = loaded(answer['length'], dots_per_mm)
+        dpi = DPI.get(model, DPI[MODELS[0]])
+        size = loaded(answer['length'], dpi)
         if size:
             state['media_width'], state['media_length'] = size
-        elif length := measured(answer['length'], dots_per_mm):
+        elif length := measured(answer['length'], dpi):
             state['media_length'] = length
         devices.status_cache[devices.lock_key(device)] = state
         return state
@@ -248,17 +207,17 @@ class Zpl(Driver):
 
     def label_lengths(self, job):
         # Each label of the job tells its rows in ^LL
-        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / dots_per_mm for label, dots_per_mm in job]
+        return [diecut.millimeters(int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]), dpi) for label, dpi in job]
 
     def render(self, queue, entries, keep=None):
         job = []
-        # The dots per mm of the labels, for their length
-        dots_per_mm = DOTS_PER_MM[next(label.models[0] for label in LABELS if label.identifier == queue.label_size)]
+        # The resolution of the labels, for their length
+        dpi = DPI[next(label.models[0] for label in LABELS if label.identifier == queue.label_size)]
         for i, entry in enumerate(entries):
             img, rows, width = label_rows(entry['label'], queue.label_size)
             if keep:
                 keep(img, f'zpl_{i}')
-            job.append((protocol.label(rows, width), dots_per_mm))
+            job.append((protocol.label(rows, width), dpi))
         return job
 
     def send(self, queue, job) -> str:
