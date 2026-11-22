@@ -162,8 +162,7 @@ function sensingHTML(p) {
 
 // The roll of a printer of two, the left one until another is chosen
 function sideHTML(p) {
-    return `<div class="set-stack">${seg('side', [['left', 'Left roll'], ['right', 'Right roll']], kept(p).side || 'left', 'Roll')}
-        <small class="muted">Which of the two rolls the labels are printed on.</small></div>`;
+    return `<div class="set-stack">${seg('side', [['left', 'Left roll'], ['right', 'Right roll']], kept(p).side || 'left', 'Roll')}</div>`;
 }
 
 function cuttingHTML(p) {

@@ -151,7 +151,8 @@ def test_a_twin_turbo_prints_on_the_roll_chosen(designer):
     assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == ['Left roll', 'Right roll']
     # The left one until another is chosen
     assert designer.inner_text(f'{choice}.on') == 'Left roll'
-    assert 'Which of the two rolls the labels are printed on.' in designer.inner_text('[data-card="0"]')
+    # The choice says it, no hint
+    assert designer.locator('[data-card="0"] button[data-k="side"]').first.locator('xpath=../..').locator('small').count() == 0
     assert setting(designer, f'{choice}[data-v="right"]') == {
         'printer': 'simulation', 'model': 'DYMO/LabelWriter-450-Twin-Turbo', 'side': 'right'}
     assert designer.inner_text(f'{choice}.on') == 'Right roll'
