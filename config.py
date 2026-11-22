@@ -68,6 +68,8 @@ class Config(object):
     IMAGE_DEFAULT_MODE = 'grayscale'
     IMAGE_DEFAULT_BW_THRESHOLD = 70
 
+    # In dots on 62 mm wide labels, other labels get them in proportion to
+    # their width
     LABEL_DEFAULT_MARGIN_TOP = 24
     LABEL_DEFAULT_MARGIN_BOTTOM = 24
     LABEL_DEFAULT_MARGIN_LEFT = 35

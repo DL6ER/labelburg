@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from . import drivers, sheets
 from .drivers.labels import FormFactor
-from .label_names import LABELS, SIZES, label_printers, label_size_problem
+from .label_names import LABELS, MARGIN_SIDES, SIZES, configured_margins, label_printers, label_size_problem
 
 TAKEN_BY = {label.identifier: label_printers(label) for label in LABELS}
 # The models some label size names
@@ -218,6 +218,23 @@ def placed(size_id: str, tape: Tape) -> bool:
     return tape.known and not fits(size_id, tape)
 
 
+def _with_preset(was: dict, placed: dict) -> dict:
+    """The label placed on another label size, the margins of a preset
+    those of the preset on it, other margins as they are."""
+    keys = [f'margin_{side}' for side in MARGIN_SIDES]
+    try:
+        margins = tuple(int(was[key]) for key in keys)
+    except (KeyError, TypeError, ValueError):
+        return placed
+    before, after = SIZES.get(was['label_size']), SIZES.get(placed['label_size'])
+    if before is None or after is None or before is after:
+        return placed
+    preset = next((name for name, values in configured_margins(before).items() if values == margins), None)
+    if preset:
+        placed.update(zip(keys, map(str, configured_margins(after)[preset])))
+    return placed
+
+
 def on_tape(design: dict, tape: Tape) -> dict:
     """The label placed on the tape, a shallow copy so that images stay
     shared."""
@@ -229,8 +246,8 @@ def on_tape(design: dict, tape: Tape) -> dict:
     elif fits(design['label_size'], tape):
         copy['label_size'] = tape.id
     else:
-        return set_size(copy, tape.id)
-    return copy
+        copy = set_size(copy, tape.id)
+    return _with_preset(design, copy)
 
 
 def describe(tape: Tape) -> dict:

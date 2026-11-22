@@ -29,7 +29,8 @@ from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_stat
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
-from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
+from .label_names import (LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits,
+                          MARGIN_SIDES, configured_margins)
 from .printer_settings import CUTS
 from flask import current_app, g, has_request_context, json, jsonify, redirect, render_template, request, make_response, url_for
 from werkzeug.security import safe_join
@@ -213,7 +214,8 @@ def _designer_config() -> dict:
          'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set
-         'length': list(limits[:2]) if (limits := length_limits(label)) else None}
+         'length': list(limits[:2]) if (limits := length_limits(label)) else None,
+         'margins': {name: list(margins) for name, margins in configured_margins(label).items()}}
         for label in LABELS
     ]
     return {
@@ -235,10 +237,6 @@ def _designer_config() -> dict:
             'font_size': current_app.config['LABEL_DEFAULT_FONT_SIZE'],
             'line_spacing': current_app.config['LABEL_DEFAULT_LINE_SPACING'],
             'qrcode_size': current_app.config['LABEL_DEFAULT_QR_SIZE'],
-            'margin_top': current_app.config['LABEL_DEFAULT_MARGIN_TOP'],
-            'margin_bottom': current_app.config['LABEL_DEFAULT_MARGIN_BOTTOM'],
-            'margin_left': current_app.config['LABEL_DEFAULT_MARGIN_LEFT'],
-            'margin_right': current_app.config['LABEL_DEFAULT_MARGIN_RIGHT'],
             'image_mode': current_app.config['IMAGE_DEFAULT_MODE'],
             'image_bw_threshold': current_app.config['IMAGE_DEFAULT_BW_THRESHOLD'],
         },
@@ -2299,10 +2297,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         'label_orientation': d.get('orientation', 'standard'),
         'kind': kind,
         # Same defaults as the label designer uses
-        'margin_top': int(d.get('margin_top', current_app.config['LABEL_DEFAULT_MARGIN_TOP'])),
-        'margin_bottom': int(d.get('margin_bottom', current_app.config['LABEL_DEFAULT_MARGIN_BOTTOM'])),
-        'margin_left': int(d.get('margin_left', current_app.config['LABEL_DEFAULT_MARGIN_LEFT'])),
-        'margin_right': int(d.get('margin_right', current_app.config['LABEL_DEFAULT_MARGIN_RIGHT'])),
+        **{f'margin_{side}': int(d.get(f'margin_{side}', normal)) for side, normal in zip(MARGIN_SIDES, configured_margins(size)['normal'])},
         'border_thickness': int(d.get('border_thickness', 0)),
         'border_roundness': int(d.get('border_roundness', 0)),
         'border_distanceX': int(d.get('border_distance_x', 0)),

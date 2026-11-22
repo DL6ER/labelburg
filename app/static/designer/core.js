@@ -188,14 +188,25 @@ export function L(text, size, bold = false, align = 'center', extra = {}) {
     }, extra);
 }
 
+// The margins of a preset on a label size, top, bottom, left, right, in
+// proportion to its width, as the server gives them
+const MARGIN_PRESETS = ['none', 'tight', 'normal', 'large'];
+const MARGIN_SIDES = ['top', 'bottom', 'left', 'right'];
+const marginsOf = (size, preset) => (SIZES[size] || SIZES[C.default_label_size]).margins[preset];
+export const marginPreset = d => MARGIN_PRESETS.find(k => MARGIN_SIDES.every((side, i) => +d['margin_' + side] === marginsOf(d.label_size, k)[i])) || 'custom';
+export function setMargins(d, preset) {
+    MARGIN_SIDES.forEach((side, i) => { d['margin_' + side] = String(marginsOf(d.label_size, preset)[i]); });
+    return d;
+}
+
 // With the defaults of the server's configuration, so that a label made here
 // prints as one sent without them
 export function baseDesign(size) {
-    const def = C.defaults;
+    const def = C.defaults, [top, bottom, left, right] = marginsOf(size, 'normal');
     return {
         label_size: size, orientation: def.orientation, print_type: 'text', text: [],
         code_text: '', barcode_type: 'QR', qrcode_size: String(def.qrcode_size), qrcode_correction: 'M',
-        margin_top: String(def.margin_top), margin_bottom: String(def.margin_bottom), margin_left: String(def.margin_left), margin_right: String(def.margin_right),
+        margin_top: String(top), margin_bottom: String(bottom), margin_left: String(left), margin_right: String(right),
         border_thickness: '0', border_roundness: '0', border_distance_x: '0', border_distance_y: '0', border_color: 'black',
         image_mode: def.image_mode, image_bw_threshold: String(def.image_bw_threshold), image_fit: '1', image_crop: '0', image_contrast: '0',
         image_scaling_factor: '100', image_rotation: '0', text_fit: 'shrink', text_wrap: '0', print_color: 'black', high_res: '0', pdf_pages: '',
@@ -716,19 +727,25 @@ export const tapeKnown = () => S.tapeKnown;
 export const fitsTape = sizeId => sizeId === S.tape || S.tapeFits.includes(sizeId);
 const movesTo = sizeId => S.tapeMoves.includes(sizeId);
 export const placed = sizeId => tapeKnown() && !fitsTape(sizeId);
-const putOnTape = d => Object.assign(d, S.tapePlace[`${d.label_size}|${d.orientation === 'rotated' ? 'rotated' : 'standard'}`]);
+// Margins of a preset are those of the preset on the size it is placed on
+function placeAs(d, place) {
+    const preset = marginPreset(d);
+    Object.assign(d, place);
+    return preset === 'custom' ? d : setMargins(d, preset);
+}
+const putOnTape = d => placeAs(d, S.tapePlace[`${d.label_size}|${d.orientation === 'rotated' ? 'rotated' : 'standard'}`]);
 export const onTape = d => movesTo(d.label_size) ? putOnTape(Object.assign({}, d)) : d;
 // Placed on the tape of a printer other than the one chosen
 function onTapeOf(d, p) {
     const t = (p && p.tape) || {};
-    return (t.moves || []).includes(d.label_size) ? Object.assign({}, d, (t.place || {})[`${d.label_size}|${d.orientation === 'rotated' ? 'rotated' : 'standard'}`]) : d;
+    return (t.moves || []).includes(d.label_size) ? placeAs(Object.assign({}, d), (t.place || {})[`${d.label_size}|${d.orientation === 'rotated' ? 'rotated' : 'standard'}`]) : d;
 }
 
 // The label in the editor is placed on the tape in the printer. E.made keeps
 // what placing it changed: unchanged since, it is saved for the tape it was
 // made for. A new label, neither saved nor a template, has no tape of its
 // own: it goes on the tape in the printer as an empty one.
-const PLACED_KEYS = ['label_size', 'orientation', 'cable_flag'];
+const PLACED_KEYS = ['label_size', 'orientation', 'cable_flag', 'margin_top', 'margin_bottom', 'margin_left', 'margin_right'];
 export function designSig(d) {
     const o = Object.assign({}, d);
     if (o.image) o.image = imageKey(o.image);
