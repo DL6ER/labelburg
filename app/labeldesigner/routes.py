@@ -2149,7 +2149,9 @@ def _told_model(device: str) -> str:
     """The model a printer tells when asked, for one the label designer knows
     no model of, e.g. one that did not answer the status query."""
     driver, model = drivers.resolve(device, 'Unknown')
-    if model != 'Unknown':
+    # A driver is not guessed for a printer it does not take, e.g. on
+    # Bluetooth: it would be sent that driver's commands
+    if model != 'Unknown' or not any(pattern.fullmatch(device) for pattern in driver.device_patterns):
         return model
     try:
         state = driver.status(device, model)

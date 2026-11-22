@@ -12,7 +12,7 @@ class Model:
     red, the zero bytes that clear its command buffer, and the codes it gives
     in its status (series and model). Its longest label
     has max_length_dots lines at dpi. It prints speed mm/s, as Brother's
-    data sheets give it."""
+    data sheets give it. With bluetooth it is reached on bt:// too."""
     identifier: str
     speed: int = 0
     max_length_dots: int = 11811
@@ -27,6 +27,7 @@ class Model:
     num_invalidate_bytes: int = 200
     series_code: int = 0xFFFF
     model_code: int = 0xFFFF
+    bluetooth: bool = False
 
 
 MODELS = {model.identifier: model for model in (

@@ -5,15 +5,11 @@ niimbluelib's B1PrintTask (https://github.com/MultiMote/niimbluelib, MIT).
 Packets are 55 55 <command> <length> <data> <checksum> aa aa, the checksum
 the XOR of command, length and data."""
 
-import errno
-import os
-import select
 import socket
 import struct
-import threading
 import time
 
-from .. import backends, bitmap, devices
+from .. import bitmap, transports
 
 # 8 dots per mm, the printhead of the D110_M is 15 mm wide, that of the B1 48 mm
 DPI = 203
@@ -22,8 +18,7 @@ B1_HEAD = 384
 # The print sequences, see print_label()
 V4, B1 = 'v4', 'b1'
 CHANNEL = 1
-# Connecting may take a few seconds, an answer comes within ANSWER_WAIT
-CONNECT_WAIT = 10
+# Seconds the printer may take to answer
 ANSWER_WAIT = 5
 # How long a label may take to print, and how often the printer is asked
 # meanwhile how many pages it printed, as the script this came from does
@@ -64,12 +59,6 @@ class NoTag(NiimbotError):
 
 class NotPrinted(NiimbotError):
     pass
-
-
-def address(device: str) -> tuple[str, int]:
-    """MAC address and RFCOMM channel of bt://<MAC>[/<channel>]."""
-    mac, _, channel = device[len('bt://'):].partition('/')
-    return mac.upper(), int(channel or CHANNEL)
 
 
 def packet(command: int, data: bytes) -> bytes:
@@ -113,263 +102,32 @@ def row_packets(rows: list[bytes], head: int = HEAD) -> list[bytes]:
     return out
 
 
-class UsbSocket:
-    """A printer on USB or shared over USB/IP, read and written like a
-    socket. The B1 takes the same packets there as on Bluetooth."""
-
-    def __init__(self, device: str):
-        self.printer = backends.open_printer(device)
-        self.timeout = CONNECT_WAIT
-
-    def settimeout(self, timeout: float):
-        self.timeout = timeout
-
-    def sendall(self, data: bytes):
-        self.printer.write(data)
-
-    def recv(self, size: int) -> bytes:
-        deadline = time.monotonic() + self.timeout
-        while not (data := self._read(size, deadline)):
-            if time.monotonic() >= deadline:
-                raise socket.timeout('no answer')
-        return data
-
-    def _read(self, size: int, deadline: float) -> bytes:
-        # usblp blocks a read until the printer answers: read once it has
-        if isinstance(self.printer, backends.KernelPrinter):
-            ready, _, _ = select.select([self.printer.dev], [], [], max(0.0, deadline - time.monotonic()))
-            return os.read(self.printer.dev, size) if ready else b''
-        return self.printer.read(size)
-
-    def close(self):
-        self.printer.dispose()
-
-
-# Bluetooth LE: the attribute protocol on its own L2CAP channel. The B1 takes
-# Niimbot's packets written to one characteristic and answers with its
-# notifications, as niimbluelib talks to it. It needs no pairing.
-ATT_CID = 4
-ATT_MTU = 247
+# On Bluetooth LE the B1 takes Niimbot's packets written to this
+# characteristic and answers with its notifications, as niimbluelib talks to it
 NIIMBOT_CHARACTERISTIC = bytes.fromhex('bef8d6c99c214c9eb632bd58c1009f9f')[::-1]
 # The service of that characteristic, as a printer may advertise it
 NIIMBOT_SERVICE = bytes.fromhex('e7810a7173ae499d8c15faa9aef0c3f2')[::-1]
-CLIENT_CONFIGURATION = 0x2902
-# The connection is kept: the B1 beeps when one opens and when it closes, not
-# at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
-# app can connect to the printer.
-KEEP_LE = 60
-
-
-class LeSocket:
-    """A printer on Bluetooth LE, read and written like a socket."""
-
-    def __init__(self, device: str):
-        mac, _ = address(device)
-        self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
-        self.s.settimeout(CONNECT_WAIT)
-        self.mtu, self.unread = 23, b''
-        # Dropped, e.g. by a printer switched off; in use; last used; when
-        # it is closed unused
-        self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
-        try:
-            self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
-            with devices.bluetooth_turn:
-                try:
-                    self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
-                except TimeoutError as e:
-                    # Not advertising, e.g. switched off: as classic
-                    # Bluetooth tells of a printer it cannot page
-                    raise OSError(errno.EHOSTDOWN, 'Host is down') from e
-            told = self._ask(0x02, struct.pack('<H', ATT_MTU))
-            self.mtu = min(ATT_MTU, struct.unpack('<H', told[:2])[0])
-            self.value, end = self._characteristic(NIIMBOT_CHARACTERISTIC)
-            self._ask(0x12, struct.pack('<HH', self._configuration(self.value, end), 1))
-        except (OSError, NiimbotError):
-            self.s.close()
-            raise
-
-    def _ask(self, op: int, data: bytes) -> bytes | None:
-        """The answer to an attribute request, None if the printer has no
-        such attribute. Its own request for the MTU is answered meanwhile."""
-        self._send(bytes([op]) + data)
-        while True:
-            pdu = self._recv()
-            if not pdu:
-                raise NoAnswer('the printer closed the connection')
-            if pdu[0] == op + 1:
-                return pdu[1:]
-            if pdu[0] == 0x01:
-                if pdu[4:5] == b'\x0a':
-                    return None
-                raise NiimbotError(f'attribute error 0x{pdu[4]:02x} on 0x{op:02x}')
-            self._other(pdu)
-
-    def _other(self, pdu: bytes):
-        if pdu[0] == 0x02:
-            self._send(bytes([0x03]) + struct.pack('<H', ATT_MTU))
-        elif pdu[0] == 0x1d:
-            self._send(b'\x1e')
-
-    def _send(self, pdu: bytes):
-        try:
-            self.s.send(pdu)
-        except TimeoutError:
-            raise
-        except OSError:
-            self.broken = True
-            raise
-
-    def _recv(self) -> bytes:
-        """An attribute PDU, b'' once the connection dropped."""
-        try:
-            pdu = self.s.recv(ATT_MTU)
-        except TimeoutError:
-            raise
-        except OSError:
-            self.broken = True
-            raise
-        if not pdu:
-            self.broken = True
-        return pdu
-
-    def _characteristic(self, uuid: bytes) -> tuple[int, int]:
-        """The value handle of a characteristic and the last handle of its
-        descriptors."""
-        value, start = None, 1
-        while start <= 0xffff:
-            answer = self._ask(0x08, struct.pack('<HHH', start, 0xffff, 0x2803))
-            if answer is None:
-                break
-            n = answer[0]
-            for i in range(1, len(answer), n):
-                handle, _, at = struct.unpack_from('<HBH', answer, i)
-                if value is not None:
-                    return value, handle - 1
-                if answer[i + 5:i + n] == uuid:
-                    value = at
-                start = handle + 1
-        if value is None:
-            raise NiimbotError('no Niimbot characteristic on Bluetooth LE')
-        return value, 0xffff
-
-    def _configuration(self, value: int, end: int) -> int:
-        """The handle that turns the notifications of a characteristic on."""
-        start = value + 1
-        while start <= end:
-            answer = self._ask(0x04, struct.pack('<HH', start, end))
-            if answer is None:
-                break
-            size = 4 if answer[0] == 1 else 18
-            for i in range(1, len(answer), size):
-                handle = struct.unpack_from('<H', answer, i)[0]
-                if size == 4 and struct.unpack_from('<H', answer, i + 2)[0] == CLIENT_CONFIGURATION:
-                    return handle
-                start = handle + 1
-        raise NiimbotError('no notifications of the Niimbot characteristic')
-
-    def settimeout(self, timeout: float):
-        self.s.settimeout(timeout)
-
-    def sendall(self, data: bytes):
-        # Written without an answer, in pieces the MTU takes
-        piece = self.mtu - 3
-        for i in range(0, len(data), piece):
-            self._send(bytes([0x52]) + struct.pack('<H', self.value) + data[i:i + piece])
-
-    def recv(self, size: int) -> bytes:
-        while not self.unread:
-            pdu = self._recv()
-            if not pdu:
-                return b''
-            if pdu[0] in (0x1b, 0x1d) and struct.unpack_from('<H', pdu, 1)[0] == self.value:
-                self.unread = pdu[3:]
-            self._other(pdu)
-        data, self.unread = self.unread[:size], self.unread[size:]
-        return data
-
-    def close(self):
-        self.s.close()
-
-
-# The connections kept, by device
-_kept: dict[str, LeSocket] = {}
-_kept_lock = threading.Lock()
-
-
-def _kept_le(device: str) -> LeSocket:
-    """The kept connection to a printer on Bluetooth LE, opened if there is
-    none or it dropped. The driver lets one user at a time have it."""
-    key = devices.lock_key(device)
-    with _kept_lock:
-        s = _kept.pop(key, None)
-        if s is not None and not s.broken:
-            _kept[key], s.busy = s, True
-            return s
-    if s is not None:
-        s.close()
-    s = LeSocket(device)
-    with _kept_lock:
-        _kept[key], s.busy = s, True
-    return s
-
-
-def _release_le(device: str, s: LeSocket):
-    key = devices.lock_key(device)
-    with _kept_lock:
-        s.busy, s.used = False, time.monotonic()
-        if not s.broken:
-            if s.timer is None:
-                s.timer = _closing(key, s, KEEP_LE)
-            return
-        if _kept.get(key) is s:
-            del _kept[key]
-    s.close()
-
-
-def _closing(key: str, s: LeSocket, after: float) -> threading.Timer:
-    timer = threading.Timer(after, _close_unused, (key, s))
-    timer.daemon = True
-    timer.start()
-    return timer
-
-
-def _close_unused(key: str, s: LeSocket):
-    with _kept_lock:
-        s.timer = None
-        if _kept.get(key) is not s:
-            return
-        unused = time.monotonic() - s.used
-        if s.busy or unused < KEEP_LE:
-            s.timer = _closing(key, s, KEEP_LE if s.busy else KEEP_LE - unused)
-            return
-        del _kept[key]
-    s.close()
+UsbSocket = transports.UsbLink
 
 
 class Connection:
     def __init__(self, device: str, le: bool = False):
         self.received = b''
         if not device.startswith('bt://'):
-            self.s = UsbSocket(device)
+            self.s = transports.UsbLink(device)
             return
         if le:
-            self.s, self.device = _kept_le(device), device
+            self.s = transports.kept_le(device, NIIMBOT_CHARACTERISTIC, error=NiimbotError, no_answer=NoAnswer)
+            self.device = device
             return
-        self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        self.s.settimeout(CONNECT_WAIT)
-        try:
-            with devices.bluetooth_turn:
-                self.s.connect(address(device))
-        except OSError:
-            self.s.close()
-            raise
+        self.s = transports.rfcomm(device, CHANNEL)
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        if isinstance(self.s, LeSocket):
-            _release_le(self.device, self.s)
+        if isinstance(self.s, transports.LeLink):
+            transports.release_le(self.device, self.s)
         else:
             self.s.close()
 
