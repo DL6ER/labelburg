@@ -54,7 +54,7 @@ def asked_afresh(monkeypatch):
 
 def answered_before(device):
     """The printer answered a status request before, as a TM-T20II does."""
-    protocol._answered[devices.lock_key(device)] = True
+    protocol._answered[escpos._answer_key(device)] = True
 
 
 @pytest.fixture
@@ -732,3 +732,60 @@ def test_status_of_a_printer_without_a_device_id_names_none(client, fake):
     fake()
     told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert 'device_name' not in told
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(protocol, 'time', clock)
+    return clock
+
+
+def print_one(client):
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    return outcome(client, response)
+
+
+def test_epson_that_left_a_request_unanswered_is_asked_again(client, fake, clock):
+    # Its first job goes out without an answer, a later one is refused once it tells it has no paper
+    printer = fake(paper=QUIET | 0x60)
+    printer.silent = True
+    assert print_one(client) == ('printed', '')
+    printer.silent = False
+    clock.sleep(protocol.ASK_AGAIN + 1)
+    assert print_one(client) == ('failed', 'The printer has no paper')
+
+
+@pytest.fixture
+def told(monkeypatch, tmp_path):
+    """Sets the device ID usblp read of DEVICE."""
+    (tmp_path / 'sys' / 'lp3').mkdir(parents=True)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'sys' / '{name}' / 'ieee1284_id'))
+    return (tmp_path / 'sys' / 'lp3' / 'ieee1284_id').write_text
+
+
+CLONE = 'MFG:Printer;CMD:ESC/POS;MDL:POS-58;'
+TM_T20II = 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;'
+
+
+def test_clone_swapped_for_an_epson_at_the_same_address(client, fake, clock, told):
+    told(CLONE)
+    printer = fake(paper=QUIET | 0x60)
+    printer.silent = True
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    assert print_one(client) == ('printed', '')
+    # The Epson is asked at once
+    told(TM_T20II)
+    printer.silent = False
+    assert print_one(client) == ('failed', 'The printer has no paper')
+
+
+def test_epson_swapped_for_a_clone_at_the_same_address(client, fake, clock, told):
+    told(TM_T20II)
+    printer = fake()
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    told(CLONE)
+    printer.silent = True
+    assert print_one(client) == ('printed', '')
+    assert printer.sent.count(protocol.INIT) == 1

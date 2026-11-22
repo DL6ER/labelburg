@@ -58,6 +58,13 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     return img, rows, width
 
 
+def _answer_key(device: str) -> str:
+    """The key protocol.get_errors() notes a printer by: its lock key and its
+    device ID, so that another printer at the same address, e.g. a clone
+    plugged in at /dev/usb/lp0 where an Epson was, is asked afresh."""
+    return f'{devices.lock_key(device)} {devices.known_device_id(device)}'.rstrip()
+
+
 def _problems(c, key: str) -> list[str] | None:
     """What the printer tells is wrong, None if it never answered DLE EOT,
     e.g. a clone without it: it is told as ready and printed on, as a ZPL
@@ -140,7 +147,7 @@ class Escpos(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                errors = _problems(c, key)
+                errors = _problems(c, _answer_key(device))
         if errors is None:
             return state
         state['errors'] = errors
@@ -166,11 +173,9 @@ class Escpos(Driver):
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
-        key = devices.lock_key(device)
         try:
             with protocol.connect(device) as c:
-                # A printer that never answered is not asked again before a job
-                problems = None if protocol.never_answered(key) else _problems(c, key)
+                problems = _problems(c, _answer_key(device))
                 if problems:
                     return problems[0]
                 c.write(protocol.job(job))
