@@ -430,6 +430,16 @@ _UNANSWERED = (
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
+OTHER_PRINTER_ONLY = ('A printer at an ipp://, ipps:// or cups:// address prints as "Other printer", '
+                      'give it the model Other/IPP (Other/IPP-203 for one of 203 dpi)')
+
+
+class OtherPrinterOnly(ValueError):
+    """A printer on IPP configured or requested as a model of another
+    driver, which would send it what it does not take."""
+
+    def __init__(self):
+        super().__init__(OTHER_PRINTER_ONLY)
 
 
 def unanswered_reason(error: Exception) -> str:
@@ -442,6 +452,8 @@ def unanswered_reason(error: Exception) -> str:
         return NO_LIBUSB
     if isinstance(error, reach.NotAllowed):
         return reach.NOT_ALLOWED
+    if isinstance(error, OtherPrinterOnly):
+        return OTHER_PRINTER_ONLY
     for numbers, text in _UNANSWERED:
         if getattr(error, 'errno', None) in numbers:
             return text
@@ -458,7 +470,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 

@@ -184,6 +184,20 @@ class Ipp(Driver):
     errors = (OSError, ipp.IPPError, http.client.HTTPException)
     takes_usbip = False
 
+    def claims(self, device) -> bool:
+        """Whether a printer is on IPP, which no other driver prints on."""
+        return ipp.is_address(device)
+
+    def configured(self, model: str) -> str:
+        """The model of a printer on IPP configured or requested as model,
+        the one of 300 dpi where it is unknown. OtherPrinterOnly for a model
+        of another driver."""
+        if model in MODELS:
+            return model
+        if model == 'Unknown':
+            return MODELS[0]
+        raise devices.OtherPrinterOnly()
+
     def fits(self, label, model):
         return label in LABELS and model in label.models
 

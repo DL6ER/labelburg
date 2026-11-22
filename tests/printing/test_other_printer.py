@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 from PIL import Image
 
-from app.labeldesigner import adding, ipp
+from app.labeldesigner import adding, drivers, ipp, refusals
 from app.labeldesigner.drivers import devices, ipp as other
 from app.labeldesigner.drivers.ipp import documents
 from app.labeldesigner.label_names import label_of
@@ -542,3 +542,52 @@ def test_printer_on_ipp_is_added_and_printed_on(tmp_path, fake):
     assert (shown['name'], shown['model'], shown['device_name'], shown['media_width']) == ('Shipping', 'Other/IPP-203', 'Zebra ZD421', 102)
     assert outcome(client, print_label(client, printer='Shipping')) == ('printed', '')
     assert len(fake.jobs()) == 1
+
+
+@pytest.mark.parametrize('model, resolved', [('Other/IPP-203', 'Other/IPP-203'), ('Other/IPP', 'Other/IPP'), ('Unknown', 'Other/IPP')])
+def test_printers_on_ipp_are_other_printers(model, resolved):
+    for device in ('ipp://192.0.2.9/ipp/print', 'ipps://192.0.2.9/ipp/print', 'cups://DYMO'):
+        assert drivers.resolve(device, model) == (other.DRIVER, resolved)
+
+
+@pytest.mark.parametrize('model', ['QL-800', 'Zebra/ZPL', 'Epson/ESC-POS'])
+def test_printer_on_ipp_of_another_model_is_refused(model):
+    with pytest.raises(devices.OtherPrinterOnly) as refused:
+        drivers.resolve('ipp://192.0.2.9/ipp/print', model)
+    assert str(refused.value) == devices.OTHER_PRINTER_ONLY
+    assert refusals.message(refused.value, '-') == devices.OTHER_PRINTER_ONLY
+
+
+@pytest.mark.parametrize('configured', ['printers', 'printer'])
+def test_printer_on_ipp_configured_as_another_model_gets_nothing(tmp_path, fake, configured):
+    if configured == 'printers':
+        client = make_client(tmp_path)
+        client.application.config['PRINTERS'] = [('QL-800', fake.address, 'Labels')]
+    else:
+        client = make_client(tmp_path, model='QL-800', printer=fake.address)
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (found['path'], found['errors']) == (fake.address, [devices.OTHER_PRINTER_ONLY])
+    answer = print_label(client, '62')
+    assert (answer.status_code, answer.get_json()['message']) == (400, devices.OTHER_PRINTER_ONLY)
+    # Neither asked nor sent anything, by no driver
+    assert fake.requests == []
+
+
+def test_printer_on_ipp_of_an_assumed_model_is_an_other_printer():
+    # E.g. PRINTER_MODEL left at its default, or a printer a request names
+    assert drivers.resolve('ipp://192.0.2.9/ipp/print', 'QL-800', assumed=True) == (other.DRIVER, 'Other/IPP')
+
+
+def test_printer_on_ipp_as_printer_printer_left_without_a_model(tmp_path, fake):
+    client = make_client(tmp_path, printer=fake.address)
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (found['model'], found['errors']) == ('Other/IPP', [])
+    assert outcome(client, print_label(client, 'ipp102x152')) == ('printed', '')
+
+
+def test_request_naming_a_printer_on_ipp_without_a_model(tmp_path, fake):
+    # Neither configured nor added: the address tells its driver, not the configured model
+    client = make_client(tmp_path, model='QL-800')
+    assert outcome(client, print_label(client, 'ipp102x152', printer=fake.address)) == ('printed', '')
+    (attributes, _), = fake.jobs()
+    assert attributes['media-col']['media-size'] == {'x-dimension': 10160, 'y-dimension': 15240}

@@ -102,6 +102,7 @@ MESSAGES = (
     IMAGE_MODE_REFUSED,
     UNKNOWN_MODEL,
     *devices.not_sent_messages(),
+    devices.OTHER_PRINTER_ONLY,
     PRINTER_BUSY,
     WRONG_MODEL,
     REMOVED,

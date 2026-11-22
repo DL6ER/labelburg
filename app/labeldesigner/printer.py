@@ -652,7 +652,12 @@ def get_ptr_status(config: Config, added=()):
             status['selected'] = device_specifier
             return status
         # The label designer offers only the printers of the list
-        printer = device_state(device_specifier, drivers.resolve(device_specifier, default_model, isinstance(default_model, Default))[1])
+        try:
+            model = drivers.resolve(device_specifier, default_model, isinstance(default_model, Default))[1]
+        except devices.OtherPrinterOnly as e:
+            printer = devices.failed_printer_state(device_specifier, e, default_model)
+        else:
+            printer = device_state(device_specifier, model)
         status.update(printer)
         status['printers'] = [printer, *_added_states(added), SIMULATOR_PRINTER.copy()]
         status['selected'] = device_specifier
