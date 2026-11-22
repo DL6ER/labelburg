@@ -19,6 +19,13 @@ ROLLO = 'MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;'
 LASER = 'MFG:Brother;CMD:PJL,PCL,PCLXL,URF;MDL:HL-L2350DW series;CLS:PRINTER;'
 INKJET = 'MFG:EPSON;CMD:ESCPL2,BDC,D4,D4PX,ESCPR7,END4,GENEP;MDL:XP-2100 Series;CLS:PRINTER;'
 QL700 = 'MFG:Brother;CMD:PT-CBP;MDL:QL-700;CLS:PRINTER;'
+# Lasers the computer draws for, a printer telling PJL only, with their USB IDs
+HOST_BASED = [('MFG:Brother;CMD:PJL,HBP;MDL:HL-1110 series;CLS:PRINTER;', (0x04f9, 0x0054)),
+              ('MFG:Samsung;CMD:SPL,FWV,PIC,BDN,EXT;MDL:ML-2160 Series;CLS:PRINTER;', (0x04e8, 0x330f)),
+              ('MFG:Hewlett-Packard;MDL:HP LaserJet 1020;CMD:ACL;CLS:PRINTER;DES:HP LaserJet 1020;', (0x03f0, 0x2b17)),
+              ('MFG:Canon;MDL:LBP2900;CMD:CAPT;VER:1.0;CLS:PRINTER;DES:Canon LBP2900;', (0x04a9, 0x2676)),
+              ('MFG:Generic;MDL:GDI Printer;CMD:GDI;CLS:PRINTER;', (0x0483, 0x5743)),
+              ('MFG:KYOCERA;MDL:FS-1020D;CMD:PJL;CLS:PRINTER;', (0x0482, 0x0491))]
 MAC = '00:00:5E:00:53:01'
 STATUS_REQUEST = b'\x1b\x69\x53'
 
@@ -110,9 +117,26 @@ def test_a_usb_device_without_a_device_id_is_named_by_its_maker():
 @pytest.mark.parametrize('device_id, office', [
     (LASER, True), (INKJET, True), ('MFG:Canon;CMD:BJL,BJRaster3,BSCCe,IVEC;MDL:MG3600 series;', True),
     ('MFG:HP;CMD:PJL,PML,POSTSCRIPT,PCLXL,PCL;MDL:LaserJet;', True), ('MFG:Apple;CMD:URF;', True),
-    (DYMO, False), (ROLLO, False), (QL700, False), ('MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;', False), ('', False)])
+    *[(device_id, True) for device_id, _ in HOST_BASED],
+    (DYMO, False), (ROLLO, False), (QL700, False), ('MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;', False), ('', False),
+    # A label printer that takes PJL jobs too
+    ('MFG:Brother;CMD:PT-CBP,PJL;MDL:TD-4550DNWB;', False)])
 def test_office_printers_are_known_by_their_commands(device_id, office):
     assert unknown.office(devices.device_id_fields(device_id)) is office
+
+
+@pytest.mark.parametrize('device_id, ids, label', [
+    *[(device_id, ids, False) for device_id, ids in HOST_BASED],
+    # By the maker's vendor ID or name, or by the commands of label printers
+    ('', (0x0922, 0x1001), True), ('MFG:DYMO;CMD: ;MDL:LabelWriter 450;', None, True),
+    ('MFG:Zebra Technologies;MDL:ZTC GK420t;', None, True), ('MFG:NIIMBOT;CMD:ESC;MDL: K9;', (0x3513, 0x0002), True),
+    (ROLLO, None, True), ('MFG:Acme;CMD:EPL2;MDL:LP 2844;', None, True), ('MFG:Acme;CMD:ESCPOS;MDL:P58;', None, True),
+    ('MFG:DatamaxONeil ;CMD:DPL;MDL:E4204B Mark III;', None, True),
+    # Neither, e.g. a receipt printer of a maker without a driver here
+    ('', (0x0416, 0x5011), False), ('', None, False), ('MFG:Acme;CMD:FOO;MDL:Bar;', (0x1234, 0x5678), False),
+    ('', (0x0922, 0x8003), False)])
+def test_label_printers_are_known_by_their_maker_or_commands(device_id, ids, label):
+    assert unknown.label_printer(devices.device_id_fields(device_id), ids) is label
 
 
 def test_devices_of_makers_of_label_printers():
@@ -258,6 +282,36 @@ def test_office_printer_on_usblp_is_neither_asked_nor_reported(usblp):
     assert UsbPrinter.written == []
 
 
+@pytest.mark.parametrize('device_id, ids', HOST_BASED)
+def test_office_printer_drawn_for_by_the_computer_is_neither_asked_nor_reported(usblp, device_id, ids):
+    plug, client = usblp
+    plug('lp0', device_id, ids)
+    told = status(client)
+    assert [p['path'] for p in told['printers']] == ['simulation'] and told['unknown'] == []
+    assert UsbPrinter.written == []
+
+
+def test_usblp_printer_without_a_device_id_is_asked_only_where_it_may_be_a_brother(usblp):
+    plug, client = usblp
+    # A POS-58 clone, which takes ESC i as a cut; a Brother; one of no known maker; a DYMO
+    plug('lp0', ids=(0x0416, 0x5011))
+    plug('lp1', ids=(0x04f9, 0x2042))
+    plug('lp2')
+    plug('lp3', ids=(0x0922, 0x0020))
+    told = status(client)
+    assert [p['path'] for p in told['printers']] == ['file:///dev/usb/lp1', 'file:///dev/usb/lp2', 'simulation']
+    assert UsbPrinter.written == [('file:///dev/usb/lp1', STATUS_REQUEST), ('file:///dev/usb/lp2', STATUS_REQUEST)]
+    assert [found['name'] for found in told['unknown']] == ['DYMO printer']
+
+
+def test_usblp_printer_of_no_maker_of_label_printers_is_neither_asked_nor_reported(usblp):
+    plug, client = usblp
+    plug('lp0', 'MFG:Acme;CMD:FOO;MDL:Bar;', (0x1234, 0x5678))
+    told = status(client)
+    assert [p['path'] for p in told['printers']] == ['simulation'] and told['unknown'] == []
+    assert UsbPrinter.written == []
+
+
 def test_usblp_printer_without_its_usb_ids_is_reported(usblp):
     plug, client = usblp
     plug('lp0', ROLLO)
@@ -299,13 +353,15 @@ def _untouched(device):
 def test_printer_on_pyusb_no_driver_prints_on_is_reported(detected, pyusb):  # noqa: F811
     rollo = Device(0x0081, vendor=0x0a5f, serial='S1234567890', device_id=ROLLO)
     laser = Device(0x0042, serial='E78123', device_id=LASER)
-    pyusb.extend([rollo, laser])
+    others = [Device(ids[1], vendor=ids[0], serial=f'X{i}', device_id=device_id) for i, (device_id, ids) in enumerate(HOST_BASED)]
+    others.append(Device(0x5678, vendor=0x1234, serial='Y1', device_id='MFG:Acme;CMD:FOO;MDL:Bar;'))
+    pyusb.extend([rollo, laser, *others])
     told = detected()
     assert [p['path'] for p in told['printers']] == ['simulation']
     [found] = told['unknown']
     assert (found['name'], 'USB ID: 0a5f:0081' in found['report']) == ('Thermal Printer', True)
     assert 'S1234567890' not in str(found) and 'E78123' not in str(told['unknown'])
-    assert rollo.endpoints[1].written == laser.endpoints[1].written == []
+    assert all(device.endpoints[1].written == [] for device in [rollo, laser, *others])
 
 
 def test_other_devices_of_makers_of_label_printers_are_reported(detected, pyusb, tmp_path, monkeypatch):  # noqa: F811

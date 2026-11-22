@@ -18,13 +18,13 @@ A printer Labelburg does not find at all can be reported in the same form: [New 
 
 Labelburg looks only where its search for printers (`PRINTER_PRINTER` `?`) looks already, and sends nothing to a device to find out what it is:
 
-- USB printers through PyUSB whose IEEE 1284 device ID names no model of a driver.
-- Printers of `/dev/usb/lp<N>` whose device ID, which Linux read when they were plugged in, names another maker than Brother. These no longer get Brother's status request `ESC i S`, a printer of another maker might print it. One that tells no device ID is still asked as a Brother printer.
+- USB printers through PyUSB and `/dev/usb/lp<N>` whose IEEE 1284 device ID names no model of a driver, where their vendor ID or device ID names a maker of label printers (see below) or the device ID names the commands of label printers: ZPL, EPL, TSPL, CPCL, DPL, ESC/POS or Brother's raster commands.
+- Printers of `/dev/usb/lp<N>` get Brother's status request `ESC i S` only where their device ID, which Linux read when they were plugged in, names Brother or a model of a driver, or where they tell none and their vendor ID is Brother's or unknown. Another printer might print it, a receipt printer cuts.
 - USB devices without a printer interface by makers of label printers, by their vendor ID from [usb.ids](http://www.linux-usb.org/usb.ids): DYMO `0922` (not its scales), TSC `1203`, Zebra `0a5f`, Datamax-O'Neil `0b0b`, SATO `0828`, cab `0985`, King Jim `0d8a` and Niimbot `3513`.
 - Devices on Bluetooth named as Niimbot names its printers, `<model>-<serial number>`, with a model after [niimbluelib](https://github.com/MultiMote/niimbluelib), e.g. `B21`; one of two characters, e.g. `K3`, only where it advertises Niimbot's service `e7810a71-73ae-499d-8c15-faa9aef0c3f2`. With that service and another model in such a name, it is reported as a Niimbot printer without the model. Niimbot models Labelburg prints on are left out.
 - Brother printers on Bluetooth, named by their model and serial number, e.g. `PT-P710BT<serial number>`: P-touch printers `PT-<model>BT` of other models, and those of a model Labelburg prints on over USB or the network but not over Bluetooth, reported "over Bluetooth". Models Labelburg prints on over Bluetooth are left out.
 
-Office printers, whose device ID names PCL, PostScript, PDF, AirPrint (URF), IPP Everywhere (PWG) or the commands of inkjets, are neither asked nor reported.
+Office printers, whose device ID names PCL, PostScript, PDF, PJL, AirPrint (URF), IPP Everywhere (PWG), the commands of inkjets or of lasers the computer draws for (e.g. Brother HBP, Samsung SPL, HP ACL, Canon CAPT, GDI) and none of label printers, are neither asked nor reported.
 
 The report holds the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID, without anything that looks like a serial number, an address or a path, and without the rest of a field after `SN`, `S/N`, `SERIAL`, `MAC`, `IP`, `HOST` or `OWNER`. `DES` is free text and told only where it repeats maker and model; `SN`, `SERN` and other fields are left out. Of a Bluetooth name only the model is kept. `GET /labeldesigner/api/printer_status` tells the printers found in `unknown`.
 

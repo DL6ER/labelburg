@@ -27,9 +27,16 @@ PRODUCTS = {(0x0922, 0x0013): 'LabelManager 400', (0x0922, 0x1001): 'LabelManage
             (0x0d8a, 0x0101): 'TEPRA PRO', (0x0d8a, 0x4001): 'KL-P1000'}
 # DYMO's postal scales
 NOT_PRINTERS = {0x0922: range(0x8000, 0x10000)}
-# Commands of office printers, which are no label printers: PCL, PostScript,
-# PDF, AirPrint, IPP Everywhere, Epson and Canon inkjets, Canon lasers
-OFFICE = re.compile(r'(PCL|POSTSCRIPT|PDF|URF|PWG|ESCPL2|ESCPR|BJ|LIPS)', re.IGNORECASE)
+# Command sets of office printers: PCL, PostScript, PDF, AirPrint, IPP
+# Everywhere, Epson and Canon inkjets, Canon lasers, PJL, and lasers the
+# computer draws for (Brother, Samsung, HP, Canon, GDI)
+OFFICE = re.compile(r'(PCL|POSTSCRIPT|PS$|PDF|URF|PWG|ESCPL2|ESCPR|BJ|LIPS|PJL|HBP|SPL|ACL|CAPT|GDI|QPDL|XPS)',
+                    re.IGNORECASE)
+# Command sets of label printers: ZPL, EPL, TSPL, CPCL, DPL, ESC/POS,
+# Brother's raster commands, XPP of TSPL printers like the Rollo after LPrint
+LABEL_COMMANDS = re.compile(r'(ZPL|EPL|TSPL|CPCL|DPL|ESC/?POS|PT-|XPP)', re.IGNORECASE)
+# Makers of label printers as device IDs name them
+LABEL_MFG = re.compile(r'(DYMO|TSC|NIIMBOT|ZEBRA|DATAMAX|SATO|CAB|KING ?JIM)\b', re.IGNORECASE)
 # Niimbot's models by niimbluelib (MIT) that no driver prints on. They tell
 # <model>-<serial number> as their name; models of two characters count
 # only with Niimbot's service, other devices may be named so.
@@ -70,9 +77,25 @@ def clean(text: str) -> str:
     return re.sub(r'\s+', ' ', text).strip(' -_:;,/')[:LONGEST].strip()
 
 
+def _commands(fields: dict) -> list[str]:
+    return [command.strip() for command in fields.get('CMD', '').split(',') if command.strip()]
+
+
 def office(fields: dict) -> bool:
-    """Whether a device ID, by its fields, is one of an office printer."""
-    return any(OFFICE.match(command.strip()) for command in fields.get('CMD', '').split(','))
+    """Whether a device ID, by its fields, is one of an office printer: it
+    names the commands of one and none of a label printer."""
+    commands = _commands(fields)
+    return any(OFFICE.match(command) for command in commands) and not any(LABEL_COMMANDS.match(command) for command in commands)
+
+
+def label_printer(fields: dict, ids: tuple[int, int] | None) -> bool:
+    """Whether a printer no driver prints on, by the fields of its device ID
+    and its vendor and product ID, is a label printer: one of a maker of
+    label printers or that names their commands, never an office printer."""
+    if office(fields):
+        return False
+    return bool(ids and label_maker(ids) or LABEL_MFG.match(fields.get('MFG', '').strip())
+                or any(LABEL_COMMANDS.match(command) for command in _commands(fields)))
 
 
 def brother(fields: dict) -> bool:

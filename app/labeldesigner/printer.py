@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 USB_PRINTER_DEVICES = [f'/dev/usb/lp{i}' for i in range(0, 11)]
 # Brother printers on USB, which the Brother driver asks for their model
 BROTHER_USB = 'usb://0x04f9:'
+BROTHER_VENDOR = 0x04f9
 ARP_TABLE = '/proc/net/arp'
 # Network printers that announce themselves (DNS-SD, as for Bonjour and
 # CUPS). Asking takes a second, the answer is kept for a minute.
@@ -369,22 +370,25 @@ _cached_unknown = []
 def _usblp_printers() -> tuple[list[str], list[dict]]:
     """usblp's devices to ask for their status, as file://..., and the
     label printers among them that no driver prints on. Brother's status
-    request goes to Brother printers and those that tell no device ID only,
-    another printer may print it."""
+    request goes to Brother printers and those that tell no device ID unless
+    their vendor ID names another maker, never to office printers: another
+    printer may print it, a receipt printer takes ESC i as a cut."""
     asked, other = [], []
     for dev in USB_PRINTER_DEVICES:
         if not os.path.exists(dev):
             continue
         device_id = devices.usb_device_id(dev)
         fields = devices.device_id_fields(device_id)
-        if not device_id or drivers.told_model(device_id):
-            asked.append(f'file://{dev}')
-        elif unknown.office(fields):
+        ids = devices.usb_ids(dev)
+        brother = unknown.brother(fields) if device_id else ids is None or ids[0] == BROTHER_VENDOR
+        if unknown.office(fields):
             logger.debug('Not asking %s, an office printer', dev)
-        elif unknown.brother(fields):
+        elif drivers.told_model(device_id) or brother:
             asked.append(f'file://{dev}')
+        elif unknown.label_printer(fields, ids):
+            other.append(unknown.on_usb(device_id, ids))
         else:
-            other.append(unknown.on_usb(device_id, devices.usb_ids(dev)))
+            logger.debug('Not asking %s, a printer no driver here prints on', dev)
     return asked, other
 
 
@@ -603,7 +607,7 @@ def get_ptr_status(config: Config, added=()):
                     raster = spec.startswith(BROTHER_USB) and (not fields or 'PT-CBP' in fields.get('CMD', '').split(','))
                     if model in drivers.MODELS or raster:
                         specs.append(spec)
-                    elif not unknown.office(fields):
+                    elif unknown.label_printer(fields, devices.usb_ids(spec)):
                         other.append(unknown.on_usb(device_id, devices.usb_ids(spec)))
                 other += _other_usb_devices()
                 for spec in specs:
