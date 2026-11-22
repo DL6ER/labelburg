@@ -137,7 +137,7 @@ def test_a_dymo_labelmanager_offers_its_tapes(designer):
     designer.wait_for_function("() => labelEditor.S.printers[0].model === 'DYMO/LabelManager-280' && labelEditor.S.tape === 'd1-12-280'")
     sizes = '[data-card="0"] select[data-k="label_size"]'
     offered = designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.value)')
-    assert offered == ['', 'd1-12-280', 'd1-6-280', 'd1-9'] == [''] + tape.takes('DYMO/LabelManager-280')
+    assert offered == ['', 'd1-12-280', 'd1-6-280', 'd1-9-280'] == [''] + tape.takes('DYMO/LabelManager-280')
     assert designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.textContent)')[1:] == ['12 mm endless', '6 mm endless', '9 mm endless']
     card = designer.inner_text('[data-card="0"]')
     assert 'DYMO LabelManager 280' in card and 'Cut by hand' in card

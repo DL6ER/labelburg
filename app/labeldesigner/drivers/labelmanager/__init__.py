@@ -28,10 +28,8 @@ logger = logging.getLogger(__name__)
 MODELS = ('DYMO/LabelManager-PnP', 'DYMO/LabelManager-280', 'DYMO/LabelManager-420P', 'DYMO/LabelManager-PC-II')
 PNP, LM280, LM420P, PC2 = MODELS
 MODEL_NAMES = {PNP: 'LabelManager PnP', LM280: 'LabelManager 280', LM420P: 'LabelManager 420P', PC2: 'LabelManager PC II'}
-# 180 dpi (labelle, constants.py; LPrint, lprint-dymo.c), a head of 64 pins
-# on the PnP (labelle, doc/margin-calibration-howto.md) and the 280 (issue
-# #69), of 128 on the 420P (issue #62) and the PC II (issue #51; 18.1 mm in
-# DYMO's "DYMO Label Software User Guide" 7.7, p. 44)
+# 180 dpi (labelle, constants.py), heads of 64 pins (margin-calibration-howto.md, issue #69) and 128 (issues
+# #62, #51; PC II 18.1 mm high in DYMO's "DYMO Label Software User Guide" 7.7, p. 44)
 DPI = 180
 HEAD_DOTS = {PNP: 64, LM280: 64, LM420P: 128, PC2: 128}
 # mm/s after DYMO's product sheets of the PnP, the 280 and the 420P and the
@@ -57,13 +55,11 @@ def _tape(identifier: str, width: int, models: tuple, first: int, last: int) -> 
 # take 6 to 12 mm, the 420P also 19 mm (DYMO's product sheets), the PC II up
 # to 24 mm (DYMO Label 7.7), its 6 and 19 mm tapes were not measured.
 LABELS = (
-    # On a head of 64 pins: 64, 48 and 32 dots of 12, 9 and 6 mm tape,
-    # centered (thermal-label, data/media.json5 and the dot tab of
-    # protocol.ts, printed on a PnP); a PnP prints all 64 on 12 mm tape
-    # (labelle, margin-calibration-howto.md, and issue #69)
+    # 64, 48 and 32 dots of 12, 9 and 6 mm tape centered (thermal-label, media.json5 and protocol.ts, on a
+    # PnP); all 64 on 12 mm tape (labelle, margin-calibration-howto.md, issue #69)
     _tape('d1-12', 12, (PNP,), 1, 64),
-    # The 280 prints fewer: pins 4 to 61 of 12 mm tape, 18 to 47 of 6 mm
-    # tape set on the printer (issue #69)
+    # The 280 prints fewer: pins 4 to 61, 8 to 57 and 18 to 47 of 12, 9 and
+    # 6 mm tape set on the printer (issue #69, 9 mm read 2025-02-10 and 12)
     _tape('d1-12-280', 12, (LM280,), 4, 61),
     # Pins 28 to 105 and 32 to 106 of 12 mm tape, 1 and 3 to 128 of 19 mm in
     # the two readings of issue #62: the pins both print
@@ -74,8 +70,8 @@ LABELS = (
     _tape('d1-6', 6, (PNP,), 17, 48),
     _tape('d1-6-280', 6, (LM280,), 18, 47),
     _tape('d1-6-420p', 6, (LM420P,), 44, 86),
-    # Not measured on a 280
-    _tape('d1-9', 9, (PNP, LM280), 9, 56),
+    _tape('d1-9', 9, (PNP,), 9, 56),
+    _tape('d1-9-280', 9, (LM280,), 8, 57),
     _tape('d1-9-420p', 9, (LM420P,), 35, 98),
     _tape('d1-9-pc2', 9, (PC2,), 28, 91),
     _tape('d1-19-420p', 19, (LM420P,), 3, 128),

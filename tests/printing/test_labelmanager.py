@@ -164,9 +164,9 @@ def test_a_12_mm_label_on_a_pnp_as_the_sources_send_it(printer):
     # Centered on a head of 64 (thermal-label, media.json5 and protocol.ts)
     (PNP, 'd1-9', 48, 1, b'\xff' * 6),
     (PNP, 'd1-6', 32, 2, b'\xff' * 4),
-    (LM280, 'd1-9', 48, 1, b'\xff' * 6),
-    # Pins 4 to 61 and 18 to 47 on a 280 (labelle issue #69)
+    # Pins 4 to 61, 8 to 57 and 18 to 47 on a 280 (labelle issue #69)
     (LM280, 'd1-12-280', 58, 0, b'\x1f' + b'\xff' * 6 + b'\xf8'),
+    (LM280, 'd1-9-280', 50, 0, b'\x01' + b'\xff' * 6 + b'\x80'),
     (LM280, 'd1-6-280', 30, 2, b'\x7f\xff\xff\xfe'),
     # Pins 32 to 105, 35 to 98, 44 to 86 and 3 to 128 on a 420P (issue #62)
     (LM420P, 'd1-12-420p', 74, 3, b'\x01' + b'\xff' * 9 + b'\x80'),
@@ -315,7 +315,7 @@ def test_usblp_tells_the_usb_ids(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize('model, sizes', [
-    (PNP, ['d1-12', 'd1-6', 'd1-9']), (LM280, ['d1-12-280', 'd1-6-280', 'd1-9']),
+    (PNP, ['d1-12', 'd1-6', 'd1-9']), (LM280, ['d1-12-280', 'd1-6-280', 'd1-9-280']),
     (LM420P, ['d1-12-420p', 'd1-6-420p', 'd1-9-420p', 'd1-19-420p']), (PC2, ['d1-12-pc2', 'd1-9-pc2', 'd1-24-pc2'])])
 def test_tapes_of_the_printers(model, sizes):
     from app.labeldesigner.label_names import label_dpi, label_name
@@ -328,7 +328,7 @@ def test_tapes_of_the_printers(model, sizes):
 
 @pytest.mark.parametrize('saved, model, printed', [
     ('d1-12', LM280, 'd1-12-280'), ('d1-12-280', PNP, 'd1-12'), ('d1-12-pc2', LM420P, 'd1-12-420p'),
-    ('d1-9', PC2, 'd1-9-pc2'), ('d1-9-420p', LM280, 'd1-9'), ('d1-6-420p', LM280, 'd1-6-280'),
+    ('d1-9', PC2, 'd1-9-pc2'), ('d1-9-420p', LM280, 'd1-9-280'), ('d1-9-280', PNP, 'd1-9'), ('d1-6-420p', LM280, 'd1-6-280'),
     # Tapes the model does not take, and other paper, stay as saved
     ('d1-24-pc2', PNP, 'd1-24-pc2'), ('d1-6', PC2, 'd1-6'), ('pt12', PNP, 'pt12'), ('12', LM420P, '12')])
 def test_a_label_prints_on_the_same_tape_of_another_model(saved, model, printed):
