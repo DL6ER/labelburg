@@ -2,6 +2,7 @@
 small label written by hand from niimbluelib's source at commit 35110a71
 (https://github.com/MultiMote/niimbluelib), files under src/, how each tells
 that the label was printed, and the task of each model."""
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -404,6 +405,29 @@ def test_label_not_told_as_printed_is_an_error(monkeypatch, model, answers):
     assert sent[-1] == p(0xf3, [1])
     if model == 'B21_L2B':
         assert sent.count(p(0xe3, [1])) == 21
+
+
+class Counting(Printer):
+    """A printer that tells page index 0 at each read once the page ended,
+    forever."""
+
+    def recv(self, size):
+        if p(0xe3, [1]) not in self.sent:
+            return super().recv(size)
+        self.reads = getattr(self, 'reads', 0) + 1
+        if self.reads > 1000:
+            raise RuntimeError('still waiting')
+        time.sleep(0.001)
+        return super().recv(size) or p(0xe0, [0, 0])
+
+
+def test_page_index_that_stays_0_is_not_waited_for_longer_than_a_label_takes(monkeypatch):
+    monkeypatch.setattr(protocol, 'PRINT_WAIT', 0.05)
+    printer = Counting({0x40: p(0x48, [2, 2]), 0xdc: D110_BEAT, **TAKEN})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/D11S', label_size='niimbot12x40')
+    assert niimbot.DRIVER.send(queue, [ROWS_96]) == 'The printer did not tell that it printed the label'
+    assert printer.sent[-1] == p(0xf3, [1])
 
 
 def test_page_start_refused_five_times_is_an_error(monkeypatch):

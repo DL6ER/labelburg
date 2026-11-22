@@ -505,7 +505,8 @@ def _until_printed(c: Connection):
 def _until_page_index(c: Connection):
     """waitUntilPrintFinishedByPageIndex(): the page index the printer tells
     by itself (e0) until a page was printed, each within ANSWER_WAIT of the
-    one before."""
+    one before, all within PRINT_WAIT."""
+    deadline = time.monotonic() + PRINT_WAIT
     while True:
         try:
             data = c.ask(0xe0, b'', 0xe0, send=False)
@@ -513,6 +514,8 @@ def _until_page_index(c: Connection):
             raise NotPrinted('the label was not printed') from e
         if len(data) == 2 and struct.unpack('>H', data)[0] >= 1:
             return
+        if time.monotonic() > deadline:
+            raise NotPrinted('the label was not printed')
 
 
 def _end_quietly(c: Connection):
