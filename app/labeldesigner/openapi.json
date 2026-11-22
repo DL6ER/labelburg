@@ -2310,15 +2310,72 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "high_res": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "fast_printing": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "leaves_first": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom"
+                        ],
+                        "description": "The end of the labels that leaves the printer first, `top` or `bottom`, e.g. to stick them on as they come out. Set for each printer in the printer settings (`/labeldesigner/api/settings`), never saved with a label. Default: as set there, else as the driver prints them."
+                      },
+                      "printer": {
+                        "type": "string",
+                        "description": "Printer to use: the configured one, the name of one listed in `PRINTERS`, `simulation`, `file:///dev/usb/lp<N>`, `usb://<vendor>:<product>` or `tcp://<host>`. Default: `PRINTER_PRINTER`. A network printer that is neither configured, added in the Settings nor found by the search only at an address `ADD_PRINTERS` allows, see `printers/identify`."
+                      },
+                      "model": {
+                        "type": "string",
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. Default: `PRINTER_MODEL`."
+                      },
+                      "print_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
+                      },
+                      "collate": {
+                        "type": "integer",
+                        "enum": [0, 1],
+                        "description": "Order of the copies of several files or PDF pages: 1 as sets (ABC ABC), 0 grouped (AA BB CC). Default: as saved with the label, else as set in the label settings (`/labeldesigner/api/settings/labels`), else 1."
+                      },
+                      "cut_once": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ],
+                        "default": 0,
+                        "description": "1 cuts only after the last label, like `cut` `last`."
+                      },
+                      "blanks": {
+                        "$ref": "#/components/schemas/SavedLabelBlanks"
+                      }
+                    }
                   },
-                  "blanks": {
-                    "$ref": "#/components/schemas/SavedLabelBlanks"
+                  {
+                    "$ref": "#/components/schemas/Cutting"
                   }
-                }
+                ]
               }
             },
             "application/x-www-form-urlencoded": {
