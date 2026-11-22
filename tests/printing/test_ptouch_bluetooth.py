@@ -163,8 +163,50 @@ def test_status_names_the_pt_p910bt_by_its_model_code():
     assert (state['model'], state['media_width'], state['errors']) == ('PT-P910BT', 12, [])
 
 
-def test_status_of_a_pt_p710bt_names_no_model_of_its_own():
-    assert parse_status(told(UNNAMED))['model'] == 'Unknown'
+class UsbBrother:
+    """A Brother printer on USB in place of the connection to it, which
+    answers a status request with its status."""
+
+    def __init__(self, model_code: int):
+        self.model_code, self.unread = model_code, b''
+
+    def write(self, data: bytes):
+        if data == b'\x1b\x69\x53':
+            self.unread += told(self.model_code)
+
+    def read(self, length: int = 32) -> bytes:
+        data, self.unread = self.unread[:length], self.unread[length:]
+        return data
+
+    def dispose(self):
+        pass
+
+
+@pytest.mark.parametrize('model, named', [('PT-P710BT', 'PT-P710BT'), ('PT-P750W', 'Unknown'), ('Unknown', 'Unknown')])
+def test_status_of_a_pt_p710bt_names_the_model_given(monkeypatch, model, named):
+    # Its reference names no model code of it, it tells one of no Brother
+    # model; another model with a model code of its own stays unknown
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    state = drivers.BROTHER.status('/dev/usb/lp0', model)
+    assert (state['model'], state['media_width'], state['errors']) == (named, 12, [])
+
+
+def test_pt_p710bt_on_usb_is_found_by_its_device_id(tmp_path, monkeypatch):
+    lp = tmp_path / 'lp0'
+    lp.touch()
+    device_id = 'MFG:Brother;CMD:PT-CBP;MDL:PT-P710BT;CLS:PRINTER;'
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [str(lp)])
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: device_id if str(lp) in device else '')
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    found_printer = client.get(STATUS).get_json()['printers'][0]
+    assert (found_printer['path'], found_printer['model'], found_printer['follow'], found_printer['errors']) == \
+        (f'file://{lp}', 'PT-P710BT', True, [])
+    assert drivers.resolve(f'file://{lp}', 'QL-800') == (drivers.BROTHER, 'PT-P710BT')
+    # A model with a model code of its own is the one its status names
+    device_id = 'MFG:Brother;CMD:PT-CBP;MDL:PT-P750W;CLS:PRINTER;'
+    assert drivers.resolve(f'file://{lp}', 'QL-800') == (drivers.BROTHER, 'QL-800')
 
 
 class FakeBrother:

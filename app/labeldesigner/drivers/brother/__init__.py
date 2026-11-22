@@ -54,7 +54,7 @@ def _on_bluetooth(device: str, model: str) -> dict:
 
 def _named(state: dict, model: str) -> dict:
     """The status with the model asked for where it names none and Brother
-    documents no model code of that model, as of the PT-P710BT."""
+    documents no model code of that model, e.g., the PT-P710BT."""
     if state.get('model') == 'Unknown' and model in MODELS and MODELS[model].model_code > 0xFF:
         state['model'] = model
     return state
@@ -81,10 +81,12 @@ class BrotherRaster(Driver):
     refusals = tuple(length_problem(model) for model in MODELS)
 
     def model_of(self, device, device_id=None):
-        # Over USB/IP the device ID read at the import names the model
-        if not usbip.is_address(device):
-            return None
-        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        # Over USB/IP the device ID read at the import names the model, on USB
+        # that of a model whose status names it by no documented model code
+        told = self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        if usbip.is_address(device) or (told and MODELS[told].model_code > 0xFF):
+            return told
+        return None
 
     def model_in(self, device_id):
         model = devices.device_id_fields(device_id).get('MDL')
