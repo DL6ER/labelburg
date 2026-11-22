@@ -13,7 +13,7 @@ import pytest
 from app.labeldesigner import printer, printer_settings
 from app.labeldesigner.drivers import devices, niimbot, progress, usbip
 from app.labeldesigner.drivers.niimbot import calibration, protocol
-from tests.helpers import make_client, without_status
+from tests.helpers import make_client, outcome, without_status
 
 DEVICE = 'bt://00:F4:BA:17:12:06'
 # A B1 on USB, shared over USB/IP
@@ -127,7 +127,7 @@ def test_label_is_printed_in_the_order_of_the_script(client, fake, monkeypatch):
     without_status(monkeypatch)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     rows = [c for c in fake.commands if c in (0x84, 0x85)]
     sent = [c for c in fake.commands if c not in (0x84, 0x85)]
     assert rows and sent == [0x40, 0xdc, 0x1a, 0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
@@ -137,7 +137,7 @@ def test_b1_label_is_printed_as_niimbluelib_prints_one(b1, fake, monkeypatch):
     without_status(monkeypatch)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     rows = [c for c in fake.commands if c in (0x84, 0x85)]
     sent = [c for c in fake.commands if c not in (0x84, 0x85)]
     # Its serial number asked after its roll
@@ -164,7 +164,7 @@ def test_b1_starts_the_next_label_once_it_takes_it(b1, fake, monkeypatch):
     monkeypatch.setattr(fake, '_take', refusing)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     assert fake.commands.count(0xf3) == 2 and fake.commands.count(0x21) == 3
 
 
@@ -174,7 +174,7 @@ def test_b1_refusing_a_label_for_longer_is_not_waited_for(b1, fake, monkeypatch)
     monkeypatch.setitem(REPLIES, 0x21, (0x31, b'\x00'))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.status_code == 503 and response.get_json()['success'] is False
+    assert (response.status_code, outcome(b1, response)[0]) == (200, 'failed')
     assert fake.commands.count(0x21) > 1 and 0x23 not in fake.commands
 
 
@@ -209,7 +209,7 @@ def test_b1_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
     b1.application.config['PRINTER_PRINTER'] = B1_DEVICE
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     sent = [c for c in printer.commands if c not in (0x84, 0x85)]
     assert sent == [0x40, 0xdc, 0x1a, 0x40, 0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xa3, 0xf3]
     assert opened and all(p.disposed for p in opened)
@@ -301,7 +301,7 @@ def test_printer_of_another_model_is_refused(b1, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0x40, (0x48, struct.pack('>H', 2320)))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'This printer is a Niimbot D110_M, choose that model for it'
+    assert outcome(b1, response) == ('failed', 'This printer is a Niimbot D110_M, choose that model for it')
     assert 0x01 not in fake.commands
 
 
@@ -310,7 +310,7 @@ def test_printer_that_does_not_tell_its_model_prints(b1, fake, monkeypatch):
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
 
 
 def test_b1_tells_its_battery(b1, fake, monkeypatch):
@@ -328,7 +328,7 @@ def test_labels_are_counted_while_printing(client, fake):
     fake.sendall = lambda data: (data[2] == 0x01 and seen.append(progress.state(DEVICE))) or send(data)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT, 'print_count': '3'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert [(state['label'], state['labels']) for state in seen] == [(1, 3), (2, 3), (3, 3)]
     assert all(state['seconds_left'] >= 0 for state in seen)
     assert progress.state(DEVICE) is None
@@ -407,7 +407,7 @@ def test_open_lid_is_an_error(client, fake, monkeypatch):
     # Not printed then
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == error
+    assert outcome(client, response) == ('failed', error)
     assert 0x21 not in fake.commands
 
 
@@ -448,7 +448,7 @@ def test_b1_with_its_lid_open(b1, fake, monkeypatch):
     assert b1.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The cover of the printer is open']
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'The cover of the printer is open'
+    assert outcome(b1, response) == ('failed', 'The cover of the printer is open')
     assert 0x21 not in fake.commands
 
 
@@ -463,7 +463,7 @@ def test_printer_that_stops_answering(client, fake, monkeypatch):
     monkeypatch.delitem(REPLIES, 0xe3)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'The printer does not answer'
+    assert outcome(client, response) == ('failed', 'The printer does not answer')
     # Asked again at the next status query
     sent = len(fake.commands)
     client.get('/labeldesigner/api/printer_status')
@@ -475,7 +475,7 @@ def test_printer_that_does_not_tell_it_printed(client, fake, monkeypatch):
     monkeypatch.setattr(protocol, 'PRINT_WAIT', 0)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'The printer did not tell that it printed the label'
+    assert outcome(client, response) == ('failed', 'The printer did not tell that it printed the label')
 
 
 def test_roll_without_its_rfid_tag_is_refused(client, fake, monkeypatch):
@@ -483,7 +483,7 @@ def test_roll_without_its_rfid_tag_is_refused(client, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0x01, (protocol.ERROR, b'\x14'))
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'The printer prints only on Niimbot rolls with their RFID tag'
+    assert outcome(client, response) == ('failed', 'The printer prints only on Niimbot rolls with their RFID tag')
 
 
 def test_tag_laid_out_otherwise_is_an_unknown_roll(client, fake, monkeypatch):
@@ -574,7 +574,7 @@ def test_calibration_label_is_placed_as_the_printer_is_calibrated(label_size, pa
 def test_b1_prints_its_calibration_label(b1, fake, tmp_path):
     b1.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
     r = b1.post('/labeldesigner/api/calibration/print', data={'printer': B1_DEVICE, 'model': 'Niimbot/B1', 'label_size': 'niimbot40x30'})
-    assert r.get_json() == {'success': True}
+    assert outcome(b1, r) == ('printed', '')
     packets = {packet[2]: data_of(packet) for packet in fake.packets}
     assert packets[0x13] == struct.pack('>HHH', 240, 384, 1)
 
@@ -598,7 +598,7 @@ def test_b1_refusing_its_serial_number_still_prints(b1, fake, monkeypatch):
     assert (printer_['errors'], printer_['serial']) == ([], None)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
 
 
 def test_b1_not_telling_its_serial_number_is_not_asked_again(b1, fake, monkeypatch):
@@ -640,7 +640,7 @@ def test_printer_refusing_its_model_id_still_prints(b1, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, (0x40, 0x08), (protocol.ERROR, b'\x01'))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
 
 
 def test_roll_serial_number_of_other_letters_is_left_out(b1, fake, monkeypatch):
@@ -688,7 +688,7 @@ def test_error_answer_while_printing_tells_why(b1, fake, monkeypatch, code, mess
     monkeypatch.setitem(REPLIES, 0xe3, (protocol.ERROR, bytes([code])))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.status_code == 503 and response.get_json()['message'] == message
+    assert (response.status_code, outcome(b1, response)) == (200, ('failed', message))
 
 
 def test_error_answer_left_from_a_stopped_job_is_not_the_status(b1, fake):
@@ -774,7 +774,7 @@ def test_page_of_two_labels_prints_whole_on_a_b1(b1, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, _roll(b'052325255', kind=5)))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot30x15-1x2', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     # 30 mm along, across the printhead, on transparent labels
     size = struct.unpack('>HHH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:6])
     assert size[:2] == (240, 384) and data_of(next(p for p in fake.packets if p[2] == 0x23)) == b'\x05'
@@ -802,7 +802,7 @@ def test_round_label_prints_on_a_b1(b1, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbotd50', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     # 50 mm across, as many rows along
     size = struct.unpack('>HHH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:6])
     assert size[:2] == (400, 384)
@@ -812,7 +812,7 @@ def test_b1_gets_the_rows_of_a_label_in_one_write(b1, fake):
     # Over USB/IP each write waits for the host, row by row a label took seconds
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     rows = [w for w in fake.writes if w[2] in (0x84, 0x85)]
     assert len(rows) == 1 and len(protocol.parse(rows[0])[0]) > 1
 
@@ -820,7 +820,7 @@ def test_b1_gets_the_rows_of_a_label_in_one_write(b1, fake):
 def test_d110_m_gets_each_row_on_its_own(client, fake):
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     rows = [w for w in fake.writes if w[2] in (0x84, 0x85)]
     assert len(rows) > 1 and all(len(protocol.parse(w)[0]) == 1 for w in rows)
 
@@ -894,7 +894,7 @@ def test_b1_print_clears_an_unanswered_status_question(b1, fake, monkeypatch):
     b1.get(status)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     asked = fake.commands.count(0xdc)
     assert b1.get(status).get_json()['printers'][0]['errors'] == []
     assert fake.commands.count(0xdc) == asked + 1
@@ -915,7 +915,7 @@ def test_pages_are_counted_while_printing(b1, fake, monkeypatch):
     fake.sendall = lambda data: (data[2] == 0x01 and seen.append(progress.state(B1_DEVICE))) or send(data)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot15x8-2x3', 'print_type': 'text', 'text': TEXT, 'print_count': '8'})
-    assert response.get_json() == {'success': True}
+    assert outcome(b1, response) == ('printed', '')
     assert [(state['label'], state['labels'], state['unit']) for state in seen] == [(1, 2, 'page'), (2, 2, 'page')]
 
 
@@ -925,7 +925,7 @@ def test_page_that_is_not_told_printed(b1, fake, monkeypatch):
     monkeypatch.setattr(protocol, 'PRINT_WAIT', 0)
     response = b1.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot15x8-2x3', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['message'] == 'The printer did not tell that it printed the page'
+    assert outcome(b1, response) == ('failed', 'The printer did not tell that it printed the page')
 
 
 def test_device_id_names_the_b1():

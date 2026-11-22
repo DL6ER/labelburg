@@ -10,7 +10,7 @@ from PIL import Image
 
 from app.labeldesigner import printer, printer_settings
 
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf'}])
 
@@ -81,14 +81,14 @@ def _print(client, path):
 def test_every_print_uses_the_calibration(tmp_path, offsets, path):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     _keep(tmp_path, json.dumps(printer_settings.calibrated({'printers': {}}, 'simulation', -0.5, 0.25, None)))
-    assert _print(client, path).get_json()['success'] is True
+    assert outcome(client, _print(client, path)) == ('printed', '')
     assert offsets == [(-0.5, 0.25)]
 
 
 def test_broken_settings_print_without_calibration(tmp_path, offsets):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     _keep(tmp_path, 'not json')
-    assert _print(client, 'print').get_json()['success'] is True
+    assert outcome(client, _print(client, 'print')) == ('printed', '')
     assert offsets == [(0.0, 0.0)]
 
 
@@ -219,7 +219,7 @@ def test_seen_that_is_not_a_printer_is_left_out(monkeypatch):
 def test_settings_that_are_not_text_print_without_calibration(tmp_path, offsets):
     client = make_client(tmp_path, empty_repo=True, model='QL-800')
     (tmp_path / 'label_repo' / printer_settings.FILE).write_bytes(b'\xff\xfe\x00broken')
-    assert _print(client, 'print').get_json()['success'] is True
+    assert outcome(client, _print(client, 'print')) == ('printed', '')
     assert offsets == [(0.0, 0.0)]
 
 
@@ -245,7 +245,7 @@ def test_a_failing_calibration_print_answers_plainly(b1, monkeypatch):
         raise RuntimeError('broken')
     monkeypatch.setattr(printer.PrinterQueue, 'print_calibration', broken)
     r = b1.post(URL + '/print', data={**B1, 'label_size': 'niimbot40x30'})
-    assert r.status_code == 400 and r.get_json()['message'] == refusals.PRINT_FAILED
+    assert r.status_code == 200 and outcome(b1, r) == ('failed', refusals.PRINT_FAILED)
 
 
 def test_calibration_is_tried_without_saving(b1):
@@ -277,7 +277,7 @@ def test_calibration_without_a_label_size_is_for_the_roll_in_the_printer(b1, mon
     monkeypatch.setattr(printer.PrinterQueue, 'print_calibration', lambda self: sizes.append(self.label_size) or '')
     monkeypatch.setattr('app.labeldesigner.routes.device_state',
                         lambda device, model: {'model': model, 'media_width': 40, 'media_length': 30, 'errors': []})
-    assert b1.post(URL + '/print', data=B1).get_json() == {'success': True}
+    assert outcome(b1, b1.post(URL + '/print', data=B1)) == ('printed', '')
     assert sizes == ['niimbot40x30']
     assert b1.get(URL, query_string=B1).get_json()['kind'] == 'narrow'
 

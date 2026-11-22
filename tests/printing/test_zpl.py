@@ -9,7 +9,7 @@ import pytest
 
 from app.labeldesigner.drivers import backends, devices, zpl
 from app.labeldesigner.drivers.zpl import protocol
-from tests.helpers import make_client, without_status
+from tests.helpers import make_client, outcome, without_status
 
 DEVICE = 'file:///dev/usb/lp_zpl'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
@@ -40,7 +40,7 @@ def test_network_address(device, address):
 
 def test_label_is_printed_as_large_as_it_is(client, sent):
     response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl102x76', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     (device, data), = sent
     assert device == DEVICE
     assert data.startswith(b'^XA\n^PW816\n^LL608\n^FO0,0^GFA,62016,62016,102,') and data.endswith(b'\n^XZ\n')
@@ -113,7 +113,7 @@ def test_label_over_the_network(client, monkeypatch):
         'printer': device, 'label_size': 'zpl51x25', 'print_type': 'text', 'text': TEXT})
     thread.join(5)
     server.close()
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert b''.join(received).startswith(b'^XA\n^PW408\n^LL200\n')
 
 
@@ -122,7 +122,7 @@ def test_printer_on_usb_that_is_not_there(client, sent):
     assert printer_['errors'] == ['The printer is switched off or not connected']
     response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl57x32', 'print_type': 'text', 'text': TEXT})
     # Printing does not ask it
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_600_dpi_is_refused(client, sent):

@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, paperless, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -928,18 +928,81 @@ def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLa
     queued = []
     for i, image in enumerate(labels):
         queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn))
-        # Only the first label keeps its image, the print routes return it
-        queued[-1].keep_generated = i == 0
         printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
     return queued
 
 
-def _printed_image(result: dict, queued: list[SimpleLabel], return_format) -> dict:
-    """result with the image of the first label printed as base64 (image)
-    for return_format png, as the printer got it."""
-    if return_format == 'png' and queued and getattr(queued[0], 'generated', None) is not None:
-        result['image'] = base64.b64encode(image_to_png_bytes(queued[0].generated, gray=not queued[0].in_color)).decode()
-    return result
+# The preview of a job in the queue, at most this many pixels on its long side
+PREVIEW_SIZE = 240
+MAX_TITLE_LENGTH = 200
+# Where a job comes from as a request may tell it, the routes name the others
+TOLD_SOURCES = ('designer', 'mcp')
+
+
+def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int, drawn: Drawn | None = None,
+            return_format=None, extra: dict | None = None):
+    """Add the job run() prints to the line of the printer and answer that it
+    waits there. drawn is its first label as printer.check() drew it: the
+    queue shows it, return_format png returns it as base64 (image) as the
+    printer gets it."""
+    preview = image = None
+    if drawn is not None:
+        gray = not drawn.label.in_color
+        small = drawn.shown.copy()
+        small.thumbnail((PREVIEW_SIZE, PREVIEW_SIZE))
+        preview = image_to_png_bytes(small, gray=gray)
+        if return_format == 'png':
+            image = base64.b64encode(image_to_png_bytes(drawn.image, gray=gray)).decode()
+    try:
+        job = print_queue.add(printer.device_specifier, _as_in_this_request(run), title=title, labels=labels, source=source,
+                              preview=preview, size=print_queue.image_bytes(printer.images()),
+                              explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
+    except print_queue.Full as full:
+        return _line_full(printer, str(full))
+    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
+    if image is not None:
+        result['image'] = image
+    return jsonify(result)
+
+
+def _line_full(printer: PrinterQueue, why: str):
+    """The answer to a job print_queue.add() refuses, why as it tells it."""
+    current_app.logger.warning('Not queued for %s, %s', printer.device_specifier, why)
+    return _fail(BUSY, PRINTER_FAILED)
+
+
+def _as_in_this_request(call):
+    """call as made in this request: with its app, and its connections checked
+    as those of the request, see _check_named(). The request itself is not
+    kept, a job may wait long after it."""
+    app, mode = current_app._get_current_object(), reach.checking_mode()
+
+    def called(*args):
+        with app.app_context(), reach.checking(mode):
+            return call(*args)
+    return called
+
+
+def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label') -> str:
+    """The title of a print job in the queue: the one of the request, else
+    the first line of the first label as printer.check() drew it, its icons
+    left out, else the name it is saved under, else fallback."""
+    lines = [line for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)
+             for line in str(item.get('text', '')).splitlines()]
+    # Icons are drawn with fonts of their own, a title shows them as boxes
+    lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
+    name = data.get('name')
+    for title in (_requested('title'), *lines, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
+        if isinstance(title, str) and (title := ' '.join(title.split())):
+            return title[:MAX_TITLE_LENGTH]
+    return fallback
+
+
+def _job_source(default: str) -> str:
+    """Where a print job comes from: as the request tells it for the label
+    designer and MCP, else default, that of the route."""
+    source = _requested('source')
+    return source if source in TOLD_SOURCES else default
 
 
 def _next_asn(data: dict) -> int | None:
@@ -1147,20 +1210,24 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
 
 def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, collate: bool, high_res: bool, fast: bool,
                return_format, **stored):
-    """Print print_count copies of the label, of each of its images, see
-    _copies(), and answer how it went. stored tells where the image of a
-    stored label is, see load_label_images()."""
+    """Queue print_count copies of the label, of each of its images, see
+    _copies(), to be printed. stored tells where the image of a stored label
+    is, see load_label_images()."""
+    # Refused before archive serial numbers are taken for it
+    if full := print_queue.full(printer.device_specifier):
+        return _line_full(printer, full)
     try:
         # Decode the image once, all labels of the job share it. Of a PDF
         # each selected page is a label of its own.
         images, _ = load_label_images(data, files, copies=print_count, **stored)
+        if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
+            return _line_full(printer, full)
         queued = _queue_labels(printer, _copies(images, print_count, collate), data, files, high_res, fast)
-        status = printer.process_queue()
+        drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    if status:
-        return _fail(status, PRINTER_FAILED)
-    return _printed_image({'success': True}, queued, return_format)
+    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(queued),
+                   drawn=drawn, return_format=return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -1461,6 +1528,8 @@ def get_printer_status():
         printer['takes'] = tape.takes(model)
         # The label size of that tape, for API users
         printer['label_size'], printer['label_size_assumed'] = printed_on.id, printed_on.assumed
+        if printer.get('path'):
+            printer['queue'] = print_queue.summary(printer['path'])
         # A job of this server, added to what the printer tells of it
         job = progress.state(printer['path']) if printer.get('path') else None
         if job:
@@ -1877,12 +1946,96 @@ def print_calibration():
         if offsets:
             queue.offset = (offsets.get('across', queue.offset[0]), offsets.get('along', queue.offset[1]))
             printer_settings.checked_offsets(*queue.offset)
-        message = queue.print_calibration()
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
-    if message:
-        return _fail(message, PRINTER_FAILED)
-    return jsonify({'success': True})
+    return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
+
+
+def _job_told(told: dict, printing_on: str | None = None) -> dict:
+    """A job as print_queue tells it, its preview as the URL of the image
+    and, for the printing one, the progress of its printer."""
+    told = dict(told, preview=url_for('.queue_preview', job_id=told['id']) if told['preview'] else None)
+    if printing_on is not None and told['state'] == 'printing':
+        progressing = progress.state(printing_on)
+        if progressing:
+            told['progress'] = progressing
+    return told
+
+
+def _line_told(told: dict, device: str) -> dict:
+    return {'printing': _job_told(told['printing'], device) if told['printing'] else None,
+            'waiting': [_job_told(job) for job in told['waiting']], 'held': told['held']}
+
+
+def _no_such_job():
+    return make_response(jsonify({'success': False, 'message': print_queue.NO_SUCH_JOB, 'start': print_queue.START}), 404)
+
+
+def _queue_device(requested: str) -> str:
+    """The device of the printer a request of the queue names, by its device
+    or its name as the print requests take them. Never asks a printer."""
+    return _named_device(requested, *_known_printers()[:2])
+
+
+@bp.route('/api/queue', methods=['GET'])
+def queue_of_printers():
+    """The jobs of the line of the printer, or of every line with a job or
+    a hold. Never asks a printer."""
+    if request.args.get('printer'):
+        try:
+            device = _queue_device(request.args['printer'])
+        except ValueError as e:
+            return _refused('Reading the print queue', e, refusals.INVALID_INPUT)
+        return jsonify({**_line_told(print_queue.line(device), device), 'start': print_queue.START})
+    return jsonify(printers=[{'printer': told['printer'], **_line_told(told, told['printer'])} for told in print_queue.lines()],
+                   start=print_queue.START)
+
+
+@bp.route('/api/queue/<job_id>', methods=['GET'])
+def queue_job(job_id):
+    job = print_queue.get(job_id)
+    if job is None:
+        return _no_such_job()
+    return jsonify({**_job_told(job.told()), 'start': print_queue.START})
+
+
+@bp.route('/api/queue/<job_id>/preview.png', methods=['GET'])
+def queue_preview(job_id):
+    job = print_queue.get(job_id)
+    if job is None:
+        return _fail(print_queue.NO_SUCH_JOB, 404)
+    # Read once, it is dropped in time
+    preview = job.preview
+    if preview is None:
+        return _fail(print_queue.NO_PREVIEW, 404)
+    response = make_response(preview)
+    response.headers.set('Content-type', 'image/png')
+    return response
+
+
+@bp.route('/api/queue/<job_id>/remove', methods=['POST'])
+def queue_remove(job_id):
+    """Take a job that waits out of its line."""
+    refused = print_queue.remove(job_id)
+    if refused is None:
+        return _no_such_job()
+    if refused:
+        return _fail(refused, 409)
+    return jsonify(success=True)
+
+
+@bp.route('/api/queue/continue', methods=['POST'])
+def queue_continue():
+    """Print on after a job that did not print held the jobs behind it."""
+    values = {**request.values.to_dict(), **_json_body()}
+    if not values.get('printer'):
+        return _fail(print_queue.PRINTER_REQUIRED, 400)
+    try:
+        device = _queue_device(values['printer'])
+    except ValueError as e:
+        return _refused('Continuing the print queue', e, refusals.INVALID_INPUT)
+    print_queue.resume(device)
+    return jsonify(success=True)
 
 
 @bp.route('/api/calibration/example.png', methods=['GET'])
@@ -2002,20 +2155,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     the network that is neither configured, added nor found by the search,
     nor shown, one the status of the printers lists, is checked by
     ADD_PRINTERS."""
-    printers = configured_printers(current_app.config)
-    if printers:
-        configured, model = printers[0][1], printers[0][0]
-    else:
-        configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
-    # And the printers added in the Settings, a name of the configuration first
-    printers += _added_printers()
-    device = requested_device or configured
-    named = {n.casefold(): d for _, d, n in reversed(printers) if n}
-    device = named.get(device.casefold(), device)
+    printers, configured, model = _known_printers()
+    device = _named_device(requested_device or configured, printers, configured)
     listed = [d for _, d, _ in printers]
-    if device not in (configured, 'simulation', '?', *listed) and \
-            not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
-        raise ValueError(f"Unsupported printer: {device}")
     # By the same spelling only, another one could name any host
     if not shown and device not in (configured, *listed) and device not in found_devices():
         _check_named(device)
@@ -2032,6 +2174,29 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
         # The driver would refuse it without a message
         raise ValueError(UNKNOWN_MODEL if model == 'Unknown' else f"Unknown printer model: {model}")
     return device, model
+
+
+def _known_printers() -> tuple[list, str, str]:
+    """The printers of the configuration and those added in the Settings as
+    (model, device, name), with the device and model configured."""
+    printers = configured_printers(current_app.config)
+    if printers:
+        configured, model = printers[0][1], printers[0][0]
+    else:
+        configured, model = current_app.config['PRINTER_PRINTER'], drivers.canonical(current_app.config['PRINTER_MODEL'])
+    # A name of the configuration first
+    return printers + _added_printers(), configured, model
+
+
+def _named_device(requested: str, printers: list, configured: str) -> str:
+    """The device a request names by its device or by the name of one of
+    printers, refused where it is neither listed nor taken by a driver."""
+    named = {n.casefold(): d for _, d, n in reversed(printers) if n}
+    device = named.get(requested.casefold(), requested)
+    if device not in (configured, 'simulation', '?', *(d for _, d, _ in printers)) and \
+            not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
+        raise ValueError(f"Unsupported printer: {device}")
+    return device
 
 
 def _demo_model(kept: dict) -> str:
@@ -2819,25 +2984,18 @@ def webhook_print():
         current_app.logger.exception(e)
         return _fail('Failed to read images', 400)
 
-    # Process and queue each image
+    # Queue each image
     try:
         printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
-        status = printer.process_queue()
+        drawn = printer.check()
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
-
-    result = {
-        'success': len(status) == 0,
-        'count': len(labels)
-    }
-    if status:
-        result['message'] = status
-        return make_response(jsonify(result), PRINTER_FAILED)
-    return jsonify(result)
+    return _queued(printer, run=printer.process_queue, title=_job_title({}, drawn), source=_job_source('webhook'), labels=len(labels),
+                   drawn=drawn, extra={'count': len(labels)})
 
 
 # --- Homebox ------------------------------------------------------------------
@@ -2940,9 +3098,8 @@ def homebox(name: str | None = None):
         image_mode = {'color': 'colored', 'red': 'red_and_black'}.get(_palette(label_size), 'grayscale')
         printer.add_label_to_queue(_image_label(img, label_size, orientation, image_mode, high_res=high_res),
                                    high_res=high_res, fast=_whole(_option('fast_printing', data, 0)) != 0)
-        status = printer.process_queue()
+        drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    if status:
-        return _fail(status, PRINTER_FAILED)
-    return {'success': True}
+    return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}, drawn), source=_job_source('homebox'),
+                   labels=1, drawn=drawn)

@@ -10,9 +10,11 @@ import logging
 import os
 import threading
 import time
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from flask import Config
+from PIL import Image
 
 from . import bluetooth, drivers, mdns, sheets
 from .drivers import devices, progress, reach, usbip
@@ -96,6 +98,16 @@ class _Simulator:
         logger.info('Saved simulated label to %s', path)
 
 
+class Drawn(NamedTuple):
+    """The first label of a queue as PrinterQueue.check() drew it: its image
+    as the printer gets it, as the label designer shows it (upright, a page
+    of several labels laid out as sheets.page_view() does), and the label
+    with its templates filled in."""
+    image: Image.Image
+    shown: Image.Image
+    label: object
+
+
 class PrinterQueue:
     def __init__(self, model, device_specifier, label_size, resolved=False):
         # A printer known by its address or device ID is that model, a model
@@ -133,6 +145,11 @@ class PrinterQueue:
             'fast': fast
         })
 
+    def images(self) -> list:
+        """The images of the labels queued, e.g. uploaded photos, which the
+        job holds until it prints. Copies share theirs."""
+        return [entry['label'].image for entry in self._print_queue]
+
     def _model_problem(self) -> str:
         """Why the job cannot go to a printer shared over USB/IP: it cannot
         be reached, or the device ID of its import names another model than
@@ -165,6 +182,29 @@ class PrinterQueue:
         self.cut says: after each one, the last one or none."""
         last = len(self._print_queue) - 1
         return [self.cut == 'each' or (self.cut == 'last' and i == last) for i in range(last + 1)]
+
+    def check(self) -> Drawn | None:
+        """The first label of the queue, drawn as printing draws it, which
+        raises what printing would raise for it. None without labels. It is
+        drawn again when it prints."""
+        if not self._print_queue:
+            return None
+        size = label_of(self.label_size)
+        page = self._print_queue[:sheets.per_sheet(size) if size else 1]
+        made = [entry['label'] for entry in page]
+        # A page (sheets.Sheet) takes over the turn of its labels, which keep
+        # it for printing
+        kept = [(each.turned, getattr(each, 'keep_generated', False)) for each in made]
+        made[0].keep_generated = True
+        try:
+            [first] = self._grouped(page)
+            cut = self.cut == 'each' or self.cut == 'last' and len(page) == len(self._print_queue)
+            self.driver.render(self, [dict(first, cut=cut)], None)
+            return Drawn(made[0].generated, made[0].shown, made[0])
+        finally:
+            for each, (turned, keep) in zip(made, kept):
+                each.turned, each.keep_generated = turned, keep
+            made[0].generated = made[0].shown = None
 
     def process_queue(self) -> str:
         """Print the labels of the queue as one job."""

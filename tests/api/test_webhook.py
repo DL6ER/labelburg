@@ -7,7 +7,7 @@ from PIL import Image
 
 from app.labeldesigner.enums import LabelOrientation
 
-from tests.helpers import _red_square, _upload, make_client
+from tests.helpers import _red_square, _upload, make_client, outcome
 
 
 def test_webhook_accepts_pdf_in_json(tmp_path):
@@ -18,7 +18,7 @@ def test_webhook_accepts_pdf_in_json(tmp_path):
     payload = {'password': 'secret', 'images': [{'data': base64.b64encode(buffer.getvalue()).decode('ascii'), 'mime': 'application/pdf'}]}
     response = client.post('/labeldesigner/api/webhook/print', json=payload)
     assert response.status_code == 200
-    assert response.get_json() == {'success': True, 'count': 1}
+    assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
 
 
 def test_webhook_authentication(tmp_path):
@@ -65,7 +65,8 @@ def test_webhook_turns_images_on_die_cut_labels(tmp_path, monkeypatch):
     images = [base64.b64encode(_upload(Image.new('L', size, 'black'), 'image.png').stream.read()).decode('ascii')
               for size in ((1200, 1800), (1800, 1200))]
     payload = {'password': 'secret', 'label_size': '103x164', 'model': 'QL-1100', 'orientation': 'standard', 'images': images}
-    assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 2}
+    response = client.post('/labeldesigner/api/webhook/print', json=payload)
+    assert (response.get_json()['count'], outcome(client, response)) == (2, ('printed', ''))
     assert [(label._width, label._height, label.label_orientation) for label in labels] == [
         (1200, 1822, LabelOrientation.ROTATED), (1822, 1200, LabelOrientation.STANDARD)]
 
@@ -83,7 +84,8 @@ def test_webhook_takes_a_threshold_of_0(tmp_path, monkeypatch):
     image = base64.b64encode(_upload(_red_square(), 'image.png').stream.read()).decode('ascii')
     for given, used in ((0, 0), ('0', 0), (None, client.application.config['IMAGE_DEFAULT_BW_THRESHOLD'])):
         payload = {'password': 'secret', 'label_size': '62', 'image_mode': 'black_and_white', 'bw_threshold': given, 'images': [image]}
-        assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 1}
+        response = client.post('/labeldesigner/api/webhook/print', json=payload)
+        assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
         assert int(thresholds.pop()) == used
 
 
@@ -99,7 +101,8 @@ def test_webhook_refuses_an_unknown_image_mode(tmp_path, monkeypatch):
     response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, image_mode='sepia'))
     assert response.status_code == 400
     assert response.get_json() == {'success': False, 'message': 'image_mode must be grayscale, black_and_white, red_and_black or colored'}
-    assert client.post('/labeldesigner/api/webhook/print', json=dict(payload, image_mode='bw')).get_json() == {'success': True, 'count': 1}
+    response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, image_mode='bw'))
+    assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
 
 
 def test_webhook_takes_leaves_first(tmp_path, monkeypatch):
@@ -111,7 +114,8 @@ def test_webhook_takes_leaves_first(tmp_path, monkeypatch):
     image = base64.b64encode(_upload(_red_square(), 'image.png').stream.read()).decode('ascii')
     payload = {'password': 'secret', 'label_size': '62', 'images': [image]}
     for leaves_first in ('top', 'bottom'):
-        assert client.post('/labeldesigner/api/webhook/print', json=dict(payload, leaves_first=leaves_first)).get_json() == {'success': True, 'count': 1}
+        response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, leaves_first=leaves_first))
+        assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
     assert turned == [False, True]
     response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, leaves_first='side'))
     assert response.status_code == 400
@@ -127,7 +131,8 @@ def test_webhook_takes_a_label_size_as_a_json_number(tmp_path, monkeypatch):
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'
     image = base64.b64encode(_upload(_red_square(), 'image.png').stream.read()).decode('ascii')
     payload = {'password': 'secret', 'label_size': 62, 'model': 'QL-800', 'images': [image]}
-    assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 1}
+    response = client.post('/labeldesigner/api/webhook/print', json=payload)
+    assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
     assert sizes == ['62']
     response = client.post('/labeldesigner/api/webhook/print', json=dict(payload, label_size=63))
     assert (response.status_code, response.get_json()['message']) == (400, 'Unknown label_size')

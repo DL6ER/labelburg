@@ -11,7 +11,7 @@ import pytest
 
 from app.labeldesigner.drivers import backends, escpos
 from app.labeldesigner.drivers.escpos import protocol
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome, printing
 
 DEVICE = 'file:///dev/usb/lp3'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
@@ -274,7 +274,7 @@ def test_label_is_printed_and_cut(client, fake):
     printer = fake()
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT, 'print_count': '2', 'cut': 'last'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert printer.sent.startswith(protocol.OFFLINE + protocol.PAPER + protocol.INIT)
     assert printer.sent.count(b'\x1dv0\x00') == 2 and printer.sent.count(protocol.CUT) == 1
     assert printer.sent.endswith(protocol.CUT)
@@ -283,7 +283,7 @@ def test_label_is_printed_and_cut(client, fake):
 def test_no_paper_does_not_print(client, fake):
     printer = fake(paper=QUIET | 0x60)
     response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': False, 'message': 'The printer has no paper'}
+    assert outcome(client, response) == ('failed', 'The printer has no paper')
     assert protocol.INIT not in printer.sent
 
 
@@ -301,7 +301,7 @@ def test_send_errors_are_told_as_on_the_other_printers(client, monkeypatch, erro
         raise error
     monkeypatch.setattr(protocol, 'connect', fail)
     response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': False, 'message': message}
+    assert outcome(client, response) == ('failed', message)
 
 
 def test_paper_is_cut_at_least_after_the_last_label(client, fake):
@@ -498,7 +498,8 @@ def test_label_for_the_paper_of_the_other_model(tmp_path, monkeypatch, through, 
 
     def render(self, queue, entries, keep=None):
         job = original(self, queue, entries, keep)
-        printed_on.append((queue.label_size, job[0][2]))
+        if printing():
+            printed_on.append((queue.label_size, job[0][2]))
         return job
     monkeypatch.setattr(escpos.Escpos, 'render', render)
     client = make_client(tmp_path, empty_repo=True)
@@ -517,7 +518,7 @@ def test_label_for_the_paper_of_the_other_model(tmp_path, monkeypatch, through, 
         response = client.post('/labeldesigner/api/webhook/print', json={
             'password': 'secret', 'printer': 'simulation', 'model': model, 'label_size': saved,
             'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on == [(printed, row_bytes)]
     # Other paper stays refused
     response = client.post('/labeldesigner/api/print', data={
@@ -539,7 +540,8 @@ def test_label_for_the_paper_set_by_hand_on_the_other_model(tmp_path, monkeypatc
 
     def render(self, queue, entries, keep=None):
         job = original(self, queue, entries, keep)
-        printed_on.append((queue.label_size, job[0][2]))
+        if printing():
+            printed_on.append((queue.label_size, job[0][2]))
         return job
     monkeypatch.setattr(escpos.Escpos, 'render', render)
     client = make_client(tmp_path, empty_repo=True)
@@ -564,11 +566,11 @@ def test_label_for_the_paper_set_by_hand_on_the_other_model(tmp_path, monkeypatc
         response = client.post('/labeldesigner/api/webhook/print', json={
             'password': 'secret', 'printer': 'Till', 'label_size': 'escpos80',
             'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on == [('escpos80-180', 64)]
     # Without a label size on the paper set by hand
     response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on[1:] == [('escpos80-180', 64)]
 
 
@@ -583,7 +585,8 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
 
     def render(self, queue, entries, keep=None):
         job = original(self, queue, entries, keep)
-        printed_on.append((queue.label_size, job[0][2]))
+        if printing():
+            printed_on.append((queue.label_size, job[0][2]))
         return job
     monkeypatch.setattr(escpos.Escpos, 'render', render)
     client = make_client(tmp_path, empty_repo=True)
@@ -594,5 +597,5 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     assert response.status_code == 200
     assert Image.open(io.BytesIO(response.data)).width == dots
     response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on == [(size, dots // 8)]

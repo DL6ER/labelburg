@@ -9,7 +9,7 @@ from PIL import Image, ImageOps
 
 from app.labeldesigner import printer
 from app.labeldesigner.label import SimpleLabel
-from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, pixels, verify_image
+from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, outcome, pixels, verify_image
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Pull', 'size': '60', 'align': 'left'},
                    {'font': 'DejaVu Sans,Book', 'text': 'Open from 9 to 5', 'size': '30', 'align': 'left'}])
@@ -65,7 +65,7 @@ def test_a_mirrored_label_is_printed_mirrored(tmp_path, monkeypatch, model, labe
         response = client.post('/labeldesigner/api/print', data={
             'label_size': label_size, 'orientation': orientation, 'text': SHORT_TEXT, 'mirror': mirror,
             'printer': 'simulation', 'model': model, 'leaves_first': leaves_first})
-        assert response.get_json()['success'] is True
+        assert outcome(client, response) == ('printed', '')
         return printed.pop()
     inverted, normal = print_label('1'), print_label('0')
     generate = SimpleLabel.generate

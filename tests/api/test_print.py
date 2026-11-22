@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 from flask.testing import FlaskClient
 
-from tests.helpers import _pdf, _red_square, _upload, EXAMPLE_FORMDATA, make_client, sent_raster
+from tests.helpers import _pdf, _red_square, _upload, EXAMPLE_FORMDATA, make_client, outcome, sent_raster
 
 
 class TestLabelDesignerAPI:
@@ -26,24 +26,18 @@ class TestLabelDesignerAPI:
         response = client.post('/labeldesigner/api/print', data=data)
         assert response.status_code == 200
         assert response.is_json
-        json_response = response.get_json()
-        assert 'success' in json_response
-        assert json_response['success'] is True
+        assert outcome(client, response) == ('printed', '')
 
     # Test printing to an invalid printer path
     def test_print_label_invalid_printer(self, client: FlaskClient):
         data = EXAMPLE_FORMDATA.copy()
         data['printer'] = '/dev/usb/lp99'
         response = client.post('/labeldesigner/api/print', data=data)
-        # The printer, not the request: it may work later
-        assert response.status_code == 503
-        assert response.is_json
-        json_response = response.get_json()
-        assert 'message' in json_response
+        # The printer, not the request: its job fails, it may work later
+        assert response.status_code == 200
         # The path is in the log only
-        assert json_response['message'] == 'Could not send the label to the printer: The printer is switched off or not connected'
-        assert 'success' in json_response
-        assert json_response['success'] is False
+        assert outcome(client, response) == (
+            'failed', 'Could not send the label to the printer: The printer is switched off or not connected')
 
     def test_printer_status_returns_simulator(self, client: FlaskClient):
         """Check /api/printer_status includes simulator."""
@@ -106,7 +100,7 @@ def test_simulator_keeps_only_the_newest_labels(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     data = EXAMPLE_FORMDATA.copy()
     data['print_count'] = '3'
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     assert len(os.listdir(printer.SIMULATED_LABELS_DIR)) == 2
 
 
@@ -118,7 +112,7 @@ def test_text_label_is_not_loaded_again_for_every_copy(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     data = EXAMPLE_FORMDATA.copy()
     data['print_count'] = '3'
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     assert len(calls) == 1
 
 
@@ -157,7 +151,7 @@ def test_600_dpi_is_refused_for_the_ql1100_series_and_ptouch_printers(tmp_path, 
 
     # At normal resolution they print
     data['high_res'] = '0'
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
 
 
 def test_several_files_are_printed_one_after_the_other(tmp_path):
@@ -218,7 +212,7 @@ def test_fast_printing(tmp_path, monkeypatch, route, fast):
         response = client.post('/labeldesigner/api/webhook/print', json={'password': 'secret', 'images': [image], 'label_size': '62', **options})
     else:
         response = client.post('/labeldesigner/api/repository/print', data={'name': 'QR-Example.json', **options})
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
     data = sent[0]
     flags = data[data.index(b'\x1biz') + 3]
     assert bool(flags & 0x40) == (fast != '1')
@@ -231,7 +225,7 @@ def test_ptouch_printers_get_compressed_lines_and_no_media_type(tmp_path, monkey
     sent = sent_raster(monkeypatch)
     client = make_client(tmp_path, model=model)
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size=label_size, orientation='rotated'))
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
     data = sent[0]
     flags = data[data.index(b'\x1biz') + 3]
     # Valid flag of the media type
@@ -246,7 +240,7 @@ def test_copies_on_ptouch_printers_are_one_job(tmp_path, monkeypatch, cut_once):
     sent = sent_raster(monkeypatch)
     client = make_client(tmp_path, model='PT-E550W')
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='pt12', orientation='rotated', print_count='12', cut_once=cut_once))
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
     assert len(sent) == 1
     data = sent[0]
     assert data.count(b'\x1b@') == 1
@@ -277,7 +271,7 @@ def test_cutting_on_ptouch_printers(tmp_path, monkeypatch, options, autocut, cut
     sent = sent_raster(monkeypatch)
     client = make_client(tmp_path, model='PT-E550W')
     data = dict(EXAMPLE_FORMDATA, label_size='pt12', orientation='rotated', print_count='3', **options)
-    assert client.post('/labeldesigner/api/print', data=data).get_json()['success'] is True
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     data, = sent
     of = lambda cmd: [data[i + 3] for i in range(len(data)) if data.startswith(cmd, i)]
     # Various mode (ESC i M), cut every n labels (ESC i A), advanced mode (ESC i K)
@@ -292,7 +286,7 @@ def test_cutting_on_ql_printers(tmp_path, monkeypatch, cut, cuts):
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: queued.extend(self.label_cuts()) or '')
     client = make_client(tmp_path)
-    assert client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='3', cut=cut)).get_json()['success'] is True
+    assert outcome(client, client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='3', cut=cut))) == ('printed', '')
     assert queued == cuts
 
 
@@ -310,7 +304,7 @@ def test_labels_leave_the_printer_bottom_first_turned(tmp_path, route):
             response = client.post('/labeldesigner/api/print', data=data)
         else:
             response = client.post('/labeldesigner/api/repository/print', data={'name': 'QR-Example.json', 'printer': 'simulation', 'print_count': '1', 'leaves_first': leaves_first})
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
     top, bottom = (Image.open(os.path.join(printer.SIMULATED_LABELS_DIR, name)) for name in sorted(os.listdir(printer.SIMULATED_LABELS_DIR)))
     assert top.tobytes() != bottom.tobytes()
     assert top.rotate(180).tobytes() == bottom.tobytes()
@@ -328,7 +322,7 @@ def test_leaves_first_is_not_taken_from_a_saved_label(tmp_path):
     (repo / 'Bottom.json').write_text(json.dumps(dict(label, name='Bottom.json', leaves_first='bottom')), encoding='utf-8')
     for body in ({'name': 'Side.json'}, {'name': 'Bottom.json'}, {'name': 'Side.json', 'leaves_first': 'bottom'}):
         response = client.post('/labeldesigner/api/repository/print', data={'printer': 'simulation', 'print_count': '1', **body})
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
     side, bottom, requested = (Image.open(os.path.join(printer.SIMULATED_LABELS_DIR, name)).tobytes()
                                for name in sorted(os.listdir(printer.SIMULATED_LABELS_DIR)))
     assert bottom == side != requested
@@ -344,7 +338,7 @@ def test_labels_of_a_driver_that_prints_the_bottom_first_are_turned_only_for_the
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, printer='simulation', model='VC-500W', label_size='vc25', cut='last')
     for leaves_first in ('', 'bottom', 'top'):
-        assert client.post('/labeldesigner/api/print', data=dict(data, leaves_first=leaves_first)).get_json() == {'success': True}
+        assert outcome(client, client.post('/labeldesigner/api/print', data=dict(data, leaves_first=leaves_first))) == ('printed', '')
     assert turned == [False, False, True]
 
 
@@ -404,7 +398,7 @@ def test_printer_failures_are_told_from_refused_requests(tmp_path, monkeypatch, 
         def post(**values):
             return client.post(path, json=dict(body, **values))
     response = post()
-    assert (response.status_code, response.get_json()['message']) == (503, failure)
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', failure))
     # A request that is refused stays 400
     refused = {'label_size': '99x99'} if body in (None, 'webhook') else {'print_count': 0}
     assert post(**refused).status_code == 400

@@ -28,7 +28,7 @@ from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.vc500w import image as vc_image
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
 from app.labeldesigner.drivers.vc500w import status as vc_status
-from tests.helpers import Answering, make_client, within
+from tests.helpers import Answering, make_client, outcome, within
 from tests.printing.usbip_host import VC500W_ID, FakeHost, SharedDevice
 
 CONFIG = b'''<?xml version="1.0" encoding="UTF-8"?>
@@ -684,7 +684,7 @@ def test_labels_and_their_stages_while_printing(client, fake, monkeypatch):
     monkeypatch.setattr(vc500w, 'print_image', print_image)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert [(state['label'], state['labels'], state['stage']) for state in seen] == [(1, 2, 'Processing'), (2, 2, 'Processing')]
     # About 40 s each
     assert seen[0]['seconds_left'] > 60
@@ -717,7 +717,7 @@ def test_vc500w_configured_as_a_tcp_printer(fake, tmp_path):
     assert (vc['media_width'], vc['tape_remaining_mm'], vc['weak_connection']) == (25, 4596, False)
     response = client.post('/labeldesigner/api/print', data={
         'printer': device, 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert len(fake.images) == 1
 
 
@@ -771,7 +771,7 @@ def test_vc500w_on_the_network_is_detected_by_its_announcement(tmp_path, monkeyp
         assert (vc['path'], vc['model'], vc['color_support'], vc['tape_remaining_mm']) == ('vc500w://127.0.0.1', 'VC-500W', True, 4596)
         response = client.post('/labeldesigner/api/print', data={
             'printer': 'vc500w://127.0.0.1', 'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
         assert len(printer_.images) == 1
     finally:
         printer_.close()
@@ -829,7 +829,7 @@ def test_color_label_is_printed_as_raw_rgb(client, fake):
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': json.dumps(text),
         'print_count': '2', 'cut_once': '1'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert len(fake.images) == 2
     image = _sent(fake)[0]
     # Across 25 mm tape and beyond its edges, the text in its color
@@ -856,7 +856,7 @@ def _print_commands(fake, part):
 def test_cut_options(client, fake, cutting, cuts):
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '3', **cutting})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert _print_commands(fake, 'cutmode') == cuts
 
 
@@ -881,10 +881,10 @@ def test_saved_label_prints_fast(client, fake, tmp_path):
     client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path)
     label = {'name': 'Spices.json', 'label_size': 'vc25', 'print_type': 'text', 'text': TEXT, 'fast_printing': 1}
     assert client.post('/labeldesigner/api/repository/save', json=label).status_code == 200
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Spices.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Spices.json'})) == ('printed', '')
     # The request goes before what is stored
-    assert client.post('/labeldesigner/api/repository/print?fast_printing=0&cut=last&print_count=2',
-                       json={'name': 'Spices.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print?fast_printing=0&cut=last&print_count=2',
+                                       json={'name': 'Spices.json'})) == ('printed', '')
     assert _print_commands(fake, 'mode') == ['color', 'vivid', 'vivid'] and _print_commands(fake, 'cutmode') == ['full', 'half', 'full']
 
 
@@ -894,7 +894,8 @@ def test_webhook_prints_fast_in_color(client, fake):
     Image.new('RGB', (300, 200), (30, 144, 255)).save(image, 'PNG')
     payload = {'password': 'secret', 'label_size': 'vc25', 'model': 'VC-500W', 'image_mode': 'black_and_white', 'high_res': 1,
                'fast_printing': 1, 'images': [base64.b64encode(image.getvalue()).decode('ascii')]}
-    assert client.post('/labeldesigner/api/webhook/print', json=payload).get_json() == {'success': True, 'count': 1}
+    response = client.post('/labeldesigner/api/webhook/print', json=payload)
+    assert (response.get_json()['count'], outcome(client, response)) == (1, ('printed', ''))
     assert _print_commands(fake, 'mode') == ['color'] and _print_commands(fake, 'cutmode') == ['full']
     # In color whatever image mode is asked, across the tape
     image = _sent(fake)[0]
@@ -922,7 +923,7 @@ def test_images_print_with_stronger_contrast(client, fake, tmp_path, route):
             response = client.post('/labeldesigner/api/repository/print', json={'name': 'Wash.json'})
         else:
             response = client.post('/labeldesigner/api/webhook/print', json={**label, 'password': 'secret', 'images': [data]})
-        assert response.get_json()['success'] is True
+        assert outcome(client, response) == ('printed', '')
         image = _sent(fake)[-1]
         return image.getpixel((image.width // 2, image.height // 2))
 
@@ -935,8 +936,7 @@ def test_printer_error_through_the_label_designer(client, fake):
     fake.statuses = [status_xml(), status_xml('BUSY', 'PRINTING'), status_xml('ERROR', 'PRINTING', 'MEDIA_EMPTY')]
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer reports: Media empty'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: Media empty'))
 
 
 def test_no_cassette_through_the_label_designer(client, fake):
@@ -946,7 +946,7 @@ def test_no_cassette_through_the_label_designer(client, fake):
     assert (printer_['media_width'], printer_['tape_remaining_mm']) == (None, None)
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
-    assert response.status_code == 503 and response.get_json()['message'] == 'There is no cassette in the printer'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'There is no cassette in the printer'))
     assert not [c for c in fake.commands if '<print>' in c]
 
 
@@ -954,8 +954,8 @@ def test_refused_label_through_the_label_designer(client, fake):
     fake.refuse_print = 'please check /dev/tmp/lutgen.out'
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer refused the label (label 1 of 2), the log of the server names the reason'
+    assert (response.status_code, outcome(client, response)) == (
+        200, ('failed', 'The printer refused the label (label 1 of 2), the log of the server names the reason'))
 
 
 def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
@@ -970,9 +970,9 @@ def test_printer_gone_through_the_label_designer(client, fake, tmp_path):
         client.application.config['PRINTER_PRINTER'] = f'file://{tmp_path}/lp0'
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT})
-    assert response.status_code == 503
-    assert response.get_json()['message'].startswith('Could not send the label to the printer')
-    assert 'status query' not in response.get_json()['message']
+    told_state, told = outcome(client, response)
+    assert (response.status_code, told_state) == (200, 'failed')
+    assert told.startswith('Could not send the label to the printer') and 'status query' not in told
 
 
 def test_label_left_in_the_printer_through_the_label_designer(client, fake, monkeypatch):
@@ -980,7 +980,7 @@ def test_label_left_in_the_printer_through_the_label_designer(client, fake, monk
     fake.statuses = [status_xml('ERROR', 'SUCCESS', 'EJECT JAM')]
     response = client.post('/labeldesigner/api/print', data={
         'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
-    assert response.get_json()['message'] == 'Take the printed label out of the printer (label 1 of 2)'
+    assert outcome(client, response) == ('failed', 'Take the printed label out of the printer (label 1 of 2)')
     # The printer keeps reporting it until the label is taken out
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert printer_['errors'] == ['Take the printed label out of the printer']

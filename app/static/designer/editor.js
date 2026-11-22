@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, sheetNote
+    loadSaved, roomFrom, isSheet, sheetNote, untold
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -1199,15 +1199,17 @@ export async function printNow() {
 }
 
 function announce(entry) {
+    if (untold(entry)) return;
     hideToast();
     const n = entry.copies, what = `${n} ${n === 1 ? 'label' : 'labels'}`;
     if (entry.state === 'printed') {
         toast(`Printed ${what}: ${entryName(entry)}`, { label: 'Print again', run: () => printJob(Object.assign({}, entry), announce) });
         return;
     }
-    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Not printed">
-        <div class="okc bad">${icon('x', '')}</div><h2>Not printed</h2><p>${esc(entry.message)}</p>
-        <div class="acts"><button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="retry">${icon('refresh')}Try again</button></div></div>`, 'center');
+    const maybe = entry.state === 'unknown', head = maybe ? 'Maybe not printed' : 'Not printed';
+    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="${head}">
+        <div class="okc bad">${icon('x', '')}</div><h2>${head}</h2><p>${esc(entry.message)}</p>
+        <div class="acts"><button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="retry">${icon('refresh')}${maybe ? 'Print again' : 'Try again'}</button></div></div>`, 'center');
     $('#retry').onclick = () => { closeLayer(true); printJob(Object.assign({}, entry), announce); };
 }
 

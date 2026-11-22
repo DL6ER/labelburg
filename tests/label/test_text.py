@@ -16,7 +16,7 @@ from app import create_app
 from app.labeldesigner import icons
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import EXAMPLE_FORMDATA, make_client, pixels, TEXT, verify_image
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome, pixels, printing, TEXT, verify_image
 
 
 class TestLabelDesignerAPI:
@@ -573,10 +573,11 @@ def test_counters_count_as_their_start_looks(tmp_path, monkeypatch, template, va
     from app.labeldesigner import label as label_module
     printed = []
     original = label_module.SimpleLabel.process_templates
-    monkeypatch.setattr(label_module.SimpleLabel, 'process_templates', lambda self: original(self) or printed.append(self.text[0]['text']))
+    monkeypatch.setattr(label_module.SimpleLabel, 'process_templates',
+                        lambda self: original(self) or printing() and printed.append(self.text[0]['text']))
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, print_count='3', text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': template}]))
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     assert printed == values
 
 

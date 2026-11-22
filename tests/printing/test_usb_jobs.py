@@ -9,7 +9,7 @@ import pytest
 
 from app.labeldesigner.drivers import backends, devices
 from app.labeldesigner.drivers.brother import usb
-from tests.helpers import EXAMPLE_FORMDATA, make_client, without_status
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome, without_status
 
 REPLY, COMPLETED, PHASE_CHANGE, ERROR = 0x00, 0x01, 0x06, 0x02
 PRINTING, WAITING = 0x01, 0x00
@@ -315,7 +315,7 @@ def test_job_while_a_request_is_outstanding_is_made_for_the_last_tape(clock, mon
     client.application.config.update(PRINTER_PRINTER='file:///dev/usb/lp0', PRINTER_MODEL='QL-800')
     start = clock.now
     data = {key: value for key, value in EXAMPLE_FORMDATA.items() if key != 'label_size'}
-    assert client.post('/labeldesigner/api/print', data=dict(data, text=TEXT)).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=dict(data, text=TEXT))) == ('printed', '')
     assert clock.now - start < 0.1
     query, job = printers
     assert query.written == b''
@@ -373,5 +373,5 @@ def test_long_labels_printed_through_the_api(clock, monkeypatch, tmp_path):
     client = make_client(tmp_path)
     client.application.config['PRINTER_PRINTER'] = 'file:///dev/usb/lp0'
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='7'))
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert [job.written.count(b'\x1biz') for job in jobs] == [7]

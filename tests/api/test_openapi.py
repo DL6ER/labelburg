@@ -79,3 +79,25 @@ def test_spec_is_served(tmp_path):
     response = client.get('/labeldesigner/api/openapi.json')
     assert response.status_code == 200
     assert response.get_json()['openapi'] == '3.1.0'
+
+
+def test_the_answer_of_a_print_request_tells_every_state_of_a_job():
+    # A job may print, fail or be removed before its request is answered
+    schemas = json.load(open(SPEC))['components']['schemas']
+    assert schemas['QueuedAnswer']['properties']['state']['enum'] == schemas['QueueJob']['properties']['state']['enum']
+
+
+def test_a_job_tells_where_it_comes_from():
+    from app.labeldesigner import print_queue
+    told = print_queue.Job('id', 'key', 'Label', 1, 'api').told()
+    # The routes add the progress and the start of the server
+    assert set(json.load(open(SPEC))['components']['schemas']['QueueJob']['properties']) == {*told, 'progress', 'start'}
+
+
+def test_a_busy_printer_names_both_reasons_of_the_refusal():
+    # The line is full, or the waiting jobs hold too many large images
+    spec = json.load(open(SPEC))
+    for path in ('/labeldesigner/api/print', '/labeldesigner/api/repository/print', '/labeldesigner/api/demos/print',
+                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print'):
+        description = spec['paths'][path]['post']['responses']['503']['description']
+        assert 'line of the printer is full' in description and 'large images' in description, path

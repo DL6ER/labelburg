@@ -385,7 +385,8 @@ class Tools:
         return headers
 
     def _printed(self, path: str, **kwargs) -> bytes:
-        """Prints, the image of the first label as the printer got it."""
+        """Adds a print job to the queue of its printer, the image of its
+        first label as the printer gets it."""
         return base64.b64decode(self._call('POST', f'{path}?return_format=png', **kwargs)['image'])
 
     def print_label(self, name: str, printer: str, label_size: str | None, fillings: list[dict],
@@ -404,7 +405,7 @@ class Tools:
         printer, device = found.get('name') or found['path'], found['path']
         specs = [{'path': '/repository/preview', 'json': {'name': name, 'printer': device, 'blanks': blanks}}
                  for blanks in fillings]
-        # All of them are checked before the first one is printed, each page
+        # All of them are checked before the first one is added, each page
         # of a saved PDF prints as a label of its own
         told = [self.checked(spec) for spec in specs]
         labels = count * sum(int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told)
@@ -412,10 +413,10 @@ class Tools:
         images = []
         for done, spec in enumerate(specs):
             try:
-                images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count)))
+                images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count, source='mcp')))
             except ToolError as e:
-                raise ToolError(f'{e} ({done * labels // len(specs)} of {_labels(labels)} printed)') from None
-        return _noted(f'Printed {_labels(labels)} of {name} on {printer}', told), specs, images
+                raise ToolError(f'{e} ({done * labels // len(specs)} of {_labels(labels)} added to the queue)') from None
+        return _noted(f'Added {_labels(labels)} of {name} to the queue of {printer}', told), specs, images
 
     def print_text(self, lines: list[str], printer: str, label_size: str | None, count: int, font_size: int,
                    code: str | None, code_type: str) -> tuple[str, list[dict], list[bytes]]:
@@ -429,8 +430,8 @@ class Tools:
         form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'])
         spec = {'path': '/preview', 'data': form}
         self.checked(spec)
-        image = self._printed('/print', data=dict(form, print_count=count))
-        return f'Printed {_labels(count)} on {printer}', [spec], [image]
+        image = self._printed('/print', data=dict(form, print_count=count, source='mcp'))
+        return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
 
 
 # The note of the label designer about a font that is not installed
@@ -535,8 +536,9 @@ def _server(app):
         its blanks, e.g. [{"Name": "Anna"}, {"Name": "Ben"}] prints a badge
         for each, on the label size it is saved for. label_size only as the
         user told it, refused if the printer has another one loaded. Prints
-        nothing where a label is cut off or a filling is refused. Returns
-        the image of each printed."""
+        nothing where a label is cut off or a filling is refused. The labels
+        are added to the queue of the printer, which prints them in turn.
+        Returns the first label of each filling as it will print."""
         return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count))
 
     @server.tool(annotations=printing, meta=confirm)
@@ -548,7 +550,8 @@ def _server(app):
         CODE128) on printer, count labels. label_size, e.g. 62 or 100x30,
         only as the user told it, else the one loaded; refused if the printer
         has another one loaded. Prints nothing where the label is cut off.
-        Returns the image printed."""
+        The labels are added to the queue of the printer, which prints them
+        in turn. Returns the first label as it will print."""
         return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type))
 
     return server

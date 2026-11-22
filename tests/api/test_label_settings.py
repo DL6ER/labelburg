@@ -14,7 +14,7 @@ from PIL import Image
 from app.labeldesigner import printer_settings, refusals
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client
+from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client, outcome
 
 URL = '/labeldesigner/api/settings/labels'
 NONE_SET = {'date_format': '', 'collate': '', 'font_family': ''}
@@ -250,6 +250,6 @@ def test_saved_labels_write_their_date_blanks_as_set(tmp_path, monkeypatch):
              'fields': {'Filled on': {'type': 'date'}}}
     assert client.post('/labeldesigner/api/repository/save', json=label).status_code == 200
     r = client.post('/labeldesigner/api/repository/print', json={'name': 'Jar.json', 'blanks': {'Filled on': '2026-11-03'}})
-    assert r.get_json() == {'success': True}
+    assert outcome(client, r) == ('printed', '')
     queued[0].process_templates()
     assert queued[0].text[0]['text'] == 'Filled 03.11.2026'

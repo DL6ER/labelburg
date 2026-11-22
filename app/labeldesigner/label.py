@@ -515,6 +515,11 @@ class SimpleLabel:
         return gap
 
     @property
+    def image(self) -> Optional[Image.Image]:
+        """The image of the label as it was given, e.g. an uploaded photo."""
+        return self._image
+
+    @property
     def in_color(self) -> bool:
         """Whether red or color is chosen for a part of the label: its text,
         code or frame, or its image in red and black or in color."""
@@ -798,10 +803,12 @@ class SimpleLabel:
 
     def generate(self):
         """The image of the label, kept as generated where keep_generated is
-        set: of the first label of a print job, which the print routes return."""
+        set, and upright as shown: of the first label of a print job, which
+        the print routes return and the queue shows."""
         image = self._generate()
         if getattr(self, 'keep_generated', False):
             self.generated = image
+            self.shown = image.rotate(180) if self.turned else image
         return image
 
     def _generate(self):

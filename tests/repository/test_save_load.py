@@ -11,7 +11,7 @@ from PIL import Image
 from app.labeldesigner.routes import _text_fit, _whole_or
 from app.utils import fill_first_line_fields
 
-from tests.helpers import make_client, verify_image
+from tests.helpers import make_client, outcome, verify_image
 from tests.repository.helpers import _png_b64, BLANK_LABEL, SAVE_URL, TEXT
 
 
@@ -322,7 +322,7 @@ def test_a_label_saved_without_lines_is_loaded_and_printed(tmp_path, text):
     assert loaded.status_code == 200 and json.loads(loaded.get_json()['text']) == []
     assert client.get('/labeldesigner/api/repository/preview', query_string={'name': 'Code.json'}).status_code == 200
     printed = client.post('/labeldesigner/api/repository/print', json={'name': 'Code.json', 'printer': 'simulation'})
-    assert printed.get_json() == {'success': True}
+    assert outcome(client, printed) == ('printed', '')
 
 
 def test_a_label_whose_image_cannot_be_read_is_not_loaded_without_it(tmp_path):
@@ -464,7 +464,7 @@ def test_a_label_saved_with_a_number_as_its_size_is_read_as_the_size_it_names(tm
     assert (entry['label_size_id'], entry['label_size']) == ('62', '62 mm endless (DK-22205 / DK-2205)')
     assert client.get('/labeldesigner/api/repository/load?name=Shelf.json').get_json()['label_size'] == '62'
     assert client.get('/labeldesigner/api/repository/preview?name=Shelf.json').status_code == 200
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'})) == ('printed', '')
     assert sizes == ['62']
 
 
@@ -481,7 +481,7 @@ def test_a_label_saved_without_a_size_prints_on_the_size_its_preview_shows(tmp_p
     preview = client.get('/labeldesigner/api/repository/preview?name=Shelf.json')
     on_29 = client.post('/labeldesigner/api/preview', data={'label_size': '29', 'text': json.dumps(TEXT)})
     assert preview.data == on_29.data
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'})) == ('printed', '')
     assert sizes == ['29']
 
 

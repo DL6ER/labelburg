@@ -4,6 +4,7 @@ services:
     # build: . # building locally from source (see git clone below))
     container_name: labelburg
     restart: always
+    stop_grace_period: 30s # a printing label gets up to 20 s to finish on stop
     ports:
       - "8013:8013"
     environment:

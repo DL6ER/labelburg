@@ -16,7 +16,7 @@ from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
 from app.labeldesigner.drivers.vc500w import DRIVER as VC500W
 from app.labeldesigner.drivers.vc500w import protocol as vc500w
-from tests.helpers import make_client, within
+from tests.helpers import make_client, outcome, within
 from tests.printing.test_vc500w import FakeVC500W
 from tests.printing.test_usb_jobs import COMPLETED, PHASE_CHANGE, PRINTING, REPLY, WAITING, status
 from tests.printing.usbip_host import QL1100_ID, VC500W_ID, FakeHost, SharedDevice, TricklingHost
@@ -238,7 +238,7 @@ def test_printer_that_cannot_be_reached_is_tried_once_for_its_model(tmp_path, mo
     # Printing tries it once more
     usbip._unreachable.clear()
     attempts.clear()
-    assert client.post('/labeldesigner/api/print', data=data).status_code == 503
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data))[0] == 'failed'
     assert len(attempts) == 2
     # The model is asked again after a while
     usbip._unreachable[usbip.key('usbip://192.0.2.1')] -= usbip.UNREACHABLE_FOR
@@ -499,7 +499,7 @@ def test_shared_printer_in_the_label_designer(host, tmp_path):
     shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert (shown['path'], shown['media_width'], shown['errors']) == (host.address(), 62, [])
     response = client.post('/labeldesigner/api/print', data={'label_size': '62', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert ql.received.endswith(b'\x1a') and len(ql.received) > 1000
 
 
@@ -513,7 +513,7 @@ def test_shared_brother_printer_is_the_model_its_device_id_names(host, tmp_path)
         assert routes._printer(None, 'QL-800') == (host.address(), 'QL-800')
     # Only the QL-1100 series takes it
     response = client.post('/labeldesigner/api/print', data={'label_size': '103', 'print_type': 'text', 'text': TEXT})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert ql.received.endswith(b'\x1a')
 
 
@@ -523,19 +523,19 @@ def test_shared_printer_switched_off_is_the_model_its_device_id_named(host, tmp_
     client = make_client(tmp_path)
     client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='QL-800')
     data = {'label_size': '103', 'print_type': 'text', 'text': TEXT}
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     device.unplug()
     # Seen switched off, e.g. by the label designer, the host let it go
     shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert shown['errors'] == ['The printer is switched off or not connected']
-    off = client.post('/labeldesigner/api/print', data=data).get_json()
-    assert off['message'].endswith('The printer is switched off or not connected')
+    off, told = outcome(client, client.post('/labeldesigner/api/print', data=data))
+    assert off == 'failed' and told.endswith('The printer is switched off or not connected')
     # Switched on again right away, the job is made for it
     device.plug_in()
     with client.application.test_request_context():
         assert routes._printer(None, None) == (host.address(), 'QL-1100')
     ql = FakeQL(device)
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     assert ql.received.endswith(b'\x1a')
 
 
@@ -568,7 +568,7 @@ def test_shared_vc500w_is_known_by_its_device_id(tmp_path, monkeypatch):
         shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
         assert (shown['model'], shown['media_width']) == ('VC-500W', 25)
         response = client.post('/labeldesigner/api/print', data={'label_size': 'vc25', 'print_type': 'text', 'text': TEXT})
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
         assert len(vc.images) == 1
     finally:
         vc.close()
@@ -586,7 +586,7 @@ def test_shared_receipt_printer(tmp_path):
         assert (shown['model'], shown['errors']) == ('Epson/ESC-POS', ['The printer has no paper'])
         tm.replies[escpos.PAPER] = 0x12
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
         assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')
         assert (device.imports, device.resets) == (1, 0)
     finally:
@@ -738,7 +738,7 @@ def unknown_epson(tmp_path):
 def test_a_job_made_for_another_model_is_not_sent(unknown_epson):
     client, tm = unknown_epson
     answer = client.post('/labeldesigner/api/print', data={'label_size': '62', 'print_type': 'text', 'text': TEXT})
-    assert (answer.status_code, answer.get_json()) == (503, {'success': False, 'message': printer.WRONG_MODEL})
+    assert (answer.status_code, outcome(client, answer)) == (200, ('failed', printer.WRONG_MODEL))
     assert tm.received == b''
     # Imported meanwhile, it is the model its device ID names
     with client.application.test_request_context():

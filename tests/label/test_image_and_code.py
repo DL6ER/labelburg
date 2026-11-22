@@ -12,7 +12,7 @@ from app.labeldesigner.enums import LabelContent, LabelOrientation
 from app.labeldesigner.label import _code_image
 from app.labeldesigner.routes import create_label_from_request
 
-from tests.helpers import _upload, make_client, verify_image
+from tests.helpers import _upload, make_client, outcome, verify_image
 from tests.repository.helpers import SAVE_URL
 
 URL = 'https://example.com'
@@ -312,7 +312,7 @@ def test_print_has_image_and_code_on_every_label(tmp_path, monkeypatch):
     data = _color_label(label_size='62', image_position='left', printer='simulation',
                         image=[(io.BytesIO(_png(_red_image())), 'one.png', 'image/png'), (io.BytesIO(_png(_red_image((60, 60)))), 'two.png', 'image/png')])
     response = client.post('/labeldesigner/api/print', data=data, content_type='multipart/form-data')
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     assert len(queued) == 2
     for label, size in zip(queued, ((120, 80), (60, 60))):
         image = label.generate()

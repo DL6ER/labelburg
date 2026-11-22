@@ -9,7 +9,7 @@ import pytest
 
 from app.labeldesigner import paperless
 from app.labeldesigner.printer import PrinterQueue
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'ASN{{asn:5}}', 'size': '40'}])
 LABEL = {'print_type': 'qrcode_text', 'label_size': '62', 'text': TEXT, 'code_text': 'ASN{{asn:5}}', 'barcode_type': 'QR'}
@@ -60,7 +60,7 @@ def print_label(client, count=1, **values):
 
 
 def test_each_label_gets_the_next_asn(client, printed):
-    assert print_label(client, 3).get_json() == {'success': True}
+    assert outcome(client, print_label(client, 3)) == ('printed', '')
     assert printed == [[('ASN00001', 'ASN00001'), ('ASN00002', 'ASN00002'), ('ASN00003', 'ASN00003')]]
 
 

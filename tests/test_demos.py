@@ -10,7 +10,7 @@ from PIL import Image
 
 from app.labeldesigner import demos
 from app.labeldesigner.drivers import LABELS
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 
 LABEL_SIZES = {label.identifier for label in LABELS}
 DEMO_IDS = [label_id for category in demos.categories() for label_id, _ in demos.labels(category['id'])]
@@ -74,7 +74,7 @@ def test_a_blank_without_a_default_shows_its_name(client, monkeypatch):
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
-    assert client.post('/labeldesigner/api/demos/print', json={'id': label_id}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/demos/print', json={'id': label_id})) == ('printed', '')
     label, = queued
     label.process_templates()
     assert [line['text'] for line in label.text] == ['', '']
@@ -177,7 +177,7 @@ def test_print(client, monkeypatch, label_id):
                         lambda self, label, cut=True, high_res=False, fast=False: queued.append((self.label_size, label)))
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     response = client.post('/labeldesigner/api/demos/print', json={'id': label_id})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     (label_size, label), = queued
     assert label_size == demos.load(label_id)['label_size']
     # With the pictogram from the demo images, red on black/red labels

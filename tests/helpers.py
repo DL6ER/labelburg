@@ -13,6 +13,7 @@ from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
 from app import create_app
+from app.labeldesigner import print_queue
 
 
 UPDATE_IMAGES = False
@@ -114,6 +115,19 @@ def _pdf(*sizes) -> bytes:
     return pdf.getvalue()
 
 
+def outcome(client: FlaskClient, response) -> tuple[str, str]:
+    """The state of the print job a print request added and the message of
+    a job that was not printed."""
+    job = client.get(f"/labeldesigner/api/queue/{response.get_json()['job']}").get_json()
+    return job['state'], job['message']
+
+
+def printing() -> bool:
+    """Whether this thread prints the jobs of the queue, rather than a request
+    drawing the first label of its job to check it."""
+    return threading.current_thread().name.startswith(print_queue.WORKER_PREFIX)
+
+
 def sent_raster(monkeypatch) -> list:
     """The raster data of every job printed on a Brother printer, also on the
     simulator."""
@@ -123,7 +137,8 @@ def sent_raster(monkeypatch) -> list:
 
     def capture(self, queue, entries, keep=None):
         job = render(self, queue, entries, keep)
-        sent.append(job.data)
+        if printing():
+            sent.append(job.data)
         return job
     monkeypatch.setattr(BrotherRaster, 'render', capture)
     return sent
