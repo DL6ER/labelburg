@@ -29,6 +29,11 @@ class NoLibusb(OSError):
     """PyUSB finds no libusb to reach usb:// printers through."""
 
 
+class NotPaired(OSError):
+    """A printer on classic Bluetooth that refused the connection: it is not
+    paired with this computer, or no longer."""
+
+
 def discard(read):
     """Drop what the printer sent before a status request, read() returning
     nothing when there is nothing left."""

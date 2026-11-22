@@ -17,7 +17,7 @@ from werkzeug.security import safe_join
 
 from .. import ipp
 from . import reach, usbip
-from .backends import NoLibusb
+from .backends import NoLibusb, NotPaired
 
 try:
     import fcntl
@@ -428,6 +428,7 @@ _UNANSWERED = (
     ((errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN), 'The printer cannot be reached'),
 )
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
+NOT_PAIRED = 'Pair the printer with this computer first'
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
 OTHER_PRINTER_ONLY = 'Give this printer the model Other/IPP'
@@ -449,6 +450,8 @@ def unanswered_reason(error: Exception) -> str:
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
         return NO_LIBUSB
+    if isinstance(error, NotPaired):
+        return NOT_PAIRED
     if isinstance(error, reach.NotAllowed):
         return reach.NOT_ALLOWED
     if isinstance(error, OtherPrinterOnly):
@@ -473,7 +476,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY, ipp.RAW_PORT, ipp.NOT_ON_IPP])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NOT_PAIRED, reach.NOT_ALLOWED, OTHER_PRINTER_ONLY, ipp.RAW_PORT, ipp.NOT_ON_IPP])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 

@@ -273,10 +273,10 @@ def test_printer_on_classic_bluetooth_on_the_channel_it_names(rfcomm):
 
 class Off:
     """A printer on classic Bluetooth that is switched off, in place of the
-    RFCOMM socket: paging it fails."""
+    RFCOMM socket: paging it fails, with error from the kernel."""
 
     def __init__(self):
-        self.tries, self.closed = 0, 0
+        self.tries, self.closed, self.error = 0, 0, errno.EHOSTDOWN
 
     def __call__(self, *args):
         return self
@@ -286,7 +286,7 @@ class Off:
 
     def connect(self, address):
         self.tries += 1
-        raise OSError(errno.EHOSTDOWN, 'Host is down')
+        raise OSError(self.error, os.strerror(self.error))
 
     def close(self):
         self.closed += 1
@@ -304,6 +304,21 @@ def test_printer_on_classic_bluetooth_that_is_off(off):
     with pytest.raises(OSError) as raised:
         backends.open_printer(DEVICE)
     assert raised.value.errno == errno.EHOSTDOWN and off.closed == 1
+    assert not isinstance(raised.value, backends.NotPaired)
+    assert devices.unanswered(raised.value) == 'The printer cannot be reached'
+
+
+@pytest.mark.parametrize('error', [errno.EACCES, errno.EBADE])
+def test_printer_on_classic_bluetooth_that_is_not_paired(off, error):
+    # The kernel's errors of Authentication Failure and Pairing Not Allowed,
+    # and of PIN or Key Missing
+    off.error = error
+    with pytest.raises(backends.NotPaired) as raised:
+        backends.open_printer(DEVICE)
+    assert raised.value.errno == error and off.closed == 1
+    assert devices.unanswered(raised.value) == 'Pair the printer with this computer first'
+    assert devices.not_sent(raised.value) in refusals.MESSAGES
+    assert devices.not_sent(raised.value) == 'Could not send the label to the printer: Pair the printer with this computer first'
 
 
 def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
