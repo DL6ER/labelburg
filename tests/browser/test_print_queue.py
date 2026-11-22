@@ -105,6 +105,7 @@ def test_jobs_left_printing_are_resolved_when_the_page_opens_again(editor):  # n
     }""")
     answer_queue(editor, [job('printed')])
     editor.reload()
+    editor.wait_for_selector('#field .ln')
     editor.wait_for_function("() => labelEditor.S.history[0] && labelEditor.S.history[0].state === 'printed'", timeout=15000)
     assert history(editor)[0][0] == 'printed'
 
