@@ -296,6 +296,13 @@ def found_devices() -> set[str]:
     return {state.get('path') for state in _cached_printers}
 
 
+def found_model(device: str) -> str | None:
+    """The model of a printer the search found last, None for another one or
+    one of no known model."""
+    return next((state['model'] for state in _cached_printers
+                 if state.get('path') == device and state.get('model') in drivers.MODELS), None)
+
+
 def _discovered_label_printers() -> list[tuple[str, str]]:
     """Label printers that announce themselves on the network, as (address,
     model), e.g. tcp://<address>[:<port>] or vc500w://<address>. Kept for

@@ -644,7 +644,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: the model the search found of a printer it found, else `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -708,7 +708,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. `Unknown`, as the printer status names a printer that has not told its model yet, asks the printer. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: the model the search found of a printer it found, else `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -2320,7 +2320,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: the model the search found of a printer it found, else `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -2720,7 +2720,7 @@
                       },
                       "model": {
                         "type": "string",
-                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: `PRINTER_MODEL`."
+                        "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: the model the search found of a printer it found, else `PRINTER_MODEL`."
                       },
                       "print_count": {
                         "type": "integer",
@@ -4446,7 +4446,7 @@
           },
           "model": {
             "type": "string",
-            "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: `PRINTER_MODEL`."
+            "description": "Printer model, e.g. `QL-800`, other makers than Brother with the maker, e.g. `PUQU/Q00`. A printer whose device ID names its model is that model, the one named here only where its driver also takes the printer, e.g. `Zebra/ZPL` for one that also names TSPL, or where it is the same printer of the other resolution and the device ID names none, e.g. `Zebra/ZPL-300` for one it names `Zebra/ZPL`. Default: the model the search found of a printer it found, else `PRINTER_MODEL`."
           }
         }
       },

@@ -14,7 +14,7 @@ import types
 import pytest
 
 from app.labeldesigner import bluetooth, drivers, printer, refusals
-from app.labeldesigner.drivers import base, devices, escpos, progress, transports, tspl
+from app.labeldesigner.drivers import base, devices, escpos, niimbot, progress, transports, tspl
 from app.labeldesigner.drivers.escpos import protocol as escpos_protocol
 from app.labeldesigner.drivers.tspl import protocol as tspl_protocol
 from tests.helpers import make_client, outcome
@@ -566,3 +566,33 @@ def test_classic_device_that_told_no_name_is_asked_for_it(monkeypatch):
         address + b'\x00\x00', bytes.fromhex(other.replace(':', ''))[::-1] + b'\x00\x01']
     # Waited for the names the kernel asks for after its inquiry
     assert waits[0] <= bluetooth.CLASSIC_SEARCH < max(waits) <= bluetooth.CLASSIC_SEARCH + bluetooth.NAME_WAIT
+
+
+def test_epson_found_on_bluetooth_prints_without_a_model_named(on_bluetooth, searches):
+    # As the search found it, not PRINTER_MODEL, nothing else tells its model
+    fake = on_bluetooth(FakeEscpos())
+    client, _, _ = searches
+    listed(client)
+    assert listed(client, look=True) == [(DEVICE, 'Epson/ESC-POS', [])]
+    response = client.post('/labeldesigner/api/print', data=dict(ESCPOS_LABEL, printer=DEVICE))
+    assert outcome(client, response) == ('printed', '')
+    assert fake.all_received()[-1].endswith(escpos_protocol.CUT)
+
+
+def test_b1_found_on_bluetooth_prints_without_a_model_named(tmp_path, monkeypatch):
+    b1 = {'address': MAC, 'name': 'B1-TEST0001', 'le': True, 'services': []}
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', True)
+    monkeypatch.setattr(printer.bluetooth, 'discover', lambda timeout, classic=False: [b1])
+    monkeypatch.setattr(printer, '_bluetooth', {})
+    monkeypatch.setattr(printer, '_bluetooth_searched', None)
+    monkeypatch.setattr(printer, '_bluetooth_thread', None)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(niimbot.DRIVER, 'status', lambda device, model, unconfirmed=False: {
+        'errors': [], 'path': device, 'model': model, 'status_type': 'Reply to status request'})
+    printed = []
+    monkeypatch.setattr(niimbot.DRIVER, 'send', lambda queue, job: printed.append((queue.device_specifier, queue.model)) or '')
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    assert listed(client) == [(DEVICE, 'Niimbot/B1', [])]
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT, 'printer': DEVICE})
+    assert outcome(client, response) == ('printed', '') and printed == [(DEVICE, 'Niimbot/B1')]

@@ -27,7 +27,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, diecut, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, found_model, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -2207,6 +2207,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
         # The model a printer tells, e.g. in its device ID, else the configured
         # one; PRINTER_MODEL is that of PRINTER_PRINTER only
         listed_model = next((m for m, d, _ in printers if d == device), None)
+        # One the search found is the model it found, e.g. on Bluetooth,
+        # where neither its address nor a device ID tells it
+        listed_model = listed_model or found_model(device)
         chosen = listed_model or model
         assumed = not listed_model and (device != configured or isinstance(model, Default))
         model = drivers.resolve(device, chosen, assumed)[1]
