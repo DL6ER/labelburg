@@ -10,7 +10,7 @@ from .. import devices
 from ..labels import FormFactor
 from .commands import Raster, RasterError
 from .labels import BY_ID
-from .models import TUBE_LENGTH, TUBE_TOO_LONG, length_problem
+from .models import TUBE_TOO_LONG, length_problem, tube_lines
 from .status import TUBES
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,11 @@ def render(queue, entries, keep=None) -> Raster:
     return raster
 
 
+def on_tube(device: str) -> bool:
+    """Whether the printer holds heat-shrink tube, as its last status tells."""
+    return devices.status_cache.get(devices.lock_key(device or ''), {}).get('media_type') in TUBES
+
+
 def _add_job(queue, raster, job):
     """Convert the images of a job, labels printed with the same settings."""
     rotate, dither, high_res, fast = job['settings']
@@ -66,8 +71,6 @@ def _add_job(queue, raster, job):
         # cuts it off and saves the tape fed before it.
         options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(len(job['images']), 255),
                    'half_cut': queue.half_cut, 'chain': queue.chain}
-    # Heat-shrink tube in the printer, as its last status tells
-    tube = devices.status_cache.get(devices.lock_key(queue.device_specifier or ''), {}).get('media_type') in TUBES
     # Unless printing fast, the printer gives priority to print quality. A
     # QL-810W printed a 29 x 90 mm label in 3.0 s instead of 1.8 s with it, a
     # little sharper. PT printers get compressed raster lines, as from
@@ -75,7 +78,7 @@ def _add_job(queue, raster, job):
     # half cut the tape and hung in the printing state.
     convert(raster, job['images'], queue.label_size, red='red' in str(queue.label_size), dither=dither,
             cut=raster.ptouch or any(job['cuts']), dpi_600=high_res, hq=not fast, rotate=rotate,
-            compress=raster.ptouch, tube=tube, **options)
+            compress=raster.ptouch, tube=on_tube(queue.device_specifier), **options)
 
 
 def convert(raster: Raster, images: list, label_size: str, *, red: bool = False, dither: bool = False,
@@ -138,7 +141,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         # At 600 dpi a label has twice the lines
         if im.size[1] // (2 if dpi_600 else 1) > raster.spec.max_length_dots:
             raise ValueError(length_problem(raster.model))
-        if tube and im.size[1] // (2 if dpi_600 else 1) > round(TUBE_LENGTH / 25.4 * raster.spec.dpi):
+        if tube and im.size[1] // (2 if dpi_600 else 1) > tube_lines(raster.model):
             raise ValueError(TUBE_TOO_LONG)
 
         if red:

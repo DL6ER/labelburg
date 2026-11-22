@@ -1341,7 +1341,7 @@ def font_family_sample():
 def preview_from_image():
     try:
         values = request.values.to_dict(flat=True)
-        model = None
+        device = model = None
         # Made as printed: the label size and the quality the request leaves
         # out as set for its printer, the label designer sends both
         if any(values.get(key) in (None, '') for key in ('label_size', 'high_res')):
@@ -1360,7 +1360,7 @@ def preview_from_image():
         label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
-        if too_long := _length_problem(values, im, model):
+        if too_long := _length_problem(values, im, model, device):
             label.warnings.append(f'{too_long}.')
         # On a roll with several labels to a page: how the copies fill the
         # last page, and the first page with them, each with its counter
@@ -1404,20 +1404,21 @@ def _count(value, default: int = 1) -> int:
     return count if count >= 1 else default
 
 
-def _length_problem(values: dict, im, model: str | None = None) -> str:
+def _length_problem(values: dict, im, model: str | None = None, device: str | None = None) -> str:
     """Why the printer of a request refuses the label im as too long, or an
     empty string, also where the request names no printer it knows. model
-    is the one _resolved_printer() found where the request was resolved."""
+    and device are those _resolved_printer() found where the request was
+    resolved."""
     if model is None:
         try:
-            _, model = _printer(values.get('printer') or '', values.get('model'))
+            device, model = _printer(values.get('printer') or '', values.get('model'))
         except ValueError:
             return ''
     label_size = values.get('label_size', DEFAULT_LABEL_SIZE)
     high_res = _high_res(values)
     across = _get_label_dimensions(label_size, high_res)[0]
     along = im.height if im.width == across else im.width
-    return drivers.for_model(model).length_problem(model, along, high_res)
+    return drivers.for_model(model).length_problem(model, along, high_res, device or '')
 
 
 def _preview_refused(error: Exception):

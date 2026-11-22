@@ -8,6 +8,7 @@ PT-P900/P900W/P950NW/P910BT reference:
 https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf"""
 import _socket
 import errno
+import json
 import socket
 import threading
 import time
@@ -33,6 +34,8 @@ PRINT = '/labeldesigner/api/print'
 # The PT-P710BT reference names no model code of the PT-P710BT, this one is
 # that of no Brother model
 UNNAMED = 0x00
+# Text that fits on 12 mm tape
+SMALL_TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Test', 'size': '8', 'align': 'center'}])
 # Socket pairs are made of real sockets also while the tests replace them
 SOCKET = socket.socket
 
@@ -317,6 +320,23 @@ def test_labels_too_long_for_heat_shrink_tube_are_refused(tmp_path, brother_on_b
     assert (response.status_code, response.get_json()['message']) == (400, 'Labels on heat-shrink tube can be at most 500 mm long')
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12', label_length='400'))
     assert outcome(client, response) == ('printed', '') and len(fake.jobs) == 1
+
+
+@pytest.mark.parametrize('label_length, warning', [('600', 'Labels on heat-shrink tube can be at most 500 mm long.'), ('400', '')])
+def test_preview_says_that_heat_shrink_tube_takes_no_longer_label(tmp_path, brother_on_bluetooth, label_length, warning):
+    brother_on_bluetooth(media=0x11)
+    client = make_client(tmp_path, model='PT-P710BT', printer=DEVICE)
+    client.get(STATUS)
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, label_size='pt12', label_length=label_length, text=SMALL_TEXT, margin_top='0', margin_bottom='0'))
+    assert response.status_code == 200 and response.headers.get('X-Label-Warning', '') == warning
+
+
+def test_preview_on_tze_tape_takes_a_label_longer_than_500_mm(tmp_path, brother_on_bluetooth):
+    brother_on_bluetooth()
+    client = make_client(tmp_path, model='PT-P710BT', printer=DEVICE)
+    client.get(STATUS)
+    response = client.post('/labeldesigner/api/preview', data=dict(EXAMPLE_FORMDATA, label_size='pt12', label_length='600', text=SMALL_TEXT, margin_top='0', margin_bottom='0'))
+    assert response.status_code == 200 and response.headers.get('X-Label-Warning', '') == ''
 
 
 def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, brother_on_bluetooth, clock):

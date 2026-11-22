@@ -109,6 +109,11 @@ def longest_label(model: str) -> int:
     return round(spec.max_length_dots / spec.dpi * 25.4)
 
 
+def tube_lines(model: str) -> int:
+    """The most lines of a label on heat-shrink tube, see TUBE_LENGTH."""
+    return round(TUBE_LENGTH / 25.4 * MODELS[model].dpi)
+
+
 def length_problem(model: str) -> str:
     """Why a label is too long for the model."""
     return f'Labels on the {model} can be at most {longest_label(model)} mm long'

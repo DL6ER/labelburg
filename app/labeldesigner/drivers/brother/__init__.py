@@ -13,7 +13,7 @@ from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, TUBE_TOO_LONG, length_problem, longest_label, resolution_problem)
+                     RED_SPEED, TUBE_TOO_LONG, length_problem, longest_label, resolution_problem, tube_lines)
 
 logger = logging.getLogger(__name__)
 
@@ -119,10 +119,13 @@ class BrotherRaster(Driver):
         # The printer feeds the margin before and after the print
         return label.feed_margin / self.label_dpi(label)[0] * 25.4, shortest, longest
 
-    def length_problem(self, model, dots, high_res):
+    def length_problem(self, model, dots, high_res, device=''):
         # As raster.py counts the lines, at 600 dpi a label has twice as many
-        if dots // (2 if high_res else 1) > MODELS[model].max_length_dots:
+        lines = dots // (2 if high_res else 1)
+        if lines > MODELS[model].max_length_dots:
             return length_problem(model)
+        if lines > tube_lines(model) and raster.on_tube(device):
+            return TUBE_TOO_LONG
         return ''
 
     def capabilities(self, model):
