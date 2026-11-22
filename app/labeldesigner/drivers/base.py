@@ -5,6 +5,7 @@ for the QL and P-touch printers. Its __init__.py has a Driver as DRIVER, and
 drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -263,10 +264,12 @@ class Driver:
         """The status query() tells of a printer on Bluetooth, see
         BLUETOOTH_STATUS_EVERY. Its last answer or error while that is
         younger, from after the label designer last looked for printers and
-        not followed by a job, see ask_bluetooth_again()."""
+        not followed by a job, see ask_bluetooth_again(), and whatever its age
+        while classic Bluetooth is searched, which paging it would end."""
         key = devices.lock_key(device)
         asked, error, state = _bluetooth_asked.get(key, (None, None, None))
-        if asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY:
+        fresh = asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY
+        if fresh or (asked is not None and devices.classic_search.is_set()):
             if error is not None:
                 raise error.with_traceback(None)
             return dict(state)
@@ -285,8 +288,10 @@ class Driver:
 
     def ask_bluetooth_again(self, device: str):
         """Ask a printer on Bluetooth at the next status query, e.g. once it
-        got a job."""
-        _bluetooth_asked.pop(devices.lock_key(device), None)
+        got a job. Its last answer stays for a search, see bluetooth_status()."""
+        key = devices.lock_key(device)
+        if key in _bluetooth_asked:
+            _bluetooth_asked[key] = (-math.inf, *_bluetooth_asked[key][1:])
 
     def note_settings(self, device: str, settings: dict):
         """Take the settings of a printer as the server read them last, see

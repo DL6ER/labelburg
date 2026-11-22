@@ -53,6 +53,9 @@ status_cache = {}
 # Niimbot D110_M was paged, which then gave up after its 10 s. Each now waits
 # for its turn, its time to connect counts from it.
 bluetooth_turn = threading.Lock()
+# Set while the label designer searches classic Bluetooth: Linux cancels the
+# inquiry before it connects to a device, see Driver.bluetooth_status()
+classic_search = threading.Event()
 
 # A printer on Bluetooth that did not answer is not looked for again by the
 # status queries, only when printing on it or when asked to look for printers

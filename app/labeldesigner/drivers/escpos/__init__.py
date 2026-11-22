@@ -159,7 +159,7 @@ class Escpos(Driver):
         if device.startswith('bt://'):
             # Paging it takes the radio: one switched off is not paged at every
             # status query, any other one at most every 30 s
-            return self.noted_status(device, lambda: self.bluetooth_status(device, lambda: self._status(device, model)))
+            return self.bluetooth_status(device, lambda: self.noted_status(device, lambda: self._status(device, model)))
         return self._status(device, model)
 
     def _status(self, device, model):

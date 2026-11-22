@@ -2,6 +2,7 @@ import errno
 import ipaddress
 import os
 import socket
+import threading
 
 import pytest
 
@@ -79,6 +80,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
     monkeypatch.setattr('app.labeldesigner.drivers.base._bluetooth_asked', {})
+    monkeypatch.setattr(devices, 'classic_search', threading.Event())
 
 
 @pytest.fixture(autouse=True)

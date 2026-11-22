@@ -322,7 +322,10 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
 def _search_bluetooth(classic: bool = False):
     global _last_scan_ts
     found = {}
-    nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
+    try:
+        nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
+    finally:
+        devices.classic_search.clear()
     for device in nearby:
         printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
         if printer:
@@ -350,6 +353,9 @@ def _bluetooth_printers() -> list[tuple[str, str]]:
         if due and not bluetooth_searching():
             _bluetooth_searched = now
             classic = looked and drivers.classic_bluetooth()
+            if classic:
+                # Before the status queries of this request
+                devices.classic_search.set()
             _bluetooth_thread = threading.Thread(target=_search_bluetooth, args=(classic,), daemon=True)
             _bluetooth_thread.start()
         return list(_bluetooth.items())

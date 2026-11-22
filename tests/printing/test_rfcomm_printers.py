@@ -437,3 +437,82 @@ def test_status_of_a_printer_on_bluetooth_that_closes_the_connection_is_not_wait
         with pytest.raises(ConnectionResetError):
             escpos.DRIVER.status(DEVICE, model)
     assert time.monotonic() - started < 1
+
+
+@pytest.fixture
+def searches(tmp_path, monkeypatch):
+    """The automatic detection with an Epson nearby on classic Bluetooth,
+    whose search goes on until released is set; with the state of
+    devices.classic_search at each search."""
+    searched, release = [], threading.Event()
+    release.set()
+
+    def discover(timeout, classic=False):
+        searched.append(devices.classic_search.is_set())
+        release.wait(5)
+        epson = {'address': MAC, 'name': 'TM-P20_123456', 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS}
+        return [epson] if classic else []
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', True)
+    monkeypatch.setattr(printer, 'BLUETOOTH_INTERVAL', 0)
+    monkeypatch.setattr(printer.bluetooth, 'discover', discover)
+    monkeypatch.setattr(printer, '_bluetooth', {})
+    monkeypatch.setattr(printer, '_bluetooth_searched', None)
+    monkeypatch.setattr(printer, '_bluetooth_thread', None)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(devices, 'looked', 0.0)
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    return client, release, searched
+
+
+def looked_for_while_searching(client, release) -> list:
+    """The errors of the printers listed when the label designer looks for
+    printers, while classic Bluetooth is still searched."""
+    release.clear()
+    printer._last_scan_ts = 0
+    data = client.get(STATUS + '?look=1').get_json()
+    assert data['searching']
+    return [(p['path'], p['errors']) for p in data['printers'] if p['path'] != 'simulation']
+
+
+def errors_once_searched(client, release) -> list:
+    release.set()
+    printer._bluetooth_thread.join(5)
+    return [p['errors'] for p in client.get(STATUS).get_json()['printers'] if p['path'] == DEVICE]
+
+
+def test_printers_on_bluetooth_are_not_paged_while_classic_bluetooth_is_searched(on_bluetooth, searches):
+    fake = on_bluetooth(FakeEscpos())
+    client, release, searched = searches
+    assert listed(client) == []
+    assert listed(client, look=True) == [(DEVICE, 'Epson/ESC-POS', [])] and len(fake.addresses) == 1
+    # Its last answer while classic Bluetooth is searched again
+    fake.printer.offline = QUIET | 0x04
+    assert looked_for_while_searching(client, release) == [(DEVICE, [])] and len(fake.addresses) == 1
+    # Paged once the search ended
+    assert errors_once_searched(client, release) == [['The cover of the printer is open']]
+    assert len(fake.addresses) == 2 and searched == [False, True, True] and not devices.classic_search.is_set()
+
+
+def test_printer_on_bluetooth_that_was_off_is_paged_once_the_search_ended(on_bluetooth, searches):
+    fake = on_bluetooth(FakeEscpos())
+    fake.error = errno.EHOSTDOWN
+    client, release, _ = searches
+    listed(client)
+    assert listed(client, look=True) == [(DEVICE, 'Epson/ESC-POS', ['The printer cannot be reached'])]
+    # Switched on, it is paged once the next search ended, not during it
+    fake.error = 0
+    assert looked_for_while_searching(client, release) == [(DEVICE, ['The printer cannot be reached'])]
+    assert len(fake.addresses) == 1
+    assert errors_once_searched(client, release) == [[]] and len(fake.addresses) == 2
+
+
+def test_last_answer_of_a_printer_that_got_a_job_is_kept_for_a_search(on_bluetooth):
+    fake = on_bluetooth(FakeTspl())
+    assert tspl.DRIVER.status(DEVICE, 'TSC/TSPL')['errors'] == []
+    tspl.DRIVER.ask_bluetooth_again(DEVICE)
+    fake.printer.status = 0x04
+    devices.classic_search.set()
+    assert tspl.DRIVER.status(DEVICE, 'TSC/TSPL')['errors'] == [] and len(fake.addresses) == 1
+    devices.classic_search.clear()
+    assert tspl.DRIVER.status(DEVICE, 'TSC/TSPL')['errors'] == ['No labels are in the printer'] and len(fake.addresses) == 2
