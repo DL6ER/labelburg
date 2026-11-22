@@ -4001,7 +4001,7 @@
       },
       "Tape": {
         "type": "object",
-        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer, or `dymo102x152` for `zpl102x152` on a DYMO LabelWriter 4XL. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
+        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer, `dymo102x152` for `zpl102x152` on a DYMO LabelWriter 4XL, or `d1-12-280` for `d1-12` on a DYMO LabelManager 280. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
         "properties": {
           "id": {
             "type": "string",

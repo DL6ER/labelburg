@@ -11,11 +11,12 @@ from .escpos import DRIVER as ESCPOS
 from .tspl import DRIVER as TSPL
 from .zpl import DRIVER as ZPL
 from .dymo import DRIVER as DYMO
+from .labelmanager import DRIVER as LABELMANAGER
 from .ipp import DRIVER as IPP
 
 # In the order the label designer lists their models and label sizes, and
 # asks them which printer a device ID names: one naming TSPL and ZPL is TSPL
-DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL, DYMO, IPP)
+DRIVERS: tuple[Driver, ...] = (BROTHER, VC500W, PUQU, NIIMBOT, ESCPOS, TSPL, ZPL, DYMO, LABELMANAGER, IPP)
 
 MODELS = tuple(model for driver in DRIVERS for model in driver.models)
 LABELS = tuple(label for driver in DRIVERS for label in driver.labels)

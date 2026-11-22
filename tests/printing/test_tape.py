@@ -174,7 +174,8 @@ def test_hand_set_tape_that_is_no_text_is_none(manual):
 
 
 # As each driver package sets it: ESC/POS, PUQU, TSPL and DYMO printers tell no tape
-REPORTS_TAPE = {'brother': True, 'dymo': False, 'escpos': False, 'ipp': True, 'niimbot': True, 'puqu': False, 'tspl': False, 'vc500w': True, 'zpl': True}
+REPORTS_TAPE = {'brother': True, 'dymo': False, 'escpos': False, 'ipp': True, 'labelmanager': False, 'niimbot': True, 'puqu': False,
+                'tspl': False, 'vc500w': True, 'zpl': True}
 
 
 @pytest.mark.parametrize('package', [m.name for m in pkgutil.iter_modules(drivers.__path__) if m.ispkg])

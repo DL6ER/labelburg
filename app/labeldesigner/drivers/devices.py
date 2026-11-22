@@ -317,9 +317,9 @@ def found_usb_printers() -> tuple[list[str], list[str]]:
     """The printers PyUSB finds that no driver of the kernel holds, as
     usb://..., their device IDs kept, and the bus IDs of those Linux shares
     over USB/IP."""
-    from . import backends
+    from . import DRIVERS, backends
     found = []
-    printers, shared = backends.found_printers()
+    printers, shared = backends.found_printers(frozenset().union(*(driver.usb_ids for driver in DRIVERS)))
     for spec, told in printers:
         if told:
             _usb_device_ids[_usb_key(spec)] = told

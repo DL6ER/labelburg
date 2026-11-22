@@ -93,6 +93,9 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
+    # (vendor, product) of its printers on USB that the search lists also
+    # where they show no printer interface, e.g. a DYMO LabelManager on HID
+    usb_ids: frozenset = frozenset()
     # Whether each of its models is one for printers of many makers or for
     # several printers, whose name its status tells, see device_name()
     names_devices: bool = False

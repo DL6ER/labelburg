@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import drivers
-from app.labeldesigner.drivers import devices, dymo, zpl
+from app.labeldesigner.drivers import devices, dymo, labelmanager, zpl
 from app.labeldesigner.drivers.dymo import protocol
 from tests.helpers import make_client, outcome
 
@@ -264,9 +264,9 @@ def test_status_byte_of_the_se450(status, errors):
     ('MDL:LabelWriter 450;', None)])
 def test_known_by_its_device_id(device_id, model):
     assert dymo.DRIVER.model_in(device_id) == model
-    # No other driver takes it for one of its printers
+    # No other driver takes it for one of its printers, a LabelManager its own
     if 'dymo' in device_id.lower():
-        assert drivers.told_model(device_id) == model
+        assert drivers.told_model(device_id) == (model or labelmanager.DRIVER.model_in(device_id))
 
 
 @pytest.mark.parametrize('device, model', [
@@ -281,7 +281,7 @@ def test_known_by_its_device_id(device_id, model):
 def test_a_printer_that_tells_no_device_id_is_known_by_its_usb_ids(monkeypatch, device, model):
     monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: '')
     assert dymo.DRIVER.model_of(device) == model
-    assert drivers.resolve(device, 'QL-800')[1] == (model or 'QL-800')
+    assert drivers.resolve(device, 'QL-800')[1] == (model or labelmanager.DRIVER.model_of(device) or 'QL-800')
 
 
 @pytest.mark.parametrize('device, device_id, configured, assumed, model', [

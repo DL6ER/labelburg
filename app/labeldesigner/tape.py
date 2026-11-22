@@ -48,12 +48,25 @@ def _shown_as_another(size_id: str) -> bool:
     return all(drivers.for_model(m).shown_as.get(m, m) != m for m in TAKEN_BY[size_id])
 
 
+def _papers_listed_before() -> set[str]:
+    """The label sizes of the same paper as one of their driver listed
+    before them, for the models taking them, e.g. d1-12-280 as d1-12 for a
+    LabelManager 280."""
+    sizes = [s for s in SIZES if TAKEN_BY[s]]
+    return {size for i, size in enumerate(sizes)
+            if any(drivers.for_label(s) is drivers.for_label(size) and drivers.for_label(size).label_for(s, model) == size
+                   for s in sizes[:i] for model in TAKEN_BY[size])}
+
+
+_LATER = _papers_listed_before()
+
+
 def takes(model) -> list[str]:
     """The label sizes a printer takes, for the label designer. A printer of
     no known model takes each paper once, not again as the size of a model
-    shown as another one."""
+    shown as another one or of another model of the same driver."""
     known = bool(model) and model in _LISTED
-    return [s for s in SIZES if _takes(s, model) and (known or not _shown_as_another(s))]
+    return [s for s in SIZES if _takes(s, model) and (known or not (_shown_as_another(s) or s in _LATER))]
 
 
 def same_paper(size_id: str | None, model) -> str | None:
