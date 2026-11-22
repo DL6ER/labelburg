@@ -122,6 +122,10 @@ def test_a_zpl_printer_is_told_how_it_finds_its_labels(designer):
     designer.wait_for_selector(choice)
     assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
         'Labels with gaps', 'Labels with black marks on the back', 'Continuous roll']
+    # None is chosen while none is set, the printer goes on as last told
+    assert designer.query_selector(f'{choice}.on') is None
+    assert 'Choose what is on the roll. Until then the printer finds the labels as before.' in designer.inner_text('[data-card="0"]')
+    assert setting(designer, f'{choice}[data-v="gap"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'gap'}
     assert designer.inner_text(f'{choice}.on') == 'Labels with gaps'
     assert 'How the printer finds where each label starts.' in designer.inner_text('[data-card="0"]')
     assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'mark'}
@@ -140,7 +144,10 @@ def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
         designer.select_option(MODEL, 'Zebra/ZPL')
     designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
     size = designer.evaluate("() => labelEditor.S.printers[0].tape.id")
-    designer.wait_for_function("() => document.querySelector('#printerChip').title.endsWith(' mm, die-cut labels')")
+    # Not named while not set
+    assert designer.get_attribute('#printerChip', 'title').endswith(' mm')
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="gap"]')
+    designer.wait_for_function("() => document.querySelector('#printerChip').title.endsWith(' mm, labels with gaps')")
     setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="endless"]')
     designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Continuous roll'")
     back_to_the_editor(designer)
@@ -153,7 +160,7 @@ def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
     designer.keyboard.press('Escape')
     open_settings(designer)
     setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="mark"]')
-    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks'")
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Labels with black marks on the back'")
     back_to_the_editor(designer)
     designer.click('#printerChip')
-    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, labels with black marks')
+    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, labels with black marks on the back')

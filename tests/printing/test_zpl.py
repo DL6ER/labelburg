@@ -562,12 +562,16 @@ def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
         found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
         return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
     shown = status()
+    # Nothing set, the printer finds them as last told
     assert (shown['media_type'], shown['media_length'], shown['tape']['id'], shown['tape']['roll']) == (
-        'Die-cut labels', 152, 'zpl102x152', 'Die-cut labels')
+        'Die-cut labels', 152, 'zpl102x152', '')
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'gap'})
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with gaps')
+    assert status()['media_type'] == 'Die-cut labels'
     r = client.post('/labeldesigner/api/settings', data={'sensing': 'mark'})
-    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with black marks')
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with black marks on the back')
     shown = status()
-    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Labels with black marks', 152, True)
+    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Labels with black marks on the back', 152, True)
     # The labels are as long as the label size, set by hand or of the label
     r = client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
     assert (r.get_json()['tape']['known'], r.get_json()['tape']['roll']) == (False, 'Continuous roll')
@@ -634,7 +638,7 @@ def test_a_setting_written_wrong_by_hand_is_none(tmp_path, monkeypatch, sent, wr
     r = client.get('/labeldesigner/api/printer_status')
     assert r.status_code == 200
     shown = next(p for p in r.get_json()['printers'] if p['path'] == 'tcp://127.0.0.1')
-    assert (shown['settings'], shown['media_length']) == ({}, 152)
+    assert (shown['settings'], shown['tape']['roll'], shown['media_length']) == ({}, '', 152)
     # Printed on the labels measured
     response = client.post('/labeldesigner/api/print', data={'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', '')

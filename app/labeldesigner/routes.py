@@ -251,6 +251,8 @@ def _designer_config() -> dict:
         # Kept on the server for every browser, see /api/settings/labels
         'label_settings': _label_settings(),
         'date_formats': list(printer_settings.DATE_FORMATS),
+        # How a printer told so finds its labels, by the words of its roll
+        'rolls': [[sensing, roll] for sensing, roll in diecut.ROLLS.items()],
     }
 
 
@@ -1594,10 +1596,12 @@ def _as_set(state: dict, model: str, settings: dict) -> dict:
 def _tape_of(state: dict, model: str, settings: dict) -> tape.Tape:
     """The tape a printer of the model prints on, as its status state tells
     it, else the one set by hand in its settings, see tape.in_printer(). Of
-    a printer told how it finds the labels with its roll as set."""
-    state = _as_set(state, model, settings)
-    found = tape.in_printer(state, model, settings.get('label_size', ''), current_app.config['LABEL_DEFAULT_SIZE'])
-    return dataclasses.replace(found, roll=state['media_type']) if printer_settings.told_how(model) else found
+    a printer told how it finds the labels with its roll as set, none while
+    nothing is."""
+    found = tape.in_printer(_as_set(state, model, settings), model, settings.get('label_size', ''),
+                            current_app.config['LABEL_DEFAULT_SIZE'])
+    told = printer_settings.told_how(model) and settings.get('sensing') in diecut.SENSINGS
+    return dataclasses.replace(found, roll=diecut.ROLLS[settings['sensing']]) if told else found
 
 
 def _loaded_tape(device: str, model: str, settings: dict) -> tape.Tape:

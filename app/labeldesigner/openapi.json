@@ -3484,7 +3484,7 @@
           "sensing": {
             "type": "string",
             "enum": ["gap", "mark", "endless"],
-            "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as it is set up."
+            "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as last told or as set up on the printer."
           },
           "quality": {
             "type": "string",
@@ -4024,7 +4024,7 @@
           },
           "roll": {
             "type": "string",
-            "description": "Of a printer told how it finds its labels (`sensing` in its settings), e.g. a ZPL printer: `Die-cut labels`, `Labels with black marks` or `Continuous roll`, as set. Empty for other printers."
+            "description": "Of a printer told how it finds its labels (`sensing` in its settings), e.g. a ZPL printer: `Labels with gaps`, `Labels with black marks on the back` or `Continuous roll`, as set. Empty for other printers and while `sensing` is not set."
           },
           "candidates": {
             "type": "array",
@@ -4103,7 +4103,7 @@
               "string",
               "null"
             ],
-            "description": "The kind of roll, e.g. `Continuous length tape`. Of a printer told how it finds its labels (`sensing` in its settings) the roll as set, see `roll` of `tape`; on a continuous roll it then tells no `media_width` and `media_length`."
+            "description": "The kind of roll, e.g. `Continuous length tape`. Of a printer told how it finds its labels (`sensing` in its settings) `Die-cut labels`, else `Labels with black marks on the back` or `Continuous roll` as set; on a continuous roll it then tells no `media_width` and `media_length`."
           },
           "media_width": {
             "type": [

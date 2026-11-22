@@ -74,7 +74,7 @@ def test_the_end_of_a_label_drawn_lying_leaves_first(top_first, start, white):
     assert img.getpixel(start) == 0 and img.getpixel(white) == 1
 
 
-@pytest.mark.parametrize('sensing, roll', [(None, 'Die-cut labels'), ('gap', 'Die-cut labels'), ('mark', 'Labels with black marks')])
+@pytest.mark.parametrize('sensing, roll', [(None, 'Die-cut labels'), ('gap', 'Die-cut labels'), ('mark', 'Labels with black marks on the back')])
 def test_the_roll_is_named_as_set(sensing, roll):
     state = {'media_type': 'Die-cut labels', 'media_width': None, 'media_length': 152}
     assert diecut.as_set(state, sensing) == dict(state, media_type=roll)

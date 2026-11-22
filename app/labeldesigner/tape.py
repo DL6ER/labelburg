@@ -27,7 +27,7 @@ class Tape:
     # same_paper(). Left out of equality: the tape, not the printer, is compared.
     model: str | None = field(default=None, compare=False)
     # Of a printer told how it finds the labels, the roll as set for it, see
-    # diecut.ROLLS
+    # diecut.ROLLS, empty while nothing is
     roll: str = field(default='', compare=False)
 
     @property

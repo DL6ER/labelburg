@@ -147,13 +147,13 @@ function qualityHTML(p) {
     return `<div class="set-stack">${seg('quality', opts, on, 'Quality')}<small class="muted">${esc(about)} The same for all printers.</small></div>`;
 }
 
-// How the printer finds the start of each label, for printers whose driver tells them
-const SENSINGS = [['gap', 'Labels with gaps'], ['mark', 'Labels with black marks on the back'], ['endless', 'Continuous roll']];
-
+// How the printer finds the start of each label, for printers whose driver
+// tells them; none is shown as chosen while none is set, so that any is sent
 function sensingHTML(p) {
-    const on = kept(p).sensing || 'gap';
-    const about = on === 'endless' ? 'Each label is as long as the tape chosen above.' : 'How the printer finds where each label starts.';
-    return `<div class="set-stack">${seg('sensing', SENSINGS, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
+    const on = kept(p).sensing || '';
+    const about = !on ? 'Choose what is on the roll. Until then the printer finds the labels as before.'
+        : on === 'endless' ? 'Each label is as long as the tape chosen above.' : 'How the printer finds where each label starts.';
+    return `<div class="set-stack">${seg('sensing', C.rolls, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
 }
 
 function cuttingHTML(p) {
