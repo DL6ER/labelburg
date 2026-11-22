@@ -155,9 +155,10 @@ def on_network(monkeypatch):
 
 def test_label_as_a_bitmap():
     # BITMAP takes the width in bytes and the height in dots, a 0 bit is
-    # printed (manual pp. 67-69), each command line ends with CR LF (p. X)
+    # printed (manual pp. 67-69), each command line ends with CR LF (p. X),
+    # SIZE starts one of its own
     assert protocol.label([b'\x80\x00', b'\x00\x01'], 2, (50, 30), 3, 'gap') == (
-        b'SIZE 50 mm,30 mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n'
+        b'\r\nSIZE 50 mm,30 mm\r\nGAP 3 mm,0 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n'
         b'BITMAP 0,0,2,2,0,\x7f\xff\xff\xfe\r\nPRINT 1,1\r\n')
 
 
@@ -167,7 +168,7 @@ def test_how_the_printer_finds_the_labels(sensing, command):
     # GAP (p. 3, 5), BLINE (p. 9) and a continuous roll as GAP 0,0 (p. 5).
     # Not set, the printer finds them as it is set up.
     assert protocol.label([b'\x80'], 1, (50, 30), 3, sensing) == (
-        b'SIZE 50 mm,30 mm\r\n' + command + b'DIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,1,1,0,\x7f\r\nPRINT 1,1\r\n')
+        b'\r\nSIZE 50 mm,30 mm\r\n' + command + b'DIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,1,1,0,\x7f\r\nPRINT 1,1\r\n')
 
 
 def _label(width: int, length: int):
@@ -194,7 +195,7 @@ def test_job_of_a_label(sensing, command, label_size, size, dots, rows, last):
     width = (dots + 7) // 8
     bitmap = b'\x00' + b'\xff' * (width - 2) + bytes([last]) + b'\xff' * (width * (rows - 1))
     assert [data for data, _ in job] == [
-        b'SIZE ' + size + b'\r\n' + command + b'DIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n'
+        b'\r\nSIZE ' + size + b'\r\n' + command + b'DIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\n'
         + f'BITMAP 0,0,{width},{rows},0,'.encode() + bitmap + b'\r\nPRINT 1,1\r\n']
     assert tspl.DRIVER.label_lengths(job) == [pytest.approx(int(label_size.rpartition('x')[2]), abs=0.1)]
 
@@ -337,7 +338,7 @@ def test_label_for_the_same_paper_of_another_driver(saved, model, printed):
 
 def test_a_saved_4x6_label_prints_on_either(tmp_path, sent, monkeypatch):
     monkeypatch.setattr(zpl.protocol, 'write', protocol.write)
-    for model, printed in (('TSC/TSPL', b'SIZE 102 mm,152 mm\r\n'), ('Zebra/ZPL', b'^XA\n^PW816\n^LL1216\n')):
+    for model, printed in (('TSC/TSPL', b'\r\nSIZE 102 mm,152 mm\r\n'), ('Zebra/ZPL', b'^XA\n^PW816\n^LL1216\n')):
         client = make_client(tmp_path, model=model, printer='file:///dev/usb/lp_label')
         response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl102x152', 'print_type': 'text', 'text': TEXT})
         assert outcome(client, response) == ('printed', '')
@@ -419,6 +420,20 @@ def test_label_printed_on_a_printer_behind_a_device_file(tmp_path, usblp):
     assert job.startswith(b'SIZE 102 mm,76 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,102,608,0,')
     assert len(job) == len(b'SIZE 102 mm,76 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,102,608,0,') + 102 * 608 + len(b'\r\nPRINT 1,1\r\n')
     assert job.endswith(b'\r\nPRINT 1,1\r\n')
+
+
+def test_a_label_starts_its_own_line_after_unanswered_requests(tmp_path, usblp, monkeypatch):
+    # Requests the printer left unanswered, which end with no CR LF
+    usblp.status = usblp.name = None
+    device = f'file://{usblp.path}'
+    for _ in range(2):
+        monkeypatch.setattr(tspl, '_ask_after', {})
+        assert tspl.DRIVER.status(device, 'TSC/TSPL')['errors'] == []
+    client = make_client(tmp_path, model='TSC/TSPL', printer=device)
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'tspl57x32', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    asked, _ = usblp.wait_for(b'PRINT 1,1\r\n').split(b'SIZE 57 mm,32 mm\r\n')
+    assert asked.startswith(protocol.STATUS * 2) and asked.endswith(protocol.STATUS + b'\r\n')
 
 
 def test_printer_that_never_answers_is_printed_on(tmp_path):
@@ -612,5 +627,5 @@ def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
     for model in ('', 'TSC/TSPL-300'):
         response = client.post('/labeldesigner/api/print', data={'label_size': 'tspl102x152', 'print_type': 'text', 'text': TEXT, 'model': model})
         assert outcome(client, response) == ('printed', '')
-    head = b'SIZE 102 mm,152 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,151,1795,0,'
+    head = b'\r\nSIZE 102 mm,152 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,151,1795,0,'
     assert [data[:len(head)] for _, data in sent] == [head] * 2

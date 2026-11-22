@@ -46,8 +46,10 @@ def label(rows: list[bytes], width: int, size: tuple, gap: float, sensing: str |
     finds the labels, see diecut.SENSINGS, None sends nothing: the printer
     finds them as last told or as set up on it."""
     finding = {'gap': f'GAP {gap:g} mm,0 mm{END}', 'mark': f'BLINE {gap:g} mm,0 mm{END}', 'endless': f'GAP 0,0{END}'}
-    head = (f'SIZE {size[0]:g} mm,{size[1]:g} mm{END}{finding.get(sensing, "")}DIRECTION 0,0{END}REFERENCE 0,0{END}'
-            f'CLS{END}BITMAP 0,0,{width},{len(rows)},0,')
+    # SIZE starts a line of its own, also after requests a printer left
+    # unanswered, which end with no CR LF (p. X)
+    head = (f'{END}SIZE {size[0]:g} mm,{size[1]:g} mm{END}{finding.get(sensing, "")}DIRECTION 0,0{END}'
+            f'REFERENCE 0,0{END}CLS{END}BITMAP 0,0,{width},{len(rows)},0,')
     return head.encode() + b''.join(rows).translate(_WHITE_AS_ONE) + f'{END}PRINT 1,1{END}'.encode()
 
 
