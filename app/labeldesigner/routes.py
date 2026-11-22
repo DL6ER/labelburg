@@ -11,6 +11,7 @@ import threading
 import contextlib
 import datetime
 import functools
+import dataclasses
 from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
@@ -23,7 +24,7 @@ from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
 from . import drivers
-from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
+from .drivers import DEVICE_PATTERNS, devices, diecut, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
 from .printer import BUSY, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
@@ -251,6 +252,8 @@ def _designer_config() -> dict:
         # Kept on the server for every browser, see /api/settings/labels
         'label_settings': _label_settings(),
         'date_formats': list(printer_settings.DATE_FORMATS),
+        # How a printer told so finds its labels, by the words of its roll
+        'rolls': [[sensing, roll] for sensing, roll in diecut.ROLLS.items()],
         # Each named in itself, English is the empty one
         'date_languages': [['', 'English'], *map(list, DATE_LANGUAGES.items())],
     }
@@ -1547,11 +1550,13 @@ def get_printer_status():
         one = status_of_printer(current_app.config, request.args['printer'], added)
         if one is None:
             return {'message': 'No such printer'}, 404
-        status = {'printers': [one]}
-        told = [one]
+        status = {'printers': [dict(one)]}
+        told = status['printers']
     else:
         status = get_ptr_status(current_app.config, added)
-        told = [status] + status.get('printers', [])
+        # Copies, the search keeps the states the printers told
+        status['printers'] = [dict(printer) for printer in status.get('printers', [])]
+        told = [status] + status['printers']
     _described(told)
     return status
 
@@ -1569,7 +1574,8 @@ def _described(told: list[dict]):
         printer['color_support'] = drivers.for_model(model).colors(model) == 'color'
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
-        printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
+        printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
         # Labels are shown and printed on the tape in the printer
@@ -1594,7 +1600,8 @@ def _described(told: list[dict]):
 def problem_report_route():
     """The details a problem report needs and the bug form on GitHub with
     them filled in. Nothing is sent from here, the user opens the form."""
-    printers = get_ptr_status(current_app.config, _added_printers()).get('printers', [])
+    # Copies, the search keeps the states the printers told
+    printers = [dict(printer) for printer in get_ptr_status(current_app.config, _added_printers()).get('printers', [])]
     configured = {current_app.config['PRINTER_PRINTER']} | {device for _, device, _ in configured_printers(current_app.config)}
     # The demo printer listed by itself only where nothing else is listed
     if 'simulation' not in configured:
@@ -1606,10 +1613,12 @@ def problem_report_route():
 
 def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
     """A print queue for the printer, resolved before, its labels moved as
-    it is calibrated."""
+    it is calibrated and found as set for it."""
     queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
-    calibration = printer_settings.calibration_of(_kept_settings(), device)
+    kept = _kept_settings()
+    calibration = printer_settings.calibration_of(kept, device)
     queue.offset = (calibration['across'], calibration['along'])
+    queue.sensing = printer_settings.of_printer(kept, device, model).get('sensing')
     return queue
 
 
@@ -1646,10 +1655,21 @@ def _settings_of(device: str) -> dict:
     return printer_settings.of_printer(_kept_settings(), device)
 
 
+def _as_set(state: dict, model: str, settings: dict) -> dict:
+    """The status of a printer with its roll as set in its settings, see
+    diecut.as_set(), where it is told how it finds the labels."""
+    return diecut.as_set(state, settings.get('sensing')) if printer_settings.told_how(model) else state
+
+
 def _tape_of(state: dict, model: str, settings: dict) -> tape.Tape:
     """The tape a printer of the model prints on, as its status state tells
-    it, else the one set by hand in its settings, see tape.in_printer()."""
-    return tape.in_printer(state, model, settings.get('label_size', ''), current_app.config['LABEL_DEFAULT_SIZE'])
+    it, else the one set by hand in its settings, see tape.in_printer(). Of
+    a printer told how it finds the labels with its roll as set, none while
+    nothing is."""
+    found = tape.in_printer(_as_set(state, model, settings), model, settings.get('label_size', ''),
+                            current_app.config['LABEL_DEFAULT_SIZE'])
+    told = printer_settings.told_how(model) and settings.get('sensing') in diecut.SENSINGS
+    return dataclasses.replace(found, roll=diecut.ROLLS[settings['sensing']]) if told else found
 
 
 def _loaded_tape(device: str, model: str, settings: dict) -> tape.Tape:
@@ -1703,7 +1723,7 @@ def printer_settings_route():
     try:
         requested = values.pop('printer', None), values.pop('model', None)
         if request.method == 'GET':
-            return jsonify(printer_settings.of_printer(_kept_settings(), _printer(*requested)[0]))
+            return jsonify(printer_settings.of_printer(_kept_settings(), *_printer(*requested)))
         # Checked against the model the prints use
         device, model = _resolved_printer(*requested)
         changes = printer_settings.checked(values, model, is_simulation(device))
@@ -1724,7 +1744,7 @@ def printer_settings_route():
         return _fail(refusals.SETTINGS_NOT_SAVED, 500)
     except ValueError as e:
         return _refused('Saving the settings', e, refusals.INVALID_INPUT)
-    settings = printer_settings.of_printer(data, device)
+    settings = printer_settings.of_printer(data, device, model)
     # Shown at once, from the last answer of the printer: asking it may take
     # long, the next status asks it
     last = devices.status_cache.get(devices.lock_key(device), {})

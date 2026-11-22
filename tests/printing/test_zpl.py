@@ -476,7 +476,7 @@ def test_label_length_at_300_dpi():
     from types import SimpleNamespace
     from PIL import Image
     label = SimpleNamespace(label_content=None, generate=lambda: Image.new('1', (1205, 1795), 1))
-    job = zpl.DRIVER.render(SimpleNamespace(label_size='zpl300-102x152'), [{'label': label, 'cut': True}])
+    job = zpl.DRIVER.render(SimpleNamespace(label_size='zpl300-102x152', sensing=None), [{'label': label, 'cut': True}])
     assert zpl.DRIVER.label_lengths(job) == [pytest.approx(152, abs=0.1)]
 
 
@@ -485,7 +485,7 @@ def test_label_length_at_300_dpi():
     ('Zebra/ZPL-300', 1214, (102, 102)),
     ('Zebra/ZPL', 1214, (102, 152))])
 def test_labels_by_their_length_in_the_dots_of_the_model(model, length, size):
-    assert zpl.loaded(length, zpl.DOTS_PER_MM[model]) == size
+    assert zpl.loaded(length, zpl.DPI[model]) == size
 
 
 def test_status_of_a_300_dpi_printer(monkeypatch):
@@ -532,3 +532,156 @@ def test_printer_of_600_dpi_is_left_to_be_configured(client, monkeypatch):
     found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert [p['path'] for p in found] == ['simulation']
     assert zpl.DRIVER.model_of('usb://0x0a5f:0x0120/ZT610') is None
+
+
+@pytest.mark.parametrize('sensing, command', [('gap', b'^MNY\n'), ('mark', b'^MNM\n'), ('endless', b'^MNN\n'), (None, b'')])
+def test_how_the_printer_finds_the_labels(sensing, command):
+    # Not set, the printer finds them as it is set up
+    assert protocol.label([b'\x80\x00', b'\x00\x01'], 2, sensing) == (
+        b'^XA\n' + command + b'^PW16\n^LL2\n^FO0,0^GFA,4,4,2,80000001\n^XZ\n')
+
+
+@pytest.mark.parametrize('sensing, command', [('mark', b'^MNM\n'), ('endless', b'^MNN\n'), ('gap', b'^MNY\n')])
+def test_each_label_tells_how_the_printer_finds_them_as_set_for_it(tmp_path, sent, sensing, command):
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer=DEVICE)
+    assert client.post('/labeldesigner/api/settings', data={'sensing': sensing}).status_code == 200
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl57x32', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert outcome(client, response) == ('printed', '')
+    (_, data), = sent
+    assert data.count(b'^XA\n' + command + b'^PW456\n^LL256\n') == 2
+    job = [(label, 203) for label in data.split(b'^XZ\n')[:-1]]
+    assert zpl.DRIVER.label_lengths(job) == [32, 32]
+
+
+def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
+    # 4 x 6 in labels measured, or sent last on a continuous roll
+    monkeypatch.setattr(protocol, 'host_status', lambda device: DATAMAX_HS.replace(b'0235', b'1214'))
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+
+    def status():
+        found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+        return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
+    shown = status()
+    # Nothing set, the printer finds them as last told
+    assert (shown['media_type'], shown['media_length'], shown['tape']['id'], shown['tape']['roll']) == (
+        'Die-cut labels', 152, 'zpl102x152', '')
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'gap'})
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Labels with gaps')
+    assert status()['media_type'] == 'Die-cut labels'
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'mark'})
+    assert (r.get_json()['tape']['id'], r.get_json()['tape']['roll']) == ('zpl102x152', 'Black marks on the back')
+    shown = status()
+    assert (shown['media_type'], shown['media_length'], shown['tape']['known']) == ('Black marks on the back', 152, True)
+    # The labels are as long as the label size, set by hand or of the label
+    r = client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert (r.get_json()['tape']['known'], r.get_json()['tape']['roll']) == (False, 'Continuous roll')
+    shown = status()
+    assert (shown['media_type'], shown['media_width'], shown['media_length'], shown['tape']['known']) == ('Continuous roll', None, 0, False)
+    # The label designer names the roll, no die-cut size it assumes
+    assert (shown['tape']['roll'], shown['tape']['unknown']) == ('Continuous roll', '')
+    client.post('/labeldesigner/api/settings', data={'label_size': 'zpl102x76'})
+    assert status()['tape']['id'] == 'zpl102x76' and status()['tape']['manual']
+    # The label size ids stay
+    assert status()['label_size'] == 'zpl102x76'
+
+
+def test_printers_that_find_their_labels_by_themselves_name_no_roll(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert next(p for p in found if p['path'] == 'simulation')['tape']['roll'] == ''
+
+
+def test_the_roll_set_leaves_the_status_the_printer_told(tmp_path, monkeypatch, sent):
+    # Asked once within 10 s, a continuous roll set meanwhile does not
+    # change what it measured
+    asked = []
+    monkeypatch.setattr(protocol, 'host_status', lambda device: asked.append(device) or DATAMAX_HS.replace(b'0235', b'1214'))
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+
+    def shown(**query):
+        found = client.get('/labeldesigner/api/printer_status', query_string=query).get_json()['printers']
+        return next(p for p in found if p['path'] == 'tcp://127.0.0.1')
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert shown()['media_length'] == shown(printer='tcp://127.0.0.1')['media_length'] == 0
+    client.post('/labeldesigner/api/settings', data={'sensing': 'gap'})
+    for told in (shown(), shown(printer='tcp://127.0.0.1')):
+        assert (told['media_length'], told['tape']['id'], told['tape']['known']) == (152, 'zpl102x152', True)
+    response = client.post('/labeldesigner/api/print', data={'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^MNY\n^PW816\n^LL1216\n')
+    assert len(asked) == 1
+
+
+def test_nothing_is_sent_once_the_setting_is_removed(tmp_path, sent):
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer=DEVICE)
+    job = {'label_size': 'zpl57x32', 'print_type': 'text', 'text': TEXT}
+    client.post('/labeldesigner/api/settings', data={'sensing': 'mark'})
+    client.post('/labeldesigner/api/print', data=job)
+    client.post('/labeldesigner/api/settings', data={'sensing': ''})
+    response = client.post('/labeldesigner/api/print', data=job)
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^MNM\n^PW456\n') and sent[1][1].startswith(b'^XA\n^PW456\n')
+
+
+def test_a_300_dpi_label_tells_how_the_printer_finds_them(tmp_path, sent):
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL-300', printer=DEVICE)
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl300-102x152', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^MNN\n^PW1208\n^LL1795\n^FO0,0^GFA,271045,271045,151,')
+
+
+@pytest.mark.parametrize('written', [['gap'], {'gap': 1}, 1, 'holes'])
+def test_a_setting_written_wrong_by_hand_is_none(tmp_path, monkeypatch, sent, written):
+    from app.labeldesigner import printer_settings
+    monkeypatch.setattr(protocol, 'host_status', lambda device: DATAMAX_HS.replace(b'0235', b'1214'))
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_text(json.dumps({'printers': {'tcp://127.0.0.1:9100': {'sensing': written}}}))
+    r = client.get('/labeldesigner/api/printer_status')
+    assert r.status_code == 200
+    shown = next(p for p in r.get_json()['printers'] if p['path'] == 'tcp://127.0.0.1')
+    assert (shown['settings'], shown['tape']['roll'], shown['media_length']) == ({}, '', 152)
+    # Printed on the labels measured
+    response = client.post('/labeldesigner/api/print', data={'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^PW816\n^LL1216\n')
+
+
+def test_a_zpl_printer_added_again_forgets_the_roll_of_the_one_before(tmp_path, monkeypatch, sent):
+    from app.labeldesigner import adding, printer_settings
+    monkeypatch.setattr(protocol, 'host_status', lambda device: b'')
+    monkeypatch.setattr(adding, 'identify', lambda address, mode, keep=False: {'address': address, 'model': 'Zebra/ZPL'})
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    settings = tmp_path / 'label_repo' / printer_settings.FILE
+    settings.write_text(json.dumps({'printers': {'tcp://192.0.2.10:9100': {'sensing': 'endless', 'cut': 'none'}}}))
+    assert client.post('/labeldesigner/api/printers/add', json={'address': 'tcp://192.0.2.10'}).status_code == 200
+    assert json.loads(settings.read_text())['printers'] == {'tcp://192.0.2.10:9100': {'cut': 'none'}}
+    response = client.post('/labeldesigner/api/print', data={
+        'printer': 'tcp://192.0.2.10', 'label_size': 'zpl57x32', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert sent[0][1].startswith(b'^XA\n^PW456\n')
+    # Removed, it forgets it as well
+    client.post('/labeldesigner/api/settings', data={'printer': 'tcp://192.0.2.10', 'sensing': 'mark'})
+    assert client.post('/labeldesigner/api/printers/remove', json={'printer': 'tcp://192.0.2.10'}).status_code == 200
+    assert json.loads(settings.read_text())['printers'] == {'tcp://192.0.2.10:9100': {'cut': 'none'}}
+
+
+def test_a_continuous_roll_of_a_width_the_printer_reports():
+    from app.labeldesigner import tape
+    from app.labeldesigner.drivers import diecut
+    state = diecut.as_set({'model': 'Zebra/ZPL', 'media_width': 102, 'media_length': 0}, 'endless')
+    found = tape.describe(tape.in_printer(state, 'Zebra/ZPL', '', '62'))
+    assert (found['known'], found['unknown']) == (False, '102 mm')
+
+
+
+def test_a_problem_report_leaves_the_states_the_search_keeps(tmp_path, monkeypatch):
+    # As printer_status does: the roll set is not written into them
+    from app.labeldesigner import routes
+    kept = {'path': 'tcp://127.0.0.1', 'model': 'Zebra/ZPL', 'errors': [], 'media_width': 102, 'media_length': 152}
+    told = dict(kept)
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {'printers': [told]})
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert client.get('/labeldesigner/api/problem_report').status_code == 200
+    assert told == kept

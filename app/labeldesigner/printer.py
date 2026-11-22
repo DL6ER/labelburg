@@ -130,6 +130,9 @@ class PrinterQueue:
         self.leaves_first = None
         # mm its labels are moved right and down, as calibrated for the printer
         self.offset = (0.0, 0.0)
+        # How the printer finds the start of each label, one of
+        # diecut.SENSINGS, None as it is set up
+        self.sensing = None
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):

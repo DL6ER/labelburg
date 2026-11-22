@@ -379,3 +379,28 @@ def test_the_tape_a_printer_reported_is_named_for_the_model_it_prints_with(tmp_p
         monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
         assert client.post('/labeldesigner/api/print', data={'text': text}).status_code == 200
     assert jobs == ['pt24', 'pt12', 'pt18']
+
+
+def test_how_a_printer_finds_its_labels_is_a_setting_of_printers_told_so(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://a')
+    for sensing in ('gap', 'mark', 'endless'):
+        r = client.post(URL, data={'sensing': sensing})
+        assert (r.status_code, r.get_json()['settings']) == (200, {'sensing': sensing})
+    assert client.get(URL, query_string={'printer': 'tcp://b'}).get_json() == {}
+    r = client.post(URL, data={'sensing': 'holes'})
+    assert (r.status_code, r.get_json()['message']) == (400, printer_settings.SETTINGS_MESSAGE)
+    assert client.post(URL, data={'sensing': ''}).get_json()['settings'] == {}
+
+
+def test_a_printer_that_finds_its_labels_itself_is_not_told_how(tmp_path):
+    from app.labeldesigner import refusals
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    r = client.post(URL, data={'printer': 'tcp://a', 'sensing': 'mark'})
+    assert (r.status_code, r.get_json()['message']) == (400, printer_settings.NO_SENSING)
+    assert printer_settings.NO_SENSING in refusals.MESSAGES
+    assert client.get(URL, query_string={'printer': 'tcp://a'}).get_json() == {}
+
+
+def test_how_a_printer_finds_its_labels_goes_to_the_job_not_to_the_label():
+    # A print request does not name it, see PrinterQueue.sensing
+    assert printer_settings.for_printing({'sensing': 'mark', 'cut': 'none'}, 'Zebra/ZPL', {}) == {'cut': 'none'}

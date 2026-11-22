@@ -1,5 +1,7 @@
 """The demo printer: the simulator, of the model chosen in the Settings."""
 
+import json
+
 import pytest
 
 from app.labeldesigner import printer, printer_settings, tape
@@ -133,3 +135,28 @@ def test_a_configured_name_names_the_demo_printer(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['PRINTERS'] = [('QL-1100', 'simulation', 'Try-out')]
     assert demo(client)['name'] == 'Try-out'
+
+
+def test_a_new_model_keeps_how_it_finds_its_labels_where_it_is_told(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'demo_model': 'Zebra/ZPL'})
+    assert client.post(URL, data={'printer': 'simulation', 'sensing': 'mark'}).status_code == 200
+    r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'Zebra/ZPL-300'})
+    assert r.get_json()['settings']['sensing'] == 'mark'
+    # A QL printer finds its labels by itself
+    r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'QL-1100'})
+    assert 'sensing' not in r.get_json()['settings']
+
+
+def test_a_model_that_finds_its_labels_itself_is_not_told_a_roll_kept_before(tmp_path, monkeypatch):
+    # E.g. written by hand, or kept for another model at the address
+    told = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: told.append(self.sensing) or '')
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    (tmp_path / 'label_repo' / printer_settings.FILE).write_text(json.dumps(
+        {'printers': {'simulation': {'demo_model': 'QL-1100', 'sensing': 'endless'}}}))
+    assert client.get(URL, query_string={'printer': 'simulation'}).get_json() == {'demo_model': 'QL-1100'}
+    shown = demo(client)
+    assert ('sensing' not in shown['settings'], shown['tape']['roll'], shown['media_type']) == (True, '', None)
+    assert client.post('/labeldesigner/api/print', data={**EXAMPLE_FORMDATA, 'printer': 'simulation'}).status_code == 200
+    assert told == [None]

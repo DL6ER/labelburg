@@ -26,6 +26,9 @@ class Tape:
     # The model of the printer, for its size of the same paper, see
     # same_paper(). Left out of equality: the tape, not the printer, is compared.
     model: str | None = field(default=None, compare=False)
+    # Of a printer told how it finds the labels, the roll as set for it, see
+    # diecut.ROLLS, empty while nothing is
+    roll: str = field(default='', compare=False)
 
     @property
     def known(self) -> bool:
@@ -256,6 +259,6 @@ def describe(tape: Tape) -> dict:
             place[f'{size_id}|{orientation}'] = entry
     return {
         'id': tape.id, 'known': tape.known, 'assumed': tape.assumed, 'manual': tape.manual,
-        'unknown': tape.unknown, 'red_unknown': tape.red_unknown, 'candidates': list(tape.candidates),
+        'unknown': tape.unknown, 'red_unknown': tape.red_unknown, 'candidates': list(tape.candidates), 'roll': tape.roll,
         'fits': [s for s in SIZES if fits(s, tape)], 'moves': moving, 'place': place,
     }

@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
-    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
+    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE
 } from './core.js';
@@ -109,13 +109,15 @@ function tapeHTML(p) {
     const t = tapeOf(p);
     if (t.known && !t.manual) return `<div class="row"><span class="set-val">${esc(sizeName(t.id))}</span><small class="set-ok">${icon('check')}read from the printer</small></div>`;
     const chosen = tapesSaving[p.path] > 0 ? kept(p).label_size || '' : t.manual ? t.id : '';
+    const asks = !isDemo(p) && asksLength(p);
     const note = isDemo(p) ? 'Any roll this model takes.' : t.manual ? 'Set by hand, the printer does not report its tape.'
+        : asks ? 'On a continuous roll, choose how long the labels are.'
         : !t.known && (t.candidates || []).length ? `The printer measures labels ${t.unknown}, choose which ones.`
         : t.unknown ? `The printer reports ${t.unknown} tape, which is not offered here.`
         : `This printer does not report its tape, new labels are ${sizeName(t.id)}.`;
     return `<div class="set-stack"><select class="in set-sel" data-k="label_size" aria-label="Tape in ${esc(printerLabel(p))}">
             <option value="">Automatic${t.manual ? '' : `: ${esc(sizeName(t.id))}`}</option>${sizeOptions(p, chosen)}</select>
-        <small class="${t.manual || isDemo(p) ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
+        <small class="${t.manual || isDemo(p) || asks ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
 }
 
 // The demo printer prints as any model, grouped by maker, e.g. QL-500 before QL-1100
@@ -145,6 +147,15 @@ function qualityHTML(p) {
     const about = caps.colors === 'color' ? 'Fast is a few seconds quicker, colors come out lighter.'
         : 'Fast is quicker, the print a little less sharp.' + (dense ? ' Dense prints twice the lines along the label, slower and often darker.' : '');
     return `<div class="set-stack">${seg('quality', opts, on, 'Quality')}<small class="muted">${esc(about)} The same for all printers.</small></div>`;
+}
+
+// How the printer finds the start of each label, for printers whose driver
+// tells them; none is shown as chosen while none is set, so that any is sent
+function sensingHTML(p) {
+    const on = kept(p).sensing || '';
+    const about = !on ? 'Choose what is on the roll.'
+        : on === 'endless' ? 'Each label is as long as the tape chosen above.' : 'How the printer finds where each label starts.';
+    return `<div class="set-stack">${seg('sensing', C.rolls, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
 }
 
 // What feeding the paper does with the tape in the printer, as the server
@@ -226,6 +237,7 @@ function cardHTML(p, i) {
         <div class="set-grid">
             ${isDemo(p) ? `<span class="k">Model</span>${modelHTML(p)}` : ''}
             <span class="k">Tape</span>${tapeHTML(p)}
+            ${capsOf(p.model).sensing ? `<span class="k">Roll</span>${sensingHTML(p)}` : ''}
             <span class="k">Quality</span>${qualityHTML(p)}
             <span class="k">Cutting</span>${cuttingHTML(p)}
             <span class="k">Leaves first</span><div class="set-stack">${seg('leaves_first', [['top', 'Top'], ['bottom', 'Bottom']], leavesFirst(printerCaps(p), p), 'Leaves the printer first')}
@@ -465,7 +477,7 @@ function saveSettings(p, changes) {
         answered();
         if (!r.ok) throw new Error(answer.message || 'The settings could not be saved');
         const model = 'demo_model' in changes;
-        if (!tape && !model) return;
+        if (!tape && !model && !('sensing' in changes)) return;
         // The tape the server finds now, the status of all printers follows.
         // Another model comes with a roll and cutting it takes.
         settingsSaves.tapes++;

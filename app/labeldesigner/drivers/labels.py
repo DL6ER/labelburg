@@ -27,7 +27,8 @@ class Label:
     before and after it. models lists the printers it is made for, empty for
     all printers of its driver. pieces are the labels of a page of several,
     e.g. of a Niimbot roll, half cut apart: how many across (lanes), how many
-    along (rows), and the gap between lanes in mm."""
+    along (rows), and the gap between lanes in mm. gap is the paper in mm
+    between die-cut labels on their roll."""
     identifier: str
     tape_size: tuple[int, int]
     form_factor: FormFactor
@@ -38,6 +39,7 @@ class Label:
     models: tuple[str, ...] = ()
     color: Color = Color.BLACK_WHITE
     pieces: tuple[int, int, float] = (1, 1, 0)
+    gap: float = 0
 
     @property
     def name(self) -> str:

@@ -102,7 +102,7 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 export const printerCaps = (p = S.printer) => capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
@@ -123,6 +123,13 @@ export function sizeName(id) {
     if (isSheet(id)) return `${s.tape[0]} x ${s.tape[1]} mm, ${s.pieces[0] * s.pieces[1]} labels of ${s.piece[0]} x ${s.piece[1]}`;
     return `${s.tape[0]} x ${s.tape[1]} mm`;
 }
+// The roll as the server names it where the printer is told how it finds the labels, e.g. "continuous roll"
+export const rollOf = p => ((p && p.tape && p.tape.roll) || '').toLowerCase();
+// A continuous roll whose label length is not chosen: the printer measures no labels on it
+export const asksLength = (p = S.printer) => !!p && kept(p).sensing === 'endless' && !(p.tape && p.tape.known);
+export const ASK_LENGTH = 'choose the label length in the Settings';
+// That roll, with the width the printer reports, e.g. "102 mm continuous roll", never a size assumed for it
+export const unsizedRoll = p => [p && p.tape && p.tape.unknown, rollOf(p)].filter(Boolean).join(' ');
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
 // A label that shows the number of labels printed ({{total}}) is drawn for the copies

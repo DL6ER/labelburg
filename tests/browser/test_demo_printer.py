@@ -8,7 +8,7 @@ import pytest
 from app.labeldesigner import drivers, printer_settings, tape
 from app.labeldesigner.drivers import MODELS
 from tests.browser.test_editor import sent, type_label, wait_for_preview
-from tests.browser.test_settings import back_to_the_editor, open_settings
+from tests.browser.test_settings import back_to_the_editor, open_settings, setting
 
 MODEL = '[data-card="0"] select[data-k="demo_model"]'
 
@@ -109,3 +109,58 @@ def test_a_model_the_server_refuses_is_taken_back(designer):
     designer.wait_for_selector('#toast:has-text("Not now")')
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.evaluate('() => labelEditor.S.printers[0].model') == 'QL-800'
+
+
+def test_a_zpl_printer_is_told_how_it_finds_its_labels(designer):
+    choice = '[data-card="0"] button[data-k="sensing"]'
+    open_settings(designer)
+    # A QL printer finds them by itself
+    assert designer.query_selector(choice) is None
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'Zebra/ZPL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
+    designer.wait_for_selector(choice)
+    assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
+        'Labels with gaps', 'Black marks on the back', 'Continuous roll']
+    # None is chosen while none is set, the printer goes on as last told
+    assert designer.query_selector(f'{choice}.on') is None
+    assert 'Choose what is on the roll.' in designer.inner_text('[data-card="0"]')
+    assert setting(designer, f'{choice}[data-v="gap"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'gap'}
+    assert designer.inner_text(f'{choice}.on') == 'Labels with gaps'
+    assert 'How the printer finds where each label starts.' in designer.inner_text('[data-card="0"]')
+    assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'mark'}
+    assert designer.inner_text(f'{choice}.on') == 'Black marks on the back'
+    setting(designer, f'{choice}[data-v="endless"]')
+    assert 'Each label is as long as the tape chosen above.' in designer.inner_text('[data-card="0"]')
+    # Kept on the server, another visit shows it
+    designer.reload()
+    open_settings(designer)
+    assert designer.inner_text(f'{choice}.on') == 'Continuous roll'
+
+
+def test_the_roll_of_a_zpl_printer_is_named_as_set(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'Zebra/ZPL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
+    size = designer.evaluate("() => labelEditor.S.printers[0].tape.id")
+    # Not named while not set
+    assert designer.get_attribute('#printerChip', 'title').endswith(' mm')
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="gap"]')
+    designer.wait_for_function("() => document.querySelector('#printerChip').title.endsWith(' mm, labels with gaps')")
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="endless"]')
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Continuous roll'")
+    back_to_the_editor(designer)
+    # The label size stays, the roll is named
+    assert designer.evaluate("() => labelEditor.S.printers[0].tape.id") == size
+    assert designer.get_attribute('#printerChip', 'title').endswith(' mm, continuous roll')
+    designer.click('#printerChip')
+    shown = designer.inner_text('.pp [data-p="0"] small')
+    assert shown.startswith('Zebra ZPL, Ready, prints nothing, ') and shown.endswith(' mm, continuous roll')
+    designer.keyboard.press('Escape')
+    open_settings(designer)
+    setting(designer, '[data-card="0"] button[data-k="sensing"][data-v="mark"]')
+    designer.wait_for_function("() => labelEditor.S.printers[0].tape.roll === 'Black marks on the back'")
+    back_to_the_editor(designer)
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp [data-p="0"] small').endswith(' mm, black marks on the back')

@@ -468,3 +468,57 @@ def test_the_cutting_of_a_printer_is_said_as_in_the_editor(designer, server):
     printers_are(designer, server, {'path': 'simulation', 'model': 'PT-E550W', 'name': 'Shop'})
     open_settings(designer)
     assert 'The tape fed before the first label is waste, short labels get some extra tape.' in designer.inner_text('#setPrinters')
+
+
+def test_a_continuous_roll_asks_for_the_label_length(designer, server):
+    # The printer measures no labels on it, the tape the server finds then
+    path = 'tcp://192.0.2.10'
+    with urlopen(f'{server}/labeldesigner/api/settings', urlencode({'printer': path, 'model': 'Zebra/ZPL', 'sensing': 'endless'}).encode()) as r:
+        assert json.load(r)['tape']['roll'] == 'Continuous roll'
+
+    def answer(route):
+        with urlopen(f"{server}/labeldesigner/api/settings?printer={quote(path, safe='')}&model=Zebra/ZPL") as r:
+            settings = json.load(r)
+        zpl = with_tape({'path': path, 'model': 'Zebra/ZPL', 'name': 'Shipping', 'errors': [], 'media_width': None, 'media_length': 0,
+                         'settings': settings})
+        zpl['tape']['roll'] = 'Continuous roll'
+        route.fulfill(json={**zpl, 'printers': [zpl], 'selected': path})
+    designer.route('**/api/printer_status*', answer)
+    designer.reload()
+    designer.wait_for_selector('#field .ln')
+    wait_for_preview(designer)
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp [data-p="0"] small') == 'Zebra ZPL, Ready, continuous roll, choose the label length in the Settings'
+    designer.locator('.pp [data-p="0"]').click()
+    designer.wait_for_selector('#printerChip b:text-is("Shipping")')
+    assert designer.inner_text('#tapeNote') == 'Shipping has a continuous roll, choose how long the labels are. Set the length'
+    # The roll, no die-cut size assumed for it
+    assert designer.inner_text('#printerChip small') == 'continuous roll'
+    assert designer.get_attribute('#printerChip', 'title') == 'Shipping: Ready, continuous roll, choose the label length in the Settings'
+    designer.keyboard.press('Escape')
+    open_settings(designer)
+    note = designer.locator('[data-card="0"] select[data-k="label_size"] + small')
+    assert (note.inner_text(), note.get_attribute('class')) == ('On a continuous roll, choose how long the labels are.', 'muted')
+    # A length chosen, its size is shown
+    with designer.expect_response('**/api/settings'):
+        designer.select_option('[data-card="0"] select[data-k="label_size"]', 'zpl102x76')
+    designer.wait_for_function("() => document.querySelector('#printerChip small').textContent === '102 x 76 mm'")
+    assert designer.get_attribute('#printerChip', 'title') == 'Shipping: Ready, 102 x 76 mm, continuous roll'
+
+
+def test_a_continuous_roll_is_named_with_the_width_the_printer_reports(designer, server):
+    path = 'tcp://192.0.2.10'
+    with urlopen(f'{server}/labeldesigner/api/settings', urlencode({'printer': path, 'model': 'Zebra/ZPL', 'sensing': 'endless'}).encode()) as r:
+        answer = json.load(r)
+    # As the server tells a roll whose width the printer reports
+    zpl = {**with_tape({'path': path, 'model': 'Zebra/ZPL', 'name': 'Shipping', 'errors': [], 'media_width': 102, 'media_length': 0,
+                        'settings': answer['settings']}), 'tape': dict(answer['tape'], unknown='102 mm')}
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={**zpl, 'printers': [zpl], 'selected': path}))
+    designer.reload()
+    designer.wait_for_selector('#field .ln')
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp [data-p="0"] small') == 'Zebra ZPL, Ready, 102 mm continuous roll, choose the label length in the Settings'
+    designer.locator('.pp [data-p="0"]').click()
+    designer.wait_for_selector('#printerChip b:text-is("Shipping")')
+    assert designer.inner_text('#printerChip small') == '102 mm continuous roll'
+    assert designer.get_attribute('#printerChip', 'title') == 'Shipping: Ready, 102 mm continuous roll, choose the label length in the Settings'
