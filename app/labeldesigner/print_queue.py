@@ -75,6 +75,10 @@ class Job:
     done: threading.Event = field(default_factory=threading.Event)
     run: Callable[[], str] | None = field(default=None, repr=False)
     explain: Callable[[Exception], str] | None = field(default=None, repr=False)
+    # Called outside the lock as it starts to print and once it ended, before
+    # done is set
+    on_start: Callable[['Job'], None] | None = field(default=None, repr=False)
+    on_end: Callable[['Job'], None] | None = field(default=None, repr=False)
 
     def told(self) -> dict:
         told_from, detail = SOURCES.get(self.source, ('', ''))
@@ -136,13 +140,36 @@ def _start_worker(key, line):
 
 
 def _end(job, state, message):
+    """Under _lock, _told() follows outside it."""
     job.message, job.ended = message, time.monotonic()
     job.state = state
-    job.run = job.explain = None
+    job.run = job.explain = job.on_start = None
     _ended.append(job)
     if job.preview is not None:
         _previewed.append(job)
-    job.done.set()
+
+
+def _told(job):
+    """Outside _lock: the end hook of a job that ended, then those waiting
+    for it."""
+    on_end, job.on_end = job.on_end, None
+    try:
+        if on_end is not None:
+            on_end(job)
+    except Exception:
+        logger.exception('The end of print job %s was not kept', job.id)
+    finally:
+        job.done.set()
+
+
+def _hook(job):
+    """Outside _lock: the start hook of a job that starts to print."""
+    on_start, job.on_start = job.on_start, None
+    try:
+        if on_start is not None:
+            on_start(job)
+    except Exception:
+        logger.exception('The start of print job %s was not kept', job.id)
 
 
 def _work(key, line):
@@ -151,6 +178,7 @@ def _work(key, line):
     except BaseException:
         logger.exception('The print worker of %s stopped', key)
     finally:
+        failed = []
         with _lock:
             if line.worker is threading.current_thread():
                 line.worker = None
@@ -161,7 +189,10 @@ def _work(key, line):
                     except Exception:
                         logger.exception('No print worker for %s could be started', key)
                         while line.waiting:
-                            _end(line.waiting.popleft(), 'failed', FAILED)
+                            failed.append(line.waiting.popleft())
+                            _end(failed[-1], 'failed', FAILED)
+        for job in failed:
+            _told(job)
 
 
 def _print_all(key, line):
@@ -172,6 +203,7 @@ def _print_all(key, line):
                 return
             job = line.printing = line.waiting.popleft()
             job.state = 'printing'
+        _hook(job)
         message, error = FAILED, True
         try:
             try:
@@ -187,6 +219,7 @@ def _print_all(key, line):
                 line.printing = None
                 if message and not error and line.waiting:
                     line.held = message
+            _told(job)
 
 
 def _no_room(line, size: int) -> str:
@@ -201,20 +234,37 @@ def _no_room(line, size: int) -> str:
 
 
 def add(device: str, run: Callable[[], str], *, title: str, labels: int, source: str, preview: bytes | None = None,
-        size: int = 0, explain: Callable[[Exception], str]) -> Job:
+        size: int = 0, explain: Callable[[Exception], str], job_id: str | None = None,
+        on_start: Callable[[Job], None] | None = None, on_end: Callable[[Job], None] | None = None) -> Job:
     """Queue a job. run() prints and returns '' or the reason it did not
     print, explain() words an error it raises. size is that of the images
-    it holds, see image_bytes()."""
+    it holds, see image_bytes(). job_id is its id where it has one already,
+    on_start and on_end are its hooks, see Job."""
+    return _add(device, run, True, title=title, labels=labels, source=source, preview=preview, size=size,
+                explain=explain, job_id=job_id, on_start=on_start, on_end=on_end)
+
+
+def restore(device: str, run: Callable[[], str], *, job_id: str, title: str, labels: int, source: str,
+            explain: Callable[[Exception], str], preview: bytes | None = None,
+            on_start: Callable[[Job], None] | None = None, on_end: Callable[[Job], None] | None = None) -> Job:
+    """Queue a job that waited when the server stopped, with its id, also
+    beyond MAX_WAITING. Its images are read once it prints."""
+    return _add(device, run, False, title=title, labels=labels, source=source, preview=preview, size=0,
+                explain=explain, job_id=job_id, on_start=on_start, on_end=on_end)
+
+
+def _add(device, run, check: bool, *, title, labels, source, preview, size, explain, job_id, on_start, on_end) -> Job:
     key = key_of(device)
     with _lock:
         _prune()
         line = _lines.setdefault(key, _Line())
-        refused = _no_room(line, size)
+        refused = _no_room(line, size) if check else ''
         if refused:
             raise Full(refused)
         # Told by the latest spelling, the demo printer as the status lists it
         line.device = 'simulation' if key == 'simulation' else device
-        job = Job(uuid.uuid4().hex, key, title, labels, source, preview=preview, size=size, run=run, explain=explain)
+        job = Job(job_id or uuid.uuid4().hex, key, title, labels, source, preview=preview, size=size, run=run, explain=explain,
+                  on_start=on_start, on_end=on_end)
         _jobs[job.id] = job
         line.waiting.append(job)
         try:
@@ -283,7 +333,8 @@ def remove(job_id: str) -> str | None:
         current.waiting.remove(job)
         _end(job, 'removed', REMOVED)
         _release_if_empty(current)
-        return ''
+    _told(job)
+    return ''
 
 
 def resume(device: str) -> None:
