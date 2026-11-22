@@ -459,7 +459,7 @@ def test_labels_printed_here_are_a_group_of_templates(editor, server):  # noqa: 
         editor.click('#tplPrint')
     fields = sent(request.value)
     assert json.loads(fields['blanks'])['What'] == 'Peas' and fields['print_count'] == '2'
-    editor.wait_for_selector('#toast:has-text("Printed 2 labels: Peas")')
+    editor.wait_for_selector('#toast:has-text("Printed 2 labels: Jar Peas")')
     # And opened in the editor with them
     editor.click('#tplOpen')
     editor.wait_for_selector('.tpl', state='detached')

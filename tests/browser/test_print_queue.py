@@ -2,6 +2,7 @@
 outcome is known: printed, not printed, or not known. The queue of the
 printer chosen shows at the place of the print message."""
 import contextlib
+import json
 import os
 from urllib.parse import parse_qs, unquote
 
@@ -613,7 +614,8 @@ def test_jobs_are_followed_by_the_reads_of_their_line(editor):  # noqa: F811
 
 
 def _title(request):
-    return parse_qs(request.post_data)['title'][0]
+    # The first line of the label printed
+    return json.loads(parse_qs(request.post_data)['text'][0])[0]['text']
 
 
 def test_prints_are_sent_one_after_the_other(editor):  # noqa: F811
@@ -660,7 +662,8 @@ def test_prints_are_sent_in_order_per_printer(editor):  # noqa: F811
         editor.evaluate("""async () => {
             const core = await import('/static/designer/core.js');
             const on = path => Object.assign({}, core.S.printer, { path });
-            const job = title => ({ title, design: core.S.edit.design, values: {}, copies: 1 });
+            // Saved labels, sent with their names
+            const job = title => ({ title, design: core.S.edit.design, values: {}, copies: 1, source: { kind: 'saved', id: title } });
             window.sent = [core.printJob(job('A1'), null, on('file:///dev/usb/lp8')), core.printJob(job('A2'), null, on('file:///dev/usb/lp8')),
                 core.printJob(job('B1'), null, on('file:///dev/usb/lp9'))];
         }""")

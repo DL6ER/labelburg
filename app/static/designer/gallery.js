@@ -301,8 +301,7 @@ async function showDetail(item, values = null) {
         const now = valuesNow(work.values, starts, { design: work.design });
         // Printed again by the server with the values and copies set here
         if (before) {
-            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, ask: askHere, accepted,
-                title: entryName({ design: work.design, values: now, title: before.title }) };
+            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, ask: askHere, accepted };
             await printKeptAgain(before, printedDone, opts);
             return;
         }

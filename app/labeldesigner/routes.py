@@ -1323,7 +1323,7 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
 def repo_print():
     # Print a saved repository template by name. The server will load the JSON
     # and perform the same printing logic as the /api/print endpoint.
-    return _saved_response(lambda data, image_bytes: _print_stored_label(data, _get_repo_dir(), image_bytes),
+    return _saved_response(lambda data, image_bytes: _print_stored_label(data, _get_repo_dir(), image_bytes, named=True),
                            'Failed to load file')
 
 
@@ -1346,9 +1346,10 @@ def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]
     return tape.on_tape(data, loaded), kept
 
 
-def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None):
+def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None, named: bool = False):
     """Print a stored label whose image is in image_dir, or image_bytes where
-    it was read with the label, like /api/print."""
+    it was read with the label, like /api/print, a saved one (named) named
+    as it is saved."""
     try:
         data['blanks'] = _requested_blanks(data)
         printer, data, high_res, fast = _stored_job(data)
@@ -1358,8 +1359,10 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         collate = _whole_or(collate if collate is not None else data.get('collate'), _label_settings()['collate'] or 1) != 0
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
+    name = data.get('name')
+    saved_title = (_given(data.get('title'), None) or (name.removesuffix('.json') if isinstance(name, str) else None)) if named else None
     return _print_job(printer, data, {}, print_count, collate, high_res, fast, _requested('return_format'),
-                      image_dir=image_dir, image_bytes=image_bytes)
+                      title=saved_title, image_dir=image_dir, image_bytes=image_bytes)
 
 
 def _stored_job(data: dict) -> tuple[PrinterQueue, dict, bool, bool]:
@@ -1382,10 +1385,11 @@ def _stored_job(data: dict) -> tuple[PrinterQueue, dict, bool, bool]:
 
 
 def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, collate: bool, high_res: bool, fast: bool,
-               return_format, **stored):
+               return_format, title: str | None = None, **stored):
     """Queue print_count copies of the label, of each of its images, see
     _copies(), to be printed. stored tells where the image of a stored label
-    is, see load_label_images()."""
+    is, see load_label_images(). Named title, else by its first line as
+    printed, see _job_title()."""
     # Refused before archive serial numbers are taken for it
     if full := print_queue.full(printer.device_specifier):
         return _line_full(printer, full)
@@ -1409,8 +1413,11 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     except Exception as e:
         print_store.discard(job_id, staged)
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
-                   recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast,
+    # Named by the request or as saved, a name that stays when it is printed again with other values
+    named = bool(title or _given(_requested('title'), None))
+    title = _job_title({'title': title} if named else data, None if named else drawn)
+    return _queued(printer, run=printer.process_queue, title=title, source=_job_source('api'), labels=len(order),
+                   recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast, 'named': named,
                            'copies': print_count, 'collate': collate, 'sizes': [size for _, size in kept], 'dates': _dates_set()},
                    images=[copy for copy, _ in kept], drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
 
@@ -2519,7 +2526,8 @@ def history_print(job_id):
             total = (entry.get('total') or len(entry['order'])) if as_before and order == entry['order'][:len(order)] else None
             recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
                       'copies': copies, 'collate': collate, 'sizes': entry.get('sizes'), 'dates': dates or _dates_set(), 'total': total}
-            title = None if given else entry.get('title')
+            # Named as saved it keeps its name, named by its first line it is named anew
+            title = entry.get('title') if entry.get('named') or not given else None
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)

@@ -384,3 +384,16 @@ def test_a_label_printed_again_as_it_was_counts_as_it_did(client, monkeypatch):
 
 def test_the_same_numbers_refused_tell_what_to_do():
     assert refusals.SAME_NUMBERS == 'Print all its labels again, or choose Next number.'
+
+
+def test_a_label_printed_is_named_by_its_saved_name_else_by_its_first_line_as_printed(client):
+    saved = {'name': 'Pantry_jar.json', 'title': 'Pantry jar', 'label_size': '62', 'text': [{'text': 'Rice', 'size': '40'}]}
+    assert client.post(f'{API}/repository/save', json=saved).status_code == 200
+    by_name = printed(client, 'repository/print', json={'name': 'Pantry jar', 'printer': 'simulation'})
+    fields = {'Day': {'type': 'date', 'format': '%m/%d/%Y'}}
+    filled = printed(client, data=dict(LABEL, text=lines('Opened {{blank:Day}}'), blanks=json.dumps({'Day': '2026-11-22'}), fields=json.dumps(fields)))
+    assert [entry(client, job)['title'] for job in (by_name, filled)] == ['Pantry jar', 'Opened 11/22/2026']
+    # Printed again with other values, a saved label keeps its name, another one is named anew
+    assert entry(client, printed(client, f'history/{by_name}/print', json={'printer': 'simulation', 'blanks': {'Other': 'x'}}))['title'] == 'Pantry jar'
+    again = printed(client, f'history/{filled}/print', json={'printer': 'simulation', 'blanks': {'Day': '2026-12-24'}})
+    assert entry(client, again)['title'] == 'Opened 12/24/2026'

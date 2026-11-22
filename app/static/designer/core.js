@@ -1056,7 +1056,8 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
     return sendJob(entry, printer, () => {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
-        form.set('title', entryName(entry));
+        // Named by the server: a saved label as it is saved, else by its first line as printed
+        if (job.source && job.source.kind === 'saved' && job.title) form.set('title', job.title);
         form.set('source', 'designer');
         return ['/print', form];
     }, onDone, onAccepted);
@@ -1241,8 +1242,8 @@ export const keptSub = h => h.state === 'printed' ? [`${h.labels} x`, fmtTime(Da
 // A label printed, printed again on the printer chosen. Where that changes
 // its date or Paperless number, it asks whether they stay. With the label
 // before it is printed again (opts): its copies, the values of its blanks,
-// the title, the label to tell its dates and ask(same, next, choose) to ask
-// elsewhere than in a dialog.
+// the label to tell its dates and ask(same, next, choose) to ask elsewhere
+// than in a dialog.
 export const IMAGE_GONE = 'Its image is no longer kept';
 export function printKeptAgain(h, onDone = announceKept, opts = {}) {
     if (!h.again) { toast(IMAGE_GONE); return Promise.resolve(null); }
@@ -1266,14 +1267,13 @@ export function printKeptAgain(h, onDone = announceKept, opts = {}) {
     });
 }
 function sendAgain(h, asBefore, onDone, opts = {}) {
-    const printer = S.printer, entry = Object.assign(newEntry(printer, opts.copies || h.labels), { title: opts.title || h.title });
+    const printer = S.printer, entry = Object.assign(newEntry(printer, opts.copies || h.labels), { title: h.title });
     return sendJob(entry, printer, () => {
         const form = new URLSearchParams({ as_before: asBefore ? '1' : '0', source: 'designer' });
         if (printer && printer.path) form.set('printer', printer.path);
         if (printer && printer.model) form.set('model', printer.model);
         if (opts.copies) form.set('print_count', String(opts.copies));
         if (opts.blanks) form.set('blanks', JSON.stringify(opts.blanks));
-        if (opts.title) form.set('title', opts.title);
         return [`/history/${encodeURIComponent(h.id)}/print`, form];
     }, entry => onDone(entry, h), opts.accepted);
 }

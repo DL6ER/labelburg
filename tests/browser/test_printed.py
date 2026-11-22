@@ -254,3 +254,15 @@ def test_more_labels_printed_are_shown_when_asked(page, server):
     page.click('#setMore')
     page.wait_for_function("() => document.querySelectorAll('#setHist .set-hrow').length === 61")
     assert page.locator('#setMore').count() == 0 and asked[-1].endswith('limit=60&before=e59')
+
+
+def test_labels_printed_are_listed_by_their_saved_name_else_by_their_first_line(page, server):
+    from tests.browser.test_gallery import print_jar, save_new
+    save_new(page, 'Rice jar', 'Rice')
+    with page.expect_request('**/api/print'):
+        page.click('#print')
+    page.wait_for_selector('#toast:has-text("Printed 1 label")')
+    page.click('#newLabel')
+    print_jar(page, 'Beans')
+    open_settings(page, 'printed')
+    assert [row.split('\n')[0] for row in rows(page)] == ['Jar Beans', 'Rice jar']
