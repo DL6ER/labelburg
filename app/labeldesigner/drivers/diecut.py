@@ -75,10 +75,11 @@ def loaded(length: int, dpi: int = 203) -> tuple[int, int] | None:
 def as_set(state: dict, sensing: str | None) -> dict:
     """The status of a printer told how it finds the labels, see SENSINGS:
     its roll named as set, MEDIA_TYPE for labels with gaps and where nothing
-    is set. On a continuous roll it measured no labels, the length it tells
-    is the one it was sent last."""
+    is set. On a continuous roll it measured no labels: the length it tells,
+    and a width that comes with it, are of the labels it was sent last. A
+    width told without a length is the one of the roll."""
     state = dict(state, media_type=ROLLS[sensing] if sensing in ('mark', 'endless') else MEDIA_TYPE)
-    if sensing == 'endless':
+    if sensing == 'endless' and state.get('media_length'):
         state.update(media_width=None, media_length=0)
     return state
 

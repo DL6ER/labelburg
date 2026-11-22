@@ -85,3 +85,9 @@ def test_a_continuous_roll_has_no_labels_measured():
     state = {'media_type': 'Die-cut labels', 'media_width': 102, 'media_length': 152, 'errors': []}
     assert diecut.as_set(state, 'endless') == {'media_type': 'Continuous roll', 'media_width': None, 'media_length': 0, 'errors': []}
     assert state['media_length'] == 152
+
+
+def test_a_continuous_roll_keeps_a_width_the_printer_reports():
+    # Told without a length, of the roll, not of labels sent before
+    state = {'media_type': 'Die-cut labels', 'media_width': 102, 'media_length': 0}
+    assert diecut.as_set(state, 'endless') == {'media_type': 'Continuous roll', 'media_width': 102, 'media_length': 0}

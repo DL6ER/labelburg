@@ -577,6 +577,8 @@ def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
     assert (r.get_json()['tape']['known'], r.get_json()['tape']['roll']) == (False, 'Continuous roll')
     shown = status()
     assert (shown['media_type'], shown['media_width'], shown['media_length'], shown['tape']['known']) == ('Continuous roll', None, 0, False)
+    # The label designer names the roll, no die-cut size it assumes
+    assert (shown['tape']['roll'], shown['tape']['unknown']) == ('Continuous roll', '')
     client.post('/labeldesigner/api/settings', data={'label_size': 'zpl102x76'})
     assert status()['tape']['id'] == 'zpl102x76' and status()['tape']['manual']
     # The label size ids stay
@@ -662,3 +664,11 @@ def test_a_zpl_printer_added_again_forgets_the_roll_of_the_one_before(tmp_path, 
     client.post('/labeldesigner/api/settings', data={'printer': 'tcp://192.0.2.10', 'sensing': 'mark'})
     assert client.post('/labeldesigner/api/printers/remove', json={'printer': 'tcp://192.0.2.10'}).status_code == 200
     assert json.loads(settings.read_text())['printers'] == {'tcp://192.0.2.10:9100': {'cut': 'none'}}
+
+
+def test_a_continuous_roll_of_a_width_the_printer_reports():
+    from app.labeldesigner import tape
+    from app.labeldesigner.drivers import diecut
+    state = diecut.as_set({'model': 'Zebra/ZPL', 'media_width': 102, 'media_length': 0}, 'endless')
+    found = tape.describe(tape.in_printer(state, 'Zebra/ZPL', '', '62'))
+    assert (found['known'], found['unknown']) == (False, '102 mm')

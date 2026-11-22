@@ -128,6 +128,8 @@ export const rollOf = p => ((p && p.tape && p.tape.roll) || '').toLowerCase();
 // A continuous roll whose label length is not chosen: the printer measures no labels on it
 export const asksLength = (p = S.printer) => !!p && kept(p).sensing === 'endless' && !(p.tape && p.tape.known);
 export const ASK_LENGTH = 'choose the label length in the Settings';
+// That roll, with the width the printer reports, e.g. "102 mm continuous roll", never a size assumed for it
+export const unsizedRoll = p => [p && p.tape && p.tape.unknown, rollOf(p)].filter(Boolean).join(' ');
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
