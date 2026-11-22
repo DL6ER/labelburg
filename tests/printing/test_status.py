@@ -422,10 +422,12 @@ def test_printer_answering_only_after_esc_at_polled_for_a_minute(monkeypatch):
     assert len([at for at, data in printer.writes if data.endswith(b'\x1b\x40')]) == 3
 
 
-@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W')])
+@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W'), (0x6F, 'PT-P900W'),
+                                         (0x70, 'PT-P950NW'), (0x69, 'Unknown')])
 def test_ptouch_models_are_told_apart(code, model):
     # brother_ql gave the PT-E550W the code of the PT-P750W, a PT-E550W was
-    # an unknown printer and a PT-P750W was taken for a PT-E550W
+    # an unknown printer and a PT-P750W was taken for a PT-E550W. The
+    # PT-P900W is "o" (6Fh), not the 69h its reference prints next to it.
     from app.labeldesigner.drivers.brother.usb import get_status
     packet = bytearray(make_status_packet())
     packet[3], packet[4] = 0x30, code

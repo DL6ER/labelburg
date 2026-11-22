@@ -123,6 +123,53 @@ def test_the_color_swatch_follows_the_tape(editor, model, tape, colors):  # noqa
     assert request['border_color'] == 'red'
 
 
+# Previews wait until window.letGo() is called
+HOLD = """() => {
+    const original = window.fetch;
+    window.fetch = (url, options) => String(url).endsWith('/api/preview')
+        ? new Promise(resolve => { window.letGo = () => resolve(original(url, options)); }) : original(url, options);
+}"""
+
+
+def code_with_preview_held(page):
+    """The code added on red tape, its preview not yet shown."""
+    printer_is(page, 'QL-800', '62red')
+    type_label(page, 'Shelf 3')
+    page.evaluate(HOLD)
+    page.click('#addCode')
+    page.wait_for_function('() => !!window.letGo')
+
+
+def toolbar_top(page) -> float:
+    return page.evaluate("() => document.querySelector('#ltb').getBoundingClientRect().top")
+
+
+def test_a_press_on_the_toolbar_is_not_lost_when_the_preview_moves_it(editor):  # noqa: F811
+    code_with_preview_held(editor)
+    top = toolbar_top(editor)
+    box = editor.locator('#ltb [data-ccolor]').bounding_box()
+    editor.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    editor.mouse.down()
+    editor.evaluate('() => letGo()')
+    wait_for_preview(editor)
+    editor.mouse.up()
+    editor.wait_for_selector('.color-menu')
+    # Let go, the toolbar moves where the new preview needs it
+    editor.wait_for_function("top => document.querySelector('#ltb').getBoundingClientRect().top !== top", arg=top)
+
+
+def test_a_menu_of_the_toolbar_moves_along_with_it(editor):  # noqa: F811
+    code_with_preview_held(editor)
+    top = toolbar_top(editor)
+    editor.click('#ltb [data-ccolor]')
+    editor.evaluate('() => letGo()')
+    wait_for_preview(editor)
+    assert toolbar_top(editor) != top
+    gap = editor.evaluate("""() => document.querySelector('.color-menu').getBoundingClientRect().top
+        - document.querySelector('#ltb [data-ccolor]').getBoundingClientRect().bottom""")
+    assert gap == pytest.approx(8, abs=1)
+
+
 def test_how_a_color_prints_is_what_the_server_tells(editor):  # noqa: F811
     # The rule is the server's, the designer says what the preview told
     printer_is(editor, 'QL-800', '62red')
