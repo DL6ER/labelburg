@@ -91,6 +91,11 @@ class Driver:
         devices.usb_device_id() tells it, read if None."""
         return None
 
+    def kept_model(self, model: str, known: str) -> str:
+        """The model of a printer model_of() tells as known, configured or
+        requested as model: known, where its address tells the model."""
+        return known
+
     def model_in(self, device_id: str) -> str | None:
         """The model of a printer of this driver an IEEE 1284 device ID names,
         e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., None for other devices."""

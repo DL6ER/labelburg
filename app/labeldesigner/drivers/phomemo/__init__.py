@@ -11,7 +11,7 @@ import re
 from PIL import Image
 
 from .. import bitmap, devices, progress
-from ..base import Driver, network_status
+from ..base import Driver, network_status, shown
 from ..labels import FormFactor, Label
 from . import protocol
 
@@ -21,41 +21,33 @@ M02, M02PRO, T02 = 'Phomemo/M02', 'Phomemo/M02Pro', 'Phomemo/T02'
 M110, M120, M220, M421 = 'Phomemo/M110', 'Phomemo/M120', 'Phomemo/M220', 'Phomemo/M421'
 D30, D35, Q30 = 'Phomemo/D30', 'Phomemo/D35', 'Phomemo/Q30'
 MODELS = (M02, M02PRO, T02, M110, M120, M220, M421, D30, D35, Q30)
-SHOWN = {M02PRO: 'M02 Pro'}
 # The job of each model, see protocol.py
 KINDS = {M02: 'm02', M02PRO: 'm02', T02: 'm02', M110: 'm110', M120: 'm110', M220: 'm110', M421: 'm110',
          D30: 'd30', D35: 'd30', Q30: 'q30'}
-# The dots across the printhead, rows as wide, the label in their middle: on
-# the M110 and M120 ([PY] printers.json:157-173), on the M220 ([LB]
-# rastertopm220.py:54, the maker's own setting). On others rows are as wide
-# as the label.
+# Rows as wide as the printhead, the label centered ([PY] printers.json:157-173, the M220A [LB] rastertopm220.py:50-54),
+# else as wide as the label. [PY] has the roll of the M110S and an M220 on the right (printers.json:182, 233).
 HEADS = {M110: 384, M120: 384, M220: 576}
 DPI = 203
 # The M02 Pro prints 300 dpi ([PT] cups/drv/phomemo-m02pro.drv:38)
 DPI_300 = (M02PRO,)
-# How labels the label designer draws lying are turned: a quarter to the left
-# ([PT] rastertopd30.py:94, [PD] print_text.py:59), on the Q30 to the right
-# ([TP] Q30/index.js:56-68). Their right end leaves the printer first, on a Q30
-# their left one.
+# Labels drawn lying turn left, their right end first ([PT] rastertopd30.py:94, [PD] print_text.py:59),
+# on the Q30 right ([TP] Q30/index.js:56-68)
 TURNS = {Q30: -90}
 
 # mm/s, the least Phomemo names for a model of each kind: 30 for the M110 and
 # the M220, 15 to 20 for the D30, 10 to 15 for the M02 Pro. The jobs correct it.
 SPEEDS = {'m110': 30, 'd30': 15, 'q30': 15, 'm02': 10}
 
-# On Bluetooth LE ([PY] printers.json, ble.js; [KN] README.md:77; [OD]; [TP])
+# On Bluetooth LE ([PY] printers.json, ble.js; [OD] index.js:248-254; [TP] Q30/ble.js:30-62)
 OVER_LE = (M110, M120, M220, D30, D35, Q30)
-# On classic Bluetooth ([PT] README.md:20-34 and 193-224, issues 12 and 28,
-# the M421 as any printer of its backend; [PD] README.md:22-25; on a D35 [PT]
-# pull request 34)
+# On classic Bluetooth ([PT] README.md:20-34 and 193-224, issues 12 and 28, pull request 34 on a D35, the M421 as
+# any printer of its backend; [PD] README.md:22-25)
 OVER_CLASSIC = (M02, M02PRO, T02, M110, M120, M220, M421, D30, D35)
-# Its names as it advertises itself: [PT] README.md:24 and
-# cups/backend/phomemo.py:36-41, [PY] printers.json:51-68, 102, 170, 238 and
-# 306, [KN] example/lib/main.dart:59. An M110S and some M220 advertise a
-# serial number only, e.g. Q199E5797220037 ([PT] issue 37).
-NAMES = {r'Mr\.in_M02|M02': M02, r'(?i:M02 ?PRO).*': M02PRO, r'T02': T02, r'M110.*': M110, r'M120.*': M120,
-         r'M220.*': M220, r'D30.*': D30, r'D35.*': D35, r'Q30.*': Q30}
-# By their USB IDs ([PT] cups/backend/phomemo.py:81-84, README.md:52)
+# Names as advertised ([PT] README.md:24, cups/backend/phomemo.py:36-41, pull request 34; [PY] printers.json:51-68, 102,
+# 170, 238, 306; [KN] example/lib/main.dart:59); M110S, M120 and M220 units with a serial number instead tell none
+NAMES = {r'Mr\.in_M02|M02': M02, r'(?i:M02 ?PRO)': M02PRO, r'T02': T02, r'M110': M110, r'M120': M120, r'M220': M220,
+         r'D30': D30, r'D35': D35, r'Q30S?': Q30}
+# By their USB IDs, the first model of the family, for the search ([PT] cups/backend/phomemo.py:81-84, README.md:52)
 USB_IDS = {(0x0493, 0xb002): M02, (0x0493, 0x8760): M110}
 
 # Die-cut labels, width x length in mm, as the CUPS drivers list them: the
@@ -105,11 +97,8 @@ def _paper(identifier: str, models: tuple, dpi: int = DPI) -> Label:
     return Label(identifier, (PAPER_WIDTH, 0), FormFactor.ENDLESS, (total, 0), (printable, 0), 0, models=models)
 
 
-# The size each source starts with comes first, the label designer assumes
-# the first one a model takes: 4 x 6 in on the M421 ([PT]
-# cups/drv/phomemo-m421.drv:94), 40 x 30 mm on the other M models
-# (phomemo-m110.drv:56), 12 x 50 mm on the Q30 ([TP] Q30/index.html:83), 12 x
-# 40 mm on the D30 and D35 ([PT] cups/drv/phomemo-d30.drv:25)
+# The size each source starts with first, the one the label designer assumes ([PT] cups/drv/phomemo-m421.drv:94,
+# phomemo-m110.drv:56, phomemo-d30.drv:25; [TP] Q30/index.html:83)
 FIRST = ((102, 152), (40, 30), (12, 50), (12, 40))
 
 
@@ -130,16 +119,13 @@ def _name(label: Label) -> str:
     if label.form_factor == FormFactor.ROUND_DIE_CUT:
         return f'{width} mm round die-cut (Phomemo)'
     if label.form_factor == FormFactor.ENDLESS:
-        return f'{width} mm ' + ('endless (Phomemo)' if label.identifier == f'phomemo{ENDLESS_WIDTH}' else 'paper (Phomemo)')
+        kind = 'endless' if label.identifier == f'phomemo{ENDLESS_WIDTH}' else 'paper'
+        return f'{width} mm {kind} (Phomemo)'
     return f'{width} x {length} mm die-cut (Phomemo)'
 
 
 NAMES_OF_LABELS = {label.identifier: _name(label) for label in LABELS}
 _BY_ID = {label.identifier: label for label in LABELS}
-
-
-def shown(model: str) -> str:
-    return 'Phomemo ' + SHOWN.get(model, model.split('/')[-1])
 
 
 def label_rows(label, size: Label, model: str) -> tuple[Image.Image, list[bytes]]:
@@ -184,13 +170,12 @@ class Phomemo(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES_OF_LABELS
-    # bt://<MAC>[/<RFCOMM channel>], usblp's device, the printer through
-    # PyUSB by the IDs of the sources ([PT] issues 37, 41, 44, 52 and 53). A
-    # serial port only where configured: a request could send its bytes to
-    # any other device there, e.g. a 3D printer.
+    shown_as = {M02PRO: 'Phomemo/M02 Pro'}
+    # Serial ports, also Jieli's 4c4a:4155, only where configured: a request could write to any device there, e.g. a
+    # 3D printer ([PT] issues 37, 41, 44, 52 and 53)
     device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),
                        re.compile(r'(file://)?/dev/usb/lp\w+'),
-                       re.compile(r'usb://0x(0493:0x(b002|8760)|0483:0x5740|4c4a:0x4155)(/[A-Za-z0-9_-]+)?', re.IGNORECASE))
+                       re.compile(r'usb://0x(0493:0x(b002|8760)|0483:0x5740)(/[A-Za-z0-9_-]+)?', re.IGNORECASE))
     errors = (OSError, protocol.PhomemoError)
     reports_tape = False
     # The M02, M02 Pro, T02 and D35 that are a serial port only ([PT] issues
@@ -200,6 +185,10 @@ class Phomemo(Driver):
 
     def model_of(self, device, device_id=None):
         return USB_IDS.get(devices.usb_ids(device)) if isinstance(device, str) else None
+
+    def kept_model(self, model, known):
+        # The USB IDs tell the family only
+        return model if model in self.models else known
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
@@ -225,7 +214,7 @@ class Phomemo(Driver):
     def capabilities(self, model):
         # The labels are torn off
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=model not in TURNS,
-                    model_shown=SHOWN.get(model, model.split('/')[-1]))
+                    model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def followed(self, device, model):
         # A serial port on USB costs nothing either

@@ -69,5 +69,5 @@ def resolve(device: str, model: str) -> tuple[Driver, str]:
     for driver in DRIVERS:
         known = driver.model_of(device, device_id)
         if known:
-            return driver, known
+            return driver, driver.kept_model(model, known)
     return for_model(model), model

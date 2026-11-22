@@ -11,6 +11,7 @@ import pytest
 from PIL import Image, ImageOps
 
 from app.labeldesigner import refusals, tape
+from app.labeldesigner.label_names import label_size_problem
 from app.labeldesigner.drivers import backends, devices, phomemo, transports
 from app.labeldesigner.drivers.phomemo import protocol
 from app.labeldesigner.label import LabelOrientation
@@ -41,12 +42,12 @@ def _marked(size):
 
 
 def _vivier(page):
-    # A CUPS page as [PT] rastertopm110.py:229-232 and rastertopd30.py:90-93 make it
+    # A CUPS page as [PT] rastertopm110.py:110-113 and rastertopd30.py:90-93 make it
     return ImageOps.invert(page).convert('1')
 
 
 def test_m110_job_is_that_of_the_cups_filter():
-    # [PT] rastertopm110.py:183-219 and 236-240 for a page as wide as the
+    # [PT] rastertopm110.py:64-100 and 117-121 for a page as wide as the
     # printhead, 48 bytes ([PY] printers.json:163)
     inner = _marked((304, 240))
     page = Image.new('L', (384, 240), 255)
@@ -174,9 +175,13 @@ def test_status_queries():
 @pytest.mark.parametrize('name, model', [
     ('Mr.in_M02', 'Phomemo/M02'), ('M02', 'Phomemo/M02'), ('M02 Pro', 'Phomemo/M02Pro'), ('M02PRO', 'Phomemo/M02Pro'),
     ('T02', 'Phomemo/T02'), ('M110', 'Phomemo/M110'), ('M120', 'Phomemo/M120'), ('M220', 'Phomemo/M220'),
-    ('D30', 'Phomemo/D30'), ('D35', 'Phomemo/D35'), ('Q30', 'Phomemo/Q30'),
-    # Its serial number alone tells no model ([PT] issue 37), nor do others
-    ('Q199E5797220037', None), ('M02S', None), ('B1-H123', None), ('', None),
+    ('D30', 'Phomemo/D30'), ('D35', 'Phomemo/D35'), ('Q30', 'Phomemo/Q30'), ('Q30S', 'Phomemo/Q30'),
+    # A serial number tells no model ([PT] issue 37), also one that starts
+    # like a model, nor do other devices
+    ('Q199E5797220037', None), ('Q306E1234567890', None), ('M02S', None), ('B1-H123', None), ('', None),
+    ('D30-Speaker', None), ('D30 Smartwatch', None), ('Q30 Pro earbuds', None), ('M220 Silent', None),
+    # Their roll sits right, unlike that of an M110 ([PY] printers.json:182)
+    ('M110S', None), ('M110R', None),
 ])
 def test_printers_on_bluetooth_by_their_names(name, model):
     found = phomemo.DRIVER.found_on_bluetooth({'address': MAC, 'name': name, 'le': True, 'services': []})
@@ -196,8 +201,11 @@ def test_printers_on_usb_by_their_ids(tmp_path, monkeypatch):
     (folder / 'idVendor').write_text('0493\n')
     (folder / 'idProduct').write_text('b002\n')
     (tmp_path / 'lp0').symlink_to(folder / '3-3.7.2:1.2')
-    monkeypatch.setattr(devices, 'USB_INTERFACE', str(tmp_path / '{name}'))
+    monkeypatch.setattr(devices, 'USB_DESCRIPTOR', f'{tmp_path}/{{name}}/../{{field}}')
     assert drivers.resolve('file:///dev/usb/lp0', 'Unknown') == (phomemo.DRIVER, 'Phomemo/M02')
+    # The IDs tell the family only: a Phomemo model configured stays
+    assert drivers.resolve('usb://0x0493:0x8760', 'Phomemo/M220') == (phomemo.DRIVER, 'Phomemo/M220')
+    assert drivers.resolve('file:///dev/usb/lp0', 'Phomemo/M02Pro') == (phomemo.DRIVER, 'Phomemo/M02Pro')
     # The IDs others share stay the configured model ([PT] issues 37 and 53)
     assert drivers.resolve('usb://0x0483:0x5740', 'Phomemo/M220') == (phomemo.DRIVER, 'Phomemo/M220')
     assert devices.usb_ids('file:///dev/usb/lp1') is None and devices.usb_ids('tcp://192.0.2.1') is None
@@ -224,7 +232,7 @@ def links(monkeypatch):
     ('Phomemo/D30', DEVICE, ('le', DEVICE, b'\x02\xff', b'\x03\xff')),
     ('Phomemo/M110', DEVICE, ('le', DEVICE, b'\x02\xff', b'\x03\xff')),
     ('Phomemo/Q30', DEVICE + '/1', ('le', DEVICE + '/1', b'\x02\xff', b'\x03\xff')),
-    # Channel 1 ([PT] cups/backend/phomemo.py:145, [PD] README.md:28-31)
+    # Channel 1 ([PT] cups/backend/phomemo.py:145, [PD] README.md:22-25)
     ('Phomemo/D30', DEVICE + '/1', ('rfcomm', DEVICE + '/1', 1)),
     ('Phomemo/M02', DEVICE, ('rfcomm', DEVICE, 1)),
     ('Phomemo/M421', DEVICE, ('rfcomm', DEVICE, 1)),
@@ -393,6 +401,8 @@ def test_600_dpi_is_refused(tmp_path, fake):
     message = 'The Phomemo M02 Pro cannot print at 600 dpi, turn off 600 dpi printing'
     assert response.get_json() == {'success': False, 'message': message}
     assert message in refusals.MESSAGES
+    # Named alike everywhere
+    assert label_size_problem('phomemo40x30', 'Phomemo/M02Pro').endswith('cannot be printed on a Phomemo M02 Pro')
 
 
 def test_only_its_printers_print_its_labels(tmp_path):
@@ -408,10 +418,13 @@ def test_serial_port_prints_only_where_configured(tmp_path, monkeypatch):
     response = client.post('/labeldesigner/api/print', data={'label_size': 'phomemo-m02', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', '')
     assert printer.jobs()[0].startswith(protocol.M02_HEADER)
-    # A request cannot send its bytes to another one, e.g. of a 3D printer
-    response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'phomemo-m02', 'print_type': 'text', 'text': TEXT, 'printer': 'serial:///dev/ttyACM1', 'model': 'Phomemo/T02'})
-    assert response.get_json() == {'success': False, 'message': 'Unsupported printer'}
+    # A request cannot send its bytes to another one, e.g. of a 3D printer,
+    # nor to Jieli's serial port on USB, which other devices have too
+    for device, model in (('serial:///dev/ttyACM1', 'Phomemo/T02'), ('usb://0x4c4a:0x4155', 'Phomemo/T02'),
+                          ('usb://0x4c4a:0x4155', 'QL-800')):
+        response = client.post('/labeldesigner/api/print', data={
+            'label_size': 'phomemo-m02', 'print_type': 'text', 'text': TEXT, 'printer': device, 'model': model})
+        assert response.get_json() == {'success': False, 'message': 'Unsupported printer'}
 
 
 def test_same_paper_on_another_model():

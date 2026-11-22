@@ -10,7 +10,7 @@ the file and line:
 [LB] Ladeburger/phomemo-tools, its fork, GPL-3.0, at cf99432
 [PD] polskafan/phomemo_d30, MIT, at 1f90dbb
 [TP] yaddran/thermal-print, GPL-3.0, at 73dd564
-[PY] transcriptionstream/phomymo, MIT, at 1f58d3f
+[PY] transcriptionstream/phomymo, no license file (README MIT, package.json ISC), at 1f58d3f
 [OD] odensc/phomemo-d30-web-bluetooth, Apache-2.0, at 179a0da
 [KN] Knightro63/phomemo, MIT, at 1c015d7"""
 
@@ -40,11 +40,11 @@ ANSWER_WAIT = 1.0
 DONE_WAIT = 8.0
 
 # The raster image: GS v 0, normal size, bytes per row and rows, 16 bit
-# little endian ([PT] README.md:434-447, rastertopm110.py:204-215)
+# little endian ([PT] README.md:434-447, rastertopm110.py:85-96)
 RASTER = b'\x1d\x76\x30\x00'
 
 # M110, M120, M220, M421: speed 5 and density 10 as [PT] sends them, the media
-# type, the label in one raster image, the footer ([PT] rastertopm110.py:183-219,
+# type, the label in one raster image, the footer ([PT] rastertopm110.py:64-100 and 117-121,
 # README.md:482-508; one image on the M220: [PT] issue 13)
 M110_HEADER = bytes.fromhex('1b4e0d05' '1b4e040a')
 MEDIA = b'\x1f\x11'

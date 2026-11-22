@@ -2192,11 +2192,14 @@ def _known_printers() -> tuple[list, str, str]:
 
 def _named_device(requested: str, printers: list, configured: str) -> str:
     """The device a request names by its device or by the name of one of
-    printers, refused where it is neither listed nor taken by a driver."""
+    printers, refused where it is neither listed nor taken by a driver. A
+    serial port on USB is printed on only where listed: other devices have
+    its IDs too, see Driver.usb_serial_ids."""
     named = {n.casefold(): d for _, d, n in reversed(printers) if n}
     device = named.get(requested.casefold(), requested)
+    serial = any(devices.usb_ids(device) in driver.usb_serial_ids for driver in drivers.DRIVERS)
     if device not in (configured, 'simulation', '?', *(d for _, d, _ in printers)) and \
-            not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS):
+            (serial or not any(pattern.fullmatch(device) for pattern in DEVICE_PATTERNS)):
         raise ValueError(f"Unsupported printer: {device}")
     return device
 
