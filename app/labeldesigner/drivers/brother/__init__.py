@@ -11,7 +11,7 @@ from ..base import Driver, Told
 from ..labels import Color, FormFactor
 from . import labels as tables, labels_td, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, SHOWN_AS, TD_PRODUCT_IDS, length_problem, longest_label, resolution_problem)
+                     RED_SPEED, SHOWN_AS, TD_PRODUCT_IDS, length_problem, longest_label, named, resolution_problem)
 
 VENDOR_ID = 0x04F9
 
@@ -47,13 +47,12 @@ class BrotherRaster(Driver):
         return TD_PRODUCT_IDS.get(ids[1]) if ids and ids[0] == VENDOR_ID else None
 
     def model_in(self, device_id):
-        model = devices.device_id_fields(device_id).get('MDL')
-        return model if model in MODELS else None
+        return named(devices.device_id_fields(device_id).get('MDL', ''))[0]
 
     def told(self, device_id):
-        # The name of a TD-2300D model is that of either resolution
-        model = self.model_in(device_id)
-        return Told(model, resolution=model not in SHOWN_AS.values()) if model else None
+        # The name of a TD-2300D model may be that of either resolution
+        model, resolution = named(devices.device_id_fields(device_id).get('MDL', ''))
+        return Told(model, resolution=resolution) if model else None
 
     def fits(self, label, model):
         return tables.label_fits(label, model)

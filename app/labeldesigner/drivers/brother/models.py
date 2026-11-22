@@ -1,6 +1,7 @@
 """The Brother printers that speak the raster protocol, and what each of them
 can do, after the model table of brother_ql by Philipp Klaus."""
 
+import re
 from dataclasses import dataclass
 
 
@@ -160,6 +161,26 @@ HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW')
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape
 MIN_PRINT_LENGTH = 12.7
 MIN_PTOUCH_PRINT_LENGTH = 4.4
+
+
+# The resolution Brother adds to the name of a TD-2300D model, e.g. "Brother
+# TD-2350D (300 dpi)" (TD2300_GUIDE, LabelCLT; TD2300 4.2.1 and 5.2.1)
+NAMED_RESOLUTION = re.compile(r'\s*\((203|300)\s*dpi\)$', re.IGNORECASE)
+
+
+def named(name: str) -> tuple[str | None, bool]:
+    """The model a name like "Brother QL-810W" or "Brother TD-2350D (300
+    dpi)" names, None for other devices, and whether it tells which of the
+    models of one name it is, see SHOWN_AS."""
+    model = (name or '').removeprefix('Brother ').strip()
+    resolution = NAMED_RESOLUTION.search(model)
+    if resolution:
+        model = model[:resolution.start()]
+        if resolution[1] == '300' and f'{model}-300' in MODELS:
+            model += '-300'
+    if model not in MODELS:
+        return None, False
+    return model, bool(resolution) or model not in SHOWN_AS.values()
 
 
 def longest_label(model: str) -> int:

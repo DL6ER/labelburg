@@ -13,6 +13,8 @@ from app.labeldesigner.drivers.brother.commands import Raster
 from app.labeldesigner.drivers.brother.raster import convert
 from app.labeldesigner.label_names import label_printers, length_limits
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome, without_status
+from app.labeldesigner import ipp
+from tests.printing.test_ipp import attribute, response, state
 from tests.printing.test_snmp import agent, fake_printer, query  # noqa: F401
 from tests.printing.test_usb_jobs import COMPLETED, ERROR, PHASE_CHANGE, PRINTING, REPLY, WAITING, Clock, FakePrinter, send  # noqa: F401
 
@@ -179,6 +181,59 @@ def test_announced_on_the_network():
     assert network.label_printer_model('Brother TD-2135NWB') == 'TD-2135NWB'
 
 
+@pytest.mark.parametrize('name, configured, model', [
+    # As Brother names the TD-2300D models of each resolution (TD2300_GUIDE,
+    # LabelCLT; TD2300 4.2.1 and 5.2.1)
+    ('Brother TD-2350D (300 dpi)', None, 'TD-2350D-300'), ('Brother TD-2310D (300 DPI)', 'TD-2310D', 'TD-2310D-300'),
+    ('Brother TD-2350D (203 dpi)', 'TD-2350D-300', 'TD-2350D'),
+    # Named without it, a configured model of the other resolution wins
+    ('Brother TD-2350D', 'TD-2350D-300', 'TD-2350D-300'), ('Brother TD-2350D', None, 'TD-2350D'),
+    ('Brother TD-2350D', 'QL-800', 'TD-2350D'), ('Brother TD-2320D', 'TD-2350D-300', 'TD-2320D'),
+    # Other printers as before
+    ('Brother QL-810W', 'QL-800', 'QL-810W'), ('Brother TD-4520DN', 'TD-4420DN', 'TD-4520DN'),
+    ('Brother MFC-L3760CDW series', 'TD-2350D-300', None)])
+def test_model_of_a_name_on_the_network(name, configured, model):
+    assert network.label_printer_model(name, configured) == model
+
+
+@pytest.mark.parametrize('name, configured, model', [
+    ('Brother TD-2350D (300 dpi)', 'QL-800', 'TD-2350D-300'), ('Brother TD-2350D', 'TD-2350D-300', 'TD-2350D-300'),
+    ('Brother TD-2350D', 'TD-2350D', 'TD-2350D')])
+def test_printer_of_300_dpi_on_ipp_only(fake_printer, name, configured, model):
+    fake_printer['body'] = response(attribute(0x41, 'printer-make-and-model', name.encode()), state(ipp.IDLE))
+    assert network.query_network_status('tcp://127.0.0.1', configured)['model'] == model
+
+
+def test_printer_of_300_dpi_over_snmp(agent):
+    # The model code tells the resolution, whatever is configured
+    assert query(agent, td_status(0x55, 58), model='TD-2310D')['model'] == 'TD-2310D-300'
+    assert query(agent, td_status(0x54, 58), model='TD-2310D-300')['model'] == 'TD-2310D'
+
+
+@pytest.mark.parametrize('txt, model', [
+    ({'ty': 'Brother TD-2350D (300 dpi)', 'usb_mdl': 'TD-2350D'}, 'TD-2350D-300'),
+    ({'ty': 'Brother TD-2350D', 'usb_mdl': 'TD-2350D'}, 'TD-2350D')])
+def test_announced_printer_of_300_dpi(txt, model):
+    service = {'service': '_pdl-datastream._tcp.local', 'address': '192.0.2.5', 'port': 9100, 'txt': txt}
+    assert DRIVER.announced(service) == ('tcp://192.0.2.5', model)
+
+
+@pytest.mark.parametrize('name, configured', [('Brother TD-2350D', 'TD-2350D-300'), ('Brother TD-2350D (300 dpi)', 'QL-800')])
+def test_label_of_a_printer_of_300_dpi_on_ipp_only_is_made_for_it(fake_printer, monkeypatch, tmp_path, name, configured):
+    # Not as for 203 dpi, two thirds as large
+    fake_printer['body'] = response(attribute(0x41, 'printer-make-and-model', name.encode()), state(ipp.IDLE))
+    sent = []
+    monkeypatch.setattr(network, 'send', lambda data, device: sent.append(data))
+    monkeypatch.setattr(network, 'NETWORK_JOB_POLL', 0.01)
+    client = make_client(tmp_path, model=configured, printer='tcp://127.0.0.1')
+    model = client.get('/labeldesigner/api/printer_status').get_json()['model']
+    assert model == 'TD-2350D-300'
+    # As the label designer prints, with the model of the status
+    r = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='td23-300-58', model=model))
+    assert outcome(client, r) == ('printed', '')
+    assert ESC_I + b'\x64\x24\x00\x4d\x00\x67\x00\x57' in sent[0]
+
+
 @pytest.mark.parametrize('product, model', [
     # TD2000, Appendix A
     (0x2055, 'TD-2020'), (0x2057, 'TD-2120N'), (0x2058, 'TD-2130N'), (0x20F6, None), (0x20F7, 'TD-2125N'),
@@ -201,6 +256,7 @@ def test_product_ids_of_other_makers_are_none(monkeypatch):
 
 def test_name_of_a_td_2300d_model_is_that_of_either_resolution(monkeypatch):
     assert DRIVER.told('MFG:Brother;MDL:TD-2310D;') == Told('TD-2310D', resolution=False)
+    assert DRIVER.told('MFG:Brother;MDL:TD-2310D (300 dpi);') == Told('TD-2310D-300')
     assert DRIVER.told('MFG:Brother;MDL:TD-4420DN;') == Told('TD-4420DN')
     # Shared over USB/IP, a 300 dpi one keeps the model configured
     monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: 'MFG:Brother;MDL:TD-2310D;')
