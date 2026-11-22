@@ -62,8 +62,9 @@ DATA_RATE = 20000
 STALL_TIMEOUT = 60
 # How long it may stay idle after the data before it starts the label
 START_TIMEOUT = 10
-# How long a printed label may wait to be taken out
-TAKE_OUT_TIMEOUT = 300
+# A printed label is waited for until it is taken out, unless the printer
+# does not answer for this long
+TAKE_OUT_SILENCE = 60
 # How long a job waits while the printer is busy, e.g., 6 s reading a
 # cassette just put in
 BUSY_TIMEOUT = 120
@@ -383,16 +384,19 @@ def _poll(connection: Connection) -> dict | None:
 
 
 def _take_out(connection: Connection, progress) -> str:
-    """Wait until the label before is taken out of the printer: '' or why
-    not."""
+    """Wait until the label before is taken out of the printer, as long as
+    the printer answers: '' or why not."""
     progress(TAKE_OUT, 0)
-    deadline = time.monotonic() + TAKE_OUT_TIMEOUT
-    while time.monotonic() < deadline:
+    answered = time.monotonic()
+    while time.monotonic() - answered < TAKE_OUT_SILENCE:
         time.sleep(POLL_INTERVAL)
         status = _poll(connection)
-        if status is not None and print_error(status) != EJECT_JAM:
+        if status is None:
+            continue
+        if print_error(status) != EJECT_JAM:
             return ''
-    return TAKE_OUT
+        answered = time.monotonic()
+    return NO_ANSWER
 
 
 def _ready(connection: Connection, progress) -> str:

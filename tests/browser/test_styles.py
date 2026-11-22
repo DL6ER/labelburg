@@ -54,6 +54,34 @@ def test_italic_and_underline_reach_the_preview(editor):  # noqa: F811
     assert 'underline' not in first_line(editor, lambda: editor.click('#ltb [data-underline]'))
 
 
+def test_capitals_and_letter_spacing_reach_the_preview(editor):  # noqa: F811
+    type_label(editor, 'Shelf 3')
+    editor.click('#ltb [data-more]')
+    line = lines(changed_preview(editor, lambda: editor.click('.line-menu [data-act="caps"]')))[0]
+    # A style of the line, the text stays as typed
+    assert line['caps'] is True and line['text'] == 'Shelf 3'
+    assert editor.inner_text('#field .ln >> nth=0') == 'Shelf 3'
+    editor.wait_for_selector('.line-menu [data-act="caps"].on')
+    assert editor.inner_text('.line-menu [data-act="caps"]') == 'All capitals'
+    assert 'dot' in editor.get_attribute('#ltb [data-more]', 'class')
+    assert editor.inner_text('.line-menu [data-lsv]') == 'Normal'
+    steps = []
+    for step in ('Wide', 'Wider'):
+        steps.append(lines(changed_preview(editor, lambda: editor.click('.line-menu [data-ls="1"]')))[0]['letter_spacing'])
+        assert editor.inner_text('.line-menu [data-lsv]') == step
+    assert steps == [0.1, 0.2] and editor.is_disabled('.line-menu [data-ls="1"]')
+    # Back to normal, shown from the previews of before, and narrow
+    for step, value in (('Wide', 0.1), ('Normal', None)):
+        assert first_line(editor, lambda: editor.click('.line-menu [data-ls="-1"]')).get('letter_spacing') == value
+        assert editor.inner_text('.line-menu [data-lsv]') == step
+    line = lines(changed_preview(editor, lambda: editor.click('.line-menu [data-ls="-1"]')))[0]
+    assert line['letter_spacing'] == -0.05 and editor.inner_text('.line-menu [data-lsv]') == 'Narrow'
+    assert editor.is_disabled('.line-menu [data-ls="-1"]') and not editor.is_disabled('.line-menu [data-ls="1"]')
+    # Off again, the request leaves it out, as labels saved before have it
+    line = lines(changed_preview(editor, lambda: editor.click('.line-menu [data-act="caps"]')))[0]
+    assert 'caps' not in line and line['letter_spacing'] == -0.05
+
+
 @pytest.mark.parametrize('model, tape, colors', [
     pytest.param('VC-500W', 'vc25', 'palette', id='color tape'),
     pytest.param('QL-800', '62red', 'two', id='black and red'),
@@ -93,6 +121,53 @@ def test_the_color_swatch_follows_the_tape(editor, model, tape, colors):  # noqa
     editor.click('#adv [data-fcolor]')
     request = changed_preview(editor, lambda: editor.click('.color-menu [data-c="red"]'))
     assert request['border_color'] == 'red'
+
+
+# Previews wait until window.letGo() is called
+HOLD = """() => {
+    const original = window.fetch;
+    window.fetch = (url, options) => String(url).endsWith('/api/preview')
+        ? new Promise(resolve => { window.letGo = () => resolve(original(url, options)); }) : original(url, options);
+}"""
+
+
+def code_with_preview_held(page):
+    """The code added on red tape, its preview not yet shown."""
+    printer_is(page, 'QL-800', '62red')
+    type_label(page, 'Shelf 3')
+    page.evaluate(HOLD)
+    page.click('#addCode')
+    page.wait_for_function('() => !!window.letGo')
+
+
+def toolbar_top(page) -> float:
+    return page.evaluate("() => document.querySelector('#ltb').getBoundingClientRect().top")
+
+
+def test_a_press_on_the_toolbar_is_not_lost_when_the_preview_moves_it(editor):  # noqa: F811
+    code_with_preview_held(editor)
+    top = toolbar_top(editor)
+    box = editor.locator('#ltb [data-ccolor]').bounding_box()
+    editor.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+    editor.mouse.down()
+    editor.evaluate('() => letGo()')
+    wait_for_preview(editor)
+    editor.mouse.up()
+    editor.wait_for_selector('.color-menu')
+    # Let go, the toolbar moves where the new preview needs it
+    editor.wait_for_function("top => document.querySelector('#ltb').getBoundingClientRect().top !== top", arg=top)
+
+
+def test_a_menu_of_the_toolbar_moves_along_with_it(editor):  # noqa: F811
+    code_with_preview_held(editor)
+    top = toolbar_top(editor)
+    editor.click('#ltb [data-ccolor]')
+    editor.evaluate('() => letGo()')
+    wait_for_preview(editor)
+    assert toolbar_top(editor) != top
+    gap = editor.evaluate("""() => document.querySelector('.color-menu').getBoundingClientRect().top
+        - document.querySelector('#ltb [data-ccolor]').getBoundingClientRect().bottom""")
+    assert gap == pytest.approx(8, abs=1)
 
 
 def test_how_a_color_prints_is_what_the_server_tells(editor):  # noqa: F811
