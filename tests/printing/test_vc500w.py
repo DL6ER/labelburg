@@ -218,6 +218,9 @@ def fake(request, monkeypatch):
         monkeypatch.setattr(vc500w, name, value)
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(vc500w, '_answers', {})
+    # Nothing learned of the jobs of an earlier fake: a pseudo terminal
+    # closed before gives its path to the next one
+    monkeypatch.setattr(progress, '_factors', {})
     yield printer_
     printer_.close()
 
