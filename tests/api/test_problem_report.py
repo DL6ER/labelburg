@@ -4,6 +4,7 @@ with them filled in."""
 import json
 import os
 import re
+import time
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
@@ -61,12 +62,49 @@ def test_each_printer_is_told_by_its_model_and_connection(client, monkeypatch):
            state('tcp://192.168.1.60', 'QL-810W'),
            state('vc500w://192.168.1.61', 'VC-500W'),
            state('bt://AA:BB:CC:DD:EE:FF', 'Niimbot/B1'),
-           state('usbip://192.168.1.62/1-1', 'PT-P750W'),
-           # Of the model configured for it
-           state('simulation', 'QL-700'))
+           state('usbip://192.168.1.62/1-1', 'PT-P750W'))
     assert report(client)['details']['printer'] == (
         'QL-800 over USB; QL-1100 over USB; Zebra ZPL over USB; QL-810W over the network; VC-500W over the network; '
-        'Niimbot B1 over Bluetooth; PT-P750W over USB on another device; QL-800 as the demo printer')
+        'Niimbot B1 over Bluetooth; PT-P750W over USB on another device')
+
+
+@pytest.mark.parametrize('configured', ['?', 'tcp://192.168.1.60'])
+def test_the_demo_printer_listed_by_itself_is_left_out_next_to_a_real_printer(client, monkeypatch, configured):
+    client.application.config['PRINTER_PRINTER'] = configured
+    real = state('tcp://192.168.1.60', 'QL-810W', media_width=62)
+    # Found by the search, or configured
+    monkeypatch.setattr(printer, '_cached_printers', [real])
+    monkeypatch.setattr(printer, '_last_scan_ts', time.time())
+    monkeypatch.setattr(printer, 'device_state', lambda device, model: dict(real))
+    status = client.get(f'{API}/printer_status').get_json()
+    assert [p['path'] for p in status['printers']] == ['tcp://192.168.1.60', 'simulation']
+    details = report(client)['details']
+    assert (details['printer'], details['label_size']) == (
+        'QL-810W over the network', '62 mm endless (DK-22205 / DK-2205), reported by the printer')
+
+
+def test_the_demo_printer_configured_in_printers_is_told(client, monkeypatch):
+    client.application.config['PRINTERS'] = [('QL-810W', 'tcp://192.168.1.60', 'Office'), ('QL-700', 'simulation', '')]
+    monkeypatch.setattr(printer, '_query_configured', lambda model, device: state(device, model, media_width=62))
+    details = report(client)['details']
+    assert details['printer'] == 'QL-810W over the network; QL-700 as the demo printer'
+    assert details['label_size'] == ('QL-810W: 62 mm endless (DK-22205 / DK-2205), reported by the printer; '
+                                     'Demo printer: 62 mm endless (DK-22205 / DK-2205), assumed as the printer does not report it')
+
+
+def test_the_demo_printer_set_as_the_printer_is_told_next_to_an_added_one(client, monkeypatch):
+    config = client.application.config
+    config['PRINTER_PRINTER'] = 'simulation'
+    with open(os.path.join(config['LABEL_REPOSITORY_DIR'], printer_settings.FILE), 'w') as fh:
+        json.dump({'printers': {}, 'added': [{'address': 'tcp://192.168.1.60', 'model': 'QL-810W', 'name': 'Office'}]}, fh)
+    monkeypatch.setattr(printer, '_query_configured', lambda model, device: state(device, model))
+    assert report(client)['details']['printer'] == 'QL-800 as the demo printer; QL-810W over the network'
+
+
+def test_the_demo_printer_as_the_only_printer_is_told(client):
+    # The search found nothing else
+    assert [p['path'] for p in client.get(f'{API}/printer_status').get_json()['printers']] == ['simulation']
+    assert report(client)['details']['printer'] == 'QL-800 as the demo printer'
 
 
 def test_the_demo_printer_is_told_as_the_model_chosen_for_it(client):
@@ -93,15 +131,13 @@ def test_the_labels_of_each_printer_are_told_and_where_they_come_from(client, mo
            state('file:///dev/usb/lp0', 'QL-800', media_width=29, media_length=90),
            state('tcp://192.168.1.60', 'QL-810W'),
            state('bt://AA:BB:CC:DD:EE:FF', 'PUQU/Q00'),
-           state('file:///dev/usb/lp1', 'QL-1100', media_width=40),
-           state('simulation', 'QL-700'))
+           state('file:///dev/usb/lp1', 'QL-1100', media_width=40))
     client.post(f'{API}/settings', data={'printer': 'tcp://192.168.1.60', 'model': 'QL-810W', 'label_size': '62x29'})
     assert report(client)['details']['label_size'] == (
         'QL-800: 29 x 90 mm die-cut (DK-11201 / DK-1201), reported by the printer; '
         'QL-810W: 62 x 29 mm die-cut (DK-11209 / DK-1209), chosen in the Settings; '
         'PUQU Q00: 50 x 30 mm die-cut (PUQU), assumed as the printer does not report it; '
-        'QL-1100: 40 mm reported by the printer, unknown to Labelburg; '
-        'Demo printer: 62 mm endless (DK-22205 / DK-2205), assumed as the printer does not report it')
+        'QL-1100: 40 mm reported by the printer, unknown to Labelburg')
 
 
 def test_the_labels_of_a_single_printer_are_told_without_its_model(client, monkeypatch):

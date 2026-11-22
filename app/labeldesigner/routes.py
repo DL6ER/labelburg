@@ -1548,6 +1548,10 @@ def problem_report_route():
     """The details a problem report needs and the bug form on GitHub with
     them filled in. Nothing is sent from here, the user opens the form."""
     printers = get_ptr_status(current_app.config, _added_printers()).get('printers', [])
+    configured = {current_app.config['PRINTER_PRINTER']} | {device for _, device, _ in configured_printers(current_app.config)}
+    # The demo printer listed by itself only where nothing else is listed
+    if 'simulation' not in configured:
+        printers = [p for p in printers if not is_simulation(p.get('path'))] or printers
     _described(printers)
     details = problem_report.details(current_app.extensions['build'], printers)
     return jsonify({'details': details, 'text': problem_report.text(details), 'url': problem_report.url(details)})
