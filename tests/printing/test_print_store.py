@@ -724,3 +724,18 @@ def test_a_job_queued_while_the_queue_is_taken_over_is_not_restored(store, monke
     assert taken.wait(5)
     # Kept in memory, it prints once
     assert found == [] and kept == [False]
+
+
+def test_a_picture_printed_again_with_copies_prints_them_after_a_restart(server, tmp_path, monkeypatch):
+    server.application.config['WEBHOOK_PASSWORD'] = 'secret'
+    image = io.BytesIO()
+    Image.new('L', (200, 100), 0).save(image, 'PNG')
+    job = server.post(f'{API}/webhook/print', json={'password': 'secret', 'printer': 'simulation',
+                                                    'images': [base64.b64encode(image.getvalue()).decode('ascii')]}).get_json()['job']
+    assert ended(job).state == 'printed'
+    print_queue.stop()
+    again = server.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '2'}).get_json()['job']
+    sent, process = [], printer.PrinterQueue.process_queue
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda queue: (sent.append(len(queue.images())), process(queue))[1])
+    restart(tmp_path)
+    assert ended(again).state == 'printed' and sent == [2]

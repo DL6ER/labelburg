@@ -1084,7 +1084,8 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
     if record['kind'] == 'calibration':
         printer.offset = tuple(record['offset'])
     elif record['kind'] == 'image':
-        for shape in record['shapes']:
+        # The shapes of one set, as many sets as copies
+        for shape in _copies(record['shapes'], record.get('copies') or 1, True):
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     else:
         _queue_labels(printer, record['data'], _as_printed(images, record.get('sizes')), record['order'], record['high_res'],
@@ -2469,10 +2470,10 @@ def _image_job_again(entry: dict, images: list, copies: int) -> tuple[PrinterQue
     # Made again at the resolution printed now, as the webhook made them
     made = [_image_label(images[shape['image']], label_size, LabelOrientation[shape['orientation']],
                          IMAGE_MODE_OF[shape['content']], high_res=high_res) for shape in entry['shapes']]
-    order = _copies(list(range(len(made))), copies, True)
-    for i in order:
+    for i in _copies(list(range(len(made))), copies, True):
         printer.add_label_to_queue(_image_label_of(made[i].shape, made[i].image), high_res=high_res, fast=fast)
-    recipe = {'kind': 'image', 'shapes': [dict(made[i].shape, image=i) for i in order], 'high_res': high_res, 'fast': fast, 'copies': copies}
+    recipe = {'kind': 'image', 'shapes': [dict(label.shape, image=i) for i, label in enumerate(made)], 'high_res': high_res, 'fast': fast,
+              'copies': copies}
     return printer, recipe, [label.image for label in made]
 
 

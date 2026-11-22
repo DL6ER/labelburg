@@ -319,3 +319,11 @@ def test_a_picture_printed_again_is_cut_as_the_request_or_the_printer_says(clien
     assert print_store.entry(printed(client, f'history/{job}/print', data={'printer': 'simulation', 'cut': 'last'}))['printer']['cut'] == 'last'
     assert client.post(f'{API}/settings', data={'printer': 'simulation', 'cut': 'none'}).status_code == 200
     assert print_store.entry(printed(client, f'history/{job}/print', data={'printer': 'simulation'}))['printer']['cut'] == 'none'
+
+
+def test_a_picture_printed_again_and_again_keeps_its_copies(client, monkeypatch):
+    job = webhook_job(client, monkeypatch)
+    three = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '3'})
+    again = printed(client, f'history/{three}/print', data={'printer': 'simulation'})
+    assert [(entry(client, each)['labels'], entry(client, each)['copies']) for each in (three, again)] == [(3, 3), (3, 3)]
+    assert len(print_store.entry(again)['shapes']) == 1
