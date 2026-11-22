@@ -1366,8 +1366,7 @@ def preview_from_image():
         # last page, and the first page with them, each with its counter
         size, state = label_of(values.get('label_size', DEFAULT_LABEL_SIZE)), None
         if sheets.per_sheet(size) > 1:
-            pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
-            copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
+            copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), _pages(values, page_count))
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
             layouts = {}
             more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
@@ -1392,6 +1391,14 @@ def preview_from_image():
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _pages(d: dict, page_count: int | None) -> int:
+    """The labels each copy of a label prints of the file sent or stored
+    with it: of an image label the pages pdf_pages selects of a PDF, else one."""
+    if not page_count or d.get('print_type', 'text') not in ('image', 'image_qrcode_text'):
+        return 1
+    return len(selected_pdf_pages(str(d.get('pdf_pages') or ''), page_count))
 
 
 def _count(value, default: int = 1) -> int:

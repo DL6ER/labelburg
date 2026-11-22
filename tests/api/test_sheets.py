@@ -240,6 +240,12 @@ def test_pdf_pages_count_per_copy(client):
     assert (state['filled'], state['fill']) == (3, 2)
 
 
+def test_pdf_pages_count_only_on_image_labels(client):
+    # A text label prints once for each copy, whatever file comes with it
+    state = sheet_header(client, 'niimbot15x8-2x3', pdf_pages='all', image=(io.BytesIO(_pdf((100, 50), (100, 50), (100, 50))), 'pages.pdf'))
+    assert (state['filled'], state['fill']) == (1, 6)
+
+
 def test_copies_below_one_count_as_one(client):
     assert sheet_header(client, 'niimbot15x8-2x3', print_count=0)['filled'] == 1
 
