@@ -348,8 +348,16 @@ def test_label_for_the_same_paper(saved, model, printed):
 def test_a_td_label_prints_on_the_same_paper_of_other_drivers():
     assert drivers.for_model('Zebra/ZPL').label_for('td4-102x152', 'Zebra/ZPL') == 'zpl102x152'
     assert drivers.for_model('DYMO/LabelWriter-4XL').label_for('td4-300-102x152', 'DYMO/LabelWriter-4XL') == 'dymo102x152'
-    # QL printers keep the label size
-    assert DRIVER.label_for('td4-102x152', 'QL-1100') == 'td4-102x152'
+
+
+@pytest.mark.parametrize('saved, model, printed', [
+    # The DK rolls of the same paper on the wide QL printers
+    ('td4-102x152', 'QL-1100', '102x152'), ('td4-300-102x152', 'QL-1050', '102x152'), ('td4-102', 'QL-1115NWB', '102'),
+    # Other QL printers and rolls keep the label size
+    ('td4-102x152', 'QL-800', 'td4-102x152'), ('td4-102', 'QL-700', 'td4-102'), ('td4-76', 'QL-1100', 'td4-76'),
+    ('td4-102x152', 'QL-9999', 'td4-102x152')])
+def test_rd_roll_on_a_ql_printer(saved, model, printed):
+    assert DRIVER.label_for(saved, model) == printed
 
 
 def page(model_code=0x38, printing_seconds=0.0):

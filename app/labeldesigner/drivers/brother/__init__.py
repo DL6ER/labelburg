@@ -89,8 +89,12 @@ class BrotherRaster(Driver):
         return ''
 
     def label_for(self, label_size, model):
-        # A TD printer prints a label of the same paper on its own roll of it
-        return labels_td.label_for(label_size, model) if model in labels_td.MODELS else label_size
+        # A label of the same paper prints on the printer's own roll of it
+        if model in labels_td.MODELS:
+            return labels_td.label_for(label_size, model)
+        paper = labels_td.BY_ID[label_size].tape_size if label_size in labels_td.BY_ID else None
+        return next((dk for dk, same in labels_td.DK_PAPERS.items()
+                     if same == paper and model in MODELS and tables.label_fits(tables.BY_ID[dk], model)), label_size)
 
     def capabilities(self, model):
         ptouch = model.startswith('PT-')
