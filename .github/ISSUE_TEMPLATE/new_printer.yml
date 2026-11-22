@@ -5,7 +5,7 @@ labels: [enhancement]
 body:
   - type: markdown
     attributes:
-      value: When Labelburg finds the printer, "Report it on GitHub" in its Settings under Printers fills in what it found. It names the kind of printer only, no serial numbers or addresses. [New printers](https://github.com/DL6ER/labelburg/blob/master/docs/new-printer.md) tells what else helps.
+      value: '"Report it" at the printer in the Settings of Labelburg fills in what it found: the kind of printer, never its serial number, an address or the name you gave it. Nothing is sent before you send this form. [New printers](https://github.com/DL6ER/labelburg/blob/master/docs/new-printer.md) tells what else helps, e.g. recordings of what the app of its maker sends to it.'
   - type: input
     id: version
     attributes:
@@ -24,7 +24,7 @@ body:
     id: found
     attributes:
       label: What Labelburg found
-      description: How the printer is connected and what it tells about itself. "Report it on GitHub" fills it in.
+      description: How the printer is connected and what it tells about itself. "Report it" fills it in, without serial numbers or addresses.
       render: text
   - type: input
     id: labels

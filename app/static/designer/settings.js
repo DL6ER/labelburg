@@ -189,16 +189,12 @@ function cardHTML(p, i) {
 }
 
 // A label printer the search found that Labelburg cannot print on yet, with
-// its report from the server, which names the kind of printer only
-function unknownHTML(u, i) {
-    return `<section class="set-card set-unknown" data-unknown="${esc(i)}">
+// the form for new printers on GitHub, its report filled in by the server
+function unknownHTML(u) {
+    return `<section class="set-card set-unknown">
         <div class="set-card-h"><span class="set-add-ic">${icon('printer')}</span>
-            <div class="grow"><b>Labelburg found a printer it cannot print on yet: ${esc(u.name)}</b>
-                <small class="muted">A report on GitHub helps to make it work. It tells what kind of printer it is, never its serial number or address.
-                    <a href="${esc(SOURCE)}/blob/master/docs/new-printer.md" target="_blank" rel="noopener">What else helps</a></small></div>
-            <button class="btn ghost sm" type="button" data-copy-report>${ic('copy')}Copy report</button>
-            <a class="btn soft sm" href="${esc(u.report_url)}" target="_blank" rel="noopener">${ic('out')}Report it on GitHub</a></div>
-        ${reportsShown.has(u.report) ? `<pre class="set-report" data-report>${esc(u.report)}</pre>` : ''}
+            <div class="grow"><b>${esc(u.name)}</b><small class="muted">Not supported yet, a report helps to add it.</small></div>
+            <a class="btn soft sm" href="${esc(u.report_url)}" target="_blank" rel="noopener">${ic('out')}Report it</a></div>
     </section>`;
 }
 
@@ -206,21 +202,6 @@ function cardsHTML() {
     const hints = S.printerHints.map(h => `<p class="muted small">${esc(h)}</p>`).join('');
     return (S.printers.map(cardHTML).join('') || `<section class="set-card"><p class="set-empty muted">No printer answered. Check that it is switched on and connected, then look for printers.</p></section>`)
         + S.unknownPrinters.map(unknownHTML).join('') + hints;
-}
-
-// Reports shown to copy by hand, where the browser keeps the clipboard to itself
-const reportsShown = new Set();
-async function copyReport(u) {
-    try {
-        await navigator.clipboard.writeText(u.report);
-        toast('Copied');
-    } catch (e) {
-        reportsShown.add(u.report);
-        drawCards(true);
-        const shown = $$('#setPrinters [data-report]').find(el => el.textContent === u.report);
-        if (shown) getSelection().selectAllChildren(shown);
-        toast('Press Ctrl C to copy');
-    }
 }
 
 // Drawn again keeps the focus on the control that had it
@@ -242,8 +223,6 @@ function drawCards(force = false) {
 
 function bindCards(box) {
     box.addEventListener('click', e => {
-        const other = e.target.closest('[data-unknown]'), u = other && S.unknownPrinters[+other.dataset.unknown];
-        if (u && e.target.closest('[data-copy-report]')) copyReport(u);
         const card = e.target.closest('[data-card]'), p = card && S.printers[+card.dataset.card];
         if (!p) return;
         const b = e.target.closest('button');

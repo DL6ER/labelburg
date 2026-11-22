@@ -1,10 +1,10 @@
 # New printers
 
-Labelburg prints on the printers listed in the [README](../README.md). When it finds a label printer it cannot print on yet, its Settings say so under Printers: "Labelburg found a printer it cannot print on yet", with the name of the printer.
+Labelburg prints on the printers listed in the [README](../README.md). When it finds a label printer it cannot print on yet, its Settings show it under Printers with its name and "Not supported yet, a report helps to add it."
 
 ## Reporting a printer
 
-"Report it on GitHub" opens the form for new printers with what Labelburg found already filled in. "Copy report" copies the same text, e.g. to add it to an issue about the printer that is already open. Nothing is sent until you send the form yourself, and you see all of it before.
+"Report it" opens the form for new printers on GitHub with what Labelburg found already filled in. Nothing is sent until you send the form yourself, and you see all of it before.
 
 The report tells what kind of printer it is: the version of Labelburg, how the printer is connected, the numbers its maker gave the model and what it tells about itself on USB or Bluetooth. It never tells serial numbers, addresses, the name you gave the printer or anything you printed.
 
@@ -27,7 +27,7 @@ Office printers, whose device ID names PCL, PostScript, PDF, PJL, AirPrint (URF)
 
 Printers of `/dev/usb/lp<N>` get Brother's status request `ESC i S` only where their device ID names Brother or a model of a driver, or where they tell none and their vendor ID is Brother's or unknown. Another printer might print it, a receipt printer cuts.
 
-The report holds the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID, without anything that looks like a serial number, an address or a path, and without the rest of a field after `SN`, `S/N`, `SERIAL`, `MAC`, `IP`, `HOST` or `OWNER`. `DES` is free text and told only where it repeats maker and model; `SN`, `SERN` and other fields are left out. Of a Bluetooth name only the model is kept. `GET /labeldesigner/api/printer_status` tells the printers found in `unknown`.
+The report holds the fields `MFG`, `MDL`, `CMD` and `CLS` of the device ID, without anything that looks like a serial number, an address or a path, and without the rest of a field after `SN`, `S/N`, `SERIAL`, `MAC`, `IP`, `HOST` or `OWNER`. `DES` is free text and told only where it repeats maker and model; `SN`, `SERN` and other fields are left out. Of a Bluetooth name only the model is kept. `GET /labeldesigner/api/printer_status` tells the printers found in `unknown`, each with its report in `report`, e.g. to copy it into an issue that is open already, and the form filled in with it in `report_url`.
 
 ### Recording what the maker's app sends
 
