@@ -32,7 +32,7 @@ export function paperLine(state, id, p = S.printer) {
     if (!chosenSheet(p)) return `${icon('warn')}<span>Which label sheets are in the printer?</span><button type="button" class="pill" data-sheet>Choose</button>`;
     const s = SIZES[id].sheet, per = perSheet(id);
     const start = state ? state.start : sheetStartOf(p, id), sheets = state ? state.sheets : 1, last = state ? state.filled : start;
-    const name = plainPaper(p) && per > 1 ? `Plain paper as ${s.chip}` : s.short;
+    const name = plainPaper(p) && per > 1 ? `${s.chip} on plain paper` : s.short;
     const what = per === 1 ? (sheets > 1 ? `${name}: ${sheets} sheets` : name)
         : sheets > 1 ? `${name}: ${sheets} sheets${start > 1 ? `, from label ${start}` : ''}`
             : `${name}: ${start === last ? `label ${start}` : `labels ${start} to ${last}`} of ${per}`;
@@ -88,7 +88,7 @@ export function openSheet(p, { state = () => null, fill = null, changed = () => 
             ${id && per > 1 ? `<div class="sh-start">${drawn(id, at, at, 220, true)}
                 <div class="sh-at"><label>Start at label <input class="in num" id="sheetAt" type="number" min="1" max="${per}" value="${at}"> of ${per}</label>
                 <small class="muted">Tap the first free label. For this print only.</small></div></div>` : ''}
-            ${p.blank_edge ? `<small class="set-warn">The printer leaves ${esc(p.blank_edge)} mm at the paper edge blank.</small>` : ''}
+            ${p.blank_edge ? '<small class="set-warn">Labels at the paper edge may print cut off.</small>' : ''}
             <div class="acts">${fill && st && st.fill && per > 1 ? `<button class="btn" type="button" data-fill="${esc(st.fill)}">Fill the sheet</button>` : ''}
                 <button class="btn primary" type="button" data-shut>Done</button></div></div>`;
         bind(id, per);

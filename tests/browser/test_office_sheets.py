@@ -126,7 +126,17 @@ def test_plain_paper_is_kept_for_the_printer(designer, server, app):  # noqa: F8
     assert 'Thin lines show where to cut.' in designer.inner_text('.sheet-dialog')
     assert app.test_client().get('/labeldesigner/api/settings?printer=simulation').get_json()['cut_lines'] == '1'
     designer.click('.sheet-dialog [data-shut] >> nth=-1')
-    designer.wait_for_function("() => document.querySelector('#sheetNote').innerText.includes('Plain paper as L7160: label 1 of 21')")
+    designer.wait_for_function("() => document.querySelector('#sheetNote').innerText.includes('L7160 on plain paper: label 1 of 21')")
+
+
+def test_labels_at_the_paper_edge_are_pointed_out(designer, server, app):  # noqa: F811
+    client = app.test_client()
+    assert client.post('/labeldesigner/api/settings', data={'printer': 'simulation', 'model': 'Other/Office', 'label_size': 'sheet-3474'}).status_code == 200
+    printers_are(designer, server, {**OFFICE, 'blank_edge': 4})
+    designer.click('#sheetNote .pill')
+    designer.wait_for_selector('.sheet-dialog')
+    assert 'Labels at the paper edge may print cut off.' in designer.inner_text('.sheet-dialog')
+    assert ' mm ' not in designer.inner_text('.sheet-dialog .set-warn')
 
 
 def test_fill_the_sheet(designer, server, app):  # noqa: F811
