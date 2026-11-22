@@ -78,6 +78,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
+    monkeypatch.setattr('app.labeldesigner.drivers.base._bluetooth_asked', {})
 
 
 @pytest.fixture(autouse=True)

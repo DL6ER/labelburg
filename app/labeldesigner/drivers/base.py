@@ -6,12 +6,19 @@ drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
 import re
+import time
 from dataclasses import dataclass
 
 from . import devices
 
 # Printers on USB, also shared over USB/IP, and through usblp
 _USB = re.compile(r'(usb|usbip|file)://|/dev/')
+# A printer on Bluetooth is asked at most every BLUETOOTH_STATUS_EVERY s, or
+# when looking for printers or printing; status queries between get its last
+# answer. When each was asked, by devices.lock_key(), the error it gave and
+# its answer, see Driver.bluetooth_status().
+BLUETOOTH_STATUS_EVERY = 30
+_bluetooth_asked: dict[str, tuple[float, Exception | None, dict | None]] = {}
 
 
 def network_status(device: str, model: str, red_support: bool = False) -> dict:
@@ -248,6 +255,32 @@ class Driver:
             raise
         devices.note_answer(device)
         return state
+
+    def bluetooth_status(self, device: str, query) -> dict:
+        """The status query() tells of a printer on Bluetooth, see
+        BLUETOOTH_STATUS_EVERY. Its last answer or error while that is
+        younger, from after the label designer last looked for printers and
+        not followed by a job, see ask_bluetooth_again()."""
+        key = devices.lock_key(device)
+        asked, error, state = _bluetooth_asked.get(key, (None, None, None))
+        if asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY:
+            if error is not None:
+                raise error.with_traceback(None)
+            return dict(state)
+        try:
+            state = query()
+        except self.errors as e:
+            _bluetooth_asked[key] = (time.monotonic(), e, None)
+            raise
+        # One a job holds was not asked
+        if state.get('status_type') != devices.BUSY_STATUS_TYPE:
+            _bluetooth_asked[key] = (time.monotonic(), None, dict(state))
+        return state
+
+    def ask_bluetooth_again(self, device: str):
+        """Ask a printer on Bluetooth at the next status query, e.g. once it
+        got a job."""
+        _bluetooth_asked.pop(devices.lock_key(device), None)
 
     def note_settings(self, device: str, settings: dict):
         """Take the settings of a printer as the server read them last, see

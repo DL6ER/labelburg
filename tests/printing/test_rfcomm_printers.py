@@ -13,7 +13,7 @@ import types
 import pytest
 
 from app.labeldesigner import bluetooth, drivers, printer, refusals
-from app.labeldesigner.drivers import devices, escpos, progress, transports, tspl
+from app.labeldesigner.drivers import base, devices, escpos, progress, transports, tspl
 from app.labeldesigner.drivers.escpos import protocol as escpos_protocol
 from app.labeldesigner.drivers.tspl import protocol as tspl_protocol
 from tests.helpers import make_client, outcome
@@ -138,6 +138,16 @@ def on_bluetooth(monkeypatch):
     return install
 
 
+@pytest.fixture
+def clock(monkeypatch):
+    """The clock of the status queries on Bluetooth, moved on by hand from
+    now, before the label designer looks for printers."""
+    now = [time.monotonic()]
+    monkeypatch.setattr(base, 'time', types.SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(devices, 'looked', 0.0)
+    return now
+
+
 def tspl_on_usb(tmp_path, label: dict) -> bytes:
     """The job of a label printed on a TSPL printer behind usblp."""
     usblp = FakeUsblp()
@@ -204,11 +214,12 @@ def test_printer_on_the_rfcomm_channel_it_names(tmp_path, on_bluetooth):
     assert set(fake.addresses) == {(MAC, 3)}
 
 
-def test_tspl_status_over_bluetooth(on_bluetooth):
+def test_tspl_status_over_bluetooth(on_bluetooth, clock):
     fake = on_bluetooth(FakeTspl(status=0x04))
     state = tspl.DRIVER.status(DEVICE, 'TSC/TSPL')
     assert (state['errors'], state['status_type']) == (['No labels are in the printer'], 'Error occurred')
     fake.printer.status = 0
+    clock[0] += base.BLUETOOTH_STATUS_EVERY
     state = tspl.DRIVER.status(DEVICE, 'TSC/TSPL')
     # Its model as it answers ~!T once it is ready
     assert (state['errors'], state['device_name'], state['path']) == ([], 'TE200', DEVICE)
@@ -267,10 +278,34 @@ def test_printer_on_bluetooth_that_is_not_paired(tmp_path, on_bluetooth, model, 
     fake = on_bluetooth(FakeEscpos())
     fake.error = error
     client = make_client(tmp_path, model=model, printer=DEVICE)
-    assert client.get(STATUS).get_json()['printers'][0]['errors'] == ['Pair the printer with this computer first']
+    for _ in range(2):
+        assert client.get(STATUS).get_json()['printers'][0]['errors'] == ['Pair the printer with this computer first']
+    # Paged once, as a printer that answers
+    assert len(fake.addresses) == 1
     response = client.post('/labeldesigner/api/print', data=label)
     message = 'Could not send the label to the printer: Pair the printer with this computer first'
     assert outcome(client, response) == ('failed', message) and message in refusals.MESSAGES
+
+
+@pytest.mark.parametrize('model, label', [('TSC/TSPL', TSPL_LABEL), ('Epson/ESC-POS', ESCPOS_LABEL)])
+def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, on_bluetooth, clock, model, label):
+    fake = on_bluetooth(FakeTspl() if model == 'TSC/TSPL' else FakeEscpos(answering=False))
+    client = make_client(tmp_path, model=model, printer=DEVICE)
+    start = clock[0]
+
+    def asked(at, look=False):
+        clock[0] = start + at
+        assert client.get(STATUS + ('?look=1' if look else '')).get_json()['printers'][0]['errors'] == []
+        return len(fake.addresses)
+    # Also one that does not answer its status requests, which the status
+    # tells as ready
+    assert [asked(0), asked(14), asked(29)] == [1, 1, 1]
+    # Looking for printers asks it at once
+    assert [asked(29, look=True), asked(58), asked(60)] == [2, 2, 3]
+    # As does the first status query after printing, which took a connection
+    response = client.post('/labeldesigner/api/print', data=label)
+    assert outcome(client, response) == ('printed', '')
+    assert len(fake.addresses) == 4 and asked(60) == 5
 
 
 @pytest.mark.parametrize('model, label', [('TSC/TSPL', TSPL_LABEL), ('Epson/ESC-POS', ESCPOS_LABEL)])

@@ -192,8 +192,9 @@ class Tspl(Driver):
 
     def status(self, device, model, unconfirmed=False):
         if device.startswith('bt://'):
-            # One switched off is not paged at every status query, it takes the radio
-            return self.noted_status(device, lambda: self._status(device, model))
+            # Paging it takes the radio: one switched off is not paged at every
+            # status query, any other one at most every 30 s
+            return self.noted_status(device, lambda: self.bluetooth_status(device, lambda: self._status(device, model)))
         return self._status(device, model)
 
     def _status(self, device, model):
@@ -261,6 +262,7 @@ class Tspl(Driver):
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
+        self.ask_bluetooth_again(device)
         try:
             protocol.write(device, b''.join(label for label, _ in job))
         except OSError as e:
