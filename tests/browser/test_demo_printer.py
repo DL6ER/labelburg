@@ -61,13 +61,36 @@ def test_the_demo_printer_names_its_roll_without_a_warning(designer):
 def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
-    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Cat printer', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(MODELS)
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Cat printer"] option', 'os => os.map(o => o.textContent)') == [
+        'GB01', 'GB02', 'GB03', 'GT01', 'MX05', 'MX06', 'MX08', 'MX09', 'MX10', 'MX11', 'PD01', 'YT01']
+
+
+def test_a_cat_printer_brings_its_paper_and_prints_as_it(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings') as answer:
+        designer.select_option(MODEL, 'Cat/GB01')
+    assert answer.value.ok
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Cat/GB01' && labelEditor.S.tape === 'cat48'")
+    assert 'Cat printer GB01' in designer.inner_text('[data-card="0"]')
+    offered = designer.eval_on_selector_all('[data-card="0"] select[data-k="label_size"] option', 'os => os.map(o => [o.value, o.textContent])')
+    assert offered[1:] == [['cat48', '48 mm endless']] and [value for value, _ in offered] == [''] + tape.takes('Cat/GB01')
+    # Torn off, there is no cutter to set
+    assert 'Torn off' in designer.inner_text('[data-card="0"]')
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo Cat printer GB01'
+    type_label(designer, 'Shelf 3')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'Cat/GB01', 'cat48')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
 def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):

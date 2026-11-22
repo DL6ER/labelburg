@@ -20,8 +20,9 @@ READ_INDEX_LIST, START_DISCOVERY, STOP_DISCOVERY = 0x0003, 0x0023, 0x0024
 COMMAND_COMPLETE, COMMAND_STATUS, DEVICE_FOUND, DISCOVERING = 0x0001, 0x0002, 0x0012, 0x0013
 # Public and random LE addresses, and classic Bluetooth (BR/EDR)
 LE, CLASSIC = 0x06, 0x01
-# The advertising field of the class of device
+# The advertising fields of the class of device and of manufacturer data
 CLASS_OF_DEVICE = 0x0d
+MANUFACTURER = 0xff
 # Searching both, the kernel searches LE for 5.12 s, then classic Bluetooth
 # for as long
 CLASSIC_SEARCH = 11.0
@@ -42,15 +43,16 @@ def _fields(data: bytes) -> dict[int, list[bytes]]:
 
 
 def _device(params: bytes, classic: bool = False) -> dict:
-    """A device of a Device Found event: its address, its name and the
-    128-bit UUIDs of its services, as far as it advertises them. With
-    classic, also whether it is on classic Bluetooth and its class of
-    device, None where it tells none."""
+    """A device of a Device Found event: its address, whether that is a
+    random one, its name, the 128-bit UUIDs of its services and its
+    manufacturer data, each with its company ID, as far as it advertises
+    them. With classic, also whether it is on classic Bluetooth and its
+    class of device, None where it tells none."""
     fields = _fields(params[14:14 + struct.unpack_from('<H', params, 12)[0]])
     name = (fields.get(0x09) or fields.get(0x08) or [b''])[0].decode('utf-8', 'replace').strip('\x00 ')
     services = [block[i:i + 16] for block in fields.get(0x06, []) + fields.get(0x07, []) for i in range(0, len(block) - 15, 16)]
-    device = {'address': ':'.join(f'{b:02X}' for b in params[5::-1]), 'name': name,
-              'le': params[6] in (1, 2), 'services': services}
+    device = {'address': ':'.join(f'{b:02X}' for b in params[5::-1]), 'random': params[6] == 2, 'name': name,
+              'le': params[6] in (1, 2), 'services': services, 'manufacturer': fields.get(MANUFACTURER, [])}
     if classic:
         told = (fields.get(CLASS_OF_DEVICE) or [b''])[0]
         device.update(classic=params[6] == 0, device_class=int.from_bytes(told, 'little') if len(told) == 3 else None)
@@ -100,6 +102,8 @@ def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
                         known = found.setdefault(device['address'], device)
                         known['name'] = device['name'] or known['name']
                         known['services'] = known['services'] + [s for s in device['services'] if s not in known['services']]
+                        known['manufacturer'] = known['manufacturer'] + [d for d in device['manufacturer'] if d not in known['manufacturer']]
+                        known['random'] = known['random'] or device['random']
                         if classic:
                             # A device on both is found on each
                             known['le'], known['classic'] = known['le'] or device['le'], known['classic'] or device['classic']

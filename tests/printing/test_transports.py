@@ -388,6 +388,30 @@ def le(monkeypatch):
     return peer
 
 
+@pytest.mark.parametrize('random, kind', [(False, socket.BDADDR_LE_PUBLIC), (True, socket.BDADDR_LE_RANDOM)])
+def test_bluetooth_le_connects_with_the_address_the_search_found(le, monkeypatch, random, kind):
+    monkeypatch.setattr(transports, '_random_le', set())
+    transports.note_le_address(MAC.lower(), random)
+    le_link().close()
+    assert le.addresses == [(MAC, 0, 4, kind)]
+
+
+def test_bluetooth_le_connects_a_printer_not_found_with_its_public_address(le, monkeypatch):
+    # As a B1 always was, e.g. one named in PRINTERS
+    monkeypatch.setattr(transports, '_random_le', {'00:00:5E:00:53:09'})
+    le_link().close()
+    assert le.addresses == [(MAC, 0, 4, socket.BDADDR_LE_PUBLIC)]
+
+
+def test_a_kept_bluetooth_le_link_keeps_what_the_driver_keeps_with_it(le):
+    s = transports.kept_le(DEVICE, NIIMBOT, error=Refused, no_answer=Gone)
+    s.kept['paused'] = True
+    transports.release_le(DEVICE, s)
+    assert transports.kept_le(DEVICE, NIIMBOT, error=Refused, no_answer=Gone).kept == {'paused': True}
+    # Not a new one
+    assert le_link().kept == {}
+
+
 def test_bluetooth_le_raises_the_errors_of_the_driver(le, monkeypatch):
     with pytest.raises(Refused, match='no characteristic'):
         le_link(characteristic=bytes(16))
@@ -526,11 +550,11 @@ def test_classic_search_finds_devices_with_their_class(management):
                        found(le_only, name='B1-TEST0001'),
                        found(both, kind=0, raw=class_of_device(0x5a020c)), found(both, kind=1, name='Phone')])
     devices_found = {device['address']: device for device in bluetooth.discover(1, classic=True)}
-    assert devices_found[classic] == {'address': classic, 'name': 'PT-P710BT0001', 'le': False, 'services': [],
+    assert devices_found[classic] == {'address': classic, 'random': False, 'name': 'PT-P710BT0001', 'le': False, 'services': [], 'manufacturer': [],
                                       'classic': True, 'device_class': PRINTER_CLASS}
-    assert devices_found[le_only] == {'address': le_only, 'name': 'B1-TEST0001', 'le': True, 'services': [],
+    assert devices_found[le_only] == {'address': le_only, 'random': False, 'name': 'B1-TEST0001', 'le': True, 'services': [], 'manufacturer': [],
                                       'classic': False, 'device_class': None}
-    assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [],
+    assert devices_found[both] == {'address': both, 'random': False, 'name': 'Phone', 'le': True, 'services': [], 'manufacturer': [],
                                    'classic': True, 'device_class': 0x5a020c}
     # Classic Bluetooth and LE, and stopped again
     assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]

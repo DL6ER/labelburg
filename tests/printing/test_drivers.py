@@ -157,7 +157,8 @@ def test_models_of_other_makers_are_named_with_their_maker():
             if driver.vendor == 'Brother':
                 assert '/' not in model and drivers.canonical(f'Brother/{model}') == model
             else:
-                assert model.startswith(f'{driver.vendor}/') and drivers.canonical(model) == model
+                # Cat printers have no maker, they are named Cat/<model>
+                assert model.startswith('Cat/' if driver is drivers.CAT else f'{driver.vendor}/') and drivers.canonical(model) == model
 
 
 def test_every_name_before_ends_at_a_model():
