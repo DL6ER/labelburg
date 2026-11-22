@@ -172,28 +172,45 @@ class UsbipPrinter(Printer):
         usbip.release(self.dev)
 
 
-def _usb_printers(usb, vendor: int | None = None):
-    """The devices with a printer interface (class 7), of a maker or all."""
-    def is_printer(device):
-        if device.bDeviceClass == 7:
-            return True
-        return any(usb.util.find_descriptor(config, bInterfaceClass=7) is not None for config in device)
+def _is_printer(usb, device) -> bool:
+    """Whether a device has a printer interface (class 7)."""
+    if device.bDeviceClass == 7:
+        return True
+    return any(usb.util.find_descriptor(config, bInterfaceClass=7) is not None for config in device)
+
+
+def _usb_devices(usb, match, vendor: int | None = None):
+    """The devices match() takes, of a maker or all."""
     maker = {} if vendor is None else {'idVendor': vendor}
     try:
-        return usb.core.find(find_all=True, custom_match=is_printer, backend=_libusb(), **maker)
+        return usb.core.find(find_all=True, custom_match=match, backend=_libusb(), **maker)
     except usb.core.NoBackendError as e:
         raise NoLibusb(str(e)) from e
 
 
-def _find(usb, device_specifier: str):
-    """The device of usb://<vendor>:<product>[/<serial>]."""
+def _usb_printers(usb, vendor: int | None = None):
+    """The devices with a printer interface (class 7), of a maker or all."""
+    return _usb_devices(usb, lambda device: _is_printer(usb, device), vendor)
+
+
+def _find(usb, device_specifier: str, ids: frozenset = frozenset()):
+    """The printer of usb://<vendor>:<product>[/<serial>], with ids also a
+    device of those (vendor, product) without a printer interface."""
     vendor_product, _, serial = device_specifier.removeprefix('usb://').partition('/')
     vendor, _, product = vendor_product.partition(':')
     vendor, product = int(vendor, 16), int(product, 16)
-    for printer in _usb_printers(usb, vendor):
+    found = _usb_devices(usb, lambda device: (device.idVendor, device.idProduct) in ids or _is_printer(usb, device), vendor)
+    for printer in found:
         if printer.idProduct == product and (not serial or _same_serial(_serial_number(usb, printer), serial)):
             return printer
     raise FileNotFoundError(errno.ENODEV, 'Device not found', device_specifier)
+
+
+def find_device(usb, device_specifier: str, ids: frozenset):
+    """The printer of usb://<vendor>:<product>[/<serial>] through PyUSB, the
+    module usb, or a device of ids, (vendor, product) of printers that may
+    show no printer interface."""
+    return _find(usb, device_specifier, ids)
 
 
 def _device_id(usb, device) -> str:
@@ -239,16 +256,19 @@ def _bus_id(device) -> str:
         return ''
 
 
-def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
+def found_printers(ids: frozenset = frozenset()) -> tuple[list[tuple[str, str]], list[str]]:
     """usb://<vendor>:<product>[/<serial>] and the IEEE 1284 device ID of the
     printers PyUSB finds that no driver of the kernel holds: on Linux usblp
     holds them as /dev/usb/lp<N>, on macOS none does. Then the bus IDs of
     those Linux shares over USB/IP, which are left to the computers using
-    them that way."""
+    them that way. ids: (vendor, product) of printers also listed without a
+    printer interface, which usblp cannot hold."""
     try:
         import usb.core
         import usb.util
         printers = list(_usb_printers(usb))
+        others = list(_usb_devices(usb, lambda device: (device.idVendor, device.idProduct) in ids
+                                   and not _is_printer(usb, device))) if ids else []
     except NoLibusb:
         # The printer list tells it
         raise
@@ -257,13 +277,13 @@ def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
         return [], []
     found, shared = [], []
     usbip_host = _shared_bus_ids()
-    for printer in printers:
+    for printer, usblp in [(printer, True) for printer in printers] + [(other, False) for other in others]:
         # usbip-host holds the device, not its interfaces
         if usbip_host and (bus_id := _bus_id(printer)) in usbip_host:
             shared.append(bus_id)
             continue
         try:
-            if printer.is_kernel_driver_active(0):
+            if usblp and printer.is_kernel_driver_active(0):
                 continue
         except NotImplementedError:
             pass

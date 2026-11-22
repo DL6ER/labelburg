@@ -107,6 +107,7 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert {model for model, caps in models.items() if not caps['cutter']} == {
         'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'TSC/TSPL', 'TSC/TSPL-300', 'Zebra/ZPL', 'Zebra/ZPL-300',
         'DYMO/LabelWriter-450', 'DYMO/LabelWriter-450-Twin-Turbo', 'DYMO/LabelWriter-4XL', 'DYMO/LabelWriter-SE450',
+        'DYMO/LabelManager-PnP', 'DYMO/LabelManager-280', 'DYMO/LabelManager-420P', 'DYMO/LabelManager-PC-II',
         'Other/IPP', 'Other/IPP-203'}
     # Printers on IPP cut as they are set up
     assert {model for model, caps in models.items() if caps['cut_on_printer']} == {'Other/IPP', 'Other/IPP-203'}

@@ -69,7 +69,8 @@ def test_the_demo_printer_offers_every_model(designer):
                         'Other/IPP', 'Other/IPP-203'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
     for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL']),
-                           ('DYMO', ['LabelWriter 4XL', 'LabelWriter 450', 'LabelWriter 450 Twin Turbo'])):
+                           ('DYMO', ['LabelManager 280', 'LabelManager 420P', 'LabelManager PC II', 'LabelManager PnP',
+                                     'LabelWriter 4XL', 'LabelWriter 450', 'LabelWriter 450 Twin Turbo'])):
         assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
@@ -125,6 +126,28 @@ def test_a_dymo_labelwriter_offers_its_address_labels(designer):
         designer.click('#print')
     fields = sent(request.value)
     assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'DYMO/LabelWriter-450', 'dymo28x89')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
+
+
+def test_a_dymo_labelmanager_offers_its_tapes(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings') as answer:
+        designer.select_option(MODEL, 'DYMO/LabelManager-280')
+    assert answer.value.ok
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'DYMO/LabelManager-280' && labelEditor.S.tape === 'd1-12-280'")
+    sizes = '[data-card="0"] select[data-k="label_size"]'
+    offered = designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.value)')
+    assert offered == ['', 'd1-12-280', 'd1-6-280', 'd1-9-280'] == [''] + tape.takes('DYMO/LabelManager-280')
+    assert designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.textContent)')[1:] == ['12 mm endless', '6 mm endless', '9 mm endless']
+    card = designer.inner_text('[data-card="0"]')
+    assert 'DYMO LabelManager 280' in card and 'Cut by hand' in card
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo DYMO LabelManager 280'
+    type_label(designer, 'Fuse box')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'DYMO/LabelManager-280', 'd1-12-280')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
