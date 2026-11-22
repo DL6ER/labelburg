@@ -428,3 +428,26 @@ def test_the_cutting_of_a_printer_is_said_as_in_the_editor(designer, server):
     printers_are(designer, server, {'path': 'simulation', 'model': 'PT-E550W', 'name': 'Shop'})
     open_settings(designer)
     assert 'The tape fed before the first label is waste, short labels get some extra tape.' in designer.inner_text('#setPrinters')
+
+
+def test_a_continuous_roll_asks_for_the_label_length(designer, server):
+    # The printer measures no labels on it, the tape the server finds then
+    path = 'tcp://192.0.2.10'
+    with urlopen(f'{server}/labeldesigner/api/settings', urlencode({'printer': path, 'model': 'Zebra/ZPL', 'sensing': 'endless'}).encode()) as r:
+        answer = json.load(r)
+    zpl = {**with_tape({'path': path, 'model': 'Zebra/ZPL', 'name': 'Shipping', 'errors': [], 'media_width': None, 'media_length': 0,
+                        'settings': answer['settings']}), 'tape': answer['tape']}
+    designer.route('**/api/printer_status*', lambda route: route.fulfill(json={**zpl, 'printers': [zpl], 'selected': path}))
+    designer.reload()
+    designer.wait_for_selector('#field .ln')
+    wait_for_preview(designer)
+    designer.click('#printerChip')
+    assert designer.inner_text('.pp [data-p="0"] small') == 'Zebra ZPL, Ready, continuous roll, choose the label length in the Settings'
+    designer.locator('.pp [data-p="0"]').click()
+    designer.wait_for_selector('#printerChip b:text-is("Shipping")')
+    assert designer.inner_text('#tapeNote') == 'Shipping has a continuous roll, choose how long the labels are. Set the length'
+    assert designer.get_attribute('#printerChip', 'title') == 'Shipping: Ready, continuous roll, choose the label length in the Settings'
+    designer.keyboard.press('Escape')
+    open_settings(designer)
+    note = designer.locator('[data-card="0"] select[data-k="label_size"] + small')
+    assert (note.inner_text(), note.get_attribute('class')) == ('On a continuous roll, choose how long the labels are.', 'muted')

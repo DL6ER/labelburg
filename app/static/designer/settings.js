@@ -4,7 +4,7 @@
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
-    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
+    printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
 } from './core.js';
@@ -109,13 +109,15 @@ function tapeHTML(p) {
     const t = tapeOf(p);
     if (t.known && !t.manual) return `<div class="row"><span class="set-val">${esc(sizeName(t.id))}</span><small class="set-ok">${icon('check')}read from the printer</small></div>`;
     const chosen = tapesSaving[p.path] > 0 ? kept(p).label_size || '' : t.manual ? t.id : '';
+    const asks = !isDemo(p) && asksLength(p);
     const note = isDemo(p) ? 'Any roll this model takes.' : t.manual ? 'Set by hand, the printer does not report its tape.'
+        : asks ? 'On a continuous roll, choose how long the labels are.'
         : !t.known && (t.candidates || []).length ? `The printer measures labels ${t.unknown}, choose which ones.`
         : t.unknown ? `The printer reports ${t.unknown} tape, which is not offered here.`
         : `This printer does not report its tape, new labels are ${sizeName(t.id)}.`;
     return `<div class="set-stack"><select class="in set-sel" data-k="label_size" aria-label="Tape in ${esc(printerLabel(p))}">
             <option value="">Automatic${t.manual ? '' : `: ${esc(sizeName(t.id))}`}</option>${sizeOptions(p, chosen)}</select>
-        <small class="${t.manual || isDemo(p) ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
+        <small class="${t.manual || isDemo(p) || asks ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
 }
 
 // The demo printer prints as any model, grouped by maker, e.g. QL-500 before QL-1100
