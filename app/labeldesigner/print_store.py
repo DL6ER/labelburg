@@ -200,13 +200,16 @@ def queued(record: dict, images: list, preview: bytes | None) -> bool:
 
 
 def started(record: dict):
-    """The job of record starts to print."""
+    """The job of record starts to print. Where that cannot be kept, it leaves
+    the queue on disk: kept as waiting it would print again after a crash."""
     record.update(state='printing', started_at=time.time())
     if _queue_fd is not None and os.path.exists(path := _queue_path(f"{record['id']}.json")):
         try:
             _write(path, json.dumps(record, ensure_ascii=False, default=str).encode('utf-8'))
         except OSError as e:
-            logger.warning('The start of print job %s was not kept: %s', record['id'], e)
+            logger.warning('The start of print job %s was not kept, it is no longer kept on disk: %s', record['id'], e)
+            with contextlib.suppress(OSError):
+                os.remove(path)
 
 
 def _left_in_queue() -> list[dict]:

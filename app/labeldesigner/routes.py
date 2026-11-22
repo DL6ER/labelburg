@@ -1007,9 +1007,13 @@ def _store_hooks(record: dict, images: list, preview: bytes | None, on_disk: boo
     images, preview = (None, None) if on_disk else (list(images), preview)
 
     def on_end(job):
-        with app.app_context():
-            keep = _keeping()
-        print_store.ended(record, job.state, job.message, keep, images, preview)
+        keep = False
+        try:
+            with app.app_context():
+                keep = _keeping()
+        finally:
+            # Also where the setting cannot be read: the job ended
+            print_store.ended(record, job.state, job.message, keep, images, preview)
     return {'on_start': lambda job: print_store.started(record), 'on_end': on_end}
 
 

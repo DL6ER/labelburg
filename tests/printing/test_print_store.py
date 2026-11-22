@@ -464,3 +464,43 @@ def test_a_job_the_queue_does_not_take_leaves_nothing_on_disk(server, monkeypatc
     with pytest.raises(RuntimeError):
         server.post(f'{API}/print', data=LABEL)
     assert files(os.path.join(repo(server), print_store.QUEUE)) == []
+
+
+def test_a_job_whose_start_was_not_kept_never_prints_twice(server, tmp_path, monkeypatch):
+    write = print_store._write
+
+    def fails_to_keep_the_start(path, content):
+        if path.endswith('.json') and b'"printing"' in content:
+            raise OSError(28, 'No space left on device')
+        write(path, content)
+    monkeypatch.setattr(print_store, '_write', fails_to_keep_the_start)
+    started, release = holding(monkeypatch)
+    job = server.post(f'{API}/print', data=LABEL).get_json()['job']
+    assert started.wait(10)
+    # Kept as waiting it would print again after a crash
+    assert f'{job}.json' not in files(os.path.join(repo(server), print_store.QUEUE))
+    # The server dies while it prints
+    ended = print_store.ended
+    monkeypatch.setattr(print_store, 'ended', lambda *args, **kwargs: None)
+    print_queue.stop()
+    release.set()
+    print_queue.reset()
+    monkeypatch.setattr(print_store, 'ended', ended)
+    monkeypatch.setattr(print_store, '_write', write)
+    calls = made(monkeypatch)
+    restart(tmp_path)
+    assert print_queue.lines() == [] and calls == []
+
+
+def test_a_job_ends_on_disk_also_where_the_setting_cannot_be_read(server, monkeypatch):
+    started, release = holding(monkeypatch)
+    server.post(f'{API}/print', data=LABEL)
+    assert started.wait(10)
+    waiting = server.post(f'{API}/print', data=LABEL).get_json()['job']
+
+    def unreadable():
+        raise RuntimeError('settings unreadable')
+    monkeypatch.setattr(routes, '_keeping', unreadable)
+    assert server.post(f'{API}/queue/{waiting}/remove').status_code == 200
+    assert f'{waiting}.json' not in files(os.path.join(repo(server), print_store.QUEUE))
+    release.set()
