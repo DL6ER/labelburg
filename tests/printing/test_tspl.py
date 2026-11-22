@@ -600,3 +600,17 @@ def test_network_device_of_another_maker_gets_nothing(fake_printer, agent, on_ne
         adding.identify('tcp://127.0.0.1', 'local')
     assert str(refused.value) == adding.NO_PRINTER
     assert on_network.connections == 0
+
+
+def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
+    # Its device ID names no resolution
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:TSC;CMD:TSPL2;MDL:TE300;')
+    monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
+    client = make_client(tmp_path, model='TSC/TSPL-300', printer='usb://0x1203:0x0230')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == 'TSC/TSPL-300'
+    # Also as the label designer names it
+    for model in ('', 'TSC/TSPL-300'):
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'tspl102x152', 'print_type': 'text', 'text': TEXT, 'model': model})
+        assert outcome(client, response) == ('printed', '')
+    head = b'SIZE 102 mm,152 mm\r\nDIRECTION 0,0\r\nREFERENCE 0,0\r\nCLS\r\nBITMAP 0,0,151,1795,0,'
+    assert [data[:len(head)] for _, data in sent] == [head] * 2

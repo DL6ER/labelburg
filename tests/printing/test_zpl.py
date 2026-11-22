@@ -672,3 +672,16 @@ def test_a_continuous_roll_of_a_width_the_printer_reports():
     state = diecut.as_set({'model': 'Zebra/ZPL', 'media_width': 102, 'media_length': 0}, 'endless')
     found = tape.describe(tape.in_printer(state, 'Zebra/ZPL', '', '62'))
     assert (found['known'], found['unknown']) == (False, '102 mm')
+
+
+def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
+    # Its device ID names no resolution
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;')
+    monkeypatch.setattr(protocol, 'host_status', lambda device: b'')
+    client = make_client(tmp_path, model='Zebra/ZPL-300', printer='usb://0x0a5f:0x0120')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == 'Zebra/ZPL-300'
+    # Also as the label designer names it
+    for model in ('', 'Zebra/ZPL-300'):
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl102x152', 'print_type': 'text', 'text': TEXT, 'model': model})
+        assert outcome(client, response) == ('printed', '')
+    assert [data[:data.index(b'^FO')] for _, data in sent] == [b'^XA\n^PW1208\n^LL1795\n'] * 2

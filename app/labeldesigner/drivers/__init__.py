@@ -64,11 +64,14 @@ def described_model(description: str) -> str | None:
 
 def resolve(device: str, model: str) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
-    ID tells, else the configured or requested model."""
+    ID tells, else the configured or requested model. That one also where it
+    is the same printer of another resolution, shown alike, e.g.
+    TSC/TSPL-300 for TSC/TSPL: few device IDs tell the resolution."""
     # Read once for all drivers, it may ask the printer
     device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
     for driver in DRIVERS:
         known = driver.model_of(device, device_id)
         if known:
-            return driver, known
+            alike = model in driver.models and driver.shown_as.get(model, model) == driver.shown_as.get(known, known)
+            return driver, model if alike else known
     return for_model(model), model

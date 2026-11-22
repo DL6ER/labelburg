@@ -44,6 +44,27 @@ def test_driver_of_a_printer():
     assert drivers.for_label('99x99') is None
 
 
+@pytest.mark.parametrize('device_id, configured, model', [
+    # The other resolution of the same printer as configured, the device ID
+    # rarely tells it
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL', 'TSC/TSPL'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'Zebra/ZPL-300', 'Zebra/ZPL-300'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL', 'Zebra/ZPL'),
+    # Else the model the device ID tells
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'Zebra/ZPL-300', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'QL-800', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'TSC/TSPL-300', 'Zebra/ZPL'),
+    # As for any models shown alike
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80;', 'Epson/ESC-POS-180', 'Epson/ESC-POS-180')])
+def test_a_configured_resolution_of_the_same_printer_wins(monkeypatch, device_id, configured, model):
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
+    driver, known = drivers.resolve('file:///dev/usb/lp0', configured)
+    assert (driver, known) == (drivers.for_model(model), model)
+
+
 @pytest.mark.parametrize('device', ['usb://0x04b8:0x0e15', 'usbip://192.0.2.1', 'file:///dev/usb/lp0'])
 def test_device_id_is_read_once_for_all_drivers(monkeypatch, device):
     # On usb:// one that tells none is asked again each time
