@@ -75,6 +75,9 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
+    # (vendor, product) of its printers on USB that are reached through their
+    # serial interface, not a printer interface, see backends.UsbSerialPrinter
+    usb_serial_ids: tuple = ()
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,

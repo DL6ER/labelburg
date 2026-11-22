@@ -1,7 +1,8 @@
 """The connections to printers on USB, through the printer interface of
 the kernel (/dev/usb/lp<N>, Linux only), PyUSB
 (usb://<vendor>:<product>[/<serial>], also on macOS, on Windows untested) or
-USB/IP (usbip://<host>), after the backends of brother_ql by Philipp Klaus."""
+USB/IP (usbip://<host>), after the backends of brother_ql by Philipp Klaus,
+and on classic Bluetooth (bt://<MAC>, see transports.RfcommPrinter)."""
 
 import ctypes.util
 import errno
@@ -9,6 +10,7 @@ import logging
 import os
 import re
 import select
+import struct
 import sys
 import time
 
@@ -99,12 +101,14 @@ class UsbPrinter(Printer):
     read_timeout = 10.
     write_timeout = 15000.
     answer_timeout = 100.
+    # The interface it prints through
+    interface_class, interface_name = 7, 'printer'
 
     def __init__(self, device_specifier: str):
         import usb.core
         import usb.util
         self._usb = usb
-        self.dev = _find(usb, device_specifier)
+        self.dev = _find(usb, device_specifier, self.interface_class)
         self.was_kernel_driver_active = False
         try:
             if self.dev.is_kernel_driver_active(0):
@@ -113,16 +117,16 @@ class UsbPrinter(Printer):
         except NotImplementedError:
             pass
         self.dev.set_configuration()
-        interface = usb.util.find_descriptor(self.dev.get_active_configuration(), bInterfaceClass=7)
+        interface = usb.util.find_descriptor(self.dev.get_active_configuration(), bInterfaceClass=self.interface_class)
         if interface is None:
-            raise ValueError('The device has no printer interface')
+            raise ValueError(f'The device has no {self.interface_name} interface')
         direction = usb.util.endpoint_direction
         self.read_dev = usb.util.find_descriptor(
             interface, custom_match=lambda e: direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN)
         self.write_dev = usb.util.find_descriptor(
             interface, custom_match=lambda e: direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT)
         if self.read_dev is None or self.write_dev is None:
-            raise ValueError('The printer interface has no endpoints to read and write')
+            raise ValueError(f'The {self.interface_name} interface has no endpoints to read and write')
 
     def _write(self, data: bytes):
         self.write_dev.write(data, int(self.write_timeout))
@@ -150,6 +154,31 @@ class UsbPrinter(Printer):
         del self.dev
 
 
+class UsbSerialPrinter(UsbPrinter):
+    """A printer that is a serial port on USB (CDC ACM) through PyUSB, as
+    usb://<vendor>:<product>[/<serial>]: its data interface, set to 115200
+    baud 8N1 with DTR and RTS on as transports.SerialLink sets the port. For
+    the models a driver lists in usb_serial_ids only."""
+
+    interface_class, interface_name = 0x0A, 'serial'
+    # Of the communications interface: SET_LINE_CODING, SET_CONTROL_LINE_STATE
+    LINE_CODING = struct.pack('<IBBB', 115200, 0, 0, 8)
+    DTR_RTS = 0x03
+
+    def __init__(self, device_specifier: str):
+        super().__init__(device_specifier)
+        usb = self._usb
+        control = usb.util.find_descriptor(self.dev.get_active_configuration(), bInterfaceClass=0x02)
+        if control is None:
+            return
+        try:
+            self.dev.ctrl_transfer(0x21, 0x20, 0, control.bInterfaceNumber, self.LINE_CODING, 1000)
+            self.dev.ctrl_transfer(0x21, 0x22, self.DTR_RTS, control.bInterfaceNumber, None, 1000)
+        except usb.core.USBError:
+            # Taken as it is by a port that does not know these requests
+            logger.debug('The serial port of %s was not set up', device_specifier, exc_info=True)
+
+
 class UsbipPrinter(Printer):
     """A printer another device shares over USB/IP, as
     usbip://<host>[:<port>][/<bus ID>]. The connection stays open after
@@ -172,12 +201,13 @@ class UsbipPrinter(Printer):
         usbip.release(self.dev)
 
 
-def _usb_printers(usb, vendor: int | None = None):
-    """The devices with a printer interface (class 7), of a maker or all."""
+def _usb_printers(usb, vendor: int | None = None, interface_class: int = 7):
+    """The devices with a printer interface (class 7), or one of
+    interface_class, of a maker or all."""
     def is_printer(device):
-        if device.bDeviceClass == 7:
+        if device.bDeviceClass == interface_class:
             return True
-        return any(usb.util.find_descriptor(config, bInterfaceClass=7) is not None for config in device)
+        return any(usb.util.find_descriptor(config, bInterfaceClass=interface_class) is not None for config in device)
     maker = {} if vendor is None else {'idVendor': vendor}
     try:
         return usb.core.find(find_all=True, custom_match=is_printer, backend=_libusb(), **maker)
@@ -185,12 +215,18 @@ def _usb_printers(usb, vendor: int | None = None):
         raise NoLibusb(str(e)) from e
 
 
-def _find(usb, device_specifier: str):
-    """The device of usb://<vendor>:<product>[/<serial>]."""
-    vendor_product, _, serial = device_specifier.removeprefix('usb://').partition('/')
-    vendor, _, product = vendor_product.partition(':')
-    vendor, product = int(vendor, 16), int(product, 16)
-    for printer in _usb_printers(usb, vendor):
+def _ids(device_specifier: str) -> tuple[int, int]:
+    """Vendor and product ID of usb://<vendor>:<product>[/<serial>]."""
+    vendor, _, product = device_specifier.removeprefix('usb://').partition('/')[0].partition(':')
+    return int(vendor, 16), int(product, 16)
+
+
+def _find(usb, device_specifier: str, interface_class: int = 7):
+    """The device of usb://<vendor>:<product>[/<serial>] with an interface
+    of the class."""
+    serial = device_specifier.removeprefix('usb://').partition('/')[2]
+    vendor, product = _ids(device_specifier)
+    for printer in _usb_printers(usb, vendor, interface_class):
         if printer.idProduct == product and (not serial or _same_serial(_serial_number(usb, printer), serial)):
             return printer
     raise FileNotFoundError(errno.ENODEV, 'Device not found', device_specifier)
@@ -309,12 +345,29 @@ def _serial_number(usb, device) -> str | None:
         return None
 
 
+def _over_serial(device_specifier: str) -> bool:
+    """Whether a driver reaches the printer usb://... through its serial
+    interface, see Driver.usb_serial_ids."""
+    from . import DRIVERS
+    try:
+        ids = _ids(device_specifier)
+    except ValueError:
+        return False
+    return any(ids in driver.usb_serial_ids for driver in DRIVERS)
+
+
 def open_printer(device_specifier: str) -> Printer:
-    """A connection to the printer on USB, usb://... through PyUSB,
-    usbip://... shared by another device, any other device through the
-    printer interface of the kernel."""
+    """A connection to the printer on USB, usb://... through PyUSB, its
+    serial interface for the models of Driver.usb_serial_ids, usbip://...
+    shared by another device, bt://... on classic Bluetooth, any other
+    device through the printer interface of the kernel."""
     if device_specifier.startswith(('usb://', '0x')):
+        if _over_serial(device_specifier):
+            return UsbSerialPrinter(device_specifier)
         return UsbPrinter(device_specifier)
     if usbip.is_address(device_specifier):
         return UsbipPrinter(device_specifier)
+    if device_specifier.startswith('bt://'):
+        from .transports import RfcommPrinter
+        return RfcommPrinter(device_specifier)
     return KernelPrinter(device_specifier)

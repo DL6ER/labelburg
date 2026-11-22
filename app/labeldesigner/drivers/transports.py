@@ -1,6 +1,8 @@
 """Connections to printers that several drivers share: classic Bluetooth
-(RFCOMM), Bluetooth LE and USB, read and written like sockets by drivers
-that exchange packets with the printer."""
+(RFCOMM), Bluetooth LE, USB and serial ports, read and written like sockets
+by drivers that exchange packets with the printer, and RfcommPrinter, a
+printer on classic Bluetooth as backends.Printer for the drivers that send
+it a stream of bytes."""
 
 import errno
 import os
@@ -14,6 +16,8 @@ from . import backends, devices
 
 # Connecting took about 4 s for a PUQU Q00, also with the printer close by
 CONNECT_WAIT = 10
+# The channel of an RfcommPrinter whose address names none
+RFCOMM_CHANNEL = 1
 
 
 def bt_address(device: str, channel: int) -> tuple[str, int]:
@@ -35,6 +39,32 @@ def rfcomm(device: str, channel: int) -> socket.socket:
         s.close()
         raise
     return s
+
+
+class RfcommPrinter(backends.Printer):
+    """A printer on classic Bluetooth, bt://<MAC>[/<channel>], for the
+    drivers that write a job and read its answers as on USB."""
+
+    # In seconds
+    read_timeout = 0.01
+    write_timeout = 15.
+
+    def __init__(self, device_specifier: str, channel: int = RFCOMM_CHANNEL):
+        self.s = rfcomm(device_specifier, channel)
+
+    def _write(self, data: bytes):
+        self.s.settimeout(self.write_timeout)
+        self.s.sendall(data)
+
+    def _read(self, length: int) -> bytes:
+        self.s.settimeout(self.read_timeout)
+        try:
+            return self.s.recv(length)
+        except TimeoutError:
+            return b''
+
+    def _dispose(self):
+        self.s.close()
 
 
 class UsbLink:
@@ -68,6 +98,64 @@ class UsbLink:
 
     def close(self):
         self.printer.dispose()
+
+
+class SerialLink:
+    """A printer on a serial port, serial:///dev/ttyACM<N> as Linux names
+    one on USB, read and written like a socket: raw at 115200 baud 8N1,
+    with DTR and RTS on."""
+
+    # Seconds a write may take, whatever an answer may take
+    write_timeout = 15.
+
+    def __init__(self, device: str):
+        import fcntl
+        import termios
+        import tty
+        self.fd = os.open(device.removeprefix('serial://'), os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        self.timeout = CONNECT_WAIT
+        try:
+            mode = termios.tcgetattr(self.fd)
+            tty.cfmakeraw(mode)
+            mode[tty.IFLAG] &= ~(termios.IXOFF | termios.IXANY)
+            mode[tty.CFLAG] &= ~(termios.CSTOPB | getattr(termios, 'CRTSCTS', 0))
+            mode[tty.CFLAG] |= termios.CREAD | termios.CLOCAL
+            mode[tty.ISPEED] = mode[tty.OSPEED] = termios.B115200
+            termios.tcsetattr(self.fd, termios.TCSANOW, mode)
+            try:
+                fcntl.ioctl(self.fd, termios.TIOCMBIS, struct.pack('i', termios.TIOCM_DTR | termios.TIOCM_RTS))
+            except OSError as e:
+                # A port without these lines, e.g. a pseudo terminal
+                if e.errno not in (errno.ENOTTY, errno.EINVAL):
+                    raise
+        except BaseException:
+            os.close(self.fd)
+            raise
+
+    def settimeout(self, timeout: float):
+        self.timeout = timeout
+
+    def sendall(self, data: bytes):
+        deadline = time.monotonic() + self.write_timeout
+        while data:
+            if not select.select([], [self.fd], [], max(0.0, deadline - time.monotonic()))[1]:
+                raise socket.timeout('not sent')
+            try:
+                data = data[os.write(self.fd, data):]
+            except BlockingIOError:
+                pass
+
+    def recv(self, size: int) -> bytes:
+        deadline = time.monotonic() + self.timeout
+        while select.select([self.fd], [], [], max(0.0, deadline - time.monotonic()))[0]:
+            try:
+                return os.read(self.fd, size)
+            except BlockingIOError:
+                pass
+        raise socket.timeout('no answer')
+
+    def close(self):
+        os.close(self.fd)
 
 
 # Bluetooth LE: the attribute protocol on its own L2CAP channel. Packets are
