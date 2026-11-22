@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, sheetNote, untold
+    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -538,7 +538,7 @@ function fillField(item, name, value, i) {
 
 // --- The preview ----------------------------------------------------------------------------
 
-let seq = 0, shownSeq = 0;
+let seq = 0, shownSeq = 0, asked = 0;
 function markBusy() { $('#labelbox').classList.add('busy'); laidOut(false); }
 // data-laid on the label box tells that the stage stands still: set once a
 // fit is drawn and no transition moves it any more, cleared as soon as
@@ -560,10 +560,13 @@ function laidOut(done) {
     settle();
 }
 
-const drawPreview = latest(async () => {
+// A preview asked for while one is drawn follows it, the label stays busy
+// until the last one asked for is shown
+function drawPreview() { asked++; nextPreview(); }
+const nextPreview = latest(async () => {
     const E = S.edit;
     if (!E || !$('#labelImg')) return;
-    const me = ++seq;
+    const me = ++seq, upTo = asked;
     const empty = isEmptyDesign(E.design);
     // An empty label shows as large as a line of its first size makes it
     const shown = empty ? Object.assign(clone(Object.assign({}, E.design, { image: undefined, more_images: undefined })), { text: E.design.text.slice(0, 1).map(l => Object.assign({}, l, { text: 'Ag' })) })
@@ -571,13 +574,13 @@ const drawPreview = latest(async () => {
     const values = previewValues(E);
     let p;
     try {
-        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0, true);
+        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0, 0, true);
     } catch (e) {
         if (me < shownSeq) return;
         shownSeq = me;
         ui.failed = !!e.refused;
         ui.last = null;
-        $('#labelbox').classList.remove('busy');
+        if (upTo === asked) $('#labelbox').classList.remove('busy');
         $('#labelbox').classList.add('failed');
         $('#picks').innerHTML = '';
         drawSheet(null);
@@ -603,7 +606,7 @@ const drawPreview = latest(async () => {
     paintTape(p.tapeColors);
     $('#labelbox').classList.toggle('empty', empty);
     $('#labelbox').classList.remove('failed');
-    if (!S.edit || me !== seq) $('#labelbox').classList.add('busy'); else $('#labelbox').classList.remove('busy');
+    if (!S.edit || upTo !== asked) $('#labelbox').classList.add('busy'); else $('#labelbox').classList.remove('busy');
     fitLabel();
     // + on a line that did not grow: the label has no room for more
     if (ui.grow && ui.grow.seq <= me) {
@@ -660,9 +663,10 @@ function drawSheet(sheet) {
     note.innerHTML = html;
     note.hidden = !html;
 }
-// Only a roll with several labels to a page previews the copies
+// Only a roll with several labels to a page and the number of labels
+// previews the copies
 export function copiesChanged() {
-    if (ui.last && isSheet(ui.last.labelSize)) drawPreview();
+    if ((ui.last && isSheet(ui.last.labelSize)) || (S.edit && withTotal(S.edit.design))) drawPreview();
 }
 
 function previewValues(E) {
@@ -690,7 +694,9 @@ function toggleLarge() {
 function stageOf(v) {
     const size = SIZES[v.labelSize] || { tape: [62, 0], dots: [696, 0], form: 'endless' };
     const scale = v.highRes ? 2 : 1, dpi = dpiOf(v.labelSize, v.highRes), span = size.dots[0] * scale;
-    const side = Math.abs(v.w - span) > 4 * scale && Math.abs(v.h - span) <= 4 * scale;
+    // One as long as the tape is wide runs the way it was asked for
+    const spans = n => Math.abs(n - span) <= 4 * scale;
+    const side = spans(v.h) && (!spans(v.w) || v.along);
     const caps = sizeCaps(v.labelSize), top = leavesFirst(caps) === 'top';
     const lead = isEndless(size) ? caps.lead_mm || 0 : 0;
     const along = Math.round((side ? v.w : v.h) / dpi * 25.4);
@@ -893,20 +899,55 @@ function stepper() {
 }
 const sizeStep = stepper(), spacingStep = stepper(), allStep = stepper();
 const ALIGNS = { left: ['left', 'Left'], center: ['center', 'Centered'], right: ['right', 'Right'] };
+// The steps of the letter spacing of a line, in parts of its size
+const LETTER_SPACINGS = [[-0.05, 'Narrow'], [0, 'Normal'], [0.1, 'Wide'], [0.2, 'Wider']];
+const letterSpacing = l => +l.letter_spacing || 0;
+// Another value, e.g. sent to the API, is named as the step nearest to it
+const letterSpacingName = v => LETTER_SPACINGS.reduce((a, b) => Math.abs(b[0] - v) < Math.abs(a[0] - v) ? b : a)[1];
 
-// Above the label with its dimensions and the printer
+// While a button of the toolbar is pressed, a preview neither moves nor
+// redraws it, so the click lands where the press began
+let held = false;
+const owed = new Set();
+addEventListener('pointerdown', e => { if (e.target.closest('#ltb')) held = true; }, true);
+const release = () => {
+    if (!held) return;
+    held = false;
+    // After the click of this press
+    const due = [...owed];
+    owed.clear();
+    setTimeout(() => due.forEach(fn => fn()));
+};
+addEventListener('pointerup', release, true);
+addEventListener('pointercancel', release, true);
+addEventListener('blur', e => { if (e.target === window) release(); });
+// Whether fn waits for the press on the toolbar to be let go
+function heldBack(fn) {
+    if (held) owed.add(fn);
+    return held;
+}
+
+// Above the label with its dimensions and the printer; the menus opened
+// from it move along
 function positionToolbar() {
     const bar = $('#ltb');
     if (!bar || bar.hidden) return;
+    if (heldBack(positionToolbar)) return;
     const lb = $('#labelbox'), above = Math.min(0, ...$$('.dim', lb).filter(e => !e.hidden).map(e => e.offsetTop));
     // The printer is above the label where the bottom leaves first
     const slot = $('#slot'), top = Math.min(lb.offsetTop + above, slot.offsetParent ? slot.offsetTop : Infinity);
+    const was = bar.offsetTop;
     bar.style.top = `${Math.max(8, top - bar.offsetHeight - 12)}px`;
+    const by = bar.offsetTop - was;
+    if (!by) return;
+    $$('#center > .menu').forEach(m => { m.style.top = `${m.offsetTop + by}px`; });
+    refreshFontMenu();
 }
 
 export function renderToolbar() {
     const bar = $('#ltb');
     if (!bar) return;
+    if (heldBack(renderToolbar)) return;
     const p = ui.pick, d = S.edit.design;
     if (p && p.part !== 'line' && hooks.toolbars[p.part]) {
         bar.hidden = false;
@@ -938,7 +979,7 @@ export function renderToolbar() {
         <button type="button" class="tb" data-align title="Alignment: ${esc(al[1])}" aria-label="Alignment: ${esc(al[1])}">${icon(al[0])}</button>
         ${swatchHTML('data-lcolor', l.color, onTape(d), 'the line')}
         <span class="sep"></span>
-        <button type="button" class="tb${l.inverted || l.checkbox || +l.line_spacing !== 100 ? ' dot' : ''}" data-more aria-expanded="false" title="More for this line" aria-label="More for this line">${icon('more')}</button>`;
+        <button type="button" class="tb${l.inverted || l.checkbox || l.caps || letterSpacing(l) || +l.line_spacing !== 100 ? ' dot' : ''}" data-more aria-expanded="false" title="More for this line" aria-label="More for this line">${icon('more')}</button>`;
     $('[data-font]', bar).onclick = () => openFontMenu({
         owner: 'line', anchor: () => $('#ltb [data-font]'), label: `Font of line ${i + 1}`,
         state: () => { const m = S.edit.design.text[i], f = m && faceOf(m.font); return { family: m ? familyOf(m.font) : '', faces: [f] }; },
@@ -976,7 +1017,8 @@ export function renderToolbar() {
     refreshFontMenu();
 }
 
-// "..." of a line: white on black, the to-do box, line spacing, removing it
+// "..." of a line: white on black, the to-do box, capitals, line and letter
+// spacing, removing it
 function lineMenu(btn, i) {
     const d = S.edit.design, l = d.text[i];
     const old = $('.line-menu');
@@ -986,7 +1028,9 @@ function lineMenu(btn, i) {
     const spacing = +(l.line_spacing || 100);
     el.innerHTML = `<button type="button" data-act="invert" class="${l.inverted ? 'on' : ''}">${icon('contrast')}<span>White on black</span>${l.inverted ? icon('check') : ''}</button>
         <button type="button" data-act="todo" class="${l.checkbox ? 'on' : ''}">${icon('todo')}<span>To-do box</span><small>in front</small>${l.checkbox ? icon('check') : ''}</button>
+        <button type="button" data-act="caps" class="${l.caps ? 'on' : ''}">${icon('caps')}<span>All capitals</span>${l.caps ? icon('check') : ''}</button>
         <div class="mi">${icon('spacing')}<span>Line spacing</span><span class="az sm"><button type="button" class="azb" data-sp="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-spv>${esc(spacing)} %</span><button type="button" class="azb" data-sp="1" aria-label="More">${icon('plus', '')}</button></span></div>
+        <div class="mi">${icon('tracking')}<span>Letter spacing</span><span class="az sm"><button type="button" class="azb" data-ls="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-lsv></span><button type="button" class="azb" data-ls="1" aria-label="More">${icon('plus', '')}</button></span></div>
         <button type="button" data-act="remove" class="danger"${d.text.length > 1 || String(l.text).length ? '' : ' disabled'}>${icon('trash')}<span>Remove the line</span></button>`;
     $('#center').appendChild(el);
     const r = btn.getBoundingClientRect(), c = $('#center').getBoundingClientRect();
@@ -1009,6 +1053,7 @@ function lineMenu(btn, i) {
             const m = x.text[i];
             if (act === 'invert') m.inverted = !m.inverted;
             if (act === 'todo') m.checkbox = !m.checkbox;
+            if (act === 'caps') { if (m.caps) delete m.caps; else m.caps = true; }
         });
         again();
     });
@@ -1016,6 +1061,20 @@ function lineMenu(btn, i) {
         const v = Math.max(50, Math.min(400, +(S.edit.design.text[i].line_spacing || 100) + +b.dataset.sp * 10 * spacingStep()));
         apply(x => { x.text[i].line_spacing = String(v); }, { merge: 'spacing' + i });
         $('[data-spv]', el).textContent = `${v} %`;
+    });
+    // The next step either way, also from a value between the steps
+    const nextSpacing = (v, dir) => (dir > 0 ? LETTER_SPACINGS.find(([s]) => s > v) : [...LETTER_SPACINGS].reverse().find(([s]) => s < v)) || null;
+    const showSpacing = v => {
+        $('[data-lsv]', el).textContent = letterSpacingName(v);
+        $$('[data-ls]', el).forEach(b => { b.disabled = !nextSpacing(v, +b.dataset.ls); });
+    };
+    showSpacing(letterSpacing(l));
+    $$('[data-ls]', el).forEach(b => b.onclick = () => {
+        const next = nextSpacing(letterSpacing(S.edit.design.text[i]), +b.dataset.ls);
+        if (!next) return;
+        // Normal leaves it out, as labels saved before have it
+        apply(x => { if (next[0]) x.text[i].letter_spacing = next[0]; else delete x.text[i].letter_spacing; }, { merge: 'letters' + i });
+        showSpacing(next[0]);
     });
 }
 
@@ -1286,4 +1345,4 @@ export function printerChanged() {
     drawPreview();
 }
 
-mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, redraw: () => drawPreview() });
+mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, heldBack, redraw: () => drawPreview() });
