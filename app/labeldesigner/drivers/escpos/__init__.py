@@ -87,12 +87,14 @@ class Escpos(Driver):
     # Both models are shown alike
     shown_as = {MODELS[1]: MODELS[0]}
     # usblp's device, also a name a udev rule gives it, e.g. /dev/usb/lp_epson,
-    # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, or
-    # on the network on the port of raw printing, as the other drivers
+    # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, on
+    # the network on the port of raw printing, as the other drivers, or on
+    # classic Bluetooth, bt://<MAC>[/<RFCOMM channel>]
     device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
-                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
+                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
+                       re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'))
     errors = (OSError, protocol.EscposError)
     reports_tape = False
     # Its models are those of many makers
@@ -145,6 +147,12 @@ class Escpos(Driver):
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def status(self, device, model, unconfirmed=False):
+        if device.startswith('bt://'):
+            # One switched off is not paged at every status query, it takes the radio
+            return self.noted_status(device, lambda: self._status(device, model))
+        return self._status(device, model)
+
+    def _status(self, device, model):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
         if name := self.device_name(device):
@@ -194,6 +202,8 @@ class Escpos(Driver):
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)
+        # Asked again at the next status query, see noted_status()
+        devices.note_answer(device)
         return ''
 
 

@@ -136,12 +136,14 @@ class Tspl(Driver):
     # Its models are those of many makers
     names_devices = True
     # usblp's device, also a name a udev rule gives it, the printer through
-    # PyUSB, or on the network on the port of raw printing, as the other drivers
+    # PyUSB, on the network on the port of raw printing, as the other drivers,
+    # or on classic Bluetooth, bt://<MAC>[/<RFCOMM channel>]
     device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
-                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
-    # Its jobs go to usblp, PyUSB or the network only
+                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
+                       re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'))
+    # Its jobs go to usblp, PyUSB, the network or Bluetooth only
     takes_usbip = False
 
     def model_of(self, device, device_id=None):
@@ -189,8 +191,14 @@ class Tspl(Driver):
                     model_shown=self.shown_as.get(model, model).split('/')[-1], sensing=True)
 
     def status(self, device, model, unconfirmed=False):
+        if device.startswith('bt://'):
+            # One switched off is not paged at every status query, it takes the radio
+            return self.noted_status(device, lambda: self._status(device, model))
+        return self._status(device, model)
+
+    def _status(self, device, model):
         path = device.removeprefix('file://')
-        if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
+        if not device.startswith(('tcp://', 'usb://', 'bt://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type=diecut.MEDIA_TYPE)
         named = self.device_name(device) or _names.get(_answer_key(device))
@@ -258,6 +266,8 @@ class Tspl(Driver):
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)
+        # Asked again at the next status query, see noted_status()
+        devices.note_answer(device)
         return ''
 
 

@@ -103,8 +103,9 @@ class Connection:
 
 
 class UsbConnection(Connection):
-    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>], or
-    shared by another device, usbip://<host>."""
+    """The printer through PyUSB, usb://<vendor>:<product>[/<serial>],
+    shared by another device, usbip://<host>, or on classic Bluetooth,
+    bt://<MAC>[/<channel>]."""
 
     def __init__(self, device: str):
         self.printer = backends.open_printer(device)
@@ -169,7 +170,7 @@ class TcpConnection(Connection):
 
 
 def connect(device: str) -> Connection:
-    if device.startswith('usb://') or usbip.is_address(device):
+    if device.startswith(('usb://', 'bt://')) or usbip.is_address(device):
         return UsbConnection(device)
     if device.startswith('tcp://'):
         return TcpConnection(device)
