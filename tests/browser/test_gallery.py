@@ -509,7 +509,15 @@ def test_a_label_printed_with_the_day_asks_in_the_templates_unless_its_date_is_s
     # Asked in the panel, the Templates stay
     editor.click('#tplPrint')
     editor.wait_for_selector('#tplAsk:not([hidden])')
-    assert editor.locator('#tplAsk button.btn').all_inner_texts() == ["Today's date", 'Same date']
+    # Under the button it answers, the main answer first, side by side where they fit, else each a line of its own
+    assert editor.locator('#tplAsk button').all_inner_texts() == ['Same date', "Today's date", 'Cancel']
+    assert 'Print again' not in editor.inner_text('#tplAsk')
+    box, same, today = (editor.locator(selector).bounding_box() for selector in ('#tplAsk', '#againSame', '#againNext'))
+    assert same['y'] == today['y'] or same['width'] == today['width'] > box['width'] - 40
+    editor.click('#againNot')
+    editor.wait_for_selector('#tplAsk[hidden]', state='attached')
+    editor.click('#tplPrint')
+    editor.wait_for_selector('#tplAsk:not([hidden])')
     with editor.expect_request('**/api/history/*/print') as request:
         editor.click('#tplAsk button:text-is("Same date")')
     assert sent(request.value)['as_before'] == '1'

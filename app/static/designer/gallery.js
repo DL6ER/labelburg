@@ -218,8 +218,8 @@ const printedDone = (entry, kept) => { announceKept(entry, kept); loadKept(); };
 function askHere(same, next, choose) {
     const box = $('#tplAsk');
     if (!box) { choose(null); return; }
-    box.innerHTML = `<b>Print again</b><span class="sp"></span><button class="btn" type="button" id="againNext">${esc(next)}</button>
-        <button class="btn primary" type="button" id="againSame">${esc(same)}</button><button class="iconbtn" type="button" id="againNot" aria-label="Close">${icon('x', '')}</button>`;
+    box.innerHTML = `<button class="btn primary" type="button" id="againSame">${esc(same)}</button><button class="btn" type="button" id="againNext">${esc(next)}</button>
+        <button class="btn ghost sm" type="button" id="againNot">Cancel</button>`;
     box.hidden = false;
     const answer = asBefore => { box.hidden = true; box.innerHTML = ''; choose(asBefore); };
     $('#againSame').onclick = () => answer(true);
