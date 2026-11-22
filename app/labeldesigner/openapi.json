@@ -3996,7 +3996,7 @@
       },
       "Tape": {
         "type": "object",
-        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
+        "description": "The tape in the printer: the one it reports, else the label size set by hand in its settings, else an assumed one. A tape the model cannot print counts as none, e.g., one set by hand for another printer at the same address. One set by hand for the same paper of another model is the model's size of it, e.g. `escpos80-180` for `escpos80` on a 180 dpi receipt printer, or `dymo102x152` for `zpl102x152` on a DYMO LabelWriter 4XL. Of a printer that measures only the length of its labels, e.g. a ZPL printer, one set by hand counts only if it has that length; with none set by hand, the only label size of that length is the one it reports.",
         "properties": {
           "id": {
             "type": "string",
@@ -4089,7 +4089,7 @@
           },
           "device_name": {
             "type": "string",
-            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS` or `Zebra GX420t` for a `Zebra/ZPL`, where its model is one for printers of many makers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
+            "description": "Maker and model a printer on USB names in its device ID, e.g. `Xprinter XP-58IIH` for an `Epson/ESC-POS`, `Zebra GX420t` for a `Zebra/ZPL` or `DYMO LabelWriter 450 Turbo` for a `DYMO/LabelWriter-450`, where its model is one for printers of many makers or for several printers; a `TSC/TSPL` printer that names none there, e.g. on the network, by the model it answers `~!T` with. The label designer shows it instead of the model. Missing where the printer names none."
           },
           "errors": {
             "type": "array",

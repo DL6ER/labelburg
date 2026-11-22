@@ -89,8 +89,8 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
-    # Whether each of its models is one for printers of many makers, whose
-    # name its status tells, see device_name()
+    # Whether each of its models is one for printers of many makers or for
+    # several printers, whose name its status tells, see device_name()
     names_devices: bool = False
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:

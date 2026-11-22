@@ -62,12 +62,13 @@ def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == [
-        'Brother', 'Epson', 'Niimbot', 'PUQU', 'TSC', 'Zebra']
+        'Brother', 'DYMO', 'Epson', 'Niimbot', 'PUQU', 'TSC', 'Zebra']
     # Once each name: not the models shown as another one
     shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
-    assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300'}
+    assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
-    for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL'])):
+    for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL']),
+                           ('DYMO', ['LabelWriter-4XL', 'LabelWriter-450', 'LabelWriter-450-Twin-Turbo'])):
         assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
@@ -101,6 +102,29 @@ def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
     designer.reload()
     open_settings(designer)
     assert designer.input_value(MODEL) == 'VC-500W'
+
+
+def test_a_dymo_labelwriter_offers_its_address_labels(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings') as answer:
+        designer.select_option(MODEL, 'DYMO/LabelWriter-450')
+    assert answer.value.ok
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'DYMO/LabelWriter-450' && labelEditor.S.tape === 'dymo28x89'")
+    sizes = '[data-card="0"] select[data-k="label_size"]'
+    offered = designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.value)')
+    assert offered == [''] + tape.takes('DYMO/LabelWriter-450') and 'dymo102x152' not in offered
+    assert designer.eval_on_selector(f'{sizes} option[value="dymo28x89"]', 'o => o.textContent') == '28 x 89 mm'
+    assert designer.input_value(sizes) == 'dymo28x89'
+    card = designer.inner_text('[data-card="0"]')
+    assert 'DYMO LabelWriter-450' in card and 'Torn off' in card
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo DYMO LabelWriter-450'
+    type_label(designer, 'Jane Doe')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'DYMO/LabelWriter-450', 'dymo28x89')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
 def test_a_model_the_server_refuses_is_taken_back(designer):
