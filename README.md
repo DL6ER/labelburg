@@ -20,6 +20,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
+| TSC | TSPL printers (USB or network): TSC printers and shipping label printers like the Rollo X1038, Marklife X4, Phomemo PM-241-BT and VEVOR Y428BT | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, also with black marks on the back or on a continuous roll, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
 Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
