@@ -10,6 +10,7 @@ import pytest
 from app.labeldesigner import refusals
 from app.labeldesigner.drivers import devices, niimbot
 from app.labeldesigner.drivers.niimbot import models, protocol
+from tests.printing.test_niimbot import B1_TAG
 
 DEVICE = 'bt://00:00:5E:00:53:21'
 
@@ -442,6 +443,18 @@ def test_print_status_unanswered_is_asked_once_more(monkeypatch):
     message, sent = printed(monkeypatch, 'H1S', ROWS_96, {0xa3: [None, p(0xb3, [0, 1, 100, 100])]})
     assert message == ''
     assert sent[-3:] == [p(0xa3, [1]), p(0xa3, [1]), p(0xf3, [1])]
+
+
+@pytest.mark.parametrize('model, answers, sent_once', [
+    # A refusal of the label type after the density taken, then the answer
+    # to the label type sent
+    ('B1', {0x21: p(0x31, [1]) + p(0x33, [0]), 0x23: p(0x33, [1]), 0x1a: p(0x1b, B1_TAG)}, 0x23),
+    # A refused start of the page after the start of the print taken
+    ('B21_L2B', {0x01: p(0x02, [1]) + p(0x04, [0])}, 0x03)])
+def test_packets_after_an_answer_answer_no_packet_sent_later(monkeypatch, model, answers, sent_once):
+    message, sent = printed(monkeypatch, model, ROWS_320, answers)
+    assert message == ''
+    assert [packet[2] for packet in sent].count(sent_once) == 1
 
 
 def test_roll_query_not_supported_is_no_roll(monkeypatch):
