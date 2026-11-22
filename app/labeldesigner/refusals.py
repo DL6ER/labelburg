@@ -33,7 +33,7 @@ SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the se
 OTHER_LABEL = 'It was made for a label this printer does not take'
 # Printed again with the numbers of Paperless it had: more labels, or copies
 # grouped otherwise, would give numbers to labels that did not have them
-SAME_NUMBERS = 'Print all its labels again, or choose Next number.'
+SAME_NUMBERS = 'Print all its labels again, or choose the next number.'
 LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'

@@ -389,7 +389,7 @@ def test_a_label_printed_again_as_it_was_counts_as_it_did(client, monkeypatch):
 
 
 def test_the_same_numbers_refused_tell_what_to_do():
-    assert refusals.SAME_NUMBERS == 'Print all its labels again, or choose Next number.'
+    assert refusals.SAME_NUMBERS == 'Print all its labels again, or choose the next number.'
 
 
 def test_a_label_printed_is_named_by_its_saved_name_else_by_its_first_line_as_printed(client):
