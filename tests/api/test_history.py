@@ -226,7 +226,7 @@ def test_a_job_is_told_from_the_history_after_a_restart(client, tmp_path):
 
 def test_the_texts_of_the_history_reach_the_client():
     for text in (print_store.NO_SUCH_ENTRY, print_store.NO_IMAGE, print_store.NOT_MADE_HERE, print_store.NOT_KEPT,
-                 print_store.NOT_CLEARED, print_store.PRINTING_AT_RESTART):
+                 print_store.NOT_CLEARED, print_store.PRINTING_AT_RESTART, print_store.LIMIT_REFUSED, refusals.OTHER_LABEL):
         assert refusals.message(ValueError(text), refusals.INVALID_INPUT) == text
 
 
@@ -235,3 +235,27 @@ def test_printed_again_it_is_cut_as_the_printer_is_set(client):
     assert client.post(f'{API}/settings', data={'printer': 'simulation', 'cut': 'last'}).status_code == 200
     again = printed(client, f'history/{job}/print', data={'printer': 'simulation'})
     assert print_store.entry(again)['printer']['cut'] == 'last'
+
+
+def webhook_job(client, monkeypatch, **values) -> str:
+    client.application.config['WEBHOOK_PASSWORD'] = 'secret'
+    state = {'errors': [], 'path': 'simulation', 'model': 'QL-800', 'media_width': 62, 'media_length': 0}
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**state, 'printers': [state], 'selected': 'simulation'})
+    return printed(client, 'webhook/print', json={'password': 'secret', 'printer': 'simulation', 'images': [base64.b64encode(png()).decode()], **values})
+
+
+def test_an_image_printed_again_prints_at_the_quality_of_the_printer(client, monkeypatch):
+    job = webhook_job(client, monkeypatch, high_res=1)
+    assert print_store.entry(job)['high_res'] is True
+    # The QL-1100 prints at 300 dpi only
+    again = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'model': 'QL-1100'})
+    assert print_queue.get(again).state == 'printed'
+    kept = print_store.entry(again)
+    assert kept['high_res'] is False and kept['shapes'][0]['width'] * 2 == print_store.entry(job)['shapes'][0]['width']
+
+
+@pytest.mark.parametrize('model', ['PT-P750W', 'Niimbot/B1', 'VC-500W'])
+def test_an_image_is_not_printed_again_on_a_printer_without_its_label(client, monkeypatch, model):
+    job = webhook_job(client, monkeypatch)
+    response = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'model': model})
+    assert (response.status_code, response.get_json()['message']) == (400, refusals.OTHER_LABEL)

@@ -29,6 +29,8 @@ from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_C
                                SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
 
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
+# A picture of the webhook or Homebox printed again on a printer that has not its label
+OTHER_LABEL = 'It was made for a label this printer does not take'
 LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
@@ -117,6 +119,7 @@ MESSAGES = (
     NOT_CLEARED,
     PRINTING_AT_RESTART,
     LIMIT_REFUSED,
+    OTHER_LABEL,
     'print_count must be greater than 0',
     *check_digit_problems(),
     *code_problems(),

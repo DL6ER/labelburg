@@ -2353,7 +2353,7 @@ def history_print(job_id):
         as_before = _whole_or(_requested('as_before'), 1) != 0
         images = [_read_image(print_store.image_path(job_id, number)) for number in range(entry.get('images', 0))]
         if entry['kind'] == 'image':
-            printer, recipe = _image_job_again(entry, images)
+            printer, recipe, images = _image_job_again(entry, images)
         else:
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             printer, data, high_res, fast = _stored_job(data)
@@ -2376,17 +2376,27 @@ def history_print(job_id):
                    labels=entry.get('labels') or 1, recipe=recipe, images=images, drawn=drawn, return_format=_requested('return_format'))
 
 
-def _image_job_again(entry: dict, images: list) -> tuple[PrinterQueue, dict]:
-    """The labels of images alone of entry on the printer of the request, as
-    they were made: of the same size, cut the same way."""
+def _image_job_again(entry: dict, images: list) -> tuple[PrinterQueue, dict, list]:
+    """The labels of images alone of entry on the printer of the request, on
+    the label size they were made for, printed and cut as set for that
+    printer. With their recipe and images."""
     device, model = _resolved_printer(_requested('printer'), _requested('model'))
-    kept = entry['printer']
-    printer = _queue(model, device, kept['label_size'])
-    printer.cut, printer.half_cut, printer.chain = kept['cut'], kept['half_cut'], kept['chain']
-    printer.leaves_first = _leaves_first(printer_settings.for_printing(_settings_of(device), model, {'leaves_first': _requested('leaves_first')}).get('leaves_first'))
-    for shape in entry['shapes']:
-        printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=entry['high_res'], fast=entry['fast'])
-    return printer, {'kind': 'image', 'shapes': entry['shapes'], 'high_res': entry['high_res'], 'fast': entry['fast']}
+    label_size = entry['printer']['label_size']
+    if label_size_problem(label_size, model):
+        raise ValueError(refusals.OTHER_LABEL)
+    given = printer_settings.for_printing(_settings_of(device), model, {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')})
+    # Images stay in color on the tapes of the VC-500W, printed at its resolution
+    high_res = _whole_or(given.get('high_res'), 0) != 0 and _palette(label_size) != 'color'
+    fast = _whole_or(given.get('fast_printing'), 0) != 0
+    printer = _queue(model, device, label_size)
+    printer.cut, printer.half_cut, printer.chain = _cutting(given.get)
+    printer.leaves_first = _leaves_first(given.get('leaves_first'))
+    # Made again at the resolution printed now, as the webhook made them
+    labels = [_image_label(images[shape['image']], label_size, LabelOrientation[shape['orientation']],
+                           IMAGE_MODE_OF[shape['content']], high_res=high_res) for shape in entry['shapes']]
+    for label in labels:
+        printer.add_label_to_queue(label, high_res=high_res, fast=fast)
+    return printer, _image_recipe(labels, high_res, fast), [label.image for label in labels]
 
 
 @bp.route('/api/history/clear', methods=['POST'])
@@ -3189,6 +3199,10 @@ def _image_label(img: Image.Image, label_size: str, label_orientation: LabelOrie
     label = _image_label_of(shape, image)
     label.shape = shape
     return label
+
+
+# The image mode of a label of an image alone by its content
+IMAGE_MODE_OF = {content.name: mode for mode, content in IMAGE_CONTENT.items()}
 
 
 def _image_label_of(shape: dict, image: Image.Image) -> SimpleLabel:
