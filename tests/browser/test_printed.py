@@ -11,7 +11,7 @@ from urllib.request import urlopen
 import pytest
 
 from app.labeldesigner import printer_settings
-from tests.browser.helpers import clear_printed
+from tests.browser.helpers import clear_printed, png
 from tests.browser.test_editor import sent, type_label, wait_for_preview
 from tests.browser.test_settings import open_settings
 
@@ -222,3 +222,34 @@ def test_a_label_printed_opens_as_the_saved_label_it_came_from(page, server):
         page.click(f'#setHist .set-hrow >> nth={row} >> [data-open]')
         page.wait_for_selector('#field .ln')
         assert page.evaluate('() => [labelEditor.S.edit.origin && labelEditor.S.edit.origin.kind, labelEditor.S.edit.origin && labelEditor.S.edit.origin.id]') == ['saved', name]
+
+
+def test_labels_of_other_programs_are_printed_again_but_not_opened(page, server):
+    with urlopen(server + '/labeldesigner/api/homebox', png(200, 100)) as r:
+        assert json.load(r)['success']
+    print_over_the_api(server, 'Flour')
+    open_settings(page, 'printed')
+    assert [row.split('\n')[0] for row in rows(page)] == ['Flour', 'Label']
+    assert page.locator('#setHist .set-hrow >> nth=0 >> [data-open]').count() == 1
+    homebox = page.locator('#setHist .set-hrow >> nth=1')
+    assert 'from Homebox' in homebox.inner_text()
+    assert homebox.locator('[data-open]').count() == 0 and homebox.locator('[data-again]').count() == 1
+
+
+def test_more_labels_printed_are_shown_when_asked(page, server):
+    def entry(number):
+        return {'id': f'e{number}', 'time': '2026-11-22T10:00:00Z', 'title': f'Jar {number}', 'labels': 1, 'copies': 1, 'from': '',
+                'from_detail': '', 'printer_name': 'Demo printer', 'state': 'printed', 'message': '', 'preview': None,
+                'again': True, 'again_asks': [], 'date_blanks': [], 'open': True}
+    asked = []
+
+    def listed(route):
+        asked.append(route.request.url)
+        older = 'before=e59' in route.request.url
+        route.fulfill(json={'enabled': True, 'entries': [entry(60)] if older else [entry(n) for n in range(60)]})
+    page.route('**/api/history?*', listed)
+    open_settings(page, 'printed')
+    assert len(rows(page)) == 60
+    page.click('#setMore')
+    page.wait_for_function("() => document.querySelectorAll('#setHist .set-hrow').length === 61")
+    assert page.locator('#setMore').count() == 0 and asked[-1].endswith('limit=60&before=e59')

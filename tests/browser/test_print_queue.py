@@ -55,6 +55,17 @@ def test_a_label_removed_in_another_tab_is_not_printed(editor):  # noqa: F811
     editor.click('#print')
     editor.wait_for_selector('[role=alertdialog]:has-text("Removed from the queue")', timeout=15000)
     assert history(editor) == [['failed', 'Removed from the queue', 'waiting']]
+    # Listed as the server keeps it
+    removed = {'id': 'j1', 'time': '2026-11-22T10:00:00Z', 'title': 'Shelf', 'labels': 1, 'copies': 1, 'from': '', 'from_detail': '',
+               'printer_name': 'Demo printer', 'state': 'removed', 'message': 'Removed from the queue', 'preview': None,
+               'again': True, 'again_asks': [], 'date_blanks': [], 'open': False}
+    editor.route('**/api/history?*', lambda route: route.fulfill(json={'enabled': True, 'entries': [removed]}))
+    editor.click('[role=alertdialog] [data-close]')
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.wait_for_selector('.thumb small:text-is("Not printed: Removed from the queue")')
+    editor.click('.thumb')
+    editor.wait_for_selector('#tplPrint:text-is("Print again")')
 
 
 @pytest.mark.parametrize('seen,state,text', [
