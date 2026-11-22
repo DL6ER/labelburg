@@ -289,3 +289,24 @@ def test_the_line_under_a_label_printed_wraps_on_a_phone(page, server):
     page.wait_for_selector('#setHist .set-hrow small')
     # Whole, from another program, not cut off
     assert page.evaluate("() => { const small = document.querySelector('#setHist .set-hrow small'); return small.scrollWidth <= small.clientWidth; }")
+
+
+def test_a_label_printed_is_told_by_the_name_the_server_gave_it(page, server):
+    open_label(page, 'Opened {{blank:Day}}', {'Day': {'type': 'date'}})
+    with page.expect_response('**/api/print') as answer:
+        page.click('#print')
+    told = answer.value.json()['title']
+    # The date as printed, not as the field holds it
+    assert told.startswith('Opened ') and '-' not in told
+    page.wait_for_selector(f'#toast:has-text("Printed 1 label: {told}")')
+    assert page.evaluate('() => labelEditor.S.history[0].told') == told
+    # Printed again with another value in Templates
+    from tests.browser.test_gallery import print_jar
+    page.click('#newLabel')
+    print_jar(page, 'Peas')
+    page.click('#templates')
+    page.click('.tpl-nav [data-cat="printed"]')
+    page.click('.tpl-grid .thumb:has-text("Jar Peas") >> nth=0')
+    page.fill('#tplFields [data-blank="What"]', 'Soup')
+    page.click('#tplPrint')
+    page.wait_for_selector('#toast:has-text("Printed 1 label: Jar Soup")')

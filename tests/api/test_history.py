@@ -430,3 +430,13 @@ def test_a_label_without_text_is_named_by_its_code_else_by_the_name_of_its_pictu
     picture = printed(client, data=dict(LABEL, print_type='image', text='[]', image=(io.BytesIO(png()), 'cat.jpg')), content_type='multipart/form-data')
     pdf = printed(client, data=dict(LABEL, print_type='image', text='[]', image=(io.BytesIO(_pdf((100, 50))), 'manual.pdf')), content_type='multipart/form-data')
     assert [entry(client, job)['title'] for job in (code, picture, pdf)] == ['Shelf 7', 'cat', 'manual']
+
+
+def test_the_answer_of_a_print_names_it_as_the_list_does(client):
+    saved = {'name': 'Spice.json', 'label_size': '62', 'text': [{'text': 'Spice {{blank:What}}', 'size': '40'}]}
+    assert client.post(f'{API}/repository/save', json=saved).status_code == 200
+    answers = [client.post(f'{API}/print', data=dict(LABEL, text=lines('Jar {{blank:What}}'), blanks=json.dumps({'What': 'Peas'}))).get_json(),
+               client.post(f'{API}/repository/print', json={'name': 'Spice', 'printer': 'simulation', 'blanks': {'What': 'Chili'}}).get_json()]
+    answers.append(client.post(f'{API}/history/{answers[0]["job"]}/print', json={'printer': 'simulation', 'blanks': {'What': 'Beans'}}).get_json())
+    assert [answer['title'] for answer in answers] == ['Jar Peas', 'Spice Chili', 'Jar Beans']
+    assert [entry(client, answer['job'])['title'] for answer in answers] == ['Jar Peas', 'Spice Chili', 'Jar Beans']

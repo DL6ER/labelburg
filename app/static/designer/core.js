@@ -1007,6 +1007,7 @@ export const savedAs = d => `as ${sizeName(d.label_size)} label`;
 // --- Printing ----------------------------------------------------------------
 
 export function entryName(e) {
+    if (e.told) return e.told;
     // Printed again from the list of the server, without its label here
     if (!e.design) return e.title || 'Label';
     const blanks = blanksOf(e.design);
@@ -1084,6 +1085,8 @@ async function sendJob(entry, printer, request, onDone, onAccepted = null) {
         try { data = await r.json(); } catch (e) { }
         // The labels the server counted, {{total}} in the previews of the entry
         if (r.ok && data.labels > 0) entry.labels = data.labels;
+        // Named by the server as the list of the labels printed names it
+        if (r.ok && data.title) entry.told = data.title;
         if (!r.ok || data.success === false) {
             entry.state = 'failed';
             entry.message = data.message || ('The printer answered ' + r.status);

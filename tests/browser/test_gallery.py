@@ -217,7 +217,8 @@ def open_another(page, way, title):
     elif way == 'printed':
         page.click('#tabs [data-tab="settings"]')
         page.click('.set-nav [data-part="printed"]')
-        page.click(f'#setHist .set-hrow:has-text("{title}") [data-open]')
+        # Listed by its first line as printed
+        page.click('#setHist .set-hrow:has-text("Other label") >> nth=0 >> [data-open]')
     else:
         page.click('#tabs [data-tab="settings"]')
         page.click('.set-nav [data-part="connections"]')
@@ -576,7 +577,7 @@ def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noq
         editor.keyboard.press('Enter')
     fields = sent(request.value)
     assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Larder'} and fields['print_count'] == '3'
-    editor.wait_for_selector('#toast:has-text("Printed 3 labels: Beans")')
+    editor.wait_for_selector('#toast:has-text("Printed 3 labels: Jar Beans Larder")')
     # The editor keeps the label it had
     assert editor.evaluate('() => labelEditor.S.edit.design.text[0].text') == ''
     # Enter opens what is not printed before

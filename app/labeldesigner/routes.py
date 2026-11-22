@@ -1009,7 +1009,8 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
         if isinstance(e, print_queue.Full):
             return _line_full(printer, str(e))
         raise
-    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, **(extra or {})}
+    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, 'title': title,
+              **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
