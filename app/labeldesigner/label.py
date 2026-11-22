@@ -1480,19 +1480,21 @@ class SimpleLabel:
     @staticmethod
     def _broken(piece: str, fits) -> list:
         """piece in parts that fit, each the longest start of what is left, at
-        least one character."""
+        least one character. Characters drawn as one, e.g. an emoji and its
+        skin tone, stay together, see _clusters()."""
         parts = []
-        while len(piece) > 1 and not fits(piece):
-            low, high = 1, len(piece) - 1
+        clusters = _clusters(piece)
+        while len(clusters) > 1 and not fits(''.join(clusters)):
+            low, high = 1, len(clusters) - 1
             while low < high:
                 middle = (low + high + 1) // 2
-                if fits(piece[:middle]):
+                if fits(''.join(clusters[:middle])):
                     low = middle
                 else:
                     high = middle - 1
-            parts.append(piece[:low])
-            piece = piece[low:]
-        return parts + [piece]
+            parts.append(''.join(clusters[:low]))
+            clusters = clusters[low:]
+        return parts + [''.join(clusters)]
 
     def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, **kwargs):
         """The bounding box of a line of text at xy, also drawn in fill if
