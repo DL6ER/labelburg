@@ -223,3 +223,19 @@ def test_labels_of_a_page_tell_which_side_runs_along(monkeypatch):
     page = Label('test20x30-2x1', (40, 30), FormFactor.DIE_CUT, (320, 240), (320, 240), 0, pieces=(2, 1, 0))
     monkeypatch.setitem(tape.SIZES, page.identifier, page)
     assert tape._long_along_tape(page.identifier)
+
+
+@pytest.mark.parametrize('model', [None, 'Unknown'])
+def test_printer_of_no_known_model_takes_each_paper_once(model):
+    from app.labeldesigner import drivers
+    from app.labeldesigner.label_names import label_name
+    takes = tape.takes(model)
+    assert 'zpl102x152' in takes and 'escpos80' in takes
+    # Not again as the sizes of the model shown as another one
+    assert not [size for size in takes if size.startswith('zpl300-') or size.endswith('-180')]
+    for driver in drivers.DRIVERS:
+        names = [label_name(tape.SIZES[size]) for size in takes if drivers.for_label(size) is driver]
+        assert len(names) == len(set(names)), type(driver).__name__
+    # A printer of that model takes its own
+    assert len([size for size in tape.takes('Zebra/ZPL-300') if size.startswith('zpl300-')]) == 24
+    assert tape.takes('Epson/ESC-POS-180') == ['escpos80-180', 'escpos58-180']
