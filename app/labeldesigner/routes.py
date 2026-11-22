@@ -2411,6 +2411,23 @@ def _date_blanks(data: dict) -> list[str]:
     return names
 
 
+def _filled_blanks(data: dict) -> dict:
+    """The values the blanks of a label are filled with: given, else their
+    default, else the first choice, else empty; those that follow the day
+    as given."""
+    blanks, fields = _blank_values(data.get('blanks')), _blank_fields(data.get('fields'))
+    filled = {}
+    for name in _blank_names(data):
+        field = fields.get(name) or {}
+        if name in blanks:
+            filled[name] = blanks[name]
+        elif field.get('default') is not None:
+            filled[name] = str(field['default'])
+        else:
+            filled[name] = str((field.get('choices') or [''])[0]) if field.get('type') == 'choice' else ''
+    return filled
+
+
 def _other_dates_now(entry: dict) -> bool:
     """Whether a label printed shows other dates or times made now, with the
     label settings of now, than as it printed, e.g. not printed earlier
@@ -2536,8 +2553,9 @@ def history_print(job_id):
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             # Values of the request for its blanks, the others as printed
             given, printed_values = _blank_values(_requested('blanks')), _blank_values(data.get('blanks'))
+            printed_data = dict(data)
             data['blanks'] = {**printed_values, **given}
-            same_values = data['blanks'] == printed_values
+            same_values = _filled_blanks(data) == _filled_blanks(printed_data)
             printer, data, high_res, fast = _stored_job(data)
             collate = entry.get('collate', True)
             order = _copies(list(range(len(images))) or [None], copies, collate)

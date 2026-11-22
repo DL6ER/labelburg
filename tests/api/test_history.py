@@ -468,3 +468,16 @@ def test_a_label_printed_is_opened_with_the_dates_it_printed_with(client):
     # The days that followed the print date as printed, the time to show the others as printed
     assert told['printed_dates'] == {'Day': day.isoformat(), 'Best': (day + datetime.timedelta(days=5)).isoformat()}
     assert told['printed_for'] == int(when)
+
+
+def test_values_sent_as_they_were_filled_in_are_the_same_values(client, monkeypatch):
+    totals, create = [], routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: (totals.append(kwargs.get('total')), create(*args, **kwargs))[1])
+    fields = {'Note': {'type': 'text'}, 'Shelf': {'type': 'text', 'default': 'Top'}, 'Kind': {'type': 'choice', 'choices': ['Dry', 'Cold']}}
+    job = printed(client, data=dict(LABEL, text=lines('Box {{counter}} of {{total}} {{blank:What}} {{blank:Note}}{{blank:Shelf}}{{blank:Kind}}'),
+                                    blanks=json.dumps({'What': 'Peas'}), fields=json.dumps(fields), print_count='3'))
+    del totals[:]
+    # As the panel of Templates sends them: also those left out, empty, the default, the first choice
+    again = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 1,
+                                                         'blanks': {'What': 'Peas', 'Note': '', 'Shelf': 'Top', 'Kind': 'Dry'}})
+    assert set(totals) == {3} and entry(client, again)['title'] == entry(client, job)['title']
