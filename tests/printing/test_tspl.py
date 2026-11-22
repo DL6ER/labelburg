@@ -20,7 +20,7 @@ from app.labeldesigner.drivers.brother import network as brother_network
 from app.labeldesigner.drivers.tspl import protocol
 from tests.helpers import make_client, outcome, without_status
 from tests.printing.test_adding import connections, identity  # noqa: F401
-from tests.printing.test_ipp import fake_printer  # noqa: F401
+from tests.printing.test_ipp import fake_printer, response  # noqa: F401
 from tests.printing.test_snmp import agent  # noqa: F401
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
@@ -637,6 +637,14 @@ def test_network_printer_known_by_its_snmp_description(fake_printer, agent, on_n
     assert (found['state']['errors'], found['state']['device_name']) == ([], 'TE200')
     # The print port only once it is known
     assert connections.index(on_network.port) > connections.index(brother_network.IPP_PORT)
+
+
+def test_tsc_known_by_snmp_where_ipp_has_no_printer(fake_printer, agent, on_network, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(reach, '_watched', {})
+    # As CUPS answers at /ipp/print, not as a computer with printers of CUPS
+    fake_printer['body'] = response(status=0x0406)
+    agent['answers'] = [{snmp.SYSTEM_DESCRIPTION: b'TSC TE200'}]
+    assert adding.identify('tcp://127.0.0.1', 'local')['model'] == 'TSC/TSPL'
 
 
 def test_network_device_of_another_maker_gets_nothing(fake_printer, agent, on_network, monkeypatch):  # noqa: F811

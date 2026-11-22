@@ -224,19 +224,17 @@ def _shared(address: str, keep: bool) -> dict:
     return found
 
 
-def _ipp_identity(host: str) -> dict:
-    """What a network printer tells over IPP, empty where it does not answer.
-    ValueError where IPP answers without a printer at /ipp/print, as CUPS."""
+def _ipp_identity(host: str) -> tuple[dict, bool]:
+    """What a network printer tells over IPP, empty where it does not answer,
+    and whether IPP answers without a printer at /ipp/print, as CUPS."""
     try:
-        return ipp.get_printer_attributes(host, network.IPP_PORT, attributes=ASKED_OVER_IPP)
+        return ipp.get_printer_attributes(host, network.IPP_PORT, attributes=ASKED_OVER_IPP), False
     except reach.NotAllowed:
         raise
     except ipp.IPPError as e:
-        if e.status == ipp.NOT_FOUND:
-            raise ValueError(QUEUES) from e
-        return {}
+        return {}, e.status == ipp.NOT_FOUND
     except (OSError, http.client.HTTPException):
-        return {}
+        return {}, False
 
 
 def _described(host: str) -> str | None:
@@ -263,12 +261,12 @@ def _on_network(address: str, host: str) -> dict:
     device_id = ''
     if not state or state['model'] == 'Unknown':
         state = None
-        told = _ipp_identity(host)
+        told, elsewhere = _ipp_identity(host)
         device_id = str(told.get('printer-device-id') or '')
         named = str(told.get('printer-make-and-model') or '').removeprefix('Brother ').strip()
         model = told_model(device_id) or (named if named in MODELS else None) or _described(host)
         if model is None:
-            return _other_printer(host, told, device_id)
+            return _other_printer(host, told, device_id, elsewhere)
     else:
         model = state['model']
     found = f"{'vc500w' if model == tapes.MODEL else 'tcp'}://{where}"
@@ -277,13 +275,14 @@ def _on_network(address: str, host: str) -> dict:
     return _found(found, 'network', model, device_id, state or _state(found, model))
 
 
-def _other_printer(host: str, told: dict, device_id: str) -> dict:
+def _other_printer(host: str, told: dict, device_id: str, elsewhere: bool) -> dict:
     """A network printer no driver claims that told over IPP that it prints
     labels and takes a format of "Other printer", at the address it
-    answered at. An office printer is one only given as ipp://."""
+    answered at. An office printer is one only given as ipp://. elsewhere:
+    IPP answers there for printers at other paths only, as CUPS."""
     model = other.offered(told) if told and other.tells_labels(told) else None
     if model is None:
-        raise ValueError(NO_PRINTER)
+        raise ValueError(QUEUES if elsewhere else NO_PRINTER)
     port = '' if network.IPP_PORT == ipp.PORT else f':{network.IPP_PORT}'
     address = f"ipp://{f'[{host}]' if ':' in host else host}{port}{ipp.DEFAULT_PATH}"
     return _found(address, 'network', model, device_id, other.told_status(address, model, told))
