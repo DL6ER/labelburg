@@ -14,6 +14,8 @@ from .drivers.labels import Label, whole
 # dots only, every how many dots of them are printed
 CUT_GRAY = 190
 CUT_DOTS = 4
+# mm by which labels of the same size may differ, e.g. 102 x 51 mm and 4 x 2 in
+SAME_SIZE = 0.5
 
 
 def per_sheet(label: Label) -> int:
@@ -41,6 +43,11 @@ def piece(label: Label) -> Label:
     dots = (round(grid.size[0] * across), round(grid.size[1] * along))
     return replace(label, tape_size=tuple(whole(mm) for mm in grid.size), dots_total=dots, dots_printable=dots,
                    grid=None, pieces=None)
+
+
+def same_size(label: Label, other: Label) -> bool:
+    """Whether one label of each page is of the same size, see SAME_SIZE."""
+    return all(abs(a - b) <= SAME_SIZE for a, b in zip(piece(label).tape_size, piece(other).tape_size))
 
 
 def lying(label: Label, image: Image.Image) -> bool:
@@ -160,7 +167,7 @@ def _mm(value: float) -> int | float:
     return whole(round(value, 1))
 
 
-def _boxes(label: Label, is_lying: bool) -> tuple[tuple, list[tuple]]:
+def boxes(label: Label, is_lying: bool) -> tuple[tuple, list[tuple]]:
     """The page and its labels in mm as the label designer draws them, in
     the order they are filled, see fill_state()."""
     width, length = piece(label).tape_size
@@ -170,12 +177,12 @@ def _boxes(label: Label, is_lying: bool) -> tuple[tuple, list[tuple]]:
         return sheet, [(grid.left + col * grid.step[0], grid.top + row * grid.step[1], width, length)
                        for row in range(grid.rows) for col in range(grid.columns)]
     scale = sheet[0] / label.dots_total[0]
-    boxes = [(x * scale, y * scale, width, length) for x, y in spots(label, is_lying)]
+    placed = [(x * scale, y * scale, width, length) for x, y in spots(label, is_lying)]
     if is_lying:
         # Turned clockwise, the end printed first is on the right
-        boxes = [(sheet[1] - y - h, x, h, w) for x, y, w, h in boxes]
+        placed = [(sheet[1] - y - h, x, h, w) for x, y, w, h in placed]
         sheet = sheet[::-1]
-    return sheet, boxes
+    return sheet, placed
 
 
 def fill_state(label: Label, is_lying: bool, copies: int, per_copy: int, limit: int, start: int = 1) -> dict | None:
@@ -185,11 +192,11 @@ def fill_state(label: Label, is_lying: bool, copies: int, per_copy: int, limit: 
     fill it, None where it is full or that would be more than limit labels.
     The copies start at label start of the first page; of a sheet of paper
     also where they start and on how many sheets they are. None where a
-    label size has one label to a page."""
+    label size has one label to a page, but a sheet of paper."""
     per = per_sheet(label)
-    if per == 1:
+    if per == 1 and not is_paper(label):
         return None
-    sheet, boxes = _boxes(label, is_lying)
+    sheet, placed = boxes(label, is_lying)
     before = start - 1
     filled = (before + copies * per_copy - 1) % per + 1
     fill = None
@@ -198,7 +205,7 @@ def fill_state(label: Label, is_lying: bool, copies: int, per_copy: int, limit: 
         fill = next((more for more in range(copies + 1, copies + per + 1) if (before + more * per_copy) % per == 0), None)
         if fill is not None and fill * per_copy > limit:
             fill = None
-    state = {'size': [_mm(v) for v in sheet], 'labels': [[_mm(v) for v in box] for box in boxes], 'filled': filled, 'fill': fill}
+    state = {'size': [_mm(v) for v in sheet], 'labels': [[_mm(v) for v in box] for box in placed], 'filled': filled, 'fill': fill}
     if is_paper(label):
         state.update(start=start, sheets=(before + copies * per_copy - 1) // per + 1)
     return state

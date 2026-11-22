@@ -5,7 +5,8 @@ images as large as the label, in the first format of documents.FORMATS the print
 made at its resolution, 203 or 300 dpi. The printer cuts or tears them off
 as it is set up. Where it tells its loaded media, e.g. in LPrint, that is
 the roll. Its status is its printer-state and the reasons for it, a job
-ends as its job-state tells."""
+ends as its job-state tells. Office printers, shown as "Office printer",
+print sheets of labels (catalog.py), each sheet a page."""
 
 import http.client
 import logging
@@ -19,25 +20,31 @@ from ... import ipp
 from .. import bitmap, devices, diecut, dymo
 from ..base import Driver, network_status, shown
 from ..labels import Label
-from . import documents
+from . import catalog, documents
 
 logger = logging.getLogger(__name__)
 
-# Of 300 dpi, for printers that do not tell, and of 203 dpi
-MODELS = ('Other/IPP', 'Other/IPP-203')
-DPI = {MODELS[0]: 300, MODELS[1]: 203}
+# Label printers of 300 dpi, for printers that do not tell, and of 203 dpi,
+# and office printers
+LABEL_MODELS = ('Other/IPP', 'Other/IPP-203')
+OFFICE = 'Other/Office'
+MODELS = (*LABEL_MODELS, OFFICE)
+DPI = {LABEL_MODELS[0]: 300, LABEL_MODELS[1]: 203, OFFICE: catalog.DPI}
 SHOWN = 'Other printer'
+OFFICE_SHOWN = 'Office printer'
 # The common die-cut labels and DYMO's, which LPrint drives a LabelWriter on;
 # no printhead limits them
 SIZES = diecut.SIZES + tuple(size for size in (*dymo.KINDS, *dymo.WIDE) if size not in diecut.SIZES)
 WIDEST = max(width for width, _ in SIZES)
 # The names of the 300 dpi sizes are the shorter ones, it is the default
-LABELS = tuple(label for model, prefix in zip(MODELS, ('ipp', 'ipp203-'))
+LABELS = tuple(label for model, prefix in zip(LABEL_MODELS, ('ipp', 'ipp203-'))
                for label in diecut.labels(prefix, DPI[model], diecut.dots(WIDEST, DPI[model]), (model,), SIZES))
 # mm a size told in whole mm may be off from one of SIZES it is: 1-1/8 x
 # 3-1/2 in are 29 x 89 mm, DYMO's 28 x 89 mm address labels
 SIZE_TOLERANCE = 1
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut ({SHOWN})' for label in LABELS}
+SHEETS = tuple(catalog.label(layout, OFFICE) for layout in catalog.LAYOUTS)
+NAMES.update((catalog.identifier(layout), catalog.name(layout)) for layout in catalog.LAYOUTS)
 
 # What a printer is asked before a job: its state, the formats it takes and
 # its loaded media; before it is added also its resolution
@@ -101,8 +108,8 @@ def offered(attributes: dict) -> str | None:
     """The model a printer with the attributes is added as, the one of the
     resolution nearest to its own, see OFFERED. None where it takes none of
     the formats labels are sent in."""
-    dpi = dpi_of(attributes.get('printer-resolution-default')) or DPI[MODELS[0]]
-    model = min(MODELS, key=lambda model: abs(DPI[model] - dpi))
+    dpi = dpi_of(attributes.get('printer-resolution-default')) or DPI[LABEL_MODELS[0]]
+    model = min(LABEL_MODELS, key=lambda model: abs(DPI[model] - dpi))
     return model if documents.chosen(attributes, DPI[model]) else None
 
 
@@ -277,16 +284,28 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
             return NO_ANSWER
 
 
+def _sheet_for(label_size: str) -> str:
+    """The sheet of labels a label made for label_size prints on: the first
+    one of more labels of its size, see sheets.same_size(), else label_size."""
+    from ... import sheets
+    from ...label_names import label_of
+    made_for = label_of(label_size)
+    if made_for is None or made_for in SHEETS or made_for.tape_size[1] == 0:
+        return label_size
+    return next((sheet.identifier for sheet in SHEETS if sheets.per_sheet(sheet) > 1 and sheets.same_size(sheet, made_for)),
+                label_size)
+
+
 class Ipp(Driver):
     # Named "Other printer"
     vendor = 'Other'
     models = MODELS
-    labels = LABELS
+    labels = LABELS + SHEETS
     label_names = NAMES
-    # Both are shown alike, by what they are, not by a maker, and never as
-    # a model of the demo printer
-    shown_as = {model: 'Other/printer' for model in MODELS}
-    names = {model: SHOWN for model in MODELS}
+    # Both label printers are shown alike, by what they are, not by a maker,
+    # and never as a model of the demo printer
+    shown_as = {model: 'Other/printer' for model in LABEL_MODELS}
+    names = {**{model: SHOWN for model in LABEL_MODELS}, OFFICE: OFFICE_SHOWN}
     # ipp://<host>[:<port>][/<path>], ipps:// alike, cups://<queue>
     device_patterns = (re.compile(rf'ipps?://[A-Za-z0-9.-]+(:\d{{1,5}})?({ipp.PATH})?'),
                        re.compile(rf'ipps?://\[[0-9A-Fa-f:.]+\](:\d{{1,5}})?({ipp.PATH})?'),
@@ -306,18 +325,20 @@ class Ipp(Driver):
         if model in MODELS:
             return model
         if model == 'Unknown':
-            return MODELS[0]
+            return LABEL_MODELS[0]
         raise devices.OtherPrinterOnly()
 
     def fits(self, label, model):
-        return label in LABELS and model in label.models
+        return label in self.labels and model in label.models
 
     def label_for(self, label_size, model):
+        if model == OFFICE:
+            return _sheet_for(label_size)
         # ipp102x152 and ipp203-102x152 are the same labels, also as zpl102x152
         return diecut.label_for(label_size, LABELS, model)
 
     def dpi(self, high_res):
-        return DPI[MODELS[0]]
+        return DPI[LABEL_MODELS[0]]
 
     def label_dpi(self, label):
         return DPI[label.models[0]], DPI[label.models[0]]
@@ -327,6 +348,10 @@ class Ipp(Driver):
 
     def capabilities(self, model):
         # Cut or torn off as the printer is set up, the top of a label leaves it first
+        if model == OFFICE:
+            # Sheets of paper, its top leaves it first
+            return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True, sheets=True,
+                        model_shown=OFFICE_SHOWN)
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, cut_on_printer=True,
                     leaves_turned=True, model_shown=self.shown_as[model].split('/')[-1])
 

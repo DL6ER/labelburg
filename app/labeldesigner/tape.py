@@ -37,9 +37,9 @@ class Tape:
 
 def _takes(size_id: str, model) -> bool:
     """Whether a printer takes a label size, any size that has printers if
-    no label lists its model."""
+    no label lists its model, but sheets of labels for office printers."""
     known = bool(model) and model in _LISTED
-    return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id])
+    return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id]) and not sheets.is_paper(SIZES[size_id])
 
 
 def _shown_as_another(size_id: str) -> bool:
@@ -206,10 +206,13 @@ def fits(size_id: str, tape: Tape) -> bool:
     """Whether a label of this size is on the tape as it is: of the same
     size, a black one also on a black and red roll, one for black and red
     where the printer cannot tell whether its roll has red, also one for the
-    same paper of another model."""
+    same paper of another model. On a sheet of labels, or for one, a label
+    of the size of one of its labels."""
     if size_id == tape.id:
         return True
     a, b = SIZES.get(size_id), SIZES.get(tape.id)
+    if a and b and (sheets.is_paper(a) or sheets.is_paper(b)):
+        return a.form_factor == b.form_factor and sheets.same_size(a, b)
     return bool(a and b and a.form_factor == b.form_factor
                 and tuple(a.tape_size) == tuple(b.tape_size) and (a.color != 1 or tape.red_unknown))
 
