@@ -67,7 +67,8 @@ def test_the_demo_printer_offers_every_model(designer):
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
-    assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == [
+        'B1', 'B1_PRO', 'B21_C2B', 'B21_PRO', 'D11_H', 'D101', 'D110_M', 'M2_H', 'N1']
 
 
 def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
