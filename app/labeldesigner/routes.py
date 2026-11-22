@@ -2427,7 +2427,8 @@ def history_print(job_id):
             if len(order) > current_app.config['PRINT_MAX_COUNT']:
                 raise ValueError(f"A print job must not have more than {current_app.config['PRINT_MAX_COUNT']} labels, "
                                  f"{copies} copies would be {len(order)}")
-            if as_before and entry.get('asn') is not None and len(order) > len(entry['order']):
+            # Each number on the label it was printed on, none that was not printed
+            if as_before and entry.get('asn') is not None and order != entry['order'][:len(order)]:
                 raise ValueError(refusals.SAME_NUMBERS)
             # Kept apart from the label: printed again, it asks again
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None

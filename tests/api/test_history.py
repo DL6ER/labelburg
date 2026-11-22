@@ -327,3 +327,18 @@ def test_a_picture_printed_again_and_again_keeps_its_copies(client, monkeypatch)
     again = printed(client, f'history/{three}/print', data={'printer': 'simulation'})
     assert [(entry(client, each)['labels'], entry(client, each)['copies']) for each in (three, again)] == [(3, 3), (3, 3)]
     assert len(print_store.entry(again)['shapes']) == 1
+
+
+@pytest.mark.parametrize('collate, allowed', [('1', True), ('0', False)])
+def test_the_same_numbers_go_only_on_the_labels_that_had_them(client, collate, allowed):
+    # Two files, three copies: as sets A B A B A B, grouped A A A B B B
+    upload = dict(LABEL, print_type='image_qrcode_text', code_text='{{asn}}', text=lines('ASN{{asn:5}}'), print_count='3', collate=collate,
+                  image=[(io.BytesIO(png()), 'a.png'), (io.BytesIO(png(color=255)), 'b.png')])
+    job = printed(client, data=upload, content_type='multipart/form-data')
+    response = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '1'})
+    if allowed:
+        assert response.status_code == 200 and print_store.entry(response.get_json()['job'])['order'] == [0, 1]
+    else:
+        assert (response.status_code, response.get_json()['message']) == (400, refusals.SAME_NUMBERS)
+    fresh = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '1', 'as_before': '0'})
+    assert fresh.status_code == 200
