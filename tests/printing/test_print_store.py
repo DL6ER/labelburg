@@ -425,3 +425,18 @@ def test_the_folders_never_show_up_with_the_saved_labels(server):
         assert server.get(f'{API}/repository/load', query_string={'name': name}).status_code == 404, name
         assert server.post(f'{API}/repository/print', json={'name': name}).status_code == 404, name
     assert server.get(f'{API}/homebox/.print-history').status_code == 404
+
+
+def test_a_file_of_the_history_is_named_by_an_id_only(store):
+    print_store.queued(rec := record(), [IMAGE], b'png')
+    print_store.ended(rec, 'printed', '', keep=True)
+    (store / 'secret-preview.png').write_bytes(b'png')
+    assert print_store.preview_path('a1') and print_store.image_path('a1', 0)
+    for job_id in ('../secret', '..', '', 'a1/../a1'):
+        assert print_store.preview_path(job_id) is None and print_store.image_path(job_id, 0) is None
+
+
+def test_files_a_crash_left_half_written_go(store):
+    (store / print_store.HISTORY / '.0123.tmp').write_bytes(b'half')
+    print_store.start(str(store))
+    assert files(store / print_store.HISTORY) == []

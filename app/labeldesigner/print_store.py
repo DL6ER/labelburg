@@ -12,6 +12,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -394,7 +395,8 @@ def _compact():
         _write(_history_path(HISTORY_FILE), ''.join(line for _, line in kept).encode('utf-8'))
     ids = {entry['id'] for entry, _ in kept}
     for name in os.listdir(_history_path('')):
-        if name.endswith('.png') and name.split('-')[0] not in ids:
+        # Also files a crash left half written
+        if name.endswith('.tmp') or name.endswith('.png') and name.split('-')[0] not in ids:
             with contextlib.suppress(OSError):
                 os.remove(_history_path(name))
     _lines = len(kept)
@@ -444,15 +446,20 @@ def history_folder() -> str:
     return _history_path('')
 
 
+def _kept_file(name: str, job_id: str) -> str | None:
+    """The file name of the history, None where it is not kept. job_id may
+    come from an address, it names no other file."""
+    path = _history_path(name) if _base is not None and re.fullmatch(r'\w{1,64}', job_id) else None
+    return path if path and os.path.exists(path) else None
+
+
 def image_path(job_id: str, number: int) -> str | None:
     """The file of an image of an entry, None where it is not kept."""
-    path = _history_path(image_name(job_id, number)) if _base is not None else None
-    return path if path and os.path.exists(path) else None
+    return _kept_file(image_name(job_id, number), job_id)
 
 
 def preview_path(job_id: str) -> str | None:
-    path = _history_path(preview_name(job_id)) if _base is not None else None
-    return path if path and os.path.exists(path) else None
+    return _kept_file(preview_name(job_id), job_id)
 
 
 def images_kept(entry: dict) -> bool:

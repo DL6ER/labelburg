@@ -2272,7 +2272,7 @@ def history_preview(job_id):
     # Read for each row of the list, the history file is not
     if not _keeping():
         return _fail(print_store.NOT_KEPT, 404)
-    path = print_store.preview_path(job_id) if re.fullmatch(r'\w{1,64}', job_id) else None
+    path = print_store.preview_path(job_id)
     if path is None:
         return _fail(print_store.NO_SUCH_ENTRY, 404)
     return send_file(path, mimetype='image/png')
