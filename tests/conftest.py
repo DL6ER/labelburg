@@ -11,13 +11,19 @@ from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
 
 
+LABELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'labels')
+
+
 @pytest.fixture(scope='session', autouse=True)
 def no_print_store():
     """Print jobs and printed labels are kept on disk only where a test opens
     the store, never in the labels of the working tree."""
+    kept = [os.path.join(LABELS, name) for name in (print_store.QUEUE, print_store.HISTORY)]
+    before = [os.path.exists(path) for path in kept]
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(print_store, 'ENABLED', False)
         yield
+    assert [os.path.exists(path) for path in kept] == before, 'A test kept print jobs in the labels of the working tree'
 
 
 @pytest.fixture(autouse=True)
