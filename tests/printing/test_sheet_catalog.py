@@ -164,3 +164,14 @@ def test_labels_of_other_printers_go_on_a_sheet_of_their_size():
 def test_label_sizes_of_a_sheet_compare_one_label_each():
     assert sheets.same_size(SIZES['sheet-5163'], SIZES['ipp102x51'])
     assert not sheets.same_size(SIZES['sheet-l7160'], SIZES['sheet-l7159'])
+
+
+def test_label_goes_on_the_sheet_assumed_where_none_is_chosen():
+    unknown = tape.in_printer({}, 'Other/Office', '', '62')
+    assert (unknown.id, unknown.known) == ('sheet-a4', False)
+    assert tape.on_tape({'label_size': '62', 'orientation': 'standard'}, unknown)['label_size'] == 'sheet-a4'
+    # A sheet of the printer stays, a label of the size of one goes on it
+    assert not tape.moves('sheet-l7160', unknown)
+    assert tape.on_tape({'label_size': 'ipp102x51', 'orientation': 'standard'}, unknown)['label_size'] == 'sheet-5163'
+    # Label printers that do not tell their tape keep labels as they are
+    assert not tape.moves('62', tape.in_printer({}, 'Zebra/ZPL', '', '62'))

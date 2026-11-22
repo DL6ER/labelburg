@@ -6,12 +6,13 @@ import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, asksLength, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter, cutShort,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, SIZES, isPaper
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
 import { queuePage } from './queue.js';
 import { calibrationHTML, openCalibration, dismissCalibration } from './calibration.js';
+import { sheetHooks } from './sheet.js';
 
 const PARTS = [['printers', 'Printers', 'printer'], ['queue', 'Print queue', 'queue'], ['labels', 'Labels', 'tag'], ['printed', 'Printed labels', 'clock'],
     ['connections', 'Connections', 'link'], ['about', 'About', 'info']];
@@ -120,6 +121,21 @@ function tapeHTML(p) {
         <small class="${t.manual || isDemo(p) || asks ? 'muted' : 'set-warn'}">${esc(note)}</small></div>`;
 }
 
+// The sheets of labels of an office printer, A4 before US Letter, none
+// shown as chosen until one is
+function sheetsHTML(p) {
+    const t = tapeOf(p), chosen = tapesSaving[p.path] > 0 ? kept(p).label_size || '' : t.manual || isDemo(p) ? t.id : '';
+    const takes = (p.takes || []).filter(isPaper), pages = [...new Set(takes.map(id => SIZES[id].sheet.page))];
+    return `<div class="set-stack"><select class="in set-sel" data-k="label_size" aria-label="Sheets in ${esc(printerLabel(p))}">
+            <option value=""${chosen ? '' : ' selected'} disabled>Choose the number on the pack</option>${pages.map(page => `<optgroup label="${esc(page)}">${takes
+                .filter(id => SIZES[id].sheet.page === page).map(id => `<option value="${esc(id)}"${id === chosen ? ' selected' : ''}>${esc(sizeName(id))}</option>`).join('')}</optgroup>`).join('')}</select>
+        <small class="muted">The number is on the pack.</small></div>`;
+}
+function paperHTML(p) {
+    return `<div class="set-stack">${seg('cut_lines', [['0', 'Label sheets'], ['1', 'Plain paper']], kept(p).cut_lines === '1' ? '1' : '0', 'Paper')}
+        <small class="muted">Plain paper gets thin lines to cut along.</small></div>`;
+}
+
 // The demo printer prints as any model, grouped by maker, e.g. QL-500 before QL-1100
 function modelHTML(p) {
     const groups = new Map();
@@ -178,7 +194,7 @@ function cuttingHTML(p) {
 }
 
 function cardHTML(p, i) {
-    const st = printerState(p), name = printerLabel(p);
+    const st = printerState(p), name = printerLabel(p), office = capsOf(p.model).sheets;
     if (unreachable(p) && !shownAnyway.has(cardKey(p))) {
         return `<section class="set-card off" data-card="${esc(i)}"><div class="set-collapsed">
             <span class="d bad"></span><b>${esc(name)}</b><span class="muted grow" title="${esc(st.text)}">cannot be reached</span>
@@ -194,18 +210,18 @@ function cardHTML(p, i) {
         <div class="set-card-h"><span class="d ${esc(st.cls)}"></span>
             <div class="grow"><b>${esc(name)}</b><small class="muted">${esc(sub)}</small>${warns}</div>
             ${unreachable(p) ? '<button class="btn ghost sm" type="button" data-hide>Hide settings</button>' : ''}
-            ${removeHTML(p)}<button class="btn soft sm" type="button" data-test${unreachable(p) ? ' disabled title="The printer cannot be reached"' : ' title="A label that shows which end leaves the printer first"'}>${icon('printer')}Print a test label</button></div>
+            ${removeHTML(p)}${office ? '' : `<button class="btn soft sm" type="button" data-test${unreachable(p) ? ' disabled title="The printer cannot be reached"' : ' title="A label that shows which end leaves the printer first"'}>${icon('printer')}Print a test label</button>`}</div>
         <div class="set-grid">
             ${isDemo(p) ? `<span class="k">Model</span>${modelHTML(p)}` : ''}
-            <span class="k">Tape</span>${tapeHTML(p)}
+            ${office ? `<span class="k">Sheets</span>${sheetsHTML(p)}<span class="k">Paper</span>${paperHTML(p)}` : `<span class="k">Tape</span>${tapeHTML(p)}
             ${capsOf(p.model).sensing ? `<span class="k">Roll</span>${sensingHTML(p)}` : ''}
             ${capsOf(p.model).two_rolls ? `<span class="k">Roll</span>${sideHTML(p)}` : ''}
             <span class="k">Quality</span>${qualityHTML(p)}
             <span class="k">Cutting</span>${cuttingHTML(p)}
             <span class="k">Leaves first</span><div class="set-stack">${seg('leaves_first', [['top', 'Top'], ['bottom', 'Bottom']], leavesFirst(printerCaps(p), p), 'Leaves the printer first')}
-                <small class="muted">The end that comes out first, e.g. to stick labels on as they come out. The test label shows it.</small></div>
+                <small class="muted">The end that comes out first, e.g. to stick labels on as they come out. The test label shows it.</small></div>`}
             ${capsOf(p.model).calibration ? `<span class="k">Position</span><div class="set-stack">${calibrationHTML(p)}
-                <small class="muted">Labels that come out off to one side are lined up with a calibration label.</small></div>` : ''}
+                <small class="muted">${office ? 'If labels print off their place.' : 'Labels that come out off to one side are lined up with a calibration label.'}</small></div>` : ''}
         </div>
         ${same.length ? `<p class="set-foot muted small">${esc(same.join(', '))} ${same.length > 1 ? 'are' : 'is'} the same device and ${same.length > 1 ? 'share' : 'shares'} these settings.</p>` : ''}
     </section>`;
@@ -261,7 +277,7 @@ function bindCards(box) {
 // asks what answers there before it adds anything, ADD_PRINTERS of its
 // configuration says where it may look.
 const EXAMPLES = [['usbip://192.168.1.50', 'USB printer on another device'], ['tcp://192.168.1.60', 'Network printer'],
-    ['vc500w://192.168.1.70', 'VC-500W'], ['ipp://192.168.1.80/ipp/print', 'Other printer']];
+    ['vc500w://192.168.1.70', 'VC-500W'], ['ipp://192.168.1.80/ipp/print', 'Other printer'], ['ipp://192.168.1.90/ipp/print', 'Office printer']];
 const adding = { mode: '', allows: '', unused: [], address: '', name: '', asking: false, found: null, error: '' };
 const removeHTML = p => p.added ? `<button class="btn ghost sm" type="button" data-remove title="Remove the printer added here">${icon('trash')}Remove</button>` : '';
 
@@ -420,6 +436,7 @@ async function removePrinter(p) {
 // Shown at once, then kept on the server:
 // only the settings changed go there, another browser may change others
 const COMMON = ['quality'];
+sheetHooks.save = (p, changes) => saveSettings(p, changes);
 function saveSettings(p, changes) {
     const printers = [...new Set([S.printer, ...S.printers].filter(Boolean))];
     const before = new Map(printers.map(o => [o.path, o.settings]));
@@ -443,6 +460,8 @@ function saveSettings(p, changes) {
         answered();
         if (!r.ok) throw new Error(answer.message || 'The settings could not be saved');
         const model = 'demo_model' in changes;
+        // Plain paper names the sheet otherwise in the line under the label
+        if ('cut_lines' in changes) printerChanged();
         if (!tape && !model && !('sensing' in changes)) return;
         // The tape the server finds now, the status of all printers follows.
         // Another model comes with a roll and cutting it takes.

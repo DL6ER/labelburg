@@ -242,6 +242,22 @@ small, .small { font-size: 12px; }
 .sheetnote .sheet { flex: none; position: relative; box-shadow: 0 0 0 1px #b3b3b3; background: #fff repeating-linear-gradient(45deg, #d5d8dc 0 2px, #fff 2px 4px); }
 .sheetnote .sheet i { position: absolute; box-sizing: border-box; border: 1px dashed #b3b3b3; background: #fff; }
 .sheetnote .sheet i.on { background: #3a3f45; border: 1px solid #fff; }
+/* A sheet of labels of an office printer: the labels of this print dark,
+   those used before hatched, on white paper in both themes */
+.sheet.office { position: relative; flex: none; background: #fff; box-shadow: 0 0 0 1px #b3b3b3; }
+.sheetnote .sheet.office, .sheet.office.big { background: #fff; }
+.sheet.office i, .sheet.office button { position: absolute; box-sizing: border-box; border: 1px solid #c3c7cc; background: #fff; padding: 0; margin: 0; }
+.sheet.office .used { background: repeating-linear-gradient(45deg, #d5d8dc 0 2px, #fff 2px 4px); }
+.sheet.office .on { background: #3a3f45; border-color: #3a3f45; }
+.sheet.office button { cursor: pointer; min-height: 0; }
+.sheet.office button:hover, .sheet.office button:focus-visible { border: 2px solid var(--select); }
+.sheetbtn { display: flex; border: 0; background: none; padding: 0; cursor: pointer; }
+.sheetnote.warn { color: var(--warn); }
+.sheet-layer { z-index: 45; }
+.sheet-dialog .sh-row { display: flex; align-items: center; gap: 10px; }
+.sheet-dialog .sh-start { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.sheet-dialog .sh-at { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.sheet-dialog .sh-at .in.num { width: 64px; display: inline-block; }
 .picks { position: absolute; inset: 0; line-height: normal; }
 /* The labels of a page, cut apart, and the gap between lanes */
 .pagecuts { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
