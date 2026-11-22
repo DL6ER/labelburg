@@ -6,6 +6,7 @@ import json
 import os
 import random
 import time
+from urllib.request import urlopen
 
 import pytest
 from PIL import Image
@@ -441,31 +442,65 @@ def print_jar(page, what, copies=1):
     page.wait_for_function("() => labelEditor.S.history.every(h => h.state !== 'printing')")
 
 
-def test_labels_printed_are_a_group_of_templates(editor, server):  # noqa: F811
+def test_labels_printed_here_are_a_group_of_templates(editor, server):  # noqa: F811
     clear_printed(server)
     print_jar(editor, 'Peas', copies=2)
     editor.click('#newLabel')
     editor.click('#newDiscard')
     editor.click('#templates')
-    editor.wait_for_selector('.tpl-nav [data-cat="printed"] small:text-is("1")')
+    editor.wait_for_selector('.tpl-nav [data-cat="printed"]:has-text("Printed")')
     editor.click('.tpl-nav [data-cat="printed"]')
     editor.click('.tpl-grid .thumb:has-text("Peas")')
-    # As it was printed, printed again by the server
+    # With its values and copies, printed again as it was
     editor.wait_for_selector('#tplPrint:has-text("Print again")')
-    assert editor.locator('#tplFields').count() == 0 and editor.locator('#tplCopies').count() == 0
-    assert editor.inner_text('#tplDetail p.muted').startswith('2 x, ')
+    assert editor.input_value('#tplFields [data-blank="What"]') == 'Peas'
+    assert editor.input_value('#tplCopies') == '2'
     with editor.expect_request('**/api/history/*/print') as request:
         editor.click('#tplPrint')
-    assert sent(request.value)['as_before'] == '1'
+    fields = sent(request.value)
+    assert json.loads(fields['blanks'])['What'] == 'Peas' and fields['print_count'] == '2'
     editor.wait_for_selector('#toast:has-text("Printed 2 labels: Peas")')
-    editor.wait_for_selector('.tpl-nav [data-cat="printed"] small:text-is("2")')
-    # And opened in the editor with its values
-    editor.click('.tpl-grid .thumb:has-text("Peas") >> nth=0')
+    # And opened in the editor with them
     editor.click('#tplOpen')
     editor.wait_for_selector('.tpl', state='detached')
     assert editor.evaluate('() => [labelEditor.S.edit.design.text[0].text, labelEditor.S.edit.values.What]') == ['Jar {{blank:What}}', 'Peas']
     editor.goto(editor.url.split('#')[0] + '#templates/printed')
     editor.wait_for_selector('.tpl-nav [data-cat="printed"].on')
+
+
+def test_values_typed_for_a_label_printed_before_leave_it_as_printed(editor, server):  # noqa: F811
+    clear_printed(server)
+    print_jar(editor, 'Peas', copies=2)
+    editor.click('#newLabel')
+    editor.click('#newDiscard')
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.click('.tpl-grid .thumb:has-text("Peas")')
+    editor.fill('#tplFields [data-blank="What"]', 'Soup')
+    editor.keyboard.press('Escape')
+    editor.wait_for_selector('.tpl', state='detached')
+    assert editor.evaluate('() => labelEditor.S.history[0].values') == {'What': 'Peas'}
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.click('.tpl-grid .thumb:has-text("Peas")')
+    editor.wait_for_selector('#tplFields [data-blank="What"]')
+    assert editor.input_value('#tplFields [data-blank="What"]') == 'Peas'
+
+
+def test_a_picture_of_another_program_printed_again_takes_copies(editor, server):  # noqa: F811
+    clear_printed(server)
+    with urlopen(server + '/labeldesigner/api/homebox', png(200, 100)) as r:
+        assert json.load(r)['success']
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.click('.tpl-grid .thumb >> nth=0')
+    editor.wait_for_selector('#tplCopies')
+    assert editor.locator('#tplFields, #tplOpen').count() == 0
+    editor.click('.tpl-print [data-cp="1"]')
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplPrint')
+    assert sent(request.value)['print_count'] == '2'
+    editor.wait_for_selector('#toast:has-text("Printed 2 labels")')
 
 
 def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noqa: F811

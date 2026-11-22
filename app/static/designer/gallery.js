@@ -7,7 +7,7 @@ import {
     $, $$, esc, icon, clone, debounce, toast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
     savedItem, demoItem, itemDesign, thumbUrl, drawThumb, preview, defaults, blanksOf, fieldType, blankChoices, valuesNow,
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
-    sheetNote, untold, loadPrinted, keptSub, printKeptAgain, announceKept, keptLabel, IMAGE_GONE
+    sheetNote, untold, loadPrinted, keptSub, printKeptAgain, announceKept, keptLabel, IMAGE_GONE, blankRequest
 } from './core.js';
 import { perCopyOf } from './media.js';
 
@@ -211,43 +211,43 @@ function selectItem(item) {
     box.hidden = false;
     return box;
 }
-// A label printed, as it was printed: printed again or opened, never changed here
+const copiesHTML = n => `<span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(n)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>`;
+const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+const printedDone = (entry, kept) => { announceKept(entry, kept); loadKept(); };
+// A picture of another program printed, as it was printed: printed again
 function showPrinted(item) {
     const box = selectItem(item), h = item.entry;
     if (!box) return;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(h.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div>
         <div class="tpl-shot">${h.preview ? `<img alt="Preview" id="tplShot" src="${esc(h.preview)}">` : ''}</div>
         <p class="muted">${esc(item.sub)}</p>
-        <div class="tpl-print"><button class="btn primary" type="button" id="tplPrint"${h.again ? '' : ` disabled title="${esc(IMAGE_GONE)}"`}>${icon('refresh')}Print again</button></div>
-        <div class="tpl-acts">${h.open ? `<button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>` : ''}</div>`;
+        <div class="tpl-print">${copiesHTML(h.copies || 1)}<button class="btn primary" type="button" id="tplPrint"${h.again ? '' : ` disabled title="${esc(IMAGE_GONE)}"`}>${icon('refresh')}Print again</button></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
-    const done = (entry, kept) => { announceKept(entry, kept); loadKept(); };
-    $('#tplPrint').onclick = () => printKeptAgain(h, done);
-    if (h.open) $('#tplOpen').onclick = async () => {
-        let opened;
-        try { opened = await keptLabel(h); } catch (e) { toast(e.message); return; }
-        closeLayer(true);
-        ctx.openEditor(opened);
-    };
+    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(100, Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); });
+    $('#tplPrint').onclick = () => printKeptAgain(h, printedDone, { copies: copiesNow() });
 }
 async function showDetail(item, values = null) {
-    if (item.kind === 'printed') { showPrinted(item); return; }
+    if (item.kind === 'printed' && !item.entry.open) { showPrinted(item); return; }
     const box = selectItem(item);
     if (!box) return;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(item.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div><p class="muted">Loading...</p>`;
     $('[data-unsel]', box).onclick = hideDetail;
     let design;
-    try { design = clone(await itemDesign(item)); } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+    try {
+        // A label printed comes as it was printed, with the values of its blanks
+        if (item.kind === 'printed' && !item.opened) item.opened = await keptLabel(item.entry);
+        design = clone(item.kind === 'printed' ? item.opened.design : await itemDesign(item));
+    } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
     if (G.sel !== item) return;
     const starts = defaults({ design });
     const work = applyTyped(item, design, values || item.values || Object.assign({}, starts));
-    const blanks = blanksOf(work.design), saved = item.kind === 'saved';
+    const blanks = blanksOf(work.design), saved = item.kind === 'saved', before = item.kind === 'printed' ? item.entry : null;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(item.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div>
         <div class="tpl-shot"><img alt="Preview" id="tplShot"></div>
         ${placed(work.design.label_size) ? `<p class="mnote">${icon('warn')}<span>Made for ${esc(sizeName(work.design.label_size))}, prints on the ${esc(sizeName(S.tape))}</span></p>` : ''}
         ${blanks.length ? `<div class="tpl-fields" id="tplFields">${blanks.map((b, i) => blankField({ design: work.design }, b, work.values[b], i)).join('')}</div>` : ''}
-        <div class="tpl-print"><span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="1" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>
-            <button class="btn primary" type="button" id="tplPrint">${icon('printer')}${blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        <div class="tpl-print">${copiesHTML(before ? before.copies || 1 : 1)}
+            <button class="btn primary" type="button" id="tplPrint"${before && !before.again ? ` disabled title="${esc(IMAGE_GONE)}"` : ''}>${icon(before ? 'refresh' : 'printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
         <p class="mnote sheetnote" id="tplSheet" hidden></p>
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
@@ -257,7 +257,6 @@ async function showDetail(item, values = null) {
         </div>
         <div id="tplMore"></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
-    const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
     // Only the answer to the last preview asked is shown, earlier ones may come later
     let asked = 0;
     const shot = () => {
@@ -286,6 +285,13 @@ async function showDetail(item, values = null) {
     const printOnce = async accepted => {
         const copies = copiesNow();
         const now = valuesNow(work.values, starts, { design: work.design });
+        // Printed again by the server with the values and copies set here
+        if (before) {
+            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, accepted,
+                title: entryName({ design: work.design, values: now, title: before.title }) };
+            await printKeptAgain(before, printedDone, opts);
+            return;
+        }
         const first = $$('#tplFields [data-blank]').find(inp => fieldType({ design: work.design }, inp.dataset.blank) === 'text');
         const typed = first && first.value;
         const entry = await printJob({ title: item.title, design: work.design, values: now, copies, source: { kind: item.kind, id: item.id } }, null, undefined, () => {
@@ -318,7 +324,9 @@ async function showDetail(item, values = null) {
             } catch (e) { toast(e.message); return; }
         }
         closeLayer(true);
-        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : item.title, design, values: work.values, origin: originOf(open.kind, open.id, open.mtime) });
+        // A label printed opens as the saved label it was printed from
+        const origin = before ? item.opened.origin : originOf(open.kind, open.id, open.mtime);
+        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : item.title, design, values: work.values, origin });
     };
     if (saved) {
         $('#tplLinks').onclick = () => linksPanel(item, work.design);

@@ -1231,28 +1231,43 @@ export async function loadPrinted(before = '') {
 export const keptSub = h => h.state === 'printed' ? [`${h.labels} x`, fmtTime(Date.parse(h.time)), h.printer_name, h.from && `from ${h.from}`].filter(Boolean).join(', ')
     : `${h.state === 'unknown' ? 'Maybe not printed' : 'Not printed'}: ${h.message}`;
 // A label printed, printed again on the printer chosen. Where that changes
-// its date or Paperless number, it asks whether they stay.
+// its date or Paperless number, it asks whether they stay. With the label
+// before it is printed again (opts): its copies, the values of its blanks,
+// the title, the label to tell its dates and ask(same, next, choose) to ask
+// elsewhere than in a dialog.
 export const IMAGE_GONE = 'Its image is no longer kept';
-export function printKeptAgain(h, onDone = announceKept) {
-    if (!h.again) { toast(IMAGE_GONE); return; }
-    const asks = h.again_asks || [], date = asks.includes('date'), number = asks.includes('asn');
-    if (!date && !number) { sendAgain(h, true, onDone); return; }
+export function printKeptAgain(h, onDone = announceKept, opts = {}) {
+    if (!h.again) { toast(IMAGE_GONE); return Promise.resolve(null); }
+    const asks = h.again_asks || [], number = asks.includes('asn');
+    // A date set by hand in a date blank is printed as set; the question is
+    // for one that shows the day it prints, or a date of the text
+    const set = opts.design ? blanksOf(opts.design).filter(name => fieldType(opts, name) === 'date' && name in (opts.blanks || {}) && !DATE_OFFSET_RE.test(opts.blanks[name])) : [];
+    const template = !opts.design || /\{\{datetime/.test(JSON.stringify(opts.design.text) + (opts.design.code_text || ''));
+    const date = asks.includes('date') && (template || (h.date_blanks || []).some(name => !set.includes(name)));
+    if (!date && !number) return sendAgain(h, true, onDone, opts);
     const [same, next] = date && number ? ['Same date and number', "Today's date, next number"] : date ? ['Same date', "Today's date"] : ['Same number', 'Next number'];
-    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Print again">
-        <div class="dialog-h"><h2>Print again</h2><span class="sp"></span><button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
-        <div class="acts"><button class="btn" type="button" id="againNext">${esc(next)}</button><button class="btn primary" type="button" id="againSame">${esc(same)}</button></div></div>`, 'center');
-    $('#againSame').onclick = () => { closeLayer(true); sendAgain(h, true, onDone); };
-    $('#againNext').onclick = () => { closeLayer(true); sendAgain(h, false, onDone); };
-    $('#againSame').focus();
+    return new Promise(resolve => {
+        const choose = asBefore => resolve(asBefore === null ? null : sendAgain(h, asBefore, onDone, opts));
+        if (opts.ask) { opts.ask(same, next, choose); return; }
+        openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Print again">
+            <div class="dialog-h"><h2>Print again</h2><span class="sp"></span><button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
+            <div class="acts"><button class="btn" type="button" id="againNext">${esc(next)}</button><button class="btn primary" type="button" id="againSame">${esc(same)}</button></div></div>`, 'center', () => choose(null));
+        $('#againSame').onclick = () => { closeLayer(true); choose(true); };
+        $('#againNext').onclick = () => { closeLayer(true); choose(false); };
+        $('#againSame').focus();
+    });
 }
-function sendAgain(h, asBefore, onDone) {
-    const printer = S.printer, entry = Object.assign(newEntry(printer, h.labels), { title: h.title });
+function sendAgain(h, asBefore, onDone, opts = {}) {
+    const printer = S.printer, entry = Object.assign(newEntry(printer, opts.copies || h.labels), { title: opts.title || h.title });
     return sendJob(entry, printer, () => {
         const form = new URLSearchParams({ as_before: asBefore ? '1' : '0', source: 'designer' });
         if (printer && printer.path) form.set('printer', printer.path);
         if (printer && printer.model) form.set('model', printer.model);
+        if (opts.copies) form.set('print_count', String(opts.copies));
+        if (opts.blanks) form.set('blanks', JSON.stringify(opts.blanks));
+        if (opts.title) form.set('title', opts.title);
         return [`/history/${encodeURIComponent(h.id)}/print`, form];
-    }, entry => onDone(entry, h));
+    }, entry => onDone(entry, h), opts.accepted);
 }
 export function announceKept(entry, h) {
     announcePrint(entry, () => printKeptAgain(h));
