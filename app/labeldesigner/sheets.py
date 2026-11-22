@@ -153,7 +153,8 @@ class Sheet:
         self.label = label
         self.labels = labels
         self.skip = skip
-        self.turned = labels[0].turned
+        # A sheet of paper is printed as it lies
+        self.turned = labels[0].turned and not is_paper(label)
         for made in labels:
             made.turned = False
 

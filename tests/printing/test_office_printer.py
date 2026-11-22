@@ -420,3 +420,74 @@ def test_where_sheets_go_on_edited_by_hand_takes_only_labels():
     assert 'continue_at' not in printer_settings.of_printer({'printers': {'simulation': {'continue_at': []}}}, 'simulation')
     kept = printer_settings.continued(data, 'simulation', 'sheet-l7160', 1)
     assert 'simulation' not in kept['printers']
+
+
+def demo_office(tmp_path, monkeypatch, shots, gate=None):
+    """The demo printer as an office printer with L7160 sheets, its pages
+    kept in shots, each once gate is set."""
+    def shot(self, image, name):
+        if gate is not None:
+            gate.wait(10)
+        shots.append(image.copy())
+    monkeypatch.setattr(printer._Simulator, '__call__', shot)
+    client = make_client(tmp_path, empty_repo=True)
+    for setting in ({'demo_model': OFFICE}, {'label_size': 'sheet-l7160'}):
+        assert client.post(f'{API}/settings', data={'printer': 'simulation', **setting}).status_code == 200
+    return client
+
+
+def on_demo(client, **data) -> str:
+    """The job of a print on the demo printer."""
+    response = client.post(f'{API}/print', data={'printer': 'simulation', 'model': OFFICE, 'label_size': 'sheet-l7160', 'text': BLACK, **data})
+    assert response.status_code == 200, response.get_json()
+    return response.get_json()['job']
+
+
+def labels_of(page: Image.Image) -> list[int]:
+    return [i + 1 for i, printed in enumerate(inked(page)) if printed]
+
+
+def test_demo_printer_starts_a_sheet_and_goes_on(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    on_demo(client, print_count=5, sheet_start=20)
+    assert [labels_of(page) for page in shots] == [[20, 21], [1, 2, 3]]
+    assert client.get(f'{API}/settings', query_string={'printer': 'simulation'}).get_json()['continue_at'] == {'sheet-l7160': 4}
+
+
+def test_a_sheet_is_never_turned(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    on_demo(client, print_count=2, sheet_start=20, leaves_first='bottom')
+    assert [labels_of(page) for page in shots] == [[20, 21]]
+
+
+def test_an_office_printer_has_no_end_that_leaves_first(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    refused = client.post(f'{API}/settings', data={'printer': 'simulation', 'leaves_first': 'bottom'})
+    assert (refused.status_code, refused.get_json()['message']) == (400, printer_settings.NO_ENDS)
+    # Set for a label printer before, it is gone once the demo printer is an office printer
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'demo_model': 'QL-810W'}).status_code == 200
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'leaves_first': 'bottom'}).status_code == 200
+    answer = client.post(f'{API}/settings', data={'printer': 'simulation', 'demo_model': OFFICE}).get_json()
+    assert 'leaves_first' not in answer['settings']
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'label_size': 'sheet-l7160'}).status_code == 200
+    on_demo(client, print_count=2, sheet_start=20)
+    assert [labels_of(page) for page in shots] == [[20, 21]]
+
+
+def test_collated_files_fill_the_sheets_in_order(tmp_path, monkeypatch):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+
+    def png():
+        out = io.BytesIO()
+        Image.new('L', (300, 120), 0).save(out, 'PNG')
+        out.seek(0)
+        return out
+    response = client.post(f'{API}/print', data={'printer': 'simulation', 'model': OFFICE, 'label_size': 'sheet-l7160', 'print_type': 'image',
+                                                 'print_count': 2, 'collate': 1, 'sheet_start': 20,
+                                                 'image': [(png(), 'a.png'), (png(), 'b.png')]}, content_type='multipart/form-data')
+    assert response.status_code == 200, response.get_json()
+    assert [labels_of(page) for page in shots] == [[20, 21], [1, 2]]

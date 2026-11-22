@@ -149,7 +149,8 @@ class PrinterQueue:
         # Turned once for all drivers where the other end than the driver's
         # leaves first, the preview stays upright
         driver_end = 'top' if self.driver.capabilities(self.model)['leaves_turned'] else 'bottom'
-        label.turned = self.leaves_first not in (None, driver_end)
+        # A sheet of labels comes out as it lies, whichever end first
+        label.turned = self.leaves_first not in (None, driver_end) and not sheets.is_paper(label_of(self.label_size))
         self._print_queue.append({
             'label': label,
             'high_res': high_res,

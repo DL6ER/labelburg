@@ -49,6 +49,8 @@ SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut
 NO_SENSING = 'This printer finds the start of each label by itself'
 # Of a printer of one roll
 NO_SIDES = 'This printer has one roll'
+# Of an office printer, which prints a sheet as it lies
+NO_ENDS = 'An office printer prints each sheet as it lies'
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # Where the next print on each sheet of labels goes on, by its label size, of
 # a sheet partly used
@@ -151,6 +153,12 @@ def told_how(model: str) -> bool:
     return model in MODELS and for_model(model).capabilities(model)['sensing']
 
 
+def prints_sheets(model: str) -> bool:
+    """Whether a printer of the model prints sheets of labels, see
+    Driver.capabilities()."""
+    return model in MODELS and for_model(model).capabilities(model)['sheets']
+
+
 def two_rolls(model: str) -> bool:
     """Whether a printer of the model has two rolls, see
     Driver.capabilities()."""
@@ -160,7 +168,8 @@ def two_rolls(model: str) -> bool:
 def of_printer(data: dict, device: str, model: str | None = None) -> dict:
     """The settings of a printer, the common ones with its own. How it
     finds its labels only where it is one of SENSINGS, e.g. not after a hand
-    edit, and, given its model, where that is told it; its roll likewise."""
+    edit, and, given its model, where that is told it; its roll likewise.
+    Of an office printer no end that leaves first."""
     return _settings(data, _key(data, device), model)
 
 
@@ -188,6 +197,8 @@ def _settings(data: dict, printer: str, model: str | None) -> dict:
         settings.pop('sensing', None)
     if settings.get('side') not in SIDES or model is not None and not two_rolls(model):
         settings.pop('side', None)
+    if model is not None and prints_sheets(model):
+        settings.pop('leaves_first', None)
     kept = own.get(CONTINUE_AT) if isinstance(own, dict) else None
     if isinstance(kept, dict) and (kept := {size: at for size, at in kept.items() if _label_number(at)}):
         settings[CONTINUE_AT] = kept
@@ -223,6 +234,8 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
         elif name == 'leaves_first':
             if value not in ENDS:
                 raise ValueError(SETTINGS_MESSAGE)
+            if prints_sheets(model):
+                raise ValueError(NO_ENDS)
         elif name == 'sensing':
             if value not in SENSINGS:
                 raise ValueError(SETTINGS_MESSAGE)
@@ -299,8 +312,8 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
     model was chosen for the demo printer: the one kept if the model takes
     it or its paper, else the one it is assumed to have, see
     tape.assumed_size(). A cutting the model cannot do is left out, as how
-    the printer finds its labels where the model is not told, and a roll
-    where it has one."""
+    the printer finds its labels where the model is not told, a roll where
+    it has one, and which end leaves first of an office printer."""
     printer = _key(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}
@@ -311,6 +324,8 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
         own.pop('sensing', None)
     if not two_rolls(model):
         own.pop('side', None)
+    if prints_sheets(model):
+        own.pop('leaves_first', None)
     data['printers'][printer] = own
     return data
 
