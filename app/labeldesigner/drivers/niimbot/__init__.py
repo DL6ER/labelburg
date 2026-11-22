@@ -64,10 +64,13 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
-# The models serial ports on USB told by their model ID, by device, and when
-# they were asked. One that told none is asked again once the label designer
-# looks for printers.
+# The models printers on Bluetooth LE and serial ports on USB told by their
+# model ID, by device, and when they were asked. One that told none is asked
+# again once the label designer looks for printers.
 _told_models: dict[str, tuple[models.Model | None, float]] = {}
+# Printers found on Bluetooth LE by Niimbot's service alone, without a name:
+# their model is the one they tell
+_by_service: set[str] = set()
 # Printers on Bluetooth LE, the others paired
 _LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
@@ -170,8 +173,9 @@ NAMES = {label.identifier: _name(label) for label in LABELS}
 
 
 def _bluetooth_name(model: models.Model) -> re.Pattern:
-    """The name a model advertises on Bluetooth LE, B1-<serial> as a B1, the
-    parts of a name like B21_PRO also apart."""
+    """The name a model is guessed to advertise on Bluetooth LE, B1-<serial>
+    as a B1, the parts of a name like B21_PRO also apart; the status asks
+    the printer for its model."""
     return re.compile(r'[_ -]?'.join(map(re.escape, model.short.split('_'))) + '-.*', re.IGNORECASE | re.DOTALL)
 
 
@@ -243,8 +247,8 @@ class Niimbot(Driver):
                        re.compile(r'usb://0x3513:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.NiimbotError)
     refusals = (calibration.KIND_MESSAGE, *REFUSALS)
-    # The models on Bluetooth LE by their names, a B1 also by Niimbot's
-    # service where it leaves the name out
+    # The models on Bluetooth LE by their names, a printer that leaves its
+    # name out by Niimbot's service, as a B1 does
     bluetooth_names = BLUETOOTH_NAMES
     bluetooth_services = {protocol.NIIMBOT_SERVICE: 'Niimbot/B1'}
     # Those that are a serial port on USB, which tell their model by its ID
@@ -342,7 +346,10 @@ class Niimbot(Driver):
         name = device.get('name')
         if name and not any(re.fullmatch(pattern, name) for pattern in self.bluetooth_names):
             return None
-        return super().found_on_bluetooth(device)
+        found = super().found_on_bluetooth(device)
+        if found and not name:
+            _by_service.add(devices.lock_key(found[0]))
+        return found
 
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
@@ -356,6 +363,9 @@ class Niimbot(Driver):
 
     def _status(self, device, model, fresh):
         cached = devices.status_cache.get(devices.lock_key(device))
+        known = _told_models.get(devices.lock_key(device))
+        if device.startswith('bt://') and known and known[0] and known[0] not in models.PRINTED:
+            return self._refused(device, model, known[0])
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
         # asked every time, it tells another roll or a lost connection so.
@@ -366,11 +376,28 @@ class Niimbot(Driver):
             if not acquired:
                 return devices.busy_state(device, network_status(device, model))
             with protocol.connect(device, _over_le(model)) as c:
+                # Its name was a guess: the model it tells is used
+                if device.startswith('bt://') and _over_le(model):
+                    named = _told(c, device)
+                    if named is not None and named not in models.PRINTED:
+                        return self._refused(device, model, named)
+                    if named is not None:
+                        model = named.name
+                    elif devices.lock_key(device) in _by_service:
+                        raise protocol.NoAnswer('no model ID')
                 told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])
                 serial = self._serial(c, device, model)
         return self._keep(device, model, told['heartbeat'], told['roll'], serial)
+
+    def _refused(self, device, model, told: models.Model) -> dict:
+        """The state of a printer of a model Labelburg cannot print on."""
+        state = network_status(device, model)
+        state.update({'media_type': 'Die-cut labels', 'errors': [models.cannot_print(told)]})
+        state['status_type'] = devices.status_type(state['errors'])
+        devices.status_cache[devices.lock_key(device)] = state
+        return state
 
     def _asked(self, c, device, model) -> dict | None:
         """The heartbeat and the roll the printer tells, None where a
