@@ -372,8 +372,13 @@ def test_status_tells_the_loaded_roll(tmp_path, fake):
     assert fake.operations() == [ipp.GET_PRINTER_ATTRIBUTES]
 
 
-def test_printer_that_does_not_tell_its_roll(tmp_path, fake):
-    fake.printer = [printer_attributes(loaded=None)]
+@pytest.mark.parametrize('loaded, media_type', [
+    (None, 'labels'),
+    # A queue of CUPS tells A4 without a type, ippeveprinter letter of an office printer
+    ((20990, 29704), ''), ((21590, 27940), 'stationery'),
+])
+def test_printer_that_does_not_tell_its_roll(tmp_path, fake, loaded, media_type):
+    fake.printer = [printer_attributes(loaded=loaded, media_type=media_type)]
     found = client_of(tmp_path, fake).get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert (found['media_width'], found['media_length']) == (None, 0)
     assert found['tape']['assumed']

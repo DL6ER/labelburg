@@ -145,12 +145,15 @@ def printer_errors(attributes: dict) -> list[str]:
 
 def told_status(device: str, model: str, attributes: dict) -> dict:
     """Status of the printer of the attributes it told, kept for when it
-    does not answer."""
+    does not answer. Its roll is the first of its media that are labels: a
+    queue of CUPS tells e.g. A4 for a label printer."""
     state = network_status(device, model)
     name = attributes.get('printer-make-and-model')
     if isinstance(name, str) and name.strip():
         state['device_name'] = ' '.join(name.split())[:MAX_NAME]
-    state['media_width'], state['media_length'], state['media_type'] = ipp.loaded_media(attributes.get('media-col-ready'))
+    ready = attributes.get('media-col-ready')
+    labels = [media for media in (ready if isinstance(ready, list) else [ready]) if _labels(media)]
+    state['media_width'], state['media_length'], state['media_type'] = ipp.loaded_media(labels)
     state['errors'] = printer_errors(attributes)
     printer_state = attributes.get('printer-state')
     devices.set_state(state, printer_state == ipp.PROCESSING, printer_state == ipp.STOPPED)
