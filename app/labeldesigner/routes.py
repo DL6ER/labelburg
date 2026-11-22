@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .dates import LANGUAGES as DATE_LANGUAGES
@@ -1576,6 +1576,10 @@ def _described(told: list[dict]):
         printed_on = _tape_of(printer, model, printer['settings'])
         printer['tape'] = tape.describe(printed_on)
         printer['takes'] = tape.takes(model)
+        # What /api/feed does with that tape, where the model offers it
+        feed = drivers.for_model(model).feed_kind(model, printed_on.id) if model in drivers.MODELS else ''
+        if feed:
+            printer['feed'] = feed
         # The label size of that tape, for API users
         printer['label_size'], printer['label_size_assumed'] = printed_on.id, printed_on.assumed
         if printer.get('path'):
@@ -2012,6 +2016,28 @@ def print_calibration():
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
     return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
+
+
+# The title of the job of /api/feed in the queue, as the label designer names its button
+FEED_TITLES = {'cut': 'Feed and cut', 'cut_paper': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label'}
+
+
+@bp.route('/api/feed', methods=['POST'])
+def feed_paper():
+    """Feed the paper of a printer and cut it, e.g. to cut off the last label
+    of a job printed without a cut, or feed one label, as the driver does
+    on the roll in the printer, see Driver.feed_kind()."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model = _resolved_printer(values.get('printer'), values.get('model'), ask=True)
+        label_size = values.get('label_size') or _loaded_tape(device, model, _settings_of(device)).id
+        queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
+        kind = queue.driver.feed_kind(model, label_size)
+        if not kind:
+            raise ValueError(NO_FEED)
+    except Exception as e:
+        return _refused('Feeding the paper', e, refusals.PRINT_FAILED)
+    return _queued(queue, run=queue.feed, title=FEED_TITLES[kind], source=_job_source('feed'), labels=1)
 
 
 def _job_told(told: dict, printing_on: str | None = None) -> dict:

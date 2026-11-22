@@ -620,6 +620,85 @@
         }
       }
     },
+    "/labeldesigner/api/feed": {
+      "post": {
+        "summary": "Feed and cut",
+        "description": "Feeds the paper of a printer that offers it and cuts it, e.g. to cut off the last label of a job printed without a cut or chain printed, as `feed` of the printer in `/labeldesigner/api/printer_status` tells: `cut` prints the shortest empty label the tape takes and cuts it (Brother QL and P-touch printers, which then end chain printing), `cut_paper` feeds the paper to the cutter and cuts it (ESC/POS printers, which cut after the last receipt anyway); `cut_label` feeds one empty die-cut label and cuts it (Brother QL printers); `label` feeds one empty label (ZPL, as the feed button of the printer). It waits in the line of the printer like a label.",
+        "operationId": "feed",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "printer": {
+                    "type": "string",
+                    "description": "The device or name of the printer, the configured one if left out."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "label_size": {
+                    "type": "string",
+                    "description": "The label size of the roll in the printer, as set for the printer if left out."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted: the job waits in the line of its printer, or runs at once if the line is empty. `success` tells that the job was accepted, not that it was done: read the outcome from `/labeldesigner/api/queue/{job_id}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown printer or label size, or a printer that offers no feed and cut.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The line of the printer is full, or its waiting jobs hold too many large images, `message` says which. The same request may succeed later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/print": {
       "post": {
         "summary": "Print a label",
@@ -4347,6 +4426,11 @@
           "calibration": {
             "$ref": "#/components/schemas/Calibration",
             "description": "Of a printer that offers calibration (the Niimbot B1): how its labels are moved, see /api/calibration."
+          },
+          "feed": {
+            "type": "string",
+            "enum": ["cut", "cut_paper", "cut_label", "label"],
+            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
           },
           "queue": {
             "type": "object",

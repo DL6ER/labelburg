@@ -23,7 +23,7 @@ from .label_names import cut_problems, label_length_problems, label_size_problem
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
 from .print_queue import FAILED as NOT_PRINTED, NO_PREVIEW, NO_SUCH_JOB, NOT_WAITING, PRINTER_REQUIRED, PRINTING_ALREADY, REMOVED
-from .printer import BUSY as PRINTER_BUSY, WRONG_MODEL
+from .printer import BUSY as PRINTER_BUSY, NO_FEED, WRONG_MODEL
 from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_CALIBRATION, OFFSET_LIMIT, READINGS_DISAGREE,
                                SETTINGS_MESSAGE, TOO_MANY_ADDED, TOO_MANY_PRINTERS)
 
@@ -103,6 +103,7 @@ MESSAGES = (
     *devices.not_sent_messages(),
     PRINTER_BUSY,
     WRONG_MODEL,
+    NO_FEED,
     REMOVED,
     PRINTING_ALREADY,
     NOT_WAITING,
