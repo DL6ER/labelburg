@@ -48,10 +48,6 @@ class Model:
         return self.name.split('/')[1]
 
     @property
-    def inverted(self) -> bool:
-        return any(model_id in INVERTED_LID for model_id in self.ids)
-
-    @property
     def asks_version(self) -> bool:
         """Whether its print sequence is picked by the protocol version the
         printer tells, see sequence()."""
@@ -91,6 +87,15 @@ PRINTED = tuple(model for model in MODELS
                 if model.sequence in (V4, B1, D110M_V4, B21_V1, B21_L2B, D110, D11_V1, H1S) or model.asks_version)
 BY_NAME = {model.name: model for model in MODELS}
 BY_ID = {model_id: model for model in MODELS for model_id in model.ids}
+
+
+def lid_inverted(model: Model, model_id: int | None) -> bool:
+    """Whether niimbluelib reads the lid of a printer of the model the other
+    way round, by the model ID it told, without one where it does for every
+    ID of the model."""
+    if model_id is not None:
+        return model_id in INVERTED_LID
+    return all(model_id in INVERTED_LID for model_id in model.ids)
 
 
 def sequence(model: Model, version: int) -> str:

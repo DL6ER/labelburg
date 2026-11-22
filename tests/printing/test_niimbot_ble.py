@@ -126,6 +126,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(niimbot, '_told_models', {})
+    monkeypatch.setattr(niimbot, '_told_ids', {})
     monkeypatch.setattr(niimbot, '_to_ask', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)

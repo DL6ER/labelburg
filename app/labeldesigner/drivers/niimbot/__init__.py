@@ -70,6 +70,8 @@ _no_serial: set[str] = set()
 # model ID, by device, and when they were asked. One that told none is asked
 # again once the label designer looks for printers.
 _told_models: dict[str, tuple[models.Model | None, float]] = {}
+# The model IDs they told, by device, their lid is read by
+_told_ids: dict[str, int] = {}
 # Printers found on Bluetooth LE whose name is no B1's, e.g. by Niimbot's
 # service alone without a name: their model is the one they tell
 _to_ask: set[str] = set()
@@ -103,9 +105,19 @@ def _told(c, device: str) -> models.Model | None:
     known = _told_models.get(key)
     if known and (known[0] or known[1] >= devices.looked):
         return known[0]
-    told = models.BY_ID.get(protocol.model_id(c))
+    told_id = protocol.model_id(c)
+    if told_id is not None:
+        _told_ids[key] = told_id
+    told = models.BY_ID.get(told_id)
     _told_models[key] = (told, time.monotonic())
     return told
+
+
+def _lid_inverted(device: str, model: str) -> bool:
+    """Whether the printer tells its lid the other way round, by the model
+    ID it told, see models.lid_inverted()."""
+    known = models.BY_NAME.get(model)
+    return known is not None and models.lid_inverted(known, _told_ids.get(devices.lock_key(device)))
 
 
 def _beeps(device: str, model: str) -> bool:
@@ -424,7 +436,7 @@ class Niimbot(Driver):
         told = {}
         for step in steps:
             waiting = owed is not None and step == owed[0]
-            asked = {'inverted': getattr(models.BY_NAME.get(model), 'inverted', False)} if step == 'heartbeat' else {}
+            asked = {'inverted': _lid_inverted(device, model)} if step == 'heartbeat' else {}
             try:
                 told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None, **asked)
             except protocol.NoAnswer:
@@ -505,9 +517,12 @@ class Niimbot(Driver):
         _owed.pop(device, None)
         try:
             with protocol.connect(device, _over_le(model)) as c:
-                told = models.BY_ID.get(protocol.model_id(c))
+                told_id = protocol.model_id(c)
+                told = models.BY_ID.get(told_id)
                 if told is not None and told.name != model:
                     return models.other_model(told) if told in models.PRINTED else models.cannot_print(told)
+                if told_id is not None:
+                    _told_ids[devices.lock_key(device)] = told_id
                 known = models.BY_NAME[model]
                 sequence = known.sequence
                 if known.asks_version:
@@ -515,7 +530,7 @@ class Niimbot(Driver):
                     if not sequence:
                         return models.cannot_print(known)
                 # What the status keeps is updated, e.g. another roll
-                beat = protocol.heartbeat(c, inverted=known.inverted)
+                beat = protocol.heartbeat(c, inverted=_lid_inverted(device, model))
                 loaded = protocol.roll(c)
                 state = self._keep(device, model, beat, loaded, self._serial(c, device, model))
                 if state['errors']:
