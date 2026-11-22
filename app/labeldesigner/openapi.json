@@ -613,7 +613,7 @@
     "/labeldesigner/api/feed": {
       "post": {
         "summary": "Feed and cut",
-        "description": "Feeds the paper of a printer that offers it and cuts it, e.g. to cut off the last label of a job printed without a cut or chain printed, as `feed` of the printer in `/labeldesigner/api/printer_status` tells: `cut` prints the shortest empty label the tape takes and cuts it (Brother QL and P-touch printers, which then end chain printing), or feeds the paper to the cutter and cuts it (ESC/POS); `cut_label` feeds one empty die-cut label and cuts it (Brother QL printers); `label` feeds one empty label (ZPL, as the feed button of the printer). It waits in the line of the printer like a label.",
+        "description": "Feeds the paper of a printer that offers it and cuts it, e.g. to cut off the last label of a job printed without a cut or chain printed, as `feed` of the printer in `/labeldesigner/api/printer_status` tells: `cut` prints the shortest empty label the tape takes and cuts it (Brother QL and P-touch printers, which then end chain printing), `cut_paper` feeds the paper to the cutter and cuts it (ESC/POS printers, which cut after the last receipt anyway); `cut_label` feeds one empty die-cut label and cuts it (Brother QL printers); `label` feeds one empty label (ZPL, as the feed button of the printer). It waits in the line of the printer like a label.",
         "operationId": "feed",
         "requestBody": {
           "content": {
@@ -4255,8 +4255,8 @@
           },
           "feed": {
             "type": "string",
-            "enum": ["cut", "cut_label", "label"],
-            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
+            "enum": ["cut", "cut_paper", "cut_label", "label"],
+            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
           },
           "queue": {
             "type": "object",

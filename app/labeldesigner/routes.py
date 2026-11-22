@@ -1956,7 +1956,7 @@ def print_calibration():
 
 
 # The title of the job of /api/feed in the queue, as the label designer names its button
-FEED_TITLES = {'cut': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label'}
+FEED_TITLES = {'cut': 'Feed and cut', 'cut_paper': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label'}
 
 
 @bp.route('/api/feed', methods=['POST'])

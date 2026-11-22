@@ -149,6 +149,7 @@ function qualityHTML(p) {
 // tells it: the button, its hint and what is said meanwhile
 const FEEDS = {
     cut: ['Feed and cut', 'Cuts off the last label, e.g. after printing without a cut.', 'Feeding and cutting...'],
+    cut_paper: ['Feed and cut', 'Feeds the paper to the cutter and cuts it.', 'Feeding and cutting...'],
     cut_label: ['Feed one label', 'Cuts off the last label, e.g. after printing without a cut. This uses one empty label.', 'Feeding one label...'],
     label: ['Feed one label', 'Feeds one empty label, e.g. to tear off the last one.', 'Feeding one label...'],
 };

@@ -158,9 +158,10 @@ class Driver:
 
     def feed_kind(self, model: str, label_size: str) -> str:
         """What feed_job() does on the model with the label size loaded:
-        'cut' feeds a little paper and cuts it, 'cut_label' feeds one empty
-        label and cuts it, 'label' feeds one empty label, an empty string
-        where the model cannot."""
+        'cut' feeds a little paper and cuts it, 'cut_paper' feeds the paper
+        to the cutter and cuts it, 'cut_label' feeds one empty label and cuts
+        it, 'label' feeds one empty label, an empty string where the model
+        cannot."""
         return ''
 
     def feed_job(self, queue):

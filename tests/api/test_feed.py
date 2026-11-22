@@ -28,7 +28,7 @@ def _demo(client, **settings) -> dict:
 
 @pytest.mark.parametrize('model, label_size, kind', [
     ('QL-800', '62', 'cut'), ('QL-800', '62x29', 'cut_label'), ('QL-800', 'd24', 'cut_label'), ('PT-E550W', 'pt12', 'cut'),
-    ('Epson/ESC-POS', 'escpos80', 'cut'), ('Zebra/ZPL', 'zpl57x32', 'label'),
+    ('Epson/ESC-POS', 'escpos80', 'cut_paper'), ('Zebra/ZPL', 'zpl57x32', 'label'),
     ('QL-500', '62', None), ('Niimbot/B1', 'niimbot40x30', None), ('VC-500W', 'vc9', None)])
 def test_the_status_tells_what_feeding_does_with_the_tape_in_the_printer(client, model, label_size, kind):
     shown = _demo(client, demo_model=model, label_size=label_size)

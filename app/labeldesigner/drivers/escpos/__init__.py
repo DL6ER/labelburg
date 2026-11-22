@@ -112,7 +112,7 @@ class Escpos(Driver):
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def feed_kind(self, model, label_size):
-        return 'cut'
+        return 'cut_paper'
 
     def feed_job(self, queue):
         # A label of no rows: only the cut after it, which feeds the paper to the cutter

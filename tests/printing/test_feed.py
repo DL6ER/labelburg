@@ -87,7 +87,7 @@ def test_printers_without_it(model, label_size):
 
 @pytest.mark.parametrize('model, label_size', [('Epson/ESC-POS', 'escpos58'), ('Epson/ESC-POS-180', 'escpos80-180')])
 def test_a_receipt_printer_feeds_to_its_cutter_and_cuts(model, label_size):
-    assert ESCPOS.feed_kind(model, label_size) == 'cut'
+    assert ESCPOS.feed_kind(model, label_size) == 'cut_paper'
     job = ESCPOS.feed_job(SimpleNamespace(model=model, label_size=label_size))
     assert escpos.job(job) == escpos.INIT + escpos.CUT == b'\x1b@\x1dVA\x00'
     assert ESCPOS.label_lengths(job) == [0.0]

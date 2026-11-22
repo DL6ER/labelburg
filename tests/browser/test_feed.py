@@ -52,7 +52,8 @@ def _demo(page, server, **settings):
     ('QL-800', '62', 'Feed and cut', CUTS_OFF),
     ('QL-800', '62x29', 'Feed one label', CUTS_OFF + ' This uses one empty label.'),
     ('PT-E550W', 'pt12', 'Feed and cut', CUTS_OFF),
-    ('Epson/ESC-POS', 'escpos80', 'Feed and cut', CUTS_OFF),
+    # A receipt printer cuts after the last receipt anyway
+    ('Epson/ESC-POS', 'escpos80', 'Feed and cut', 'Feeds the paper to the cutter and cuts it.'),
     ('Zebra/ZPL', 'zpl57x32', 'Feed one label', 'Feeds one empty label, e.g. to tear off the last one.'),
 ])
 def test_the_button_says_what_it_does_with_the_tape(designer, server, model, label_size, button, hint):
