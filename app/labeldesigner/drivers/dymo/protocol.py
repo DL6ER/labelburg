@@ -66,6 +66,13 @@ def sync(head_bytes: int) -> bytes:
     return ESC * (head_bytes + 1)
 
 
+def request(head_bytes: int, roll: str | None = None) -> bytes:
+    """ESC A after sync(), so that a printer left in the middle of a row
+    takes it as a command (SE450 reference, SYN), after the roll of a Twin
+    Turbo where roll is given: it tells the status of the roll selected."""
+    return sync(head_bytes) + (SELECT_ROLL + ROLLS[roll] if roll else b'') + STATUS
+
+
 def label(rows: list[bytes], width: int) -> bytes:
     """One label of rows of packed dots, width bytes each, MSB left, 1
     printed: the bytes of each row (ESC D, p. 15), the label length in rows,
@@ -150,11 +157,11 @@ def _answer(c: Connection, deadline: float) -> bytes:
     return b''
 
 
-def status(c: Connection, key: str) -> int:
-    """The status byte of the printer, NoAnswer if it did not answer. key,
-    the printer's lock key: a request it leaves unanswered counts as
-    outstanding for ASK_AGAIN s, in which no other is sent, an answer that
-    came late is taken."""
+def status(c: Connection, key: str, head_bytes: int, roll: str | None = None) -> int:
+    """The status byte of the printer, of the roll given of a Twin Turbo,
+    see request(), NoAnswer if it did not answer. key, the printer's lock
+    key: a request it leaves unanswered counts as outstanding for ASK_AGAIN
+    s, in which no other is sent, an answer that came late is taken."""
     if key in _asked and time.monotonic() - _asked[key] < ASK_AGAIN:
         if late := c.read(0):
             del _asked[key]
@@ -164,7 +171,7 @@ def status(c: Connection, key: str) -> int:
     # An answer from before is not taken for this one
     backends.discard(lambda: c.read(0))
     sent = time.monotonic()
-    c.write(STATUS)
+    c.write(request(head_bytes, roll))
     reply = _answer(c, sent + ANSWER_WAIT)
     if not reply:
         _asked[key] = sent

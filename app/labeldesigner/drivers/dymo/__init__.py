@@ -93,13 +93,13 @@ def _answer_key(device: str) -> str:
     return f'{devices.lock_key(device)} {devices.known_device_id(device)}'.rstrip()
 
 
-def _problems(c, device: str, model: str) -> list[str] | None:
-    """What the printer tells is wrong, None if it never answered: it is
-    printed on as a ZPL printer that never answered. NoAnswer if it
-    answered before."""
+def _problems(c, device: str, model: str, roll: str | None = None) -> list[str] | None:
+    """What the printer tells is wrong, of the roll given of a Twin Turbo,
+    None if it never answered: it is printed on as a ZPL printer that never
+    answered. NoAnswer if it answered before."""
     key = _answer_key(device)
     try:
-        return protocol.errors(protocol.status(c, key), jam=model != SE450)
+        return protocol.errors(protocol.status(c, key, HEAD_DOTS[model] // 8, roll), jam=model != SE450)
     except protocol.NoAnswer:
         if protocol.never_answered(key):
             return None
@@ -200,15 +200,15 @@ class Dymo(Driver):
 
     def send(self, queue, job) -> str:
         device, model = queue.device_specifier, queue.model
+        # A Twin Turbo prints on the left roll unless the right one is chosen,
+        # as CUPS and LPrint send it, and is asked for the status of that one
+        roll = (queue.side or 'left') if model == TWIN_TURBO else None
         try:
             with protocol.connect(device) as c:
-                problems = _problems(c, device, model)
+                problems = _problems(c, device, model, roll)
                 if problems:
                     return problems[0]
-                # The SE450 takes no short form feed (SE450 reference, raster
-                # mode). A Twin Turbo prints on the left roll unless the
-                # right one is chosen, as CUPS and LPrint send it.
-                roll = (queue.side or 'left') if model == TWIN_TURBO else None
+                # The SE450 takes no short form feed (SE450 reference, raster mode)
                 c.write(protocol.job([(rows, width) for rows, width, _ in job], HEAD_DOTS[model] // 8,
                                      short_feed=model != SE450, roll=roll))
         except OSError as e:

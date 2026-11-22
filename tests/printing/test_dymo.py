@@ -45,12 +45,60 @@ class _Label:
         return img
 
 
-class _Printer:
-    """A printer that answers ESC A with status, None for never, and keeps
-    what else it gets."""
+# A status request of a printer of 84 bytes a row: 85 ESC, then ESC A
+ASK = ESC * 85 + b'\x1bA'
+
+
+class Parser:
+    """Reads what a LabelWriter gets as the reference describes it: after SYN
+    the next bytes as many as ESC D set are a row, whatever they are, ESC A
+    read as a command is answered with status, of the roll ESC q selected
+    where by_roll names it, None for no answer."""
+    ARGUMENTS = {b'B': 1, b'D': 1, b'L': 2, b'q': 1}
+
+    def __init__(self, head_bytes=84, status=READY):
+        self.head_bytes, self.width, self.status, self.by_roll = head_bytes, head_bytes, status, {}
+        self.roll, self.rows, self.asked, self.replies, self.pending = None, 0, 0, [], b''
+
+    def feed(self, data: bytes):
+        self.pending += data
+        data, at = self.pending, 0
+        while at < len(data):
+            if data[at] == 0x16:
+                if len(data) - at - 1 < self.width:
+                    break
+                at, self.rows = at + 1 + self.width, self.rows + 1
+            elif data[at] == 0x1b:
+                command = data[at + 1:at + 2]
+                if command == ESC:
+                    at += 1
+                    continue
+                arguments = data[at + 2:at + 2 + self.ARGUMENTS.get(command, 0)]
+                if not command or len(arguments) < self.ARGUMENTS.get(command, 0):
+                    break
+                if command == b'D':
+                    self.width = arguments[0]
+                elif command == b'@':
+                    self.width = self.head_bytes
+                elif command == b'q':
+                    self.roll = arguments
+                elif command == b'A':
+                    self.asked += 1
+                    status = self.by_roll.get(self.roll, self.status)
+                    if status is not None:
+                        self.replies.append(bytes([status]))
+                at += 2 + len(arguments)
+            else:
+                at += 1
+        self.pending = data[at:]
+
+
+class _Printer(Parser):
+    """A printer as Parser reads it that keeps what it gets."""
 
     def __init__(self, status=READY):
-        self.status, self.written, self.replies = status, [], []
+        super().__init__(status=status)
+        self.written = []
 
     def __enter__(self):
         return self
@@ -60,8 +108,7 @@ class _Printer:
 
     def write(self, data):
         self.written.append(data)
-        if data == protocol.STATUS and self.status is not None:
-            self.replies.append(bytes([self.status]))
+        self.feed(data)
 
     def read(self, wait):
         return self.replies.pop(0) if self.replies else b''
@@ -81,7 +128,7 @@ def _printed(printer, model, label_size, labels):
     job = dymo.DRIVER.render(queue, [{'label': label, 'cut': True} for label in labels])
     assert dymo.DRIVER.send(queue, job) == ''
     status, data = printer.written
-    assert status == protocol.STATUS
+    assert status == ESC * (dymo.HEAD_DOTS[model] // 8 + 1) + b'\x1bA'
     return job, data
 
 
@@ -136,7 +183,39 @@ def test_a_label_is_not_sent_while_the_printer_has_no_labels(printer):
     queue = SimpleNamespace(device_specifier='/dev/usb/lp0', model='DYMO/LabelWriter-450', label_size='dymo28x89')
     job = dymo.DRIVER.render(queue, [{'label': _Label(1051, 331), 'cut': True}])
     assert dymo.DRIVER.send(queue, job) == 'No labels are in the printer'
-    assert printer.written == [protocol.STATUS]
+    assert printer.written == [ASK]
+
+
+@pytest.mark.parametrize('model, label_size, label', [
+    ('DYMO/LabelWriter-450', 'dymo28x89', _Label(1051, 331)), ('DYMO/LabelWriter-4XL', 'dymo102x152', _Label(1795, 1205)),
+    ('DYMO/LabelWriter-SE450', 'dymo203-54x101', _Label(808, 432))])
+def test_a_job_broken_off_in_a_row_leaves_the_next_one_printed(printer, model, label_size, label):
+    head_bytes = dymo.HEAD_DOTS[model] // 8
+    printer.head_bytes = printer.width = head_bytes
+    queue = SimpleNamespace(device_specifier='/dev/usb/lp0', model=model, label_size=label_size)
+    job = dymo.DRIVER.render(queue, [{'label': label, 'cut': True}])
+    assert dymo.DRIVER.status('/dev/usb/lp0', model)['errors'] == []
+    # A job broke off in the middle of a row, e.g. a write that timed out
+    printer.feed(protocol.job([(rows, width) for rows, width, _ in job], head_bytes)[:16384])
+    assert printer.pending.startswith(protocol.SYN)
+    # The ESC before ESC A fill the row, the printer answers and prints the next job whole
+    assert dymo.DRIVER.send(queue, job) == ''
+    assert printer.asked == 2 and printer.pending == b''
+
+
+def test_a_twin_turbo_is_asked_for_the_roll_it_prints_on(printer):
+    # The right roll is empty and was selected last, the left one is loaded
+    printer.by_roll, printer.roll = {b'1': READY, b'2': 0xa1}, b'2'
+    queue = SimpleNamespace(device_specifier='/dev/usb/lp0', model='DYMO/LabelWriter-450-Twin-Turbo', label_size='dymo28x89', side='left')
+    job = dymo.DRIVER.render(queue, [{'label': _Label(1051, 331), 'cut': True}])
+    assert dymo.DRIVER.send(queue, job) == ''
+    assert printer.written[0] == ESC * 85 + b'\x1bq1\x1bA' and printer.roll == b'1'
+    queue.side = 'right'
+    assert dymo.DRIVER.send(queue, job) == 'No labels are in the printer'
+    assert printer.written[2:] == [ESC * 85 + b'\x1bq2\x1bA']
+    # The status is that of the roll selected last
+    assert dymo.DRIVER.status('/dev/usb/lp0', queue.model)['errors'] == ['No labels are in the printer']
+    assert printer.written[3] == ASK
 
 
 @pytest.mark.parametrize('status, errors', [
@@ -339,34 +418,28 @@ def test_capabilities():
     assert dymo.DRIVER.print_speed('DYMO/LabelWriter-450-Twin-Turbo', False, False) == (pytest.approx(71 * 89 / 60), 0)
 
 
-class FakeLabelWriter:
-    """A LabelWriter on a pseudo terminal, as usblp's device: it answers ESC
-    A with its status, None for never, and keeps what else it gets."""
+class FakeLabelWriter(Parser):
+    """A LabelWriter as Parser reads it on a pseudo terminal, as usblp's
+    device, which keeps what it gets."""
 
     def __init__(self, status=READY):
-        self.status, self.asked, self.data = status, 0, b''
+        super().__init__(status=status)
+        self.data = b''
         self.master, self.slave = os.openpty()
         tty.setraw(self.slave)
         self.path = os.ttyname(self.slave)
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
-        pending = b''
         while True:
             try:
                 data = os.read(self.master, 65536)
             except OSError:
                 return
-            pending += data
-            # Asked alone or after a whole job
-            if pending.endswith(protocol.STATUS) and (pending == protocol.STATUS or pending[:-2].endswith(protocol.FORM_FEED)):
-                self.data += pending[:-2]
-                pending = b''
-                self.asked += 1
-                if self.status is not None:
-                    os.write(self.master, bytes([self.status]))
-            elif pending.endswith(protocol.FORM_FEED):
-                self.data, pending = self.data + pending, b''
+            self.data += data
+            self.feed(data)
+            while self.replies:
+                os.write(self.master, self.replies.pop(0))
 
     def close(self):
         os.close(self.slave)
@@ -382,12 +455,14 @@ def labelwriter(monkeypatch):
 
 
 def _received(labelwriter):
-    """What the printer got once a whole job came, nothing more for a while."""
+    """What the printer got after the status request once a whole job came,
+    nothing more for a while."""
     deadline, seen = time.monotonic() + 5, None
     while time.monotonic() < deadline and not (labelwriter.data == seen and seen.endswith(b'\x1bE')):
         seen = labelwriter.data
         time.sleep(0.1)
-    return labelwriter.data
+    assert labelwriter.data.startswith(ASK)
+    return labelwriter.data.removeprefix(ASK)
 
 
 def _labels(data, head_bytes):
@@ -465,10 +540,10 @@ def test_a_late_answer_is_taken(monkeypatch):
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     printer = _Printer(status=None)
     with pytest.raises(protocol.NoAnswer):
-        protocol.status(printer, 'lp0')
+        protocol.status(printer, 'lp0', 84)
     printer.replies.append(b'\xa1')
-    assert protocol.status(printer, 'lp0') == 0xa1
-    assert printer.written == [protocol.STATUS]
+    assert protocol.status(printer, 'lp0', 84) == 0xa1
+    assert printer.written == [ASK]
 
 
 def test_printer_through_pyusb(monkeypatch):
@@ -485,7 +560,7 @@ def test_printer_through_pyusb(monkeypatch):
 
         def write(self, data):
             self.written.append(data)
-            if data == protocol.STATUS:
+            if data == ASK:
                 self.reads.append(b'\x03')
 
         def dispose(self):
@@ -497,11 +572,11 @@ def test_printer_through_pyusb(monkeypatch):
     driver, model = drivers.resolve(device, 'QL-800')
     state = driver.status(device, model)
     # An answer from before is not taken for this one
-    assert (state['errors'], printers[0].written) == ([], [protocol.STATUS])
+    assert (state['errors'], printers[0].written) == ([], [ASK])
     queue = SimpleNamespace(device_specifier=device, model=model, label_size='dymo28x89')
     assert driver.send(queue, driver.render(queue, [{'label': _Label(1051, 331), 'cut': True}])) == ''
     status, *job = printers[1].written
-    assert status == protocol.STATUS and len(job) > 1 and {len(part) for part in job[:-1]} == {4096}
+    assert status == ASK and len(job) > 1 and {len(part) for part in job[:-1]} == {4096}
     assert _labels(b''.join(job), 84) == [(42, 1051, b'\x1bE')]
     assert all(printer.disposed for printer in printers)
 
@@ -549,7 +624,7 @@ def test_the_roll_set_for_a_twin_turbo_goes_to_its_jobs(tmp_path, printer):
     assert outcome(client, client.post('/labeldesigner/api/print', data=job)) == ('printed', '')
     assert client.post('/labeldesigner/api/settings', data={'side': 'right'}).get_json()['settings'] == {'side': 'right'}
     assert outcome(client, client.post('/labeldesigner/api/print', data=job)) == ('printed', '')
-    jobs = [data for data in printer.written if data != protocol.STATUS]
+    jobs = printer.written[1::2]
     assert [data[85:90] for data in jobs] == [b'\x1b@\x1bq1', b'\x1b@\x1bq2']
     assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['settings'] == {'side': 'right'}
 
