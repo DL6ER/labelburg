@@ -136,6 +136,8 @@ class PrinterQueue:
         self.sensing = None
         # The roll of a printer of two, left or right, None for its first
         self.side = None
+        # Whether the cutter of a model whose cutter is an option is attached
+        self.cutter = False
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):

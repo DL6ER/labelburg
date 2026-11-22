@@ -40,9 +40,10 @@ ROLLS = {
 # Dots fed before and after the print on a continuous roll, 3 mm: 24 and 35
 # dots (TD2000 2.1 and 2.3.3), 24 and 36 dots (TD2300 and TD4000 4.1)
 MARGINS = {'td2': {203: 24, 300: 35}, 'td23': {203: 24, 300: 36}, 'td4': {203: 24, 300: 36}}
-# The shortest print on a continuous roll in mm: 12 mm (TD2000 2.3.4), 20 mm
-# with the cutter of the others (TD2300 and TD4000 4.3.4)
-SHORTEST_MM = {'td2': 12, 'td23': 20, 'td4': 20}
+# The shortest print on a continuous roll in mm (TD2000 2.3.4, TD2300 and
+# TD4000 4.3.4), and in lines with the optional cutter attached, 20 mm
+SHORTEST_MM = {'td2': 12, 'td23': 6.4, 'td4': 12}
+CUTTER_SHORTEST = {203: 160, 300: 236}
 
 
 def _label(series: str, dpi: int, tape: tuple, total: tuple, printable: tuple, right: int) -> Label:

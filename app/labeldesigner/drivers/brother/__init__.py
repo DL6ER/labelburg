@@ -105,7 +105,7 @@ class BrotherRaster(Driver):
         qualities = ['fast', 'quality'] if MODELS[model].quality_flag else ['quality']
         return dict(super().capabilities(model), qualities=qualities if td else ['fast', 'quality', 'high'],
                     high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting and not td,
-                    half_cut=model in HALF_CUTTERS, chain=ptouch, feed_waste=ptouch,
+                    half_cut=model in HALF_CUTTERS, chain=ptouch, feed_waste=ptouch, cutter_option=MODELS[model].optional_cutter,
                     # The top of a label leaves a QL, P-touch or TD printer first
                     leaves_turned=True, **({'model_shown': SHOWN_AS[model]} if model in SHOWN_AS else {}))
 

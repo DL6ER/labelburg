@@ -9,6 +9,7 @@ from ...label import LabelContent, LabelOrientation, LabelType
 from ..labels import FormFactor
 from .commands import Raster, RasterError
 from .labels import BY_ID
+from .labels_td import CUTTER_SHORTEST
 from .models import length_problem
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ def render(queue, entries, keep=None) -> Raster:
     """Rasterize the queue entries into one job. Each label is converted as
     soon as its job is complete, so that the images of a long job are not all
     kept in memory; the simulator keeps them as PNG instead."""
-    raster = Raster(queue.model)
+    raster = Raster(queue.model, cutter=queue.cutter)
     ptouch = raster.ptouch
     job = None
     for i, entry in enumerate(entries):
@@ -120,6 +121,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
                 logger.warning('Resizing the image to the width of the label')
                 im = im.resize((dots_printable[0], int((dots_printable[0] / im.size[0]) * im.size[1])),
                                Image.Resampling.LANCZOS)
+            shortest = CUTTER_SHORTEST[raster.spec.dpi] if raster.spec.optional_cutter and raster.cutting else 0
+            if im.size[1] < shortest:
+                # Lengthened to the shortest label the cutter cuts, the print in its middle
+                padded = Image.new(im.mode, (im.size[0], shortest), (255,) * len(im.mode))
+                padded.paste(im, (0, (shortest - im.size[1]) // 2))
+                im = padded
         else:
             if rotate == 'auto':
                 if im.size[0] == dots_expected[1] and im.size[1] == dots_expected[0]:

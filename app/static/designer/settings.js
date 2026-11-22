@@ -165,8 +165,14 @@ function sideHTML(p) {
     return `<div class="set-stack">${seg('side', [['left', 'Left roll'], ['right', 'Right roll']], kept(p).side || 'left', 'Roll')}</div>`;
 }
 
+// Whether the cutter of a printer whose cutter is an option is attached
+function cutterHTML(p) {
+    return `<div class="set-stack">${seg('cutter', [['0', 'Not attached'], ['1', 'Attached']], kept(p).cutter === '1' ? '1' : '0', 'Cutter')}
+        <small class="muted">Choose Attached once the cutter unit is fitted.</small></div>`;
+}
+
 function cuttingHTML(p) {
-    const caps = capsOf(p.model), c = printerCut(p);
+    const caps = printerCaps(p), c = printerCut(p);
     // One that cuts as it is set up says so in its value alone
     if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${esc(cutShort(c, caps))}</span>${caps.cut_on_printer ? '' : `<small class="muted">${esc(cutText(c, caps))}</small>`}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
@@ -201,6 +207,7 @@ function cardHTML(p, i) {
             ${capsOf(p.model).sensing ? `<span class="k">Roll</span>${sensingHTML(p)}` : ''}
             ${capsOf(p.model).two_rolls ? `<span class="k">Roll</span>${sideHTML(p)}` : ''}
             <span class="k">Quality</span>${qualityHTML(p)}
+            ${capsOf(p.model).cutter_option ? `<span class="k">Cutter</span>${cutterHTML(p)}` : ''}
             <span class="k">Cutting</span>${cuttingHTML(p)}
             <span class="k">Leaves first</span><div class="set-stack">${seg('leaves_first', [['top', 'Top'], ['bottom', 'Bottom']], leavesFirst(printerCaps(p), p), 'Leaves the printer first')}
                 <small class="muted">The end that comes out first, e.g. to stick labels on as they come out. The test label shows it.</small></div>

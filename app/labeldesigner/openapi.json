@@ -3491,6 +3491,11 @@
             "enum": ["left", "right"],
             "description": "The roll a printer of two prints on, a DYMO LabelWriter 450 Twin Turbo; printers of one roll refuse it. Not set, the left one."
           },
+          "cutter": {
+            "type": "string",
+            "enum": ["0", "1"],
+            "description": "Whether the cutter unit of a printer whose cutter is an option, a Brother TD-2300D or TD-4D printer, is attached: `1` cuts as `cut` says, labels of a continuous roll at least 20 mm long; not set or `0`, the labels are torn off. Other printers refuse it."
+          },
           "quality": {
             "type": "string",
             "enum": ["quality", "high", "fast"],

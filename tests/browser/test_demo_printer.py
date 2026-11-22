@@ -146,15 +146,35 @@ def test_a_brother_td_printer_offers_its_rd_rolls(designer):
     with designer.expect_response('**/api/settings'):
         designer.select_option(sizes, 'td4-102x152')
     designer.wait_for_function("() => labelEditor.S.tape === 'td4-102x152'")
-    assert 'Brother TD-4420DN' in designer.inner_text('[data-card="0"]')
+    card = designer.inner_text('[data-card="0"]')
+    # Its cutter is an option, without it the labels are torn off
+    assert 'Brother TD-4420DN' in card and 'Not attached' in card and 'Torn off' in card
+    cutter = '[data-card="0"] [data-k="cutter"]'
+    assert designer.eval_on_selector_all(cutter, 'bs => bs.map(b => b.textContent)') == ['Not attached', 'Attached']
+    with designer.expect_response('**/api/settings') as answer:
+        designer.click(f'{cutter}[data-v="1"]')
+    assert answer.value.ok and sent(answer.value.request)['cutter'] == '1'
+    designer.wait_for_selector('[data-card="0"] [data-k="cut"][data-v="each"]')
+    assert 'Torn off' not in designer.inner_text('[data-card="0"]')
     back_to_the_editor(designer)
     assert designer.text_content('#slot .model') == 'Demo Brother TD-4420DN'
     type_label(designer, 'Parcel 7')
     with designer.expect_request('**/api/print') as request:
         designer.click('#print')
     fields = sent(request.value)
-    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'TD-4420DN', 'td4-102x152')
+    assert (fields['printer'], fields['model'], fields['label_size'], fields['cut']) == ('simulation', 'TD-4420DN', 'td4-102x152', 'each')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
+
+
+def test_only_a_brother_td_printer_whose_cutter_is_an_option_offers_it(designer):
+    open_settings(designer)
+    assert 'Cutter' not in designer.inner_text('[data-card="0"]')
+    for model, offered in (('TD-2120N', False), ('TD-2350D', True)):
+        with designer.expect_response('**/api/settings'):
+            designer.select_option(MODEL, model)
+        designer.wait_for_function(f"() => labelEditor.S.printers[0].model === '{model}'")
+        card = designer.inner_text('[data-card="0"]')
+        assert ('Not attached' in card) == offered and 'Torn off' in card
 
 
 def test_a_model_listed_as_another_one_is_named_while_chosen(designer):

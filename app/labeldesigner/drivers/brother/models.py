@@ -33,6 +33,7 @@ class Model:
     model_code: int = 0xFFFF
     quality_flag: bool = True
     status_notification: bool = False
+    optional_cutter: bool = False
 
 
 # Brother's TD printers by series, of each resolution its models with their
@@ -91,7 +92,7 @@ def _td_models() -> tuple:
     return tuple(
         Model(model, speed=speed, max_length_dots=TD_LONGEST[series][dpi], dpi=dpi,
               number_bytes_per_row=TD_ROW_BYTES[series][dpi], cutting=series != 'td2', expanded_mode=series != 'td2',
-              quality_flag=series == 'td2', status_notification=series != 'td2',
+              quality_flag=series == 'td2', status_notification=series != 'td2', optional_cutter=series != 'td2',
               num_invalidate_bytes=350 if model in TD4_INVALIDATE_350 else TD_INVALIDATE[series],
               series_code=0x35, model_code=code)
         for series, resolutions in TD_SERIES.items() for dpi, models in resolutions.items()

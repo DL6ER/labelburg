@@ -102,9 +102,13 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '', cut_on_printer: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '', cut_on_printer: false, cutter_option: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
-export const printerCaps = (p = S.printer) => capsOf(p && p.model);
+// A printer whose cutter is an option has none until it is set attached
+export const printerCaps = (p = S.printer) => {
+    const k = capsOf(p && p.model);
+    return k.cutter_option && kept(p).cutter !== '1' ? Object.assign({}, k, { cutter: false }) : k;
+};
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 // The maker and model the server read from the printer, else those of its model
 export const printerName = p => (p && p.device_name) || [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
@@ -375,7 +379,7 @@ export const CUTS = [['each', 'After each label'], ['last', 'After the last labe
 export const CUT_KEYS = ['cut', 'half_cut', 'chain'];
 export const sizeCaps = (id, p = S.printer) => {
     const models = SIZES[id] ? SIZES[id].models : [], model = p && p.model;
-    return capsOf(models.includes(model) ? model : models.find(m => !noCutter(capsOf(m))) || models[0]);
+    return models.includes(model) ? printerCaps(p) : capsOf(models.find(m => !noCutter(capsOf(m))) || models[0]);
 };
 export const neverWhy = k => k.never_cut || '';
 export const noCutter = k => k.cutter === false;

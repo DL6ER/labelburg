@@ -25,7 +25,7 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing', 'side')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing', 'side', 'cutter')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
 ENDS = ('top', 'bottom')
@@ -43,12 +43,15 @@ DEMO_MODEL = 'demo_model'
 DEMO = 'simulation'
 
 SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1), '
-                    'leaves_first (top or bottom), sensing (gap, mark or endless) and side (left or right) of a printer, demo_model (a supported '
-                    'model) of the demo printer simulation, and quality (quality, high or fast), an empty value removes one')
+                    'leaves_first (top or bottom), sensing (gap, mark or endless), side (left or right) and cutter (1 attached or 0) '
+                    'of a printer, demo_model (a supported model) of the demo printer simulation, and quality (quality, high or fast), '
+                    'an empty value removes one')
 # Of a printer that is not told how it finds its labels, see Driver.capabilities()
 NO_SENSING = 'This printer finds the start of each label by itself'
 # Of a printer of one roll
 NO_SIDES = 'This printer has one roll'
+# Of a printer whose cutter is no option, see Driver.capabilities()
+NO_CUTTER_OPTION = 'This printer has no cutter to attach'
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # The printers added in the Settings, each with its address, model and name
 ADDED = 'added'
@@ -154,6 +157,12 @@ def two_rolls(model: str) -> bool:
     return model in MODELS and for_model(model).capabilities(model)['two_rolls']
 
 
+def cutter_option(model: str) -> bool:
+    """Whether the cutter of a printer of the model is an option, see
+    Driver.capabilities()."""
+    return model in MODELS and for_model(model).capabilities(model)['cutter_option']
+
+
 def of_printer(data: dict, device: str, model: str | None = None) -> dict:
     """The settings of a printer, the common ones with its own. How it
     finds its labels only where it is one of SENSINGS, e.g. not after a hand
@@ -185,6 +194,8 @@ def _settings(data: dict, printer: str, model: str | None) -> dict:
         settings.pop('sensing', None)
     if settings.get('side') not in SIDES or model is not None and not two_rolls(model):
         settings.pop('side', None)
+    if settings.get('cutter') not in ('0', '1') or model is not None and not cutter_option(model):
+        settings.pop('cutter', None)
     return settings
 
 
@@ -223,6 +234,11 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
                 raise ValueError(SETTINGS_MESSAGE)
             if not two_rolls(model):
                 raise ValueError(NO_SIDES)
+        elif name == 'cutter':
+            if value not in ('0', '1'):
+                raise ValueError(SETTINGS_MESSAGE)
+            if not cutter_option(model):
+                raise ValueError(NO_CUTTER_OPTION)
         elif value not in QUALITIES:
             raise ValueError(SETTINGS_MESSAGE)
     return changes
@@ -277,6 +293,8 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
         own.pop('sensing', None)
     if not two_rolls(model):
         own.pop('side', None)
+    if not cutter_option(model):
+        own.pop('cutter', None)
     data['printers'][printer] = own
     return data
 
@@ -285,10 +303,11 @@ def for_printing(kept: dict, model: str, values: dict) -> dict:
     """values of a print request, what it leaves out as set for the printer
     in kept, its settings as of_printer() gives them: 600 dpi and fast
     printing only where the model prints them. How the printer finds its
-    labels and its roll go to the job, see PrinterQueue.sensing and side."""
+    labels, its roll and its cutter go to the job, see PrinterQueue.sensing,
+    side and cutter."""
     def named(name):
         return any(values.get(k) not in (None, '') for k in NAMED_BY.get(name, (name,)))
-    taken = {name: kept[name] for name in OWN if name in kept and name not in ('sensing', 'side') and not named(name)}
+    taken = {name: kept[name] for name in OWN if name in kept and name not in ('sensing', 'side', 'cutter') and not named(name)}
     if 'quality' in kept and not named('quality'):
         caps = for_model(model).capabilities(model)
         taken['high_res'] = '1' if kept['quality'] == 'high' and caps['high_res'] else '0'

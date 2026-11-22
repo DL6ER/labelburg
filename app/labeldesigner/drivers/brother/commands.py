@@ -21,9 +21,11 @@ class Raster:
     other. page_lengths holds the length of each page in mm, at most: how
     long the printer may take to print it."""
 
-    def __init__(self, model: str):
+    def __init__(self, model: str, cutter: bool = False):
         self.model = model
         self.spec = MODELS[model]
+        # Of a model whose cutter is an option, whether it is attached
+        self.cutting = self.spec.cutting and (cutter or not self.spec.optional_cutter)
         self.ptouch = model.startswith('PT-')
         self.td = model.startswith('TD-')
         self.data = bytearray()
@@ -77,19 +79,20 @@ class Raster:
 
     def add_autocut(self, on: bool):
         """Whether the printer cuts at all (ESC i M)."""
-        if self.spec.cutting:
+        if self.cutting:
             self.data += b'\x1b\x69\x4d' + bytes([on << 6])
 
     def add_cut_every(self, labels: int):
         """Cut after this many labels (ESC i A)."""
-        if self.spec.cutting:
+        if self.cutting:
             self.data += b'\x1b\x69\x41' + bytes([labels & 0xFF])
 
     def add_expanded_mode(self, cut_at_end: bool, dpi_600: bool, two_color: bool, half_cut: bool, chain: bool):
         """ESC i K: on P-touch printers half cuts between labels and chain
         printing, on QL printers the cut after the last label, 600 dpi and
-        printing in red."""
-        if not self.spec.expanded_mode:
+        printing in red, on TD printers the cut after the last label only
+        with the cutter attached."""
+        if not self.spec.expanded_mode or self.spec.optional_cutter and not self.cutting:
             return
         if self.ptouch:
             flags = half_cut << 2 | (not chain) << 3 | dpi_600 << 5

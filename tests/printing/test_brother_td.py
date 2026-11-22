@@ -33,8 +33,8 @@ def td_status(model_code, width, media_type=CONTINUOUS, length=0, kind=REPLY, ph
     return bytes(packet)
 
 
-def job(model, label_size, image, **options):
-    raster = Raster(model)
+def job(model, label_size, image, cutter=False, **options):
+    raster = Raster(model, cutter=cutter)
     convert(raster, [image], label_size, **options)
     return bytes(raster.data)
 
@@ -66,14 +66,14 @@ def test_die_cut_label_of_the_td_2300d_series_as_in_its_reference():
     # TD2300 4.1: 661 bytes of invalidate, ESC @, ESC i a 01h, ESC i ! 00h
     # for the status while printing, the print information of its example of
     # 51 x 26 mm (8Eh 0Bh 33h 1Ah, 230 lines at 300 dpi), auto cut (ESC i M
-    # 40h), each label (ESC i A 01h), at the end (ESC i K 08h), no margins on
-    # die-cut labels (4.3.3), and ESC i a FFh after the job. 4.3.5: 67 pins
-    # left of 563, 66 right, 87 bytes a row: the first column of the label
-    # is the pin next to the left margin.
+    # 40h), each label (ESC i A 01h), at the end (ESC i K 08h) with the cutter
+    # attached, no margins on die-cut labels (4.3.3), and ESC i a FFh after
+    # the job. 4.3.5: 67 pins left of 563, 66 right, 87 bytes a row: the
+    # first column of the label is the pin next to the left margin.
     image = Image.new('1', (563, 230), 1)
     ImageDraw.Draw(image).line((0, 0, 0, 229), fill=0)
     row = b'\x00' * 78 + b'\x08' + b'\x00' * 8
-    assert job('TD-2310D-300', 'td23-300-51x26', image) == (
+    assert job('TD-2310D-300', 'td23-300-51x26', image, cutter=True) == (
         b'\x00' * 661 + b'\x1b\x40' + ESC_I + b'\x61\x01' + ESC_I + b'\x21\x00'
         + ESC_I + b'\x7a\x8e\x0b\x33\x1a\xe6\x00\x00\x00\x00\x00'
         + ESC_I + b'\x4d\x40' + ESC_I + b'\x41\x01' + ESC_I + b'\x4b\x08' + ESC_I + b'\x64\x00\x00' + b'\x4d\x00'
@@ -81,16 +81,48 @@ def test_die_cut_label_of_the_td_2300d_series_as_in_its_reference():
 
 
 @pytest.mark.parametrize('model, invalidate', [('TD-4420DN', 350), ('TD-4425DN', 661)])
-def test_continuous_roll_of_the_td_4d_series_not_cut(model, invalidate):
+def test_continuous_roll_of_the_td_4d_series_without_its_cutter(model, invalidate):
     # TD4000 NULL: 350 or 661 bytes of invalidate by the model; 4.1: 3 mm of
     # margins at 203 dpi (18h 00h); 4.3.5: 22 pins right and left of 788 on
-    # 102 mm, 104 bytes a row; ESC i K: not cut at the end
+    # 102 mm, 104 bytes a row; no cut commands without the cutter attached
     row = b'\x00\x00\x03' + b'\xff' * 98 + b'\xc0\x00\x00'
-    assert job(model, 'td4-102', Image.new('1', (788, 100), 0), cut=False) == (
+    assert job(model, 'td4-102', Image.new('1', (788, 100), 0), cut=True) == (
         b'\x00' * invalidate + b'\x1b\x40' + ESC_I + b'\x61\x01' + ESC_I + b'\x21\x00'
         + ESC_I + b'\x7a\x86\x0a\x66\x00\x64\x00\x00\x00\x00\x00'
-        + ESC_I + b'\x4b\x00' + ESC_I + b'\x64\x18\x00' + b'\x4d\x00'
+        + ESC_I + b'\x64\x18\x00' + b'\x4d\x00'
         + (b'\x67\x00\x68' + row) * 100 + b'\x1a' + ESC_I + b'\x61\xff')
+
+
+@pytest.mark.parametrize('cut, commands', [
+    # ESC i M 40h, ESC i A 01h and ESC i K 08h (TD4000 4.1, ESC i K), or not
+    # cut at the end
+    (True, ESC_I + b'\x4d\x40' + ESC_I + b'\x41\x01' + ESC_I + b'\x4b\x08'), (False, ESC_I + b'\x4b\x00')])
+def test_cut_with_the_cutter_attached(cut, commands):
+    data = job('TD-4520DN', 'td4-300-102x152', Image.new('1', (1164, 1728), 1), cutter=True, cut=cut)
+    information = data.index(ESC_I + b'\x7a')
+    assert data[information + 13:information + 13 + len(commands) + 5] == commands + ESC_I + b'\x64\x00\x00'
+
+
+@pytest.mark.parametrize('model, label_size, lines, cutter, printed', [
+    # The cutter cuts no shorter than 20 mm: 160 lines at 203 dpi, 236 at 300
+    # dpi (TD2300 and TD4000 4.3.4)
+    ('TD-4420DN', 'td4-58', 100, True, 160), ('TD-2350D-300', 'td23-300-58', 76, True, 236),
+    ('TD-4420DN', 'td4-58', 160, True, 160), ('TD-4420DN', 'td4-58', 100, False, 100),
+    ('TD-2120N', 'td2-58', 96, True, 96)])
+def test_shortest_label_the_cutter_cuts(model, label_size, lines, cutter, printed):
+    label = labels_td.BY_ID[label_size]
+    image = Image.new('1', (label.dots_printable[0], lines), 0)
+    data = job(model, label_size, image, cutter=cutter)
+    rows = data.count(b'\x67\x00' + bytes([Raster(model).spec.number_bytes_per_row]))
+    assert rows == printed
+    # The print in the middle of the label
+    blank = (printed - lines) // 2
+    information = data.index(ESC_I + b'\x7a')
+    assert data[information + 7:information + 9] == printed.to_bytes(2, 'little')
+    first = data.index(b'\x67\x00')
+    width = Raster(model).spec.number_bytes_per_row + 3
+    assert data[first + blank * width + 3:first + (blank + 1) * width] != bytes(width - 3)
+    assert blank == 0 or data[first + 3:first + width] == bytes(width - 3)
 
 
 @pytest.mark.parametrize('model, label_size, margins, row_bytes', [
@@ -279,6 +311,9 @@ def test_capabilities():
     # Only the TD-2000 series takes a quality flag
     assert caps['TD-2120N']['qualities'] == ['fast', 'quality'] and caps['TD-4420DN']['qualities'] == ['quality']
     assert caps['TD-4420DN']['leaves_turned'] and caps['TD-4420DN']['colors'] == 'black'
+    # The cutter of the others is an option (TD2300 and TD4000 4.3.4)
+    assert {model for model, c in caps.items() if c['cutter_option']} == {model for model, c in caps.items() if c['cutter']}
+    assert not DRIVER.capabilities('QL-800')['cutter_option']
 
 
 def test_td_printers_take_only_their_rolls():
@@ -316,10 +351,10 @@ def test_names_of_the_rolls(label_size, name):
 
 
 @pytest.mark.parametrize('label_size, limits', [
-    # Margins of 3 mm, the shortest print of 12 mm (TD2000 2.3.4) or 20 mm with
-    # the cutter (TD2300 and TD4000 4.3.4), the longest of 1000 or 3000 mm
-    ('td2-58', (18.1, 1000, 3.0)), ('td2-300-57', (18, 1000, 3.0)), ('td23-58', (26.1, 3000, 3.0)),
-    ('td4-300-102', (26.1, 3000, 3.0))])
+    # Margins of 3 mm, the shortest print of 12 mm (TD2000 2.3.4, TD4000
+    # 4.3.4) or 6.4 mm (TD2300 4.3.4), the longest of 1000 or 3000 mm
+    ('td2-58', (18.1, 1000, 3.0)), ('td2-300-57', (18, 1000, 3.0)), ('td23-58', (12.5, 3000, 3.0)),
+    ('td4-300-102', (18.1, 3000, 3.0))])
 def test_lengths_of_a_continuous_roll(label_size, limits):
     shortest, longest, margin = length_limits(labels_td.BY_ID[label_size])
     assert (shortest, longest, round(margin, 1)) == limits
@@ -448,3 +483,45 @@ def test_found_on_usb_by_the_model_its_device_id_names(tmp_path, monkeypatch, de
     found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert [(p['path'], p['model']) for p in found][0] == (device, 'TD-2350D-300')
     assert found[0]['tape']['id'] == 'td23-300-58'
+
+
+def test_cutter_is_a_setting_of_printers_whose_cutter_is_an_option():
+    from app.labeldesigner import printer_settings, refusals
+    assert printer_settings.checked({'cutter': '1'}, 'TD-4420DN') == {'cutter': '1'}
+    assert printer_settings.checked({'cutter': '0'}, 'TD-2350D-300') == {'cutter': '0'}
+    for model in ('TD-2120N', 'QL-800', 'Zebra/ZPL'):
+        with pytest.raises(ValueError, match=printer_settings.NO_CUTTER_OPTION):
+            printer_settings.checked({'cutter': '1'}, model)
+    with pytest.raises(ValueError, match='^settings are'):
+        printer_settings.checked({'cutter': 'yes'}, 'TD-4420DN')
+    assert printer_settings.NO_CUTTER_OPTION in refusals.MESSAGES
+    data = {'printers': {printer_settings.key('tcp://192.0.2.5'): {'cutter': '1', 'cut': 'last'}}}
+    assert printer_settings.of_printer(data, 'tcp://192.0.2.5', 'TD-4420DN') == {'cutter': '1', 'cut': 'last'}
+    assert printer_settings.of_printer(data, 'tcp://192.0.2.5', 'QL-800') == {'cut': 'last'}
+    # It goes to the job, not to the label
+    assert printer_settings.for_printing({'cutter': '1', 'cut': 'last'}, 'TD-4420DN', {}) == {'cut': 'last'}
+
+
+@pytest.mark.parametrize('attached', [None, '1'])
+def test_cuts_only_with_the_cutter_attached(clock, monkeypatch, tmp_path, attached):
+    jobs = []
+
+    class Backend(FakePrinter):
+        def __init__(self, device_specifier):
+            super().__init__(clock, [])
+            jobs.append(self)
+
+        def write(self, data):
+            super().write(data)
+            if self.written.endswith(b'\x1a' + ESC_I + b'\x61\xff'):
+                self.messages = page()
+    monkeypatch.setattr(backends, 'KernelPrinter', Backend)
+    without_status(monkeypatch)
+    client = make_client(tmp_path, empty_repo=True, model='TD-4420DN', printer='file:///dev/usb/lp0')
+    if attached:
+        r = client.post('/labeldesigner/api/settings', data={'printer': 'file:///dev/usb/lp0', 'model': 'TD-4420DN', 'cutter': attached})
+        assert r.status_code == 200, r.get_json()
+    data = dict(EXAMPLE_FORMDATA, label_size='td4-102x152', cut='each')
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
+    assert (ESC_I + b'\x4d\x40' + ESC_I + b'\x41\x01' + ESC_I + b'\x4b\x08' in jobs[-1].written) == bool(attached)
+    assert (ESC_I + b'\x4b' in jobs[-1].written) == bool(attached)
