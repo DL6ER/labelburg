@@ -8,9 +8,10 @@ from dataclasses import dataclass
 class Model:
     """A printer model: the bytes of a raster line across its print head, the
     dots its print is moved further off the right edge, the commands it takes
-    (mode setting, cutting, expanded mode, compression), whether it prints
-    red, the zero bytes that clear its command buffer, and the codes it gives
-    in its status (series and model). Its longest label
+    (mode setting, cutting, cutting after a number of labels, expanded mode,
+    compression), whether it is told to send its status while printing,
+    whether it prints red, the zero bytes that clear its command buffer, and
+    the codes it gives in its status (series and model). Its longest label
     has max_length_dots lines at dpi. It prints speed mm/s, as Brother's
     data sheets give it. With bluetooth it is reached on bt:// too."""
     identifier: str
@@ -21,8 +22,10 @@ class Model:
     additional_offset_r: int = 0
     mode_setting: bool = True
     cutting: bool = True
+    cut_every: bool = True
     expanded_mode: bool = True
     compression_support: bool = True
+    status_notification: bool = False
     two_color: bool = False
     num_invalidate_bytes: int = 200
     series_code: int = 0xFFFF
@@ -57,16 +60,26 @@ MODELS = {model.identifier: model for model in (
     Model('PT-E550W', speed=30, max_length_dots=14172, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x66),
     Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x67),
     Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x68),
+    # The same reference names no model code of the PT-P710BT. It takes no
+    # ESC i A, and Brother's driver turns its status while printing off.
+    Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=False,
+          status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
     Model('PT-P900W', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
     Model('PT-P950NW', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
+    # After Brother's raster command reference of the PT-P900 series: model
+    # code 78h, it sends its status while printing only when told so
+    # https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf
+    Model('PT-P910BT', speed=20, max_length_dots=14173, dpi=360, number_bytes_per_row=70, status_notification=True,
+          series_code=0x30, model_code=0x78, bluetooth=True),
 )}
 
 # The QL-1100 series prints at 300 dpi only. Brother's raster command
 # reference of these models lists no 600 dpi resolution, unlike that of the
 # QL-800, and a 600 dpi label came out twice as long on a QL-1100 (#103):
 # https://download.brother.com/welcome/docp100366/cv_ql1100_eng_raster_100.pdf
-# The P-touch printers print at 180 dpi, their reference has no 600 dpi.
-MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W')
+# The P-touch printers print at 180 dpi, their reference has no 600 dpi, nor
+# has the PT-P910BT high-resolution printing.
+MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', 'PT-P910BT')
 
 # Black and red on the QL-800 series, after Brother's data sheets
 RED_SPEED = 24
@@ -77,8 +90,8 @@ QL_BESIDES = 1.3
 PTOUCH_BESIDES = 2.0
 QUALITY_SLOWER = 1.7
 
-# P-touch printers with a half cutter, the PT-P700 has none
-HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW')
+# P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
+HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
 
 # Brother's raster command references: a print of at least 12.7 mm (150
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape

@@ -381,7 +381,8 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
     known = status_cache.get(lock_key(device_specifier), {})
     return {
         'path': device_specifier,
-        'model': known.get('model', model),
+        # An answer that named no model tells less than the model given
+        'model': model if known.get('model', 'Unknown') == 'Unknown' else known['model'],
         'media_width': known.get('media_width'),
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),

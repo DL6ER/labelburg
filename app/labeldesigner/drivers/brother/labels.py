@@ -11,7 +11,7 @@ WIDE = ('QL-1050', 'QL-1060N', 'QL-1100', 'QL-1110NWB', 'QL-1115NWB')
 # PT-P710BT (6 mm: 48 + 32 + 48 pins, 9 mm: 39 + 50 + 39). The PT-P900 series
 # has a print head of its own, its tapes are "18" and pt36.
 # https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
-SMALL_HEAD = ('PT-E550W', 'PT-P700', 'PT-P750W')
+SMALL_HEAD = ('PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT')
 
 LABELS = (
     Label('12', (12, 0), FormFactor.ENDLESS, (142, 0), (106, 0), 29, feed_margin=35),

@@ -636,14 +636,15 @@ def searches(tmp_path, monkeypatch):
     return search, kinds
 
 
-def test_classic_bluetooth_is_not_searched_while_no_driver_names_printers_there(searches):
+def test_classic_bluetooth_is_not_searched_while_no_driver_names_printers_there(searches, monkeypatch):
+    monkeypatch.setattr(drivers.BROTHER, 'bluetooth_names', {})
     search, kinds = searches
     assert search() is False
     assert search(look=True) is False and kinds == [False, False]
 
 
-def test_classic_bluetooth_is_searched_only_when_looking_for_printers(searches, monkeypatch):
-    monkeypatch.setattr(drivers.NIIMBOT, 'bluetooth_kind', 'classic')
+def test_classic_bluetooth_is_searched_only_when_looking_for_printers(searches):
+    # Brother names its P-touch printers on Bluetooth there
     search, kinds = searches
     # Not at the first detection, which runs without being asked for
     assert search() is False

@@ -64,7 +64,7 @@ def test_the_demo_printer_offers_every_model(designer):
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(MODELS)
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
-    assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
+    assert brother[:9] == ['PT-E550W', 'PT-P700', 'PT-P710BT', 'PT-P750W', 'PT-P900W', 'PT-P910BT', 'PT-P950NW', 'QL-500', 'QL-550']
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']

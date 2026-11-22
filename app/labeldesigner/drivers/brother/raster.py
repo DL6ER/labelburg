@@ -93,6 +93,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
     raster.add_invalidate()
     raster.add_initialize()
     raster.add_switch_mode()
+    raster.add_status_notification()
     for i, im in enumerate(images):
         if im.mode.endswith('A'):
             # In front of a white background
@@ -157,7 +158,8 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             # half cut the tape and hung in the printing state
             raster.add_media_and_quality(im.size[1], None, tape[0], 0, hq)
         if cut:
-            raster.add_autocut(autocut)
+            # A printer without ESC i A cuts after each page told to cut
+            raster.add_autocut(autocut and (raster.spec.cut_every or (i + 1) % cut_every == 0))
             if autocut:
                 raster.add_cut_every(cut_every)
         raster.add_expanded_mode(cut, dpi_600, red, half_cut, chain)

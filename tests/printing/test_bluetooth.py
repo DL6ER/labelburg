@@ -134,7 +134,7 @@ def detecting(tmp_path, monkeypatch):
     searches, release = [], threading.Event()
     release.set()
 
-    def discover(timeout):
+    def discover(timeout, classic=False):
         searches.append(timeout)
         release.wait(5)
         return [{'address': B1, 'name': 'B1-TEST0001', 'le': True, 'services': [NIIMBOT]}]
@@ -201,7 +201,7 @@ def test_a_b1_found_stays_listed_when_it_no_longer_advertises(detecting, monkeyp
     monkeypatch.setattr(printer, 'BLUETOOTH_INTERVAL', 0)
     _listed(client)
     _searched(client)
-    monkeypatch.setattr(printer.bluetooth, 'discover', lambda timeout: [])
+    monkeypatch.setattr(printer.bluetooth, 'discover', lambda timeout, classic=False: [])
     client.get('/labeldesigner/api/printer_status?look=1')
     _searched(client)
     assert _listed(client)[0] == [(f'bt://{B1}', 'Niimbot/B1')]

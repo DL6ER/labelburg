@@ -6,7 +6,7 @@ import socket
 import pytest
 
 from app.labeldesigner import print_queue, printer, printer_settings
-from app.labeldesigner.drivers import backends, devices, usbip
+from app.labeldesigner.drivers import backends, brother, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
 
@@ -64,6 +64,7 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(usb, '_unanswered', {})
     monkeypatch.setattr(usb, '_asked', {})
     monkeypatch.setattr(usb, '_retry_answered', set())
+    monkeypatch.setattr(brother, '_bluetooth_asked', {})
     monkeypatch.setattr(escpos, '_asked', {})
 
 
