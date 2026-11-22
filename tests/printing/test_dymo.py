@@ -312,6 +312,7 @@ def test_driver_and_model_of_a_printer(monkeypatch, device, device_id, configure
 def test_the_printer_of_printer_printer(tmp_path, monkeypatch, printer, configured, device_id, model):
     from config import Default
     monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: device_id)
+    monkeypatch.delenv('PRINTER_MODEL', raising=False)
     client = make_client(tmp_path, empty_repo=True, model=configured, printer='file:///dev/usb/lp_dymo')
     assert isinstance(client.application.config['PRINTER_MODEL'], Default) is (configured is None)
     shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
