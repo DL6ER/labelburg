@@ -15,6 +15,9 @@ CONNECT_WAIT = 10
 ANSWER_WAIT = 2
 # The host status request, answered with three lines <STX>...<ETX><CR><LF>
 HOST_STATUS = b'~HS'
+# Feeds one empty label as the feed button does, no format that could set
+# the width or length of the labels
+FEED = b'~PH\n'
 # A label goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s
 WRITE_CHUNK = 16384

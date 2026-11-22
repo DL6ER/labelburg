@@ -243,12 +243,19 @@ class Zpl(Driver):
         devices.status_cache[devices.lock_key(device)] = state
         return state
 
+    def feed_kind(self, model, label_size):
+        return 'label'
+
+    def feed_job(self, queue):
+        return [(protocol.FEED, None)]
+
     def print_speed(self, model, fast, red):
         return SPEED, BESIDES
 
     def label_lengths(self, job):
-        # Each label of the job tells its rows in ^LL
-        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / dots_per_mm for label, dots_per_mm in job]
+        # Each label of the job tells its rows in ^LL, the one fed by
+        # feed_job() is unknown
+        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / dots_per_mm for label, dots_per_mm in job if b'^LL' in label]
 
     def render(self, queue, entries, keep=None):
         job = []
