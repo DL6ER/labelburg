@@ -18,7 +18,7 @@ from app.labeldesigner.drivers import ipp as other
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.ipp import calibration, documents
 from app.labeldesigner.label_names import SIZES
-from tests.helpers import make_client, outcome
+from tests.helpers import make_client, outcome, printing
 from tests.printing.test_adding import connections, fake_printer, identity  # noqa: F401
 from tests.printing.test_ipp import attribute, keywords
 from tests.printing.test_other_printer import FakePrinter, pages, printer_attributes, values
@@ -590,3 +590,28 @@ def test_a_whole_sheet_of_webhook_images(tmp_path, monkeypatch):
     refused = client.post(f'{API}/webhook/print', json={**asn, 'images': [image] * 101})
     assert refused.get_json()['message'] == 'Too many images, at most 100 per request'
     assert [len(labels_of(page, 'sheet-l4731rev')) for page in shots] == [189]
+
+
+@pytest.mark.parametrize('resolutions', [(300, 600), (600,)])
+def test_pages_are_made_one_at_a_time_as_they_are_sent(tmp_path, monkeypatch, resolutions):
+    # An A4 page in gray takes about 9 MB, 35 MB at 600 dpi
+    monkeypatch.setattr(other, 'JOB_POLL', 0.01)
+    steps = []
+    generate, header = sheets.Sheet.generate, documents.page_header
+
+    def made(self):
+        if printing():
+            steps.append('made')
+        return generate(self)
+
+    def sent(*args, **kwargs):
+        steps.append('sent')
+        return header(*args, **kwargs)
+    monkeypatch.setattr(sheets.Sheet, 'generate', made)
+    monkeypatch.setattr(documents, 'page_header', sent)
+    fake = FakePrinter(office_attributes(resolutions=resolutions))
+    try:
+        _, found = printed(client_of(tmp_path, fake), fake, print_count=63, text=json.dumps([]))
+    finally:
+        fake.close()
+    assert len(found) == 3 and steps == ['made', 'sent'] * 3

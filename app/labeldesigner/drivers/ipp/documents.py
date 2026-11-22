@@ -152,11 +152,13 @@ def _rows(img: Image.Image, raster_type: str) -> list[bytes]:
     return [data[y * img.width:(y + 1) * img.width] for y in range(img.height)]
 
 
-def pwg_raster(images: list[Image.Image], dpi: int, media_size: tuple[int, int], raster_type: str = SGRAY_8) -> bytes:
-    """A PWG raster document of images of 1 bit or gray, a page each."""
+def pwg_raster(images, dpi: int, media_size: tuple[int, int], raster_type: str = SGRAY_8, count: int | None = None) -> bytes:
+    """A PWG raster document of images of 1 bit or gray, a page each, of
+    count images where they are taken one by one, e.g. of a generator."""
+    count = len(images) if count is None else count
     pages = [SYNC]
     for img in images:
-        pages += [page_header(img.width, img.height, dpi, media_size, len(images), raster_type),
+        pages += [page_header(img.width, img.height, dpi, media_size, count, raster_type),
                   page_bitmap(_rows(img, raster_type))]
     return b''.join(pages)
 
@@ -179,14 +181,17 @@ def pdf(images: list[Image.Image], dpi: int) -> bytes:
 
 def documents(chosen_format: Format, images: list[Image.Image], media_size: tuple[int, int], made_at: int = 0) -> list[bytes]:
     """The documents of the images in the format, see chosen(): one with all
-    pages, of PNG one for each image. Images made_at another resolution
-    than the raster's are scaled to it dot by dot."""
+    pages, of PNG one for each image, of PDF one for each image where they
+    are not a list but made one at a time as they are taken. Images made_at
+    another resolution than the raster's are scaled to it dot by dot, each
+    as it is taken."""
     kind, dpi, raster_type = chosen_format
     if kind == PWG_RASTER:
+        count = len(images)
         if made_at and dpi != made_at and dpi % made_at == 0:
-            images = [img.resize((img.width * dpi // made_at, img.height * dpi // made_at), Image.Resampling.NEAREST)
-                      for img in images]
-        return [pwg_raster(images, dpi, media_size, raster_type)]
+            images = (img.resize((img.width * dpi // made_at, img.height * dpi // made_at), Image.Resampling.NEAREST)
+                      for img in images)
+        return [pwg_raster(images, dpi, media_size, raster_type, count)]
     if kind == PDF:
-        return [pdf(images, dpi)]
+        return [pdf(images, dpi)] if isinstance(images, list) else [pdf([img], dpi) for img in images]
     return [png(img, dpi) for img in images]

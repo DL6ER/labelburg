@@ -97,13 +97,33 @@ AUTHENTICATION = 'cups-held-for-authentication'
 
 
 class Job(NamedTuple):
-    """The labels of a job as 1 bit images, each as large as the label size."""
+    """The labels of a job as 1 bit images, each as large as the label size,
+    of sheets of labels Pages."""
     label: Label
     images: list
 
     @property
     def dpi(self) -> int:
         return DPI[self.label.models[0]]
+
+
+class Pages:
+    """The pages of a job on sheets of labels, made one at a time as they are
+    sent, as an A4 page in gray takes about 9 MB: make(i) makes page i. The
+    first one is made at once, which raises what making them raises."""
+
+    def __init__(self, count: int, make):
+        self.count, self.make = count, make
+        self.first = make(0)
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __iter__(self):
+        first, self.first = self.first, None
+        yield first if first is not None else self.make(0)
+        for i in range(1, self.count):
+            yield self.make(i)
 
 
 def dpi_of(resolution) -> int | None:
@@ -364,7 +384,6 @@ def _test_sheet_for(label: Label) -> Label:
 def _sheet_for(label_size: str) -> str:
     """The sheet of labels a label made for label_size prints on: the first
     one of more labels of its size, see sheets.same_size(), else label_size."""
-    from ... import sheets
     from ...label_names import label_of
     made_for = label_of(label_size)
     if made_for is None or made_for in SHEETS or made_for.tape_size[1] == 0:
@@ -454,6 +473,8 @@ class Ipp(Driver):
         return (OFFICE_SPEED, OFFICE_BESIDES) if model == OFFICE else (SPEED, BESIDES)
 
     def label_lengths(self, job):
+        if isinstance(job.images, Pages):
+            return [job.label.tape_size[1]] * len(job.images)
         return [diecut.millimeters(img.height, job.dpi) for img in job.images]
 
     def render(self, queue, entries, keep=None):
@@ -472,17 +493,19 @@ class Ipp(Driver):
 
     def _sheets(self, queue, entries, keep=None) -> Job:
         """A page in gray for each sheet of labels (sheets.Sheet), plain paper
-        with lines to cut along, moved as the printer is calibrated."""
+        with lines to cut along, moved as the printer is calibrated, see
+        Pages."""
         label = next(size for size in SHEETS if size.identifier == queue.label_size)
-        pages = []
-        for i, entry in enumerate(entries):
-            page = entry['label'].generate().convert('L')
+
+        def page(i):
+            made = entries[i]['label'].generate().convert('L')
             if queue.cut_lines and sheets.per_sheet(label) > 1:
-                page = sheets.with_cut_lines(label, page)
-            page = sheets.shifted(label, page, queue.offset)
-            if keep:
-                keep(page, f'sheet_{i}')
-            pages.append(page)
+                made = sheets.with_cut_lines(label, made)
+            return sheets.shifted(label, made, queue.offset)
+        pages = Pages(len(entries), page)
+        if keep:
+            for i, made in enumerate(pages):
+                keep(made, f'sheet_{i}')
         return Job(label, pages)
 
     def send(self, queue, job) -> str:
