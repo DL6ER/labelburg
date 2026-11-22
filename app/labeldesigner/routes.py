@@ -27,7 +27,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, diecut, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, found_model, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .dates import LANGUAGES as DATE_LANGUAGES
@@ -2240,7 +2240,9 @@ def _told_model(device: str) -> str:
     """The model a printer tells when asked, for one the label designer knows
     no model of, e.g. one that did not answer the status query."""
     driver, model = drivers.resolve(device, 'Unknown')
-    if model != 'Unknown':
+    # A driver is not guessed for a printer it does not take, e.g. on
+    # Bluetooth: it would be sent that driver's commands
+    if model != 'Unknown' or not any(pattern.fullmatch(device) for pattern in driver.device_patterns):
         return model
     try:
         state = driver.status(device, model)
@@ -2296,6 +2298,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
         # The model a printer tells, e.g. in its device ID, else the configured
         # one; PRINTER_MODEL is that of PRINTER_PRINTER only
         listed_model = next((m for m, d, _ in printers if d == device), None)
+        # One the search found is the model it found, e.g. on Bluetooth,
+        # where neither its address nor a device ID tells it
+        listed_model = listed_model or found_model(device)
         chosen = listed_model or model
         assumed = not listed_model and (device != configured or isinstance(model, Default))
         model = drivers.resolve(device, chosen, assumed)[1]

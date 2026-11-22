@@ -55,9 +55,10 @@ def label(rows: list[bytes], width: int, size: tuple, gap: float, sensing: str |
 
 def write(device: str, data: bytes):
     """Send to tcp://<host>[:<port>], to usb://<vendor>:<product>[/<serial>]
-    through PyUSB or to a device file, e.g. usblp's."""
-    if device.startswith('usb://'):
-        printer = backends.UsbPrinter(device)
+    through PyUSB, to bt://<MAC>[/<channel>] over RFCOMM or to a device file,
+    e.g. usblp's."""
+    if device.startswith(('usb://', 'bt://')):
+        printer = backends.open_printer(device)
         try:
             for start in range(0, len(data), WRITE_CHUNK):
                 printer.write(data[start:start + WRITE_CHUNK])
@@ -93,8 +94,10 @@ class _Link:
 
 
 class _UsbLink(_Link):
+    """The printer through PyUSB or on classic Bluetooth."""
+
     def __init__(self, device: str):
-        self.printer = backends.UsbPrinter(device)
+        self.printer = backends.open_printer(device)
 
     def discard(self):
         backends.discard(lambda: self.printer.read(256))
@@ -131,7 +134,7 @@ class _TcpLink(_Link):
 def _link(device: str) -> _Link:
     if device.startswith('tcp://'):
         return _TcpLink(device)
-    if device.startswith('usb://'):
+    if device.startswith(('usb://', 'bt://')):
         return _UsbLink(device)
     return _Link(device)
 

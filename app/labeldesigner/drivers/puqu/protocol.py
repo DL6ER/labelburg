@@ -6,7 +6,7 @@ compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
 import socket
 import time
 
-from .. import bitmap, devices, progress
+from .. import bitmap, progress, transports
 
 # 8 dots per mm, the printhead is 48 mm wide
 DPI = 203
@@ -24,8 +24,6 @@ ERRORS = {
     PRINT_ERROR: 'The printer reports a print error',
 }
 
-# Connecting took about 4 s, also with the printer close by
-CONNECT_WAIT = 10
 # How long the printer may take to answer, and how long a label takes at
 # most: at least as long as the script this came from waited, 3 s for a
 # 30 mm label, else as long as it takes per mm at the slowest
@@ -47,8 +45,7 @@ class PuquError(Exception):
 
 def address(device: str) -> tuple[str, int]:
     """MAC address and RFCOMM channel of bt://<MAC>[/<channel>]."""
-    mac, _, channel = device[len('bt://'):].partition('/')
-    return mac.upper(), int(channel or CHANNEL)
+    return transports.bt_address(device, CHANNEL)
 
 
 def compress(rows: list[bytes]) -> bytes:
@@ -101,14 +98,7 @@ def errors(reply: bytes) -> list[str]:
 
 
 def connect(device: str) -> socket.socket:
-    s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-    s.settimeout(CONNECT_WAIT)
-    try:
-        with devices.bluetooth_turn:
-            s.connect(address(device))
-    except OSError:
-        s.close()
-        raise
+    s = transports.rfcomm(device, CHANNEL)
     s.settimeout(ANSWER_WAIT)
     return s
 

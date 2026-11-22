@@ -46,6 +46,13 @@ BESIDES = 0.5
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
+# Epson's names on classic Bluetooth after the Technical Reference Guides (https://files.support.epson.com/pdf/pos/bulk/):
+# model, "_" ("-" too on a TM-P20II or TM-P80II) and the last 6 digits of the serial number, "-L" added on LE
+BLUETOOTH_NAMES = {
+    **{rf'{model}_[0-9]{{6}}': MODELS[0] for model in ('TM-P20', 'TM-P60II', 'TM-P80', 'TM-m10', 'TM-m30', 'TM-m30II', 'TM-m50')},
+    **{rf'{model}[_-][0-9]{{6}}(-L)?': MODELS[0] for model in ('TM-P20II', 'TM-P80II')},
+    r'TM-m30III_[0-9]{6}(-L)?': MODELS[0],
+}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
@@ -87,16 +94,20 @@ class Escpos(Driver):
     # Both models are shown alike
     shown_as = {MODELS[1]: MODELS[0]}
     # usblp's device, also a name a udev rule gives it, e.g. /dev/usb/lp_epson,
-    # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, or
-    # on the network on the port of raw printing, as the other drivers
+    # on Linux only, the printer through PyUSB, e.g. usb://0x04b8:0x0e15, on
+    # the network on the port of raw printing, as the other drivers, or on
+    # classic Bluetooth, bt://<MAC>[/<RFCOMM channel>]
     device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
-                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
+                       re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
+                       re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'))
     errors = (OSError, protocol.EscposError)
     reports_tape = False
     # Its models are those of many makers
     names_devices = True
+    bluetooth_names = BLUETOOTH_NAMES
+    bluetooth_kind = 'classic'
 
     def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
@@ -152,6 +163,13 @@ class Escpos(Driver):
         return [(True, [], 0, DPI[queue.model])]
 
     def status(self, device, model, unconfirmed=False):
+        if device.startswith('bt://'):
+            # Paging it takes the radio: one switched off is not paged at every
+            # status query, any other one at most every 30 s
+            return self.bluetooth_status(device, lambda: self.noted_status(device, lambda: self._status(device, model)))
+        return self._status(device, model)
+
+    def _status(self, device, model):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
         if name := self.device_name(device):
@@ -189,6 +207,7 @@ class Escpos(Driver):
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
+        self.ask_bluetooth_again(device)
         try:
             with protocol.connect(device) as c:
                 problems = _problems(c, _answer_key(device))
@@ -201,6 +220,8 @@ class Escpos(Driver):
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)
+        # Asked again at the next status query, see noted_status()
+        devices.note_answer(device)
         return ''
 
 

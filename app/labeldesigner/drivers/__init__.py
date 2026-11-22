@@ -66,6 +66,12 @@ def note_settings(device: str, settings: dict):
         driver.note_settings(device, settings)
 
 
+def classic_bluetooth() -> bool:
+    """Whether a driver names printers on classic Bluetooth, see
+    Driver.bluetooth_kind: only then is it searched."""
+    return any(driver.bluetooth_kind == 'classic' and driver.bluetooth_names for driver in DRIVERS)
+
+
 def told_model(device_id: str) -> str | None:
     """The model an IEEE 1284 device ID names, None if it is no printer of
     a driver."""

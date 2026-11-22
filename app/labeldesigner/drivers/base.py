@@ -5,13 +5,21 @@ for the QL and P-touch printers. Its __init__.py has a Driver as DRIVER, and
 drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
+import math
 import re
+import time
 from dataclasses import dataclass
 
 from . import devices
 
 # Printers on USB, also shared over USB/IP, and through usblp
 _USB = re.compile(r'(usb|usbip|file)://|/dev/')
+# A printer on Bluetooth is asked at most every BLUETOOTH_STATUS_EVERY s, or
+# when looking for printers or printing; status queries between get its last
+# answer. When each was asked, by devices.lock_key(), the error it gave and
+# its answer, see Driver.bluetooth_status().
+BLUETOOTH_STATUS_EVERY = 30
+_bluetooth_asked: dict[str, tuple[float, Exception | None, dict | None]] = {}
 
 
 def network_status(device: str, model: str, red_support: bool = False) -> dict:
@@ -96,6 +104,14 @@ class Driver:
     # Whether each of its models is one for printers of many makers or for
     # several printers, whose name its status tells, see device_name()
     names_devices: bool = False
+    # (vendor, product) of its printers on USB that are reached through their
+    # serial interface, not a printer interface, see backends.UsbSerialPrinter
+    usb_serial_ids: tuple = ()
+    # Its printers on Bluetooth by their names and services, with their models,
+    # and whether they are on Bluetooth LE or classic, see found_on_bluetooth()
+    bluetooth_names: dict = {}
+    bluetooth_services: dict = {}
+    bluetooth_kind: str = 'le'
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
@@ -247,13 +263,49 @@ class Driver:
         if error:
             # The traceback of the last time only, it grew at every query
             raise error.with_traceback(None)
+        started = time.monotonic()
         try:
             state = query()
         except self.errors as e:
-            devices.note_answer(device, e)
+            # Looked for meanwhile, it is looked for again
+            if started >= devices.looked:
+                devices.note_answer(device, e)
             raise
         devices.note_answer(device)
         return state
+
+    def bluetooth_status(self, device: str, query) -> dict:
+        """The status query() tells of a printer on Bluetooth, see
+        BLUETOOTH_STATUS_EVERY. Its last answer or error while that is
+        younger, from after the label designer last looked for printers and
+        not followed by a job, see ask_bluetooth_again(), and whatever its age
+        while classic Bluetooth is searched, which paging it would end."""
+        key = devices.lock_key(device)
+        asked, error, state = _bluetooth_asked.get(key, (None, None, None))
+        fresh = asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY
+        if fresh or (asked is not None and devices.classic_search.is_set()):
+            if error is not None:
+                raise error.with_traceback(None)
+            return dict(state)
+        # When it was asked: an answer to a query from before the label
+        # designer looked for printers is older than that
+        started = time.monotonic()
+        try:
+            state = query()
+        except self.errors as e:
+            _bluetooth_asked[key] = (started, e, None)
+            raise
+        # One a job holds was not asked
+        if state.get('status_type') != devices.BUSY_STATUS_TYPE:
+            _bluetooth_asked[key] = (started, None, dict(state))
+        return state
+
+    def ask_bluetooth_again(self, device: str):
+        """Ask a printer on Bluetooth at the next status query, e.g. once it
+        got a job. Its last answer stays for a search, see bluetooth_status()."""
+        key = devices.lock_key(device)
+        if key in _bluetooth_asked:
+            _bluetooth_asked[key] = (-math.inf, *_bluetooth_asked[key][1:])
 
     def note_settings(self, device: str, settings: dict):
         """Take the settings of a printer as the server read them last, see
@@ -272,9 +324,20 @@ class Driver:
         return None
 
     def found_on_bluetooth(self, device: dict) -> tuple[str, str] | None:
-        """(address, model) of a printer of this driver on Bluetooth LE as
-        bluetooth.discover() found it, None for other devices."""
-        return None
+        """(address, model) of a printer of this driver on Bluetooth as
+        bluetooth.discover() found it, None for other devices. By default one
+        on the Bluetooth of bluetooth_kind, 'le' or 'classic', whose name a
+        regular expression of bluetooth_names matches, else that advertises
+        a 128-bit service UUID of bluetooth_services. Classic Bluetooth is
+        searched only once a driver names printers there, see
+        drivers.classic_bluetooth()."""
+        if not device.get('classic' if self.bluetooth_kind == 'classic' else 'le'):
+            return None
+        name = device.get('name', '')
+        model = next((model for pattern, model in self.bluetooth_names.items() if re.fullmatch(pattern, name)), None)
+        if model is None:
+            model = next((model for service, model in self.bluetooth_services.items() if service in device.get('services', [])), None)
+        return (f"bt://{device['address']}", model) if model else None
 
     def network_device(self, address: str) -> str:
         """The address of a printer found by its MAC address."""
