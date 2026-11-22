@@ -40,9 +40,9 @@ class USBTimeoutError(USBError):
 
 
 class Device:
-    def __init__(self, product, reads=(), vendor=0x04F9, serial='A1', device_id='', bound=False):
+    def __init__(self, product, reads=(), vendor=0x04F9, serial='A1', device_id='', bound=False, classes=(7,)):
         self.idVendor, self.idProduct, self.bDeviceClass, self.iSerialNumber = vendor, product, 0, 3
-        self.serial, self.device_id, self.bound = serial, device_id, bound
+        self.serial, self.device_id, self.bound, self.classes = serial, device_id, bound, classes
         self.bInterfaceNumber, self.bAlternateSetting = 0, 0
         self.endpoints = [Endpoint(0x81, reads), Endpoint(0x02)]
         self.calls = []
@@ -74,7 +74,7 @@ class Device:
 @pytest.fixture
 def pyusb(monkeypatch):
     """A fake PyUSB with the devices of its list: each is its own
-    configuration with a printer interface."""
+    configuration with a printer interface, or those of its classes."""
     devices = []
     libusb = object()
 
@@ -86,7 +86,7 @@ def pyusb(monkeypatch):
 
     def find_descriptor(parent, bInterfaceClass=None, custom_match=None):
         if bInterfaceClass is not None:
-            return parent if bInterfaceClass == 7 else None
+            return parent if bInterfaceClass in parent.classes else None
         return next((e for e in parent.endpoints if custom_match(e)), None)
     usb.util = types.SimpleNamespace(
         find_descriptor=find_descriptor, endpoint_direction=lambda address: address & 0x80,

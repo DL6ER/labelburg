@@ -52,8 +52,10 @@ def printer_output(tmp_path, monkeypatch):
     monkeypatch.setattr(printer, 'ARP_TABLE', os.devnull)
     # Nor are the device IDs of its USB printers read
     monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'no-usb-device-id-{name}'))
-    # Nor its printers on PyUSB, nor those it shares over USB/IP
+    monkeypatch.setattr(devices, 'USB_DESCRIPTOR', str(tmp_path / 'no-usb-descriptor-{name}-{field}'))
+    # Nor its printers and other devices on PyUSB, nor those it shares over USB/IP
     monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([], []))
+    monkeypatch.setattr(devices, 'found_usb_devices', lambda vendors: [])
     monkeypatch.setattr(backends, 'USBIP_HOST', str(tmp_path / 'no-usbip-host'))
     monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', False)
     monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', False)
@@ -72,6 +74,8 @@ def no_known_printers(monkeypatch):
     # What one test found stays out of the next
     monkeypatch.setattr(printer, '_cached_printers', [])
     monkeypatch.setattr(printer, '_cached_hints', [])
+    monkeypatch.setattr(printer, '_cached_unknown', [])
+    monkeypatch.setattr(printer, '_bluetooth_unknown', {})
     monkeypatch.setattr(printer, '_last_scan_ts', 0)
     monkeypatch.setattr(printer, '_last_states', {})
     monkeypatch.setattr(printer, '_status_queries', {})

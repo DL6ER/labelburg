@@ -1,0 +1,347 @@
+"""Label printers the search finds that no driver prints on: found on USB
+and Bluetooth without anything sent to them, told in /api/printer_status
+with a report that names the kind of printer only."""
+import os
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+
+from app.labeldesigner import printer, unknown
+from app.labeldesigner.drivers import backends, devices, niimbot
+from tests.helpers import make_client
+from tests.printing.test_bluetooth import NIIMBOT
+from tests.printing.test_printer import _status_packet
+from tests.printing.test_usb_backends import FOUND_USB_PRINTERS, Device, pyusb  # noqa: F401
+
+BUILD = {'release': 'v8.0.0', 'commit': '42ef2db6aa', 'date': '2026-11-20 21:17 UTC'}
+DYMO = 'MFG:DYMO;CMD: ;MDL:LabelWriter 450;CLS:PRINTER;DES:DYMO LabelWriter 450;SN:12345678901;SERN:AB1234567;'
+ROLLO = 'MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;'
+LASER = 'MFG:Brother;CMD:PJL,PCL,PCLXL,URF;MDL:HL-L2350DW series;CLS:PRINTER;'
+INKJET = 'MFG:EPSON;CMD:ESCPL2,BDC,D4,D4PX,ESCPR7,END4,GENEP;MDL:XP-2100 Series;CLS:PRINTER;'
+QL700 = 'MFG:Brother;CMD:PT-CBP;MDL:QL-700;CLS:PRINTER;'
+MAC = '00:00:5E:00:53:01'
+STATUS_REQUEST = b'\x1b\x69\x53'
+
+
+def told(found):
+    """Everything a printer found is told with: its report and the form."""
+    entry = unknown.entry(found, BUILD)
+    return entry['report'] + '\n' + entry['report_url'] + '\n' + str(parse_qs(urlsplit(entry['report_url']).query))
+
+
+def test_a_usb_printer_is_reported_by_its_ids_and_the_fields_naming_its_model():
+    found = unknown.on_usb(DYMO, (0x0922, 0x0020))
+    assert found == {'where': 'usb', 'name': 'DYMO LabelWriter 450', 'usb_id': '0922:0020',
+                     'device_id': {'MFG': 'DYMO', 'MDL': 'LabelWriter 450', 'CLS': 'PRINTER', 'DES': 'DYMO LabelWriter 450'}}
+    assert unknown.report(found, BUILD) == '\n'.join([
+        'Version: v8.0.0, commit 42ef2db, built 2026-11-20 21:17 UTC', 'Printer: DYMO LabelWriter 450', 'Connection: USB',
+        'USB ID: 0922:0020', 'Device ID: MFG:DYMO;MDL:LabelWriter 450;CLS:PRINTER;DES:DYMO LabelWriter 450;'])
+
+
+def test_the_form_for_new_printers_is_filled_in():
+    found = unknown.on_usb(DYMO, (0x0922, 0x0020))
+    url = urlsplit(unknown.report_url(found, BUILD))
+    assert (url.scheme, url.netloc, url.path) == ('https', 'github.com', '/DL6ER/labelburg/issues/new')
+    assert parse_qs(url.query) == {
+        'template': ['new_printer.yml'], 'title': ['New printer: DYMO LabelWriter 450'],
+        'version': ['v8.0.0, commit 42ef2db, built 2026-11-20 21:17 UTC'], 'printer': ['DYMO LabelWriter 450'],
+        'found': ['Connection: USB\nUSB ID: 0922:0020\nDevice ID: MFG:DYMO;MDL:LabelWriter 450;CLS:PRINTER;DES:DYMO LabelWriter 450;']}
+    # Its fields are those of the form
+    with open(os.path.join(os.path.dirname(__file__), '..', '..', '.github', 'ISSUE_TEMPLATE', 'new_printer.yml')) as form:
+        text = form.read()
+    assert all(f'id: {field}\n' in text for field in ('version', 'printer', 'found'))
+
+
+def test_a_long_device_id_keeps_the_address_short():
+    found = unknown.on_usb('MFG:' + 'A' * 5000 + ';MDL:' + 'B' * 5000 + ';DES:' + '\u00e4' * 5000 + ';', (0x0922, 0x0020))
+    assert all(len(value) <= unknown.LONGEST for value in found['device_id'].values())
+    assert len(unknown.report_url(found, BUILD)) < 8000
+
+
+@pytest.mark.parametrize('device_id, secret', [
+    # Serial numbers in their own fields, and in those told
+    (DYMO, '12345678901'), (DYMO, 'AB1234567'),
+    ('MFG:Zebra;MDL:ZD421 S/N D4J123456789;CMD:ZPL;', 'D4J123456789'),
+    ('MFG:Zebra;MDL:ZD421;DES:Zebra ZD421 000L9Z378866;', '000L9Z378866'),
+    ('MFG:TSC;MDL:TE210;DES:TE210 on 00-00-5E-00-53-01;', '00-00-5E-00-53-01'),
+    ('MFG:TSC;MDL:TE210;DES:TE210 at ' + MAC + ';', MAC),
+    ('MFG:TSC;MDL:TE210;DES:TE210 00005E005301;', '00005E005301'),
+    ('MFG:TSC;MDL:TE210;DES:TE210 192.168.1.50;', '192.168.1.50'),
+    ('MFG:TSC;MDL:TE210;DES:TE210 fe80::5efe:c000:201;', 'fe80::5efe:c000:201'),
+    ('MFG:TSC;MDL:TE210;DES:labels.fritz.box;', 'fritz.box'),
+    ('MFG:TSC;MDL:TE210;DES:shop-printer.local;', 'shop-printer'),
+    # Fields not naming the model, e.g. a path or a serial number
+    ('MFG:TSC;MDL:TE210;SN:000L9Z378866;', 'L9Z378866'),
+    ('MFG:TSC;MDL:TE210;SERN:D4J12345;', 'D4J12345'),
+    ('MFG:TSC;MDL:TE210;UID:/dev/usb/lp0;', '/dev/usb/lp0'),
+    ('MFG:TSC;MDL:TE210;CID:Office label printer;', 'Office label printer'),
+])
+def test_no_report_tells_a_serial_number_or_an_address(device_id, secret):
+    found = unknown.on_usb(device_id, (0x1203, 0x0140))
+    assert secret.lower() not in told(found).lower()
+    assert found['name'].startswith(device_id.split(';')[0][4:])
+
+
+def test_a_usb_device_without_a_device_id_is_named_by_its_maker():
+    assert unknown.on_usb('', (0x0922, 0x1001))['name'] == 'DYMO LabelManager PnP'
+    assert unknown.on_usb('', (0x1203, 0x0140))['name'] == 'TSC printer'
+    assert unknown.on_usb('', (0x1234, 0x5678))['name'] == 'Printer on USB'
+    assert unknown.on_usb('', None) == {'where': 'usb', 'name': 'Printer on USB', 'usb_id': '', 'device_id': {}}
+    assert unknown.report(unknown.on_usb('', None), {}) == 'Version: A development version\nPrinter: Printer on USB\nConnection: USB'
+
+
+@pytest.mark.parametrize('device_id, office', [
+    (LASER, True), (INKJET, True), ('MFG:Canon;CMD:BJL,BJRaster3,BSCCe,IVEC;MDL:MG3600 series;', True),
+    ('MFG:HP;CMD:PJL,PML,POSTSCRIPT,PCLXL,PCL;MDL:LaserJet;', True), ('MFG:Apple;CMD:URF;', True),
+    (DYMO, False), (ROLLO, False), (QL700, False), ('MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;', False), ('', False)])
+def test_office_printers_are_known_by_their_commands(device_id, office):
+    assert unknown.office(devices.device_id_fields(device_id)) is office
+
+
+def test_devices_of_makers_of_label_printers():
+    assert unknown.label_maker((0x0922, 0x1001)) and unknown.label_maker((0x3513, 0x0001))
+    # DYMO's postal scales, a device of another maker
+    assert not unknown.label_maker((0x0922, 0x8003)) and not unknown.label_maker((0x04b8, 0x0e15))
+
+
+@pytest.mark.parametrize('device, found', [
+    ({'address': MAC, 'name': 'B21-H425040311', 'le': True, 'services': [NIIMBOT]},
+     {'where': 'bluetooth', 'name': 'Niimbot B21', 'connection': 'Bluetooth LE', 'bluetooth_name': 'B21',
+      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
+    ({'address': MAC, 'name': 'D11_H-G1234567', 'le': True, 'services': []},
+     {'where': 'bluetooth', 'name': 'Niimbot D11_H', 'connection': 'Bluetooth LE', 'bluetooth_name': 'D11_H', 'services': []}),
+    # Found by Niimbot's service, the model before the serial number
+    ({'address': MAC, 'name': 'K3-H1234567', 'le': True, 'services': [NIIMBOT]},
+     {'where': 'bluetooth', 'name': 'Niimbot K3', 'connection': 'Bluetooth LE', 'bluetooth_name': 'K3',
+      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
+    ({'address': MAC, 'name': '', 'le': True, 'services': [NIIMBOT, bytes(range(16))]},
+     {'where': 'bluetooth', 'name': 'Niimbot printer', 'connection': 'Bluetooth LE', 'bluetooth_name': '',
+      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2', '0f0e0d0c-0b0a-0908-0706-050403020100']}),
+    ({'address': MAC, 'name': 'H1234567890', 'le': True, 'services': [NIIMBOT]},
+     {'where': 'bluetooth', 'name': 'Niimbot printer', 'connection': 'Bluetooth LE', 'bluetooth_name': '',
+      'services': ['e7810a71-73ae-499d-8c15-faa9aef0c3f2']}),
+    ({'address': MAC, 'name': 'PT-P710BT6795', 'le': False, 'services': [], 'classic': True, 'device_class': 0x040680},
+     {'where': 'bluetooth', 'name': 'Brother PT-P710BT', 'connection': 'classic Bluetooth', 'bluetooth_name': 'PT-P710BT',
+      'services': []}),
+    # Models Labelburg prints on, and other devices
+    ({'address': MAC, 'name': 'D110-H1234567', 'le': True, 'services': [NIIMBOT]}, None),
+    ({'address': MAC, 'name': 'D110_M-H1234567', 'le': True, 'services': [NIIMBOT]}, None),
+    ({'address': MAC, 'name': 'S1-H1234567', 'le': True, 'services': []}, None),
+    ({'address': MAC, 'name': 'B21', 'le': True, 'services': []}, None),
+    ({'address': MAC, 'name': 'Phone', 'le': True, 'services': []}, None),
+    ({'address': MAC, 'name': 'QL-820NWB1234', 'le': False, 'services': [], 'classic': True, 'device_class': 0x040680}, None),
+])
+def test_label_printers_on_bluetooth_by_their_name_or_service(device, found):
+    assert unknown.on_bluetooth(device) == found
+
+
+@pytest.mark.parametrize('name, secret', [('B21-H425040311', 'H425040311'), ('B21-H425040311', 'H425'),
+                                          ('PT-P710BT6795', '6795'), ('H1234567890', '1234567890'),
+                                          ('ABCDEF-' + MAC, '5E:00'), ('', MAC)])
+def test_no_bluetooth_report_tells_the_serial_number_or_the_address(name, secret):
+    found = unknown.on_bluetooth({'address': MAC, 'name': name, 'le': True, 'services': [NIIMBOT]})
+    assert secret not in told(found)
+    assert MAC not in told(found) and MAC.replace(':', '') not in told(found)
+
+
+def test_a_bluetooth_report():
+    found = unknown.on_bluetooth({'address': MAC, 'name': 'B21-H425040311', 'le': True, 'classic': True, 'services': [NIIMBOT]})
+    assert unknown.report(found, BUILD) == '\n'.join([
+        'Version: v8.0.0, commit 42ef2db, built 2026-11-20 21:17 UTC', 'Printer: Niimbot B21',
+        'Connection: Bluetooth LE and classic Bluetooth', 'Bluetooth name: B21', 'Services: e7810a71-73ae-499d-8c15-faa9aef0c3f2'])
+
+
+# --- Detection ---------------------------------------------------------------------
+
+
+class UsbPrinter:
+    """usblp's device of a printer, which answers Brother's status request
+    as a QL printer. Each write is kept with its device."""
+    written = []
+
+    def __init__(self, device):
+        self.device, self.answers = device, []
+
+    def write(self, data):
+        UsbPrinter.written.append((self.device, data))
+        if data == STATUS_REQUEST:
+            self.answers.append(_status_packet(0x00))
+
+    def read(self, length=32):
+        return self.answers.pop(0) if self.answers else b''
+
+    def dispose(self):
+        pass
+
+
+@pytest.fixture
+def usblp(tmp_path, monkeypatch):
+    """Device files /dev/usb/lp<N> plugged in with the device IDs and USB IDs
+    given, and the label designer with PRINTER_PRINTER '?'."""
+    monkeypatch.setattr(UsbPrinter, 'written', [])
+    monkeypatch.setattr(backends, 'KernelPrinter', UsbPrinter)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'id-{name}'))
+    monkeypatch.setattr(devices, 'USB_DESCRIPTOR', str(tmp_path / '{name}-{field}'))
+    paths = []
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', paths)
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, 'exists', lambda path: path in paths or real_exists(path))
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+
+    def plug(name, device_id='', ids=None):
+        paths.append(f'/dev/usb/{name}')
+        if device_id:
+            (tmp_path / f'id-{name}').write_text(device_id + '\n')
+        for field, value in zip(('idVendor', 'idProduct'), ids or ()):
+            (tmp_path / f'{name}-{field}').write_text(f'{value:04x}\n')
+    return plug, client
+
+
+def status(client, query=''):
+    return client.get('/labeldesigner/api/printer_status' + query).get_json()
+
+
+def test_usblp_printer_of_another_maker_is_not_sent_brothers_status_request(usblp):
+    plug, client = usblp
+    plug('lp0', DYMO, (0x0922, 0x0020))
+    plug('lp1', QL700, (0x04f9, 0x2042))
+    plug('lp2')
+    told = status(client)
+    assert [p['path'] for p in told['printers']] == ['file:///dev/usb/lp1', 'file:///dev/usb/lp2', 'simulation']
+    assert UsbPrinter.written == [('file:///dev/usb/lp1', STATUS_REQUEST), ('file:///dev/usb/lp2', STATUS_REQUEST)]
+    [dymo] = told['unknown']
+    assert dymo == unknown.entry(unknown.on_usb(DYMO, (0x0922, 0x0020)), client.application.extensions['build'])
+    assert set(dymo) == {'where', 'name', 'report', 'report_url'} and (dymo['where'], dymo['name']) == ('usb', 'DYMO LabelWriter 450')
+    assert 'USB ID: 0922:0020' in dymo['report'] and 'lp0' not in str(told['unknown'])
+
+
+def test_office_printer_on_usblp_is_neither_asked_nor_reported(usblp):
+    plug, client = usblp
+    plug('lp0', LASER, (0x04f9, 0x0042))
+    plug('lp1', INKJET, (0x04b8, 0x1188))
+    told = status(client)
+    assert [p['path'] for p in told['printers']] == ['simulation'] and told['unknown'] == []
+    assert UsbPrinter.written == []
+
+
+def test_usblp_printer_without_its_usb_ids_is_reported(usblp):
+    plug, client = usblp
+    plug('lp0', ROLLO)
+    [rollo] = status(client)['unknown']
+    assert rollo['name'] == 'Thermal Printer' and 'USB ID' not in rollo['report']
+    assert UsbPrinter.written == []
+
+
+def test_unknown_printers_only_where_printers_are_searched_for(usblp):
+    plug, client = usblp
+    plug('lp0', DYMO, (0x0922, 0x0020))
+    plug('lp1', QL700, (0x04f9, 0x2042))
+    assert len(status(client)['unknown']) == 1
+    # One printer asked alone tells nothing more
+    assert 'unknown' not in status(client, '?printer=file:///dev/usb/lp1')
+    for config in ({'PRINTER_PRINTER': 'simulation'}, {'PRINTERS': [('QL-700', 'simulation')]}):
+        client.application.config.update(config)
+        assert status(client)['unknown'] == []
+
+
+@pytest.fixture
+def detected(pyusb, tmp_path, monkeypatch):  # noqa: F811
+    """What the printer status tells with PRINTER_PRINTER '?', PyUSB faked."""
+    monkeypatch.setattr(devices, 'found_usb_printers', FOUND_USB_PRINTERS)
+    monkeypatch.setattr(devices, 'found_usb_devices', backends.found_devices)
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    return lambda: client.get('/labeldesigner/api/printer_status').get_json()
+
+
+def _untouched(device):
+    """Nothing was sent to a device, not even a request for its device ID."""
+    device.ctrl_transfer = lambda *args: pytest.fail(f'Asked {args}')
+    return device
+
+
+def test_printer_on_pyusb_no_driver_prints_on_is_reported(detected, pyusb):  # noqa: F811
+    rollo = Device(0x0081, vendor=0x0a5f, serial='S1234567890', device_id=ROLLO)
+    laser = Device(0x0042, serial='E78123', device_id=LASER)
+    pyusb.extend([rollo, laser])
+    told = detected()
+    assert [p['path'] for p in told['printers']] == ['simulation']
+    [found] = told['unknown']
+    assert (found['name'], 'USB ID: 0a5f:0081' in found['report']) == ('Thermal Printer', True)
+    assert 'S1234567890' not in str(found) and 'E78123' not in str(told['unknown'])
+    assert rollo.endpoints[1].written == laser.endpoints[1].written == []
+
+
+def test_other_devices_of_makers_of_label_printers_are_reported(detected, pyusb, tmp_path, monkeypatch):  # noqa: F811
+    # A Niimbot reached as a serial port, a DYMO LabelManager PnP, a DYMO
+    # scale, a device of another maker, one shared over USB/IP
+    usbip_host = tmp_path / 'usbip-host'
+    (usbip_host / '3-2').mkdir(parents=True)
+    monkeypatch.setattr(backends, 'USBIP_HOST', str(usbip_host))
+    niimbot_, labelmanager = Device(0x0001, vendor=0x3513, classes=(2, 10)), Device(0x1001, vendor=0x0922, classes=(3, 8))
+    scale, other, shared = Device(0x8003, vendor=0x0922, classes=(3,)), Device(0x0001, vendor=0x1234, classes=(2, 10)), \
+        Device(0x0002, vendor=0x1203, classes=(2, 10))
+    for device, port in zip((niimbot_, labelmanager, scale, other, shared), ((1,), (2,), (3,), (4,), None)):
+        device.bus, device.port_numbers = (3, (2,)) if port is None else (1, port)
+        _untouched(device)
+    pyusb.extend([niimbot_, labelmanager, scale, other, shared])
+    assert [(found['where'], found['name']) for found in detected()['unknown']] == [('usb', 'Niimbot printer'), ('usb', 'DYMO LabelManager PnP')]
+    assert all(device.calls == [] and device.endpoints[1].written == [] for device in (niimbot_, labelmanager, scale, other, shared))
+
+
+def test_a_driver_reaching_a_device_as_a_serial_port_claims_it(detected, pyusb, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    pyusb.append(_untouched(Device(0x0001, vendor=0x3513, classes=(2, 10))))
+    assert detected()['unknown'] == []
+
+
+def test_the_same_printer_twice_is_reported_once(detected, pyusb):  # noqa: F811
+    pyusb.extend([Device(0x0081, vendor=0x0a5f, serial='S1', device_id=ROLLO),
+                  Device(0x0081, vendor=0x0a5f, serial='S2', device_id=ROLLO)])
+    assert len(detected()['unknown']) == 1
+
+
+@pytest.fixture
+def nearby(tmp_path, monkeypatch):
+    """The automatic detection with devices nearby on Bluetooth."""
+    devices_found = []
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', True)
+    monkeypatch.setattr(printer.bluetooth, 'discover', lambda timeout, classic=False: devices_found)
+    monkeypatch.setattr(printer, '_bluetooth', {})
+    monkeypatch.setattr(printer, '_bluetooth_searched', None)
+    monkeypatch.setattr(printer, '_bluetooth_thread', None)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(niimbot.DRIVER, 'status', lambda device, model, unconfirmed=False: {
+        'errors': [], 'path': device, 'model': model, 'status_type': 'Reply to status request'})
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+
+    def status():
+        client.get('/labeldesigner/api/printer_status')
+        printer._bluetooth_thread.join(5)
+        # The search may end before the scan that started it
+        printer._last_scan_ts = 0
+        return client.get('/labeldesigner/api/printer_status').get_json()
+    return devices_found, status
+
+
+def test_label_printers_on_bluetooth_no_driver_prints_on_are_reported(nearby):
+    devices_found, status = nearby
+    devices_found += [{'address': MAC, 'name': 'B21-H425040311', 'le': True, 'services': [NIIMBOT]},
+                      {'address': '00:00:5E:00:53:02', 'name': 'B1-TEST0001', 'le': True, 'services': [NIIMBOT]},
+                      {'address': '00:00:5E:00:53:03', 'name': 'Phone', 'le': True, 'services': []}]
+    told = status()
+    assert [p['path'] for p in told['printers']] == ['bt://00:00:5E:00:53:02', 'simulation']
+    [b21] = told['unknown']
+    assert (b21['where'], b21['name']) == ('bluetooth', 'Niimbot B21')
+    assert 'Bluetooth name: B21\n' in b21['report'] and MAC not in str(b21) and 'H425040311' not in str(b21)
+
+
+def test_searching_for_other_devices_without_libusb_finds_none(monkeypatch):
+    def no_libusb():
+        raise backends.NoLibusb('No backend available')
+    monkeypatch.setattr(backends, '_libusb', no_libusb)
+    assert backends.found_devices(unknown.LABEL_MAKERS) == []

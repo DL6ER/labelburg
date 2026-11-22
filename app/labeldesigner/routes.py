@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape, unknown
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer, unknown_printers
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
@@ -1509,6 +1509,8 @@ def get_printer_status():
     else:
         status = get_ptr_status(current_app.config, added)
         told = [status] + status.get('printers', [])
+        # Label printers found that no driver prints on, with their report
+        status['unknown'] = [unknown.entry(found, current_app.extensions['build']) for found in unknown_printers(current_app.config)]
     kept = _kept_settings()
     demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors

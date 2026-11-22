@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from flask import Config
 from PIL import Image
 
-from . import bluetooth, drivers, mdns, sheets
+from . import bluetooth, drivers, mdns, sheets, unknown
 from .drivers import devices, progress, reach, usbip
 from .drivers.backends import NoLibusb
 from .drivers.base import network_status
@@ -61,6 +61,8 @@ BLUETOOTH_DISCOVERY = True
 BLUETOOTH_SEARCH = 5.0
 BLUETOOTH_INTERVAL = 60
 _bluetooth: dict[str, str] = {}
+# Label printers found there that no driver prints on, see unknown.py, by address
+_bluetooth_unknown: dict[str, dict] = {}
 # time.monotonic() of the last search started, None before the first; the
 # search running
 _bluetooth_searched = None
@@ -314,14 +316,17 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
 
 def _search_bluetooth(classic: bool = False):
     global _last_scan_ts
-    found = {}
+    found, other = {}, {}
     nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
     for device in nearby:
         printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
         if printer:
             found[printer[0]] = printer[1]
+        elif unclaimed := unknown.on_bluetooth(device):
+            other[device['address']] = unclaimed
     with _bluetooth_lock:
         _bluetooth.update(found)
+        _bluetooth_unknown.update(other)
         # Listed at the next status query
         _last_scan_ts = 0
 
@@ -356,6 +361,49 @@ _last_scan_ts = 0
 _cached_printers = []
 # What the search for printers could not do, e.g. look on USB without libusb
 _cached_hints = []
+# Label printers on USB it found that no driver prints on, see unknown.py
+_cached_unknown = []
+
+
+def _usblp_printers() -> tuple[list[str], list[dict]]:
+    """usblp's devices to ask for their status, as file://..., and the
+    label printers among them that no driver prints on. Brother's status
+    request goes to Brother printers and those that tell no device ID only,
+    another printer may print it."""
+    asked, other = [], []
+    for dev in USB_PRINTER_DEVICES:
+        if not os.path.exists(dev):
+            continue
+        device_id = devices.usb_device_id(dev)
+        fields = devices.device_id_fields(device_id)
+        if not device_id or drivers.told_model(device_id):
+            asked.append(f'file://{dev}')
+        elif unknown.office(fields):
+            logger.debug('Not asking %s, an office printer', dev)
+        elif unknown.brother(fields):
+            asked.append(f'file://{dev}')
+        else:
+            other.append(unknown.on_usb(device_id, devices.usb_ids(dev)))
+    return asked, other
+
+
+def _other_usb_devices() -> list[dict]:
+    """Devices of makers of label printers without a printer interface that
+    no driver reaches, e.g. as a serial port."""
+    serial = {ids for driver in drivers.DRIVERS for ids in driver.usb_serial_ids}
+    return [unknown.on_usb('', ids) for ids in devices.found_usb_devices(unknown.LABEL_MAKERS)
+            if unknown.label_maker(ids) and ids not in serial]
+
+
+def unknown_printers(config: Config) -> list[dict]:
+    """The label printers the search found last that no driver prints on,
+    see unknown.py: on USB, then on Bluetooth, each kind once. None where
+    printers are configured, which are not searched for."""
+    if config.get('PRINTERS') or config['PRINTER_PRINTER'] != '?':
+        return []
+    with _bluetooth_lock:
+        found = _cached_unknown + list(_bluetooth_unknown.values())
+    return [each for i, each in enumerate(found) if each not in found[:i]]
 
 
 # The configured printers are asked at the same time, the answer waits at most
@@ -490,7 +538,7 @@ def get_ptr_status(config: Config, added=()):
     """The status of the printers: the configured or detected ones, then the
     ones added in the Settings, added as (model, device, name)."""
     # Simple in-memory cache for detected printers
-    global _last_scan_ts, _cached_printers, _cached_hints
+    global _last_scan_ts, _cached_printers, _cached_hints, _cached_unknown
 
     device_specifier = config['PRINTER_PRINTER']
     default_model = drivers.canonical(config['PRINTER_MODEL'])
@@ -531,9 +579,9 @@ def get_ptr_status(config: Config, added=()):
                 logger.debug('Auto-detecting printers: scanning local USB and network')
                 found_list = []
                 # usblp's devices on Linux, then the printers PyUSB finds
-                # that usblp does not hold, e.g. all on macOS,
-                # those of a maker without a driver here left out
-                specs = [f"file://{dev}" for dev in USB_PRINTER_DEVICES if os.path.exists(dev)]
+                # that usblp does not hold, e.g. all on macOS, those of a
+                # maker without a driver here told as unknown, see unknown.py
+                specs, other = _usblp_printers()
                 hints = []
                 try:
                     found_usb, shared = devices.found_usb_printers()
@@ -544,7 +592,8 @@ def get_ptr_status(config: Config, added=()):
                     hints.append(devices.unanswered_reason(e))
                 hints += [devices.shared_over_usbip(bus_id) for bus_id in shared]
                 for spec in found_usb:
-                    fields = devices.device_id_fields(devices.usb_device_id(spec))
+                    device_id = devices.usb_device_id(spec)
+                    fields = devices.device_id_fields(device_id)
                     driver, model = drivers.resolve(spec, fields.get('MDL', 'Unknown'))
                     # Only where its driver reaches it, a VC-500W only through usblp
                     if not any(pattern.fullmatch(spec) for pattern in driver.device_patterns):
@@ -553,6 +602,9 @@ def get_ptr_status(config: Config, added=()):
                     raster = spec.startswith(BROTHER_USB) and (not fields or 'PT-CBP' in fields.get('CMD', '').split(','))
                     if model in drivers.MODELS or raster:
                         specs.append(spec)
+                    elif not unknown.office(fields):
+                        other.append(unknown.on_usb(device_id, devices.usb_ids(spec)))
+                other += _other_usb_devices()
                 for spec in specs:
                     try:
                         # The configured model need not be the model of this
@@ -607,6 +659,7 @@ def get_ptr_status(config: Config, added=()):
 
                 _cached_printers = found_list
                 _cached_hints = hints
+                _cached_unknown = other
                 # A printer busy with a job is scanned again with the next
                 # query instead of being shown as printing for 10 s
                 busy = any(p.get('status_type') == devices.BUSY_STATUS_TYPE for p in found_list)
