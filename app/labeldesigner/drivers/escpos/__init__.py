@@ -155,6 +155,13 @@ class Escpos(Driver):
                     # The model as shown, without its maker
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
+    def feed_kind(self, model, label_size):
+        return 'cut_paper'
+
+    def feed_job(self, queue):
+        # A label of no rows: only the cut after it, which feeds the paper to the cutter
+        return [(True, [], 0, DPI[queue.model])]
+
     def status(self, device, model, unconfirmed=False):
         if device.startswith('bt://'):
             # Paging it takes the radio: one switched off is not paged at every

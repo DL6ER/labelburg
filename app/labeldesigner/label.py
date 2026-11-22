@@ -1,6 +1,7 @@
 from .enums import LabelContent, LabelOrientation, LabelType
 from . import codes, icons
 from .cable_flag import flag_box, flag_strip
+from .dates import LANGUAGES as DATE_LANGUAGES, format_date
 import os
 import uuid
 from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
@@ -18,6 +19,7 @@ import random
 import string
 import threading
 import copy
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,9 @@ MAX_BLANK_CHOICE_LENGTH = 200
 PRINTABLE = string.ascii_letters + string.digits + string.punctuation
 # A line of text is drawn from the top of its start, middle or end
 TEXT_ANCHORS = {'left': 'lt', 'center': 'mt', 'right': 'rt'}
+# Room added between the characters of a line, in parts of its size
+MIN_LETTER_SPACING, MAX_LETTER_SPACING = -0.2, 1.0
+LETTER_SPACING_REFUSED = f'letter_spacing must be a number from {MIN_LETTER_SPACING:g} to {MAX_LETTER_SPACING:g}'
 
 # Pillow refuses to open images with more than twice this number of pixels,
 # so uploaded images above MAX_LABEL_PIXELS are rejected right when decoding
@@ -135,6 +140,38 @@ def check_vertical_align(value) -> str:
     return value
 
 
+def check_letter_spacing(value) -> float:
+    """The room added between the characters of a line in parts of its
+    size, e.g. 0.1. Left out or empty: none."""
+    if value is None or value == '':
+        return 0.0
+    try:
+        spacing = float(value) if isinstance(value, (int, float, str)) and not isinstance(value, bool) else math.nan
+    except ValueError:
+        spacing = math.nan
+    # Not a number is outside as well
+    if not MIN_LETTER_SPACING <= spacing <= MAX_LETTER_SPACING:
+        raise ValueError(LETTER_SPACING_REFUSED)
+    return spacing
+
+
+def _graphemes(text: str) -> list[str]:
+    """text in the characters a reader sees, each with what belongs to it:
+    the marks on a letter, the parts of an emoji joined to it or its skin
+    tone, and the two letters of a flag."""
+    def flag(char):
+        return '\U0001F1E6' <= char <= '\U0001F1FF'
+    pieces: list[str] = []
+    for char in text:
+        last = pieces[-1] if pieces else ''
+        if last and (unicodedata.category(char).startswith('M') or char == '\u200d' or last.endswith('\u200d')
+                     or '\U0001F3FB' <= char <= '\U0001F3FF' or (flag(char) and len(last) == 1 and flag(last))):
+            pieces[-1] += char
+        else:
+            pieces.append(char)
+    return pieces
+
+
 def check_image_size(width: int, height: int) -> None:
     """Refuse to create images that would exhaust the memory."""
     if width * height > MAX_LABEL_PIXELS:
@@ -156,8 +193,8 @@ SMALL_BARCODE_NEXT_TO_IMAGE = 'This code may be too small to scan. Use a QR code
 
 
 # The codes of {{datetime:<format>}} the label designer explains. Their
-# examples come from the strftime() that fills in the labels, for a day that
-# tells day and month apart.
+# examples come from what fills in the labels, for a day that tells day and
+# month apart; those of names also in each language of dates.
 DATETIME_CODES = (
     ('%d', 'Day of the month'),
     ('%-d', 'Day of the month, no leading zero'),
@@ -182,14 +219,17 @@ DATETIME_CODES = (
     ('%%', 'A % sign'),
 )
 DATETIME_EXAMPLE = datetime.datetime(2026, 3, 7, 14, 5, 9)
+NAME_CODES = ('%a', '%A', '%b', '%B')
 
 
 def datetime_codes() -> dict:
-    """The codes with what they stand for and their example, and the time of
-    the examples."""
+    """The codes with what they stand for and their example, the examples of
+    the codes of names in each language of dates, and the time of the
+    examples."""
     when = DATETIME_EXAMPLE
     return {'example': f'{when:%A}, {when.day} {when:%B %Y, %H:%M:%S}',
-            'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES]}
+            'codes': [[code, meaning, when.strftime(code)] for code, meaning in DATETIME_CODES],
+            'languages': {language: {code: format_date(when, code, language) for code in NAME_CODES} for language in DATE_LANGUAGES}}
 
 
 # {{asn}}, an archive serial number of Paperless-ngx (paperless.py), or
@@ -364,6 +404,7 @@ class SimpleLabel:
         vertical_align: str = 'center',
         mirror: bool = False,
         date_format: str = '%Y-%m-%d',
+        date_language: str = '',
     ):
         """Initialize a SimpleLabel object. warnings are problems found
         before, e.g. a font that is not installed. blanks are the values
@@ -380,7 +421,8 @@ class SimpleLabel:
         the center or at the bottom of a label that does not grow with it in
         height. dpi tells the length of the label in mm, which warnings
         name. date_format writes the dates of blanks without a format of
-        their own."""
+        their own, date_language names months and weekdays in its language
+        (see dates.py), English if empty."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -489,6 +531,7 @@ class SimpleLabel:
         self._blanks = blanks or {}
         self._blank_fields = blank_fields or {}
         self._date_format = date_format
+        self._date_language = date_language
         self._mark_blanks = mark_blanks
         self._shown_code = code_text
         # The value of each blank, made once for the label
@@ -496,6 +539,8 @@ class SimpleLabel:
         # Printed mirror-inverted, to be read through clear tape stuck behind
         # glass
         self._mirror = mirror
+        # The pieces of lines measured, see _measured_piece()
+        self._pieces: dict[tuple, tuple] = {}
 
     @property
     def label_content(self):
@@ -649,7 +694,7 @@ class SimpleLabel:
         # {{datetime+2h:<format>}} 2 hours later (see shift_date)
         def datetime_replacer(match):
             when = self._now()
-            return (shift_date(when, match.group(1)) if match.group(1) else when).strftime(match.group(2))
+            return format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language)
         substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
@@ -809,7 +854,7 @@ class SimpleLabel:
         if len(date_format) > MAX_DATE_FORMAT_LENGTH:
             raise TextTooLong("The date format of a blank is too long")
         try:
-            return date.strftime(date_format)
+            return format_date(date, date_format, self._date_language)
         except ValueError:
             return date.isoformat()
 
@@ -1261,7 +1306,7 @@ class SimpleLabel:
         # lines, a line before them is measured like any other.
         # The lines as laid out, also those that long lines wrapped into. Drawn,
         # each comes with its box.
-        lines = [entry[2] for entry in bboxes] if do_draw else self._wrapped(draw, self.text)
+        lines = [entry[2] for entry in bboxes] if do_draw else self._wrapped(draw, [self._as_drawn(line) for line in self.text])
         last = len(lines) - 1
         last_shown = max((i for i, line in enumerate(lines) if self._shows_something(line)), default=last)
         spaced = last if lines and self._shows_something(lines[-1]) else last - 1
@@ -1275,6 +1320,7 @@ class SimpleLabel:
 
             # Get font
             font = self._get_font(line['path'], self._line_size(line), measuring=not do_draw)
+            letter_spacing = self._letter_spacing(line)
 
             align = line.get('align', 'center')
             # A list or dict cannot be looked up, it is no alignment either
@@ -1324,7 +1370,8 @@ class SimpleLabel:
                 # large enough for it (labels along the tape are only as long
                 # as their text).
                 checkbox_space = self._checkbox_space(line) if indented else 0
-                bbox = self._draw_line(draw, (checkbox_space, y), line['text'], font, "lt", align=align, measuring=not do_draw)
+                bbox = self._draw_line(draw, (checkbox_space, y), line['text'], font, "lt", align=align, measuring=not do_draw,
+                                       letter_spacing=letter_spacing)
                 if indented:
                     bbox = (0, bbox[1], bbox[2], bbox[3])
 
@@ -1389,12 +1436,14 @@ class SimpleLabel:
                         x += self._checkbox_space(line) / 2
                 if checkbox:
                     checkbox_box_dimensions = 8 * self._line_size(line) // 10
-                    bbox = self._draw_line(draw, (x - 1.2 * checkbox_box_dimensions, y), line['text'], font, anchor, align=align, measuring=not do_draw)
+                    bbox = self._draw_line(draw, (x - 1.2 * checkbox_box_dimensions, y), line['text'], font, anchor, align=align, measuring=not do_draw,
+                                           letter_spacing=letter_spacing)
                     box_dimensions = bbox[0], y, bbox[0] + checkbox_box_dimensions, y + checkbox_box_dimensions
                     draw.rounded_rectangle(box_dimensions, radius=5, outline=color, width=max(1, checkbox_box_dimensions//10), fill=(255,255,255))
                     extents.append((box_dimensions[0], box_dimensions[2] + 1))
 
-                drawn = self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing)
+                drawn = self._draw_line(draw, (x, y), line['text'], font, anchor, fill=color, align=align, spacing=spacing,
+                                        letter_spacing=letter_spacing)
                 extents.append((drawn[0], drawn[2]))
                 underline = self._underline(draw, line, font, y)
                 if underline:
@@ -1407,7 +1456,8 @@ class SimpleLabel:
                     for x_shift in [-get_shift_amount(), get_shift_amount()]:
                         for y_shift in [-get_shift_amount(), get_shift_amount()]:
                             new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
-                            draw.text((x + x_shift, y + y_shift), new_random_text, color, font=font, anchor=anchor, align=align, spacing=spacing)
+                            self._draw_line(draw, (x + x_shift, y + y_shift), new_random_text, font, anchor, fill=color, align=align,
+                                            spacing=spacing, letter_spacing=letter_spacing)
 
                 # Faint edges of letters left out, as they look on the preview
                 ink = ImageChops.difference(before, img.crop(region)).point(lambda v: 255 if v > 127 else 0).getbbox()
@@ -1465,7 +1515,7 @@ class SimpleLabel:
         room = self._wrap_width - (self._checkbox_space(line) if line.get('checkbox') else 0)
 
         def fits(piece):
-            box = self._draw_line(draw, (0, 0), piece, font, "lt", measuring=True)
+            box = self._draw_line(draw, (0, 0), piece, font, "lt", measuring=True, letter_spacing=self._letter_spacing(line))
             return box[2] - min(box[0], 0) <= room
 
         if room < 1 or fits(text):
@@ -1507,29 +1557,43 @@ class SimpleLabel:
             piece = piece[low:]
         return parts + [piece]
 
-    def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, **kwargs):
+    def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, letter_spacing=0.0, **kwargs):
         """The bounding box of a line of text at xy, also drawn in fill if
         given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
-        on the same baseline as the text around them."""
-        if not icons.has_icon(text):
+        on the same baseline as the text around them. With letter_spacing,
+        in dots, each character is drawn on its own with that much room
+        between them; letters kerned in a word lose that."""
+        spaced = letter_spacing and len(text) > 1
+        if not spaced and not icons.has_icon(text):
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
-        runs = [(''.join(chars), self._get_font(path, font.size, measuring=measuring) if path else font)
-                for path, chars in itertools.groupby(text, icons.font_of)]
-        lengths = [run_font.getlength(run) for run, run_font in runs]
-        width = sum(lengths)
+        pieces = _graphemes(text) if spaced else [''.join(chars) for _, chars in itertools.groupby(text, icons.font_of)]
+        runs = [(piece, self._get_font(path, font.size, measuring=measuring) if (path := icons.font_of(piece[0])) else font)
+                for piece in pieces]
+        measured = [self._measured_piece(run, run_font) for run, run_font in runs]
+        width = sum(length for length, _ in measured) + letter_spacing * (len(runs) - 1)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]
-        # The runs share the baseline below the top of an "H"
-        baseline = xy[1] + self._baseline(draw, 'H', font)
+        # The runs share the baseline below the top of the letters, with
+        # icons of an "H"
+        baseline = xy[1] + self._baseline(draw, text, font)
         boxes = []
-        for (run, run_font), length in zip(runs, lengths):
+        for (run, run_font), (length, box) in zip(runs, measured):
             if fill is not None:
                 draw.text((x, baseline), run, fill, font=run_font, anchor='ls')
-            boxes.append(draw.textbbox((x, baseline), run, font=run_font, anchor='ls'))
-            x += length
+            boxes.append((box[0] + x, box[1] + baseline, box[2] + x, box[3] + baseline))
+            x += length + letter_spacing
         return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+    def _measured_piece(self, piece: str, font) -> tuple:
+        """The advance of piece in font and its box drawn on the baseline at
+        0, kept for the label: a line with letter spacing is measured by its
+        characters, many times while it is wrapped and fitted."""
+        key = (piece, font)
+        if key not in self._pieces:
+            self._pieces[key] = font.getlength(piece), font.getbbox(piece, anchor='ls')
+        return self._pieces[key]
 
     @staticmethod
     def _baseline(draw, text, font) -> int:
@@ -1557,6 +1621,17 @@ class SimpleLabel:
     def _line_size(self, line) -> int:
         """Font size of a line, made smaller when the text is shrunk to fit."""
         return max(1, int(int(line['size']) * self._text_scale))
+
+    def _letter_spacing(self, line) -> float:
+        """The room added between the characters of a line in dots, in
+        proportion to its size as drawn."""
+        return float(line.get('letter_spacing') or 0) * self._line_size(line)
+
+    @staticmethod
+    def _as_drawn(line: dict) -> dict:
+        """line with its text as drawn: in capitals where caps is set, e.g.
+        "ß" as "SS". The line given keeps the text, for a code that takes it."""
+        return dict(line, text=line['text'].upper()) if line.get('caps') else line
 
     @staticmethod
     def _has_words(line) -> bool:

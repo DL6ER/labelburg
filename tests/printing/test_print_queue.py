@@ -492,7 +492,7 @@ def test_the_process_exits_once_the_job_that_prints_ended(tmp_path):
 
 
 @pytest.mark.parametrize('source, told, detail', [
-    ('designer', '', ''), ('calibration', '', ''), ('homebox', 'Homebox', ''),
+    ('designer', '', ''), ('calibration', '', ''), ('feed', '', ''), ('homebox', 'Homebox', ''),
     ('api', 'another program', 'Sent over the API'), ('webhook', 'another program', 'Sent over the webhook'),
     ('mcp', 'an AI assistant', 'Sent over MCP')])
 def test_where_a_job_comes_from_in_plain_words(source, told, detail):
