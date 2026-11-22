@@ -538,7 +538,7 @@ function fillField(item, name, value, i) {
 
 // --- The preview ----------------------------------------------------------------------------
 
-let seq = 0, shownSeq = 0;
+let seq = 0, shownSeq = 0, asked = 0;
 function markBusy() { $('#labelbox').classList.add('busy'); laidOut(false); }
 // data-laid on the label box tells that the stage stands still: set once a
 // fit is drawn and no transition moves it any more, cleared as soon as
@@ -560,10 +560,13 @@ function laidOut(done) {
     settle();
 }
 
-const drawPreview = latest(async () => {
+// A preview asked for while one is drawn follows it, the label stays busy
+// until the last one asked for is shown
+function drawPreview() { asked++; nextPreview(); }
+const nextPreview = latest(async () => {
     const E = S.edit;
     if (!E || !$('#labelImg')) return;
-    const me = ++seq;
+    const me = ++seq, upTo = asked;
     const empty = isEmptyDesign(E.design);
     // An empty label shows as large as a line of its first size makes it
     const shown = empty ? Object.assign(clone(Object.assign({}, E.design, { image: undefined, more_images: undefined })), { text: E.design.text.slice(0, 1).map(l => Object.assign({}, l, { text: 'Ag' })) })
@@ -577,7 +580,7 @@ const drawPreview = latest(async () => {
         shownSeq = me;
         ui.failed = !!e.refused;
         ui.last = null;
-        $('#labelbox').classList.remove('busy');
+        if (upTo === asked) $('#labelbox').classList.remove('busy');
         $('#labelbox').classList.add('failed');
         $('#picks').innerHTML = '';
         drawSheet(null);
@@ -602,7 +605,7 @@ const drawPreview = latest(async () => {
     el.src = p.url;
     $('#labelbox').classList.toggle('empty', empty);
     $('#labelbox').classList.remove('failed');
-    if (!S.edit || me !== seq) $('#labelbox').classList.add('busy'); else $('#labelbox').classList.remove('busy');
+    if (!S.edit || upTo !== asked) $('#labelbox').classList.add('busy'); else $('#labelbox').classList.remove('busy');
     fitLabel();
     // + on a line that did not grow: the label has no room for more
     if (ui.grow && ui.grow.seq <= me) {
