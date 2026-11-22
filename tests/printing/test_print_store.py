@@ -398,16 +398,17 @@ def test_an_image_from_the_webhook_and_homebox_print_after_a_restart(server, tmp
     Image.new('L', (200, 100), 0).save(image, 'PNG')
     print_queue.stop()
     webhook = server.post(f'{API}/webhook/print', json={'password': 'secret', 'printer': 'simulation',
-                                                        'images': [base64.b64encode(image.getvalue()).decode('ascii')]})
+                                                        'images': [base64.b64encode(image.getvalue()).decode('ascii')] * 2})
     homebox = server.post(f'{API}/homebox', data=image.getvalue(), headers={'Content-Type': 'image/png'})
     calibration = server.post(f'{API}/calibration/print', data={'printer': 'simulation', 'model': 'Niimbot/B1', 'across': '0.5'})
     jobs = [response.get_json()['job'] for response in (webhook, homebox, calibration)]
     kept = json.loads(open(os.path.join(repo(server), print_store.QUEUE, f'{jobs[0]}.json')).read())
-    assert (kept['kind'], kept['images'], len(kept['labels'])) == ('image', 1, 1)
-    restart(tmp_path)
+    assert (kept['kind'], kept['images'], kept['labels'], len(kept['shapes'])) == ('image', 2, 2, 2)
+    server = restart(tmp_path)
+    assert server.get(f'{API}/queue/{jobs[0]}').get_json()['labels'] == 2
     assert [ended(job).state for job in jobs] == ['printed'] * 3
     # Calibration labels are not kept
-    assert [entry['source'] for entry in print_store.entries(10)] == ['homebox', 'webhook']
+    assert [(entry['source'], entry['labels']) for entry in print_store.entries(10)] == [('homebox', 1), ('webhook', 2)]
 
 
 def test_a_full_disk_prints_from_memory(server, monkeypatch, caplog):

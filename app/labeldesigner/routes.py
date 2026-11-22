@@ -1061,7 +1061,7 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
     if record['kind'] == 'calibration':
         printer.offset = tuple(record['offset'])
     elif record['kind'] == 'image':
-        for shape in record['labels']:
+        for shape in record['shapes']:
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     else:
         _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']])
@@ -2361,9 +2361,9 @@ def _image_job_again(entry: dict, images: list) -> tuple[PrinterQueue, dict]:
     printer = _queue(model, device, kept['label_size'])
     printer.cut, printer.half_cut, printer.chain = kept['cut'], kept['half_cut'], kept['chain']
     printer.leaves_first = _leaves_first(printer_settings.for_printing(_settings_of(device), model, {'leaves_first': _requested('leaves_first')}).get('leaves_first'))
-    for shape in entry['labels']:
+    for shape in entry['shapes']:
         printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=entry['high_res'], fast=entry['fast'])
-    return printer, {'kind': 'image', 'labels': entry['labels'], 'high_res': entry['high_res'], 'fast': entry['fast']}
+    return printer, {'kind': 'image', 'shapes': entry['shapes'], 'high_res': entry['high_res'], 'fast': entry['fast']}
 
 
 @bp.route('/api/history/clear', methods=['POST'])
@@ -3177,7 +3177,7 @@ def _image_label_of(shape: dict, image: Image.Image) -> SimpleLabel:
 
 def _image_recipe(labels: list, high_res: bool, fast: bool) -> dict:
     """How the labels of images alone are made again, each of its image."""
-    return {'kind': 'image', 'labels': [dict(label.shape, image=i) for i, label in enumerate(labels)], 'high_res': high_res, 'fast': fast}
+    return {'kind': 'image', 'shapes': [dict(label.shape, image=i) for i, label in enumerate(labels)], 'high_res': high_res, 'fast': fast}
 
 
 def _scale_image_to_label(img: Image.Image, width: int, height: int, endless: bool, rotated: bool) -> Image.Image:
