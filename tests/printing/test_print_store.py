@@ -455,3 +455,12 @@ def test_a_folder_of_labels_that_cannot_be_made_does_not_stop_the_server(tmp_pat
     assert client.get('/labeldesigner/api/openapi.json').status_code == 200
     assert not print_store.is_open()
     assert any('not kept' in message for message in caplog.messages) == enabled
+
+
+def test_a_job_the_queue_does_not_take_leaves_nothing_on_disk(server, monkeypatch):
+    def refuses(*args, **kwargs):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(print_queue, 'add', refuses)
+    with pytest.raises(RuntimeError):
+        server.post(f'{API}/print', data=LABEL)
+    assert files(os.path.join(repo(server), print_store.QUEUE)) == []

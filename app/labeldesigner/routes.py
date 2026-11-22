@@ -966,9 +966,12 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
                               preview=preview, size=print_queue.image_bytes(printer.images()),
                               explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)),
                               job_id=record['id'], **_store_hooks(record, images, preview, on_disk))
-    except print_queue.Full as full:
+    except BaseException as e:
+        # Not queued, it must not print after a restart
         print_store.ended(record, 'removed', '', keep=False)
-        return _line_full(printer, str(full))
+        if isinstance(e, print_queue.Full):
+            return _line_full(printer, str(e))
+        raise
     result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, **(extra or {})}
     if image is not None:
         result['image'] = image
