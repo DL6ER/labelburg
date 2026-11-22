@@ -37,6 +37,8 @@ MEDIA_TYPES = {
     0x17: ('Heat-Shrink Tube (HS 3:1)', 'TZe'),
     0x0A: ('Continuous length tape', 'DK'),
     0x0B: ('Die-cut labels', 'DK'),
+    # The RD rolls of the TD printers (TD2000 4. ESC i S (4), TD2300 5.2.6,
+    # TD4000 5.2.5, see models.py)
     0x4A: ('Continuous length tape', 'RD'),
     0x4B: ('Die-cut labels', 'RD'),
     0xFF: ('Incompatible tape', 'Incompatible'),

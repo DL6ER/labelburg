@@ -107,7 +107,7 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert {model for model, caps in models.items() if not caps['cutter']} == {
         'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'TSC/TSPL', 'TSC/TSPL-300', 'Zebra/ZPL', 'Zebra/ZPL-300',
         'DYMO/LabelWriter-450', 'DYMO/LabelWriter-450-Twin-Turbo', 'DYMO/LabelWriter-4XL', 'DYMO/LabelWriter-SE450',
-        'Other/IPP', 'Other/IPP-203'}
+        'Other/IPP', 'Other/IPP-203', 'TD-2020', 'TD-2120N', 'TD-2125N', 'TD-2125NWB', 'TD-2130N', 'TD-2135N', 'TD-2135NWB'}
     # Printers on IPP cut as they are set up
     assert {model for model, caps in models.items() if caps['cut_on_printer']} == {'Other/IPP', 'Other/IPP-203'}
     assert models['Zebra/ZPL']['leaves_turned'] is True and models['TSC/TSPL']['leaves_turned'] is True
@@ -118,7 +118,8 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     # Listed as the model they are shown as
     assert {model: caps['shown_as'] for model, caps in models.items() if caps['shown_as']} == {
         'Epson/ESC-POS-180': 'Epson/ESC-POS', 'TSC/TSPL-300': 'TSC/TSPL', 'Zebra/ZPL-300': 'Zebra/ZPL',
-        'DYMO/LabelWriter-SE450': 'DYMO/LabelWriter-450', 'Other/IPP': 'Other/printer', 'Other/IPP-203': 'Other/printer'}
+        'DYMO/LabelWriter-SE450': 'DYMO/LabelWriter-450', 'Other/IPP': 'Other/printer', 'Other/IPP-203': 'Other/printer',
+        **{f'{model}-300': model for model in ('TD-2310D', 'TD-2320D', 'TD-2320DSA', 'TD-2350D', 'TD-2350DSA')}}
 
 
 def test_check_label_size():

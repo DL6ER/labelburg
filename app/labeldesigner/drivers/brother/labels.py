@@ -2,6 +2,7 @@
 brother_ql by Philipp Klaus, and which model prints which."""
 
 from ..labels import Color, FormFactor, Label
+from . import labels_td
 from .models import MODELS
 
 # DK rolls of 102 to 104 mm, for the QL-1050 and QL-1100 series
@@ -52,7 +53,7 @@ LABELS = (
     Label('pt18', (18, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (112, 0), 8, feed_margin=14, models=SMALL_HEAD),
     Label('pt24', (24, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (128, 0), 0, feed_margin=14, models=SMALL_HEAD),
     Label('pt36', (36, 0), FormFactor.PTOUCH_ENDLESS, (512, 0), (454, 0), 61, feed_margin=14),
-)
+) + labels_td.LABELS
 BY_ID = {label.identifier: label for label in LABELS}
 
 # The tapes of the P-touch printers, which QL printers cannot use (nor the
@@ -72,6 +73,8 @@ def label_fits(label: Label, model: str) -> bool:
     return (
         (not label.models or model in label.models)
         and (label.identifier in PTOUCH_LABELS) == model.startswith('PT-')
+        # The RD rolls of the TD printers, which take no DK rolls
+        and (label.identifier in labels_td.BY_ID) == (model in labels_td.MODELS)
         and (label.color != Color.BLACK_RED_WHITE or printer_model.two_color)
         # 36 mm tape needs the wide print head of the PT-P900 series
         and label.dots_printable[0] <= printer_model.number_bytes_per_row * 8

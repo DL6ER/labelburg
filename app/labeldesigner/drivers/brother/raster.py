@@ -89,10 +89,16 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
     if red and not raster.spec.two_color:
         raise RasterError('Printing in red is not supported with the selected model.')
 
-    raster.add_switch_mode()
-    raster.add_invalidate()
-    raster.add_initialize()
-    raster.add_switch_mode()
+    if raster.td:
+        # A TD printer is switched to raster mode with each page (TD2000 2.1,
+        # TD2300 and TD4000 4.1)
+        raster.add_invalidate()
+        raster.add_initialize()
+    else:
+        raster.add_switch_mode()
+        raster.add_invalidate()
+        raster.add_initialize()
+        raster.add_switch_mode()
     for i, im in enumerate(images):
         if im.mode.endswith('A'):
             # In front of a white background
@@ -146,7 +152,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             else:
                 im = im.point(lambda x: 0 if x < THRESHOLD else 255, mode='1')
 
-        raster.add_status_information()
+        if raster.td:
+            # Asked for no status while it prints (TD2000, ESC i S)
+            raster.add_switch_mode()
+            raster.add_status_notification()
+        else:
+            raster.add_status_information()
         tape = label.tape_size
         if label.form_factor in (FormFactor.DIE_CUT, FormFactor.ROUND_DIE_CUT):
             raster.add_media_and_quality(im.size[1], 0x0B, tape[0], tape[1], hq)
@@ -168,6 +179,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         else:
             raster.add_raster_data(im)
         raster.add_print(last_page=i == len(images) - 1)
+    raster.add_default_mode()
 
 
 def _filtered_hsv(im: Image.Image, bands: tuple, filter_h, filter_s, filter_v) -> Image.Image:

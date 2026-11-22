@@ -66,14 +66,18 @@ def test_the_demo_printer_offers_every_model(designer):
     # Once each name: not the models shown as another one, nor "Other printer"
     shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
     assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450',
-                        'Other/IPP', 'Other/IPP-203'}
+                        'Other/IPP', 'Other/IPP-203', 'TD-2310D-300', 'TD-2320D-300', 'TD-2320DSA-300',
+                        'TD-2350D-300', 'TD-2350DSA-300'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
     for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL']),
                            ('DYMO', ['LabelWriter 4XL', 'LabelWriter 450', 'LabelWriter 450 Twin Turbo'])):
         assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
-    assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
+    assert brother[brother.index('QL-1115NWB'):] == [
+        'QL-1115NWB', 'TD-2020', 'TD-2120N', 'TD-2125N', 'TD-2125NWB', 'TD-2130N', 'TD-2135N', 'TD-2135NWB', 'TD-2310D',
+        'TD-2320D', 'TD-2320DSA', 'TD-2350D', 'TD-2350DSA', 'TD-4210D', 'TD-4215D', 'TD-4410D', 'TD-4415D', 'TD-4420DN',
+        'TD-4425DN', 'TD-4455DNWB', 'TD-4520DN', 'TD-4525DN', 'TD-4550DNWB', 'TD-4555DNWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']
 
@@ -125,6 +129,31 @@ def test_a_dymo_labelwriter_offers_its_address_labels(designer):
         designer.click('#print')
     fields = sent(request.value)
     assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'DYMO/LabelWriter-450', 'dymo28x89')
+    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
+
+
+def test_a_brother_td_printer_offers_its_rd_rolls(designer):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings') as answer:
+        designer.select_option(MODEL, 'TD-4420DN')
+    assert answer.value.ok
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'TD-4420DN' && labelEditor.S.tape.startsWith('td4-')")
+    sizes = '[data-card="0"] select[data-k="label_size"]'
+    offered = designer.eval_on_selector_all(f'{sizes} option', 'os => os.map(o => o.value)')
+    assert offered == [''] + tape.takes('TD-4420DN') and '62' not in offered
+    assert designer.eval_on_selector(f'{sizes} option[value="td4-102x152"]', 'o => o.textContent') == '102 x 152 mm'
+    assert designer.eval_on_selector(f'{sizes} option[value="td4-102"]', 'o => o.textContent') == '102 mm endless'
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(sizes, 'td4-102x152')
+    designer.wait_for_function("() => labelEditor.S.tape === 'td4-102x152'")
+    assert 'Brother TD-4420DN' in designer.inner_text('[data-card="0"]')
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == 'Demo Brother TD-4420DN'
+    type_label(designer, 'Parcel 7')
+    with designer.expect_request('**/api/print') as request:
+        designer.click('#print')
+    fields = sent(request.value)
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'TD-4420DN', 'td4-102x152')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
