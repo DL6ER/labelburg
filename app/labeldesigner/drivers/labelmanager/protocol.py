@@ -59,7 +59,7 @@ NO_TAPE_TEXT = 'No tape cassette is in the printer'
 CUTTER_TEXT = 'The cutter is jammed, mind its blade as you free it'
 ERROR_TEXT = 'The tape is stuck, open the printer and check the cassette'
 # A printer that shows only the USB drive it is set up from, see UsbConnection
-USB_DRIVE_TEXT = 'The printer shows up as a USB drive only and cannot print like that'
+USB_DRIVE_TEXT = 'The printer shows up as a USB drive only, switch it to printing with usb_modeswitch'
 TEXTS = (NO_TAPE_TEXT, CUTTER_TEXT, ERROR_TEXT, USB_DRIVE_TEXT)
 
 
