@@ -413,14 +413,14 @@ def test_asked_right_after_boot(monkeypatch):
     # Other models of the same makers and the TSPL printers of lprint-tspl.h
     ('MFG:4BARCODE;CMD:CEZD;MDL:4B-3064TB;', None),
     ('MFG:HP;CMD:PJL,PCL,PCLXL,URF;MDL:HP LaserJet M110w;', None),
-    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None),
-    ('MFG:Marklife ;MDL:X4;CMD:XPP,XL;', None),
-    ('MFG:;MDL:PM-241-BT;CMD:XPP,XL;', None),
-    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', None)])
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:Marklife ;MDL:X4;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:;MDL:PM-241-BT;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL-300')])
 def test_model_in_device_ids_lprint_publishes(device_id, model):
     from app.labeldesigner import drivers
-    assert zpl.DRIVER.model_in(device_id) == model
-    # No other driver takes it for one of its printers
+    assert zpl.DRIVER.model_in(device_id) == (model if model and model.startswith('Zebra/') else None)
+    # No other driver takes a ZPL printer for one of its printers
     assert drivers.told_model(device_id) == model
 
 
@@ -674,6 +674,17 @@ def test_a_continuous_roll_of_a_width_the_printer_reports():
     assert (found['known'], found['unknown']) == (False, '102 mm')
 
 
+def test_a_printer_configured_as_300_dpi_prints_so(tmp_path, sent, monkeypatch):
+    # Its device ID names no resolution
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: 'MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;')
+    monkeypatch.setattr(protocol, 'host_status', lambda device: b'')
+    client = make_client(tmp_path, model='Zebra/ZPL-300', printer='usb://0x0a5f:0x0120')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['model'] == 'Zebra/ZPL-300'
+    # Also as the label designer names it
+    for model in ('', 'Zebra/ZPL-300'):
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl102x152', 'print_type': 'text', 'text': TEXT, 'model': model})
+        assert outcome(client, response) == ('printed', '')
+    assert [data[:data.index(b'^FO')] for _, data in sent] == [b'^XA\n^PW1208\n^LL1795\n'] * 2
 
 def test_a_problem_report_leaves_the_states_the_search_keeps(tmp_path, monkeypatch):
     # As printer_status does: the roll set is not written into them

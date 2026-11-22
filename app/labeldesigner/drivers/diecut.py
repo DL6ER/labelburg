@@ -29,6 +29,9 @@ MEDIA_TYPE = 'Die-cut labels'
 LENGTH_TOLERANCE = 2
 # Printers of 203 dpi, which some name 200 dpi, have 8 dots per mm
 EIGHT_PER_MM = (200, 203)
+# The paper of each label size labels() made, by its name, so that a label
+# made for one driver's size prints on the same paper of another's
+_PAPERS: dict[str, tuple[int, int]] = {}
 
 
 def dots(mm: float, dpi: int) -> int:
@@ -49,7 +52,17 @@ def labels(prefix: str, dpi: int, head_dots: int, models: tuple, sizes: tuple) -
         total = (dots(width, dpi), dots(length, dpi))
         return Label(f'{prefix}{width}x{length}', (width, length), FormFactor.DIE_CUT, total,
                      (min(total[0], head_dots), total[1]), 0, models=tuple(models), gap=GAP)
-    return tuple(label(width, length) for width, length in sizes)
+    made = tuple(label(width, length) for width, length in sizes)
+    _PAPERS.update((size.identifier, size.tape_size) for size in made)
+    return made
+
+
+def label_for(label_size: str, labels: tuple, model: str) -> str:
+    """The label size of labels that a printer of the model prints a label
+    made for label_size on: the same paper, also of another driver's die-cut
+    labels, e.g. tspl102x152 for zpl102x152, else label_size."""
+    paper = _PAPERS.get(label_size)
+    return next((label.identifier for label in labels if label.tape_size == paper and model in label.models), label_size)
 
 
 def measured(length: int, dpi: int = 203) -> int | None:

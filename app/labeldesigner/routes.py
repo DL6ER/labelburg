@@ -20,6 +20,7 @@ from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_s
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
+from config import Default
 from PIL import Image
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import HTTPException
@@ -2273,8 +2274,12 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     if requested_model:
         model = drivers.canonical(requested_model)
     else:
-        # The model a printer tells, e.g. in its device ID, else the configured one
-        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
+        # The model a printer tells, e.g. in its device ID, else the configured
+        # one; PRINTER_MODEL is that of PRINTER_PRINTER only
+        listed_model = next((m for m, d, _ in printers if d == device), None)
+        chosen = listed_model or model
+        assumed = not listed_model and (device != configured or isinstance(model, Default))
+        model = drivers.resolve(device, chosen, assumed)[1]
         if is_simulation(device):
             model = _demo_model(_kept_settings())
     if ask and model == 'Unknown' and not is_simulation(device):

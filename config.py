@@ -9,6 +9,12 @@ import os
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 
+
+class Default(str):
+    """A setting left as it is here. One given in instance/application.py,
+    an environment variable or on the command line is a plain str."""
+
+
 class Config(object):
     DEBUG = False
     LOG_LEVEL = 'WARNING'
@@ -54,7 +60,8 @@ class Config(object):
     SERVER_PORT = 8013
     SERVER_HOST = '0.0.0.0'
 
-    PRINTER_MODEL = 'QL-800'
+    # Left so, the device ID of the printer tells its model, see drivers.resolve()
+    PRINTER_MODEL = Default('QL-800')
     PRINTER_PRINTER = '?'
 
     LABEL_DEFAULT_ORIENTATION = 'standard'

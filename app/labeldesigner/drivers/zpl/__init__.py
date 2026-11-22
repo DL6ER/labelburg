@@ -14,7 +14,7 @@ import time
 from PIL import Image
 
 from .. import bitmap, devices, diecut, progress
-from ..base import Driver, network_status, shown
+from ..base import Driver, Told, network_status, shown
 from ..diecut import SIZES, loaded, measured
 from . import protocol
 
@@ -125,20 +125,28 @@ class Zpl(Driver):
         return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
 
     def model_in(self, device_id):
+        told = self.told(device_id)
+        return told.model if told else None
+
+    def told(self, device_id):
         fields = devices.device_id_fields(device_id)
+        named = bool(ZPL_DEVICE_ID.search(device_id))
         known = _KNOWN.get((_plain(fields.get('MFG', '')), _plain(fields.get('MDL', ''))))
-        if known or not ZPL_DEVICE_ID.search(device_id):
-            return known
+        if known:
+            return Told(known, command_set=named)
+        if not named:
+            return None
         resolution = RESOLUTION.search(fields.get('MDL', ''))
-        return OF_RESOLUTION.get(int(resolution[1])) if resolution else MODELS[0]
+        if not resolution:
+            return Told(MODELS[0], resolution=False)
+        return Told(OF_RESOLUTION.get(int(resolution[1])))
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
 
     def label_for(self, label_size, model):
-        # zpl102x152 and zpl300-102x152 are the same labels
-        paper = next((label.tape_size for label in LABELS if label.identifier == label_size), None)
-        return next((label.identifier for label in LABELS if label.tape_size == paper and model in label.models), label_size)
+        # zpl102x152, zpl300-102x152 and tspl102x152 are the same labels
+        return diecut.label_for(label_size, LABELS, model)
 
     def dpi(self, high_res):
         return DPI[MODELS[0]]

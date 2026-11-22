@@ -9,7 +9,7 @@ import re
 from PIL import Image
 
 from .. import bitmap, devices, progress
-from ..base import Driver, network_status, shown
+from ..base import Driver, Told, network_status, shown
 from ..labels import FormFactor, Label
 from . import protocol
 
@@ -19,6 +19,8 @@ MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
 # Most heads print 203 dpi, Epson's TM-T88, TM-T90, TM-T70, TM-T81 and
 # TM-T83(II) 180 dpi, by the model in the device ID; a TM-T81III prints 203
 HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
+# Epson's own models, whose head HEADS_180 tells
+EPSON_TM = re.compile(r'TM-')
 # ESC/POS in the command sets of a device ID, also as other makers spell it
 COMMAND_SET = re.compile(r'ESC/?POS|ESC/POS-.*', re.IGNORECASE)
 # Epson's impact printers, e.g. the TM-U220, print no raster images
@@ -103,12 +105,17 @@ class Escpos(Driver):
         return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
 
     def model_in(self, device_id):
+        told = self.told(device_id)
+        return told.model if told else None
+
+    def told(self, device_id):
         fields = devices.device_id_fields(device_id)
         if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
             return None
-        if IMPACT.match(fields.get('MDL', '')):
+        model = fields.get('MDL', '')
+        if IMPACT.match(model):
             return None
-        return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
+        return Told(MODELS[1] if HEADS_180.match(model) else MODELS[0], resolution=bool(EPSON_TM.match(model)))
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

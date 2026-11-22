@@ -293,7 +293,8 @@ def test_status_tells_the_label_sizes_each_printer_takes(client, monkeypatch):
     assert '62' in ql['takes'] and 'pt12' not in ql['takes']
     # A model no label size names takes every size that has printers, each
     # paper once: not as the size of a model shown as another one
-    assert unknown['takes'] == [s for s in tape.SIZES if tape.TAKEN_BY[s] and not s.startswith('zpl300-') and not s.endswith('-180')]
+    assert unknown['takes'] == [s for s in tape.SIZES if tape.TAKEN_BY[s] and not s.startswith(('zpl300-', 'tspl300-'))
+                                and not s.endswith('-180')]
 
 
 def test_label_designer_gets_the_sizes_taken_without_a_known_printer(client):

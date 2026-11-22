@@ -6,6 +6,7 @@ drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
 import re
+from dataclasses import dataclass
 
 from . import devices
 
@@ -34,6 +35,19 @@ def network_status(device: str, model: str, red_support: bool = False) -> dict:
         'red_support': red_support,
         'red_roll': None,
     }
+
+
+@dataclass(frozen=True)
+class Told:
+    """A model as a device ID names it: whether it names the resolution of
+    the printhead, which tells models shown alike apart, see
+    Driver.shown_as, and whether it names a command set of the driver, not
+    only a model of its table of device IDs, e.g. those LPrint lists. Model
+    None for a printer of the driver at a resolution it does not print,
+    e.g. 600 dpi, which no other driver takes then either."""
+    model: str | None
+    resolution: bool = True
+    command_set: bool = True
 
 
 def shown(model: str) -> str:
@@ -89,6 +103,17 @@ class Driver:
     def model_in(self, device_id: str) -> str | None:
         """The model of a printer of this driver an IEEE 1284 device ID names,
         e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;..., None for other devices."""
+        return None
+
+    def told(self, device_id: str) -> Told | None:
+        """The model a device ID names as model_in() reads it, and what tells
+        it, see Told. None for other devices."""
+        model = self.model_in(device_id)
+        return Told(model) if model else None
+
+    def described(self, description: str) -> str | None:
+        """The model of a printer of this driver its SNMP system description
+        (sysDescr) names, e.g. TSC TE200, None for other devices."""
         return None
 
     def fits(self, label, model: str) -> bool:

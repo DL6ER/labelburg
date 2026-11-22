@@ -44,6 +44,63 @@ def test_driver_of_a_printer():
     assert drivers.for_label('99x99') is None
 
 
+@pytest.mark.parametrize('device_id, model', [
+    # Left at its default, the model is taken only where nothing else tells one
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'TSC/TSPL'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra/ZPL-300'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'TSC/TSPL'),
+    # A Brother printer tells its model in its status
+    ('MFG:Brother;CMD:PT-CBP;MDL:QL-700;', 'QL-800')])
+def test_driver_and_model_of_a_printer_of_the_default_model(monkeypatch, device_id, model):
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
+    assert drivers.resolve('file:///dev/usb/lp0', 'QL-800', assumed=True) == (drivers.for_model(model), model)
+
+
+@pytest.mark.parametrize('device_id, configured, model', [
+    # The other resolution of the same printer as configured, where the
+    # device ID names none
+    ('MFG:Printer;CMD:TSPL;MDL:LP-420;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'Zebra/ZPL-300', 'Zebra/ZPL-300'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80;', 'Epson/ESC-POS-180', 'Epson/ESC-POS-180'),
+    # The resolution the device ID names, also by a known model
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T88V;', 'Epson/ESC-POS', 'Epson/ESC-POS-180'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;', 'Epson/ESC-POS-180', 'Epson/ESC-POS'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL', 'Zebra/ZPL-300'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra/ZPL', 'Zebra/ZPL-300'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300 300 dpi;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    # The driver of the model keeps a printer it takes, of another name too
+    ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE310;', 'Zebra/ZPL-300', 'Zebra/ZPL-300'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'Zebra/ZPL', 'Zebra/ZPL'),
+    # Another driver takes it by its command set, by the order of the
+    # drivers without a model of one
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'QL-800', 'TSC/TSPL'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'Zebra/ZPL-300', 'TSC/TSPL'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'TSC/TSPL-300', 'Zebra/ZPL'),
+    # Not by a device ID of its table alone, which names no command set
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'Epson/ESC-POS', 'Epson/ESC-POS'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'QL-800', 'QL-800'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Epson/ESC-POS', 'Epson/ESC-POS'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Unknown', 'Zebra/ZPL-300'),
+    # TSC's models give the resolution in their leading digit
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE310;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'TSC/TSPL-300', 'TSC/TSPL'),
+    # Not where it is a 6, which may be the resolution of no model
+    ('MFG:TSC;CMD:TSPL2;MDL:TDP-643 Plus;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TDP-643 Plus;', 'Unknown', 'TSC/TSPL'),
+    # A printer of 600 dpi is taken by no driver, ZPL at 203 dpi neither
+    ('MFG:TSC;CMD:TSPL2,ZPL2;MDL:TX600;', 'Unknown', 'Unknown'),
+    ('MFG:TSC;CMD:TSPL2,ZPL2;MDL:TX600;', 'QL-800', 'QL-800'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;', 'Unknown', 'Unknown')])
+def test_driver_and_model_of_a_configured_printer(monkeypatch, device_id, configured, model):
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
+    driver, known = drivers.resolve('file:///dev/usb/lp0', configured)
+    assert (driver, known) == (drivers.for_model(model), model)
+
+
 @pytest.mark.parametrize('device', ['usb://0x04b8:0x0e15', 'usbip://192.0.2.1', 'file:///dev/usb/lp0'])
 def test_device_id_is_read_once_for_all_drivers(monkeypatch, device):
     # On usb:// one that tells none is asked again each time
@@ -55,7 +112,8 @@ def test_device_id_is_read_once_for_all_drivers(monkeypatch, device):
 
 @pytest.mark.parametrize('driver, device, model', [
     (drivers.BROTHER, 'file:///dev/usb/lp0', 'QL-800'), (drivers.VC500W, 'vc500w://192.0.2.1', 'VC-500W'),
-    (drivers.PUQU, 'bt://CD:AC:BB:E0:46:4C', 'PUQU/Q00'), (drivers.NIIMBOT, 'bt://CD:AC:BB:E0:46:4C', 'Niimbot/B1')])
+    (drivers.PUQU, 'bt://CD:AC:BB:E0:46:4C', 'PUQU/Q00'), (drivers.NIIMBOT, 'bt://CD:AC:BB:E0:46:4C', 'Niimbot/B1'),
+    (drivers.TSPL, 'tcp://192.0.2.1', 'TSC/TSPL')])
 def test_printer_a_job_holds_is_told_as_printing(monkeypatch, driver, device, model):
     monkeypatch.setattr(devices, 'device_lock', lambda device, timeout=None: contextlib.nullcontext(False))
     busy = {'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'}

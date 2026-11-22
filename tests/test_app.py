@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 
 from app import create_app, parse_args
-from config import Config
+from config import Config, Default
 
 
 def test_create_app_ignores_command_line(monkeypatch):
@@ -52,6 +52,19 @@ def test_command_line_overrides_environment(monkeypatch):
     parse_args(app, ['--model', 'QL-800', 'tcp://192.168.0.23'])
     assert app.config['PRINTER_MODEL'] == 'QL-800'
     assert app.config['PRINTER_PRINTER'] == 'tcp://192.168.0.23'
+
+
+def test_a_model_left_unset_is_told_from_one_given(monkeypatch):
+    monkeypatch.delenv('PRINTER_MODEL', raising=False)
+    app = create_app()
+    assert isinstance(app.config['PRINTER_MODEL'], Default) and app.config['PRINTER_MODEL'] == 'QL-800'
+    # Also through the command line without --model
+    parse_args(app, ['tcp://192.168.0.23'])
+    assert isinstance(app.config['PRINTER_MODEL'], Default)
+    parse_args(app, ['--model', 'QL-800'])
+    assert not isinstance(app.config['PRINTER_MODEL'], Default)
+    monkeypatch.setenv('PRINTER_MODEL', 'QL-800')
+    assert not isinstance(create_app().config['PRINTER_MODEL'], Default)
 
 
 def test_request_size_is_limited():

@@ -71,7 +71,7 @@ def test_status_of_one_printer_names_it_as_listed(monkeypatch):
     listed, asked = 'tcp://192.0.2.1', ''.join(['tcp://', '192.0.2.1'])
     asked_driver = []
     driver = SimpleNamespace(followed_status=lambda device, model: asked_driver.append(device) or {})
-    monkeypatch.setattr(printer.drivers, 'resolve', lambda device, model: (driver, model))
+    monkeypatch.setattr(printer.drivers, 'resolve', lambda device, model, assumed=False: (driver, model))
     config = {'PRINTER_PRINTER': listed, 'PRINTER_MODEL': 'QL-800'}
     state = printer.status_of_printer(config, asked)
     # Equal, but what goes on is the path from the list

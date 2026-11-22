@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 from flask import Config
 from PIL import Image
 
+from config import Default
+
 from . import bluetooth, drivers, mdns, sheets
 from .drivers import devices, progress, reach, usbip
 from .drivers.backends import NoLibusb
@@ -466,7 +468,7 @@ def status_of_printer(config: Config, path: str, added=()) -> dict | None:
         return None
     model, name = listed[path]
     try:
-        driver, known = drivers.resolve(path, model)
+        driver, known = drivers.resolve(path, model, assumed=isinstance(model, Default))
         state = driver.followed_status(path, known)
     except Exception as e:
         logger.info('Status query of %s failed: %s', path, e)
@@ -662,7 +664,7 @@ def get_ptr_status(config: Config, added=()):
             status['selected'] = device_specifier
             return status
         # The label designer offers only the printers of the list
-        printer = device_state(device_specifier, drivers.resolve(device_specifier, default_model)[1])
+        printer = device_state(device_specifier, drivers.resolve(device_specifier, default_model, isinstance(default_model, Default))[1])
         status.update(printer)
         status['printers'] = [printer, *_added_states(added), SIMULATOR_PRINTER.copy()]
         status['selected'] = device_specifier
