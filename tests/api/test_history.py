@@ -73,7 +73,13 @@ def test_the_labels_printed_newest_first(client):
         assert max(image.size) <= routes.PREVIEW_SIZE
 
 
-@pytest.mark.parametrize('limit', ['0', 'x', '-1'])
+@pytest.mark.parametrize('source, told', [('mcp', 'an AI assistant'), ('designer', ''), ('homebox', 'another program')])
+def test_where_a_label_printed_comes_from(client, source, told):
+    job = printed(client, data=dict(LABEL, source=source))
+    assert entry(client, job)['from'] == told
+
+
+@pytest.mark.parametrize('limit', ['0', 'x', '-1', '201'])
 def test_a_limit_is_a_whole_number(client, limit):
     response = client.get(f'{API}/history', query_string={'limit': limit})
     assert response.status_code == 400
