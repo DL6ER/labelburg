@@ -680,7 +680,9 @@ function toggleLarge() {
 function stageOf(v) {
     const size = SIZES[v.labelSize] || { tape: [62, 0], dots: [696, 0], form: 'endless' };
     const scale = v.highRes ? 2 : 1, dpi = dpiOf(v.labelSize, v.highRes), span = size.dots[0] * scale;
-    const side = Math.abs(v.w - span) > 4 * scale && Math.abs(v.h - span) <= 4 * scale;
+    // One as long as the tape is wide runs the way it was asked for
+    const spans = n => Math.abs(n - span) <= 4 * scale;
+    const side = spans(v.h) && (!spans(v.w) || v.along);
     const caps = sizeCaps(v.labelSize), top = leavesFirst(caps) === 'top';
     const lead = isEndless(size) ? caps.lead_mm || 0 : 0;
     const along = Math.round((side ? v.w : v.h) / dpi * 25.4);
