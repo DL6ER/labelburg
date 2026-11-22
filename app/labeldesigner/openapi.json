@@ -131,7 +131,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots, or when the printer (`printer`, `model`, else the configured one) refuses a label this long.",
                 "schema": {
                   "type": "string"
                 }
@@ -2071,7 +2071,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }
@@ -2221,7 +2221,7 @@
             "description": "The label as it is printed.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }
@@ -2646,7 +2646,7 @@
             "description": "The label as it is saved.",
             "headers": {
               "X-Label-Warning": {
-                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, or when a fitted RMQR or PDF417 code makes the label longer than 200 mm.",
+                "description": "Set when text, a code or an image does not fit on the label and is cut off, when a font is not installed and the default font is used instead, when a fitted RMQR or PDF417 code makes the label longer than 200 mm, or when a code may be too small to scan, with a dot of a 2D code under 0.25 mm, a bar of a barcode under 0.19 mm, or either under 2 dots.",
                 "schema": {
                   "type": "string"
                 }

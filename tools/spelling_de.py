@@ -12,9 +12,10 @@ import sys
 DEMOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app', 'labeldesigner', 'demos')
 # Correct, but not in the dictionary: technical terms, compound words and
 # abbreviations, also in capitals
-KNOWN = {'AED', 'ASN', 'Brandfördernd', 'Chili', 'Dampflok', 'Defibrillator', 'Grocy', 'Homebox', 'Ibuprofen', 'Inventaretikett', 'Labelburg', 'mg', 'Minze',
-         'ml', 'Nr', 'Olivenöl', 'Oxidationsmittel', 'Paperless', 'Patchfeld', 'Pesto', 'Planierraupe', 'QR', 'Rack', 'Reagenz', 'Regaletikett', 'Rutschgefahr',
-         'Umweltgefährlich', 'Verbandkasten'}
+KNOWN = {'ABS', 'AED', 'ASA', 'ASN', 'Brandfördernd', 'Chili', 'Dampflok', 'Defibrillator', 'Filamentspule', 'Grocy', 'Hack', 'Hähnchenbrust',
+         'Hähnchenflügel', 'Hähnchenschenkel', 'Homebox', 'Ibuprofen', 'Inventaretikett', 'Kabeljau', 'Labelburg', 'mg', 'Minze', 'ml', 'Nr',
+         'Olivenöl', 'Oxidationsmittel', 'PA', 'Paperless', 'Patchfeld', 'Pesto', 'PETG', 'PLA', 'Planierraupe', 'Putenbrust', 'Putenhack', 'QR',
+         'Rack', 'Reagenz', 'Regaletikett', 'Rinderhack', 'Rutschgefahr', 'Schweinehack', 'TPU', 'Umweltgefährlich', 'Verbandkasten'}
 
 
 def label_words():

@@ -14,7 +14,7 @@ from werkzeug.wrappers import Response
 
 from . import tape
 from .drivers.backends import _same_serial
-from .label import DATE_OFFSET, _iso_date
+from .label import DATE_OFFSET, SMALL_BARCODE_NEXT_TO_IMAGE, SMALL_CODE, SMALL_SIZED_CODE, _iso_date
 from .label_names import LABELS
 from .refusals import BARCODE_TYPES
 
@@ -371,17 +371,21 @@ class Tools:
         to the API, its headers put into headers."""
         return self._call('POST', spec['path'], headers=headers, **{k: v for k, v in spec.items() if k in ('json', 'data')})
 
-    def checked(self, spec: dict) -> dict:
+    def checked(self, spec: dict, small_code_ok: bool = False) -> dict:
         """The headers of the preview spec, what the API tells about the
         label. Refused where the label designer warns about it, e.g. text
         cut off: nothing is printed then. A font that is not installed is
-        no refusal, the label prints with the fallback font as there."""
+        no refusal, the label prints with the fallback font as there, nor
+        with small_code_ok a code that may be too small to scan."""
         from mcp.server.mcpserver.exceptions import ToolError
         headers = {}
         self.preview(spec, headers)
-        warning = ' '.join(FONT_MISSING.sub('', headers.get('X-Label-Warning') or '').split())
+        warning = FONT_MISSING.sub('', headers.get('X-Label-Warning') or '')
+        if small_code_ok:
+            warning = SMALL_CODES.sub('', warning)
+        warning = ' '.join(warning.split())
         if warning:
-            raise ToolError(f'Nothing printed: {warning}')
+            raise ToolError(f'Nothing printed: {warning}' + (f' {SMALL_CODE_NEXT}' if SMALL_CODES.search(warning) else ''))
         return headers
 
     def _printed(self, path: str, **kwargs) -> bytes:
@@ -390,7 +394,7 @@ class Tools:
         return base64.b64decode(self._call('POST', f'{path}?return_format=png', **kwargs)['image'])
 
     def print_label(self, name: str, printer: str, label_size: str | None, fillings: list[dict],
-                    count: int) -> tuple[str, list[dict], list[bytes]]:
+                    count: int, small_code_ok: bool = False) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
         # As a print job of the label designer is logged, without what the label says
         logger.info('MCP print_label %s on %s, count %d, fillings %d', name, printer, count, len(fillings or [{}]))
@@ -408,7 +412,7 @@ class Tools:
                  for blanks in fillings]
         # All of them are checked before the first one is added, each page
         # of a saved PDF prints as a label of its own
-        told = [self.checked(spec) for spec in specs]
+        told = [self.checked(spec, small_code_ok) for spec in specs]
         labels = count * sum(int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told)
         self._cap(labels)
         images = []
@@ -420,7 +424,7 @@ class Tools:
         return _noted(f'Added {_labels(labels)} of {name} to the queue of {printer}', told), specs, images
 
     def print_text(self, lines: list[str], printer: str, label_size: str | None, count: int, font_size: int,
-                   code: str | None, code_type: str) -> tuple[str, list[dict], list[bytes]]:
+                   code: str | None, code_type: str, small_code_ok: bool = False) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
         logger.info('MCP print_text on %s, count %d', printer, count)
         if not (lines or code):
@@ -430,13 +434,18 @@ class Tools:
         printer = found.get('name') or found['path']
         form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'], print_count=count)
         spec = {'path': '/preview', 'data': form}
-        self.checked(spec)
+        self.checked(spec, small_code_ok)
         image = self._printed('/print', data=dict(form, source='mcp'))
         return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
 
 
 # The note of the label designer about a font that is not installed
 FONT_MISSING = re.compile(r'The font .+? is not installed, .+? is used instead\.')
+# Its hints of a code that may be too small to scan, the label designer shows
+# them before Print, and what the assistant can do
+SMALL_CODES = re.compile('|'.join(re.escape(text) for text in (SMALL_CODE, SMALL_SIZED_CODE, SMALL_BARCODE_NEXT_TO_IMAGE)))
+SMALL_CODE_NEXT = ('Tell the user: a larger code, shorter text in it or a wider tape scans better. '
+                   'Call again with small_code_ok only if they still want it printed.')
 
 
 def _noted(text: str, told: list[dict]) -> str:
@@ -532,28 +541,35 @@ def _server(app):
 
     @server.tool(annotations=printing, meta=confirm)
     def print_label(name: str, printer: str, count: int, label_size: str | None = None,
-                    fillings: list[dict[str, str]] | None = None, ctx: Context = None) -> list:
+                    fillings: list[dict[str, str]] | None = None, small_code_ok: bool = False, ctx: Context = None) -> list:
         """Print a saved label on printer, count labels of each filling of
         its blanks, e.g. [{"Name": "Anna"}, {"Name": "Ben"}] prints a badge
         for each, on the label size it is saved for. label_size only as the
         user told it, refused if the printer has another one loaded. Prints
-        nothing where a label is cut off or a filling is refused. The labels
-        are added to the queue of the printer, which prints them in turn.
-        Returns the first label of each filling as it will print."""
-        return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count))
+        nothing where a label is cut off, its code may be too small to scan
+        or a filling is refused. small_code_ok prints a code that may be too
+        small to scan: set it only after the user was told about it and
+        still wants the print.
+        The labels are added to the queue of the printer, which prints them
+        in turn. Returns the first label of each filling as it will print."""
+        return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count, small_code_ok))
 
     @server.tool(annotations=printing, meta=confirm)
     @coded
     def print_text(printer: str, count: int, label_size: str | None = None, lines: list[str] | None = None,
-                   font_size: int = 60, code: str | None = None, code_type: str = 'QR', ctx: Context = None) -> list:
+                   font_size: int = 60, code: str | None = None, code_type: str = 'QR', small_code_ok: bool = False,
+                   ctx: Context = None) -> list:
         """Print lines of text and/or a code (QR, e.g. a URL or
         WIFI:T:WPA;S:<name>;P:<password>;;, or a barcode type like EAN13 or
         CODE128) on printer, count labels. label_size, e.g. 62 or 100x30,
         only as the user told it, else the one loaded; refused if the printer
-        has another one loaded. Prints nothing where the label is cut off.
+        has another one loaded. Prints nothing where the label is cut off or
+        its code may be too small to scan. small_code_ok prints a code that
+        may be too small to scan: set it only after the user was told about
+        it and still wants the print.
         The labels are added to the queue of the printer, which prints them
         in turn. Returns the first label as it will print."""
-        return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type))
+        return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type, small_code_ok))
 
     return server
 

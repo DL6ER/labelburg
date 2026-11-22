@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import mcp_tools, print_queue, printer, printer_settings, tape
+from app.labeldesigner.label import SMALL_CODE, SMALL_SIZED_CODE
 from tests.helpers import make_client
 
 HEADERS = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'}
@@ -553,6 +554,49 @@ def test_a_font_not_installed_prints_with_the_fallback_font(client, tmp_path):
     result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1,
                   fillings=[{'Name': 'Maximilian-Alexander von Hohenzollern'}])
     assert result['isError'] and 'part of it is cut off' in result['content'][0]['text'] and printed(tmp_path) == 1
+
+
+LINK = 'https://www.example.com/inventory/garage/shelf-3/box-17?item=cordless-drill-and-charger'
+
+
+def test_a_code_that_may_be_too_small_to_scan_prints_only_when_the_user_wants_it(client, tmp_path):
+    # As the label designer shows it before Print
+    result = tool(client, 'preview_label', printer='Kitchen', label_size='12', code=LINK)
+    assert result['content'][0]['text'].startswith(f'Preview. {SMALL_CODE}')
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK)
+    assert result['isError'] and printed(tmp_path) == 0
+    text = result['content'][0]['text']
+    assert f'Nothing printed: {SMALL_CODE} Tell the user: a larger code' in text and 'small_code_ok' in text
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 1
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
+    # A saved code with dots of a size set too small
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text': [{'text': 'Box 17', 'size': '60'}]}).status_code == 200
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1)
+    assert result['isError'] and f'Nothing printed: {SMALL_SIZED_CODE} Tell the user' in result['content'][0]['text']
+    assert printed(tmp_path) == 1
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 2
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label of Box.json to the queue of Kitchen'
+
+
+def test_small_code_ok_prints_no_label_cut_off(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Badge.json', 'label_size': '62x29', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text_fit': 'none', 'text': [{'text': '{{blank:Name}}', 'size': '80'}]}).status_code == 200
+    name = {'Name': 'Maximilian-Alexander von Hohenzollern'}
+    for small_code_ok in (False, True):
+        result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1, fillings=[name],
+                      small_code_ok=small_code_ok)
+        assert result['isError'] and 'cut off' in result['content'][0]['text'] and printed(tmp_path) == 0
+        assert (SMALL_SIZED_CODE in result['content'][0]['text']) != small_code_ok
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, lines=['A' * 200], font_size=200,
+                  small_code_ok=True)
+    assert result['isError'] and 'small_code_ok' not in result['content'][0]['text'] and printed(tmp_path) == 0
 
 
 def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monkeypatch):

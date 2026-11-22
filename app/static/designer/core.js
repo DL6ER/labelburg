@@ -575,7 +575,8 @@ export async function preview(design, values, copies = 1, perCopy = 0, total = 0
             auto: r.headers.get('X-Label-Orientation') === 'auto', gap: +(r.headers.get('X-Label-Image-Text-Gap') || 0),
             order: r.headers.get('X-Label-Parts-Order') || '', direction: r.headers.get('X-Label-Parts-Direction') || '', faint: r.headers.get('X-Image-Faint') === '1',
             pages: +(r.headers.get('X-PDF-Selected-Pages') || 1), pageCount: +(r.headers.get('X-PDF-Pages') || 0), parts: partsOf(r.headers.get('X-Label-Parts')),
-            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet'))
+            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet')),
+            along: runsAlong(asked)
         };
     })();
     previewCache.set(key, p);
