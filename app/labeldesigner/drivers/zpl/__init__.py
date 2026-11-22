@@ -139,8 +139,7 @@ class Zpl(Driver):
         resolution = RESOLUTION.search(fields.get('MDL', ''))
         if not resolution:
             return Told(MODELS[0], resolution=False)
-        model = OF_RESOLUTION.get(int(resolution[1]))
-        return Told(model) if model else None
+        return Told(OF_RESOLUTION.get(int(resolution[1])))
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

@@ -87,7 +87,14 @@ def test_driver_and_model_of_a_printer_of_the_default_model(monkeypatch, device_
     # TSC's models give the resolution in their leading digit
     ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL', 'TSC/TSPL-300'),
     ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE310;', 'TSC/TSPL', 'TSC/TSPL-300'),
-    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'TSC/TSPL-300', 'TSC/TSPL')])
+    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'TSC/TSPL-300', 'TSC/TSPL'),
+    # Not where it is a 6, which may be the resolution of no model
+    ('MFG:TSC;CMD:TSPL2;MDL:TDP-643 Plus;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TDP-643 Plus;', 'Unknown', 'TSC/TSPL'),
+    # A printer of 600 dpi is taken by no driver, ZPL at 203 dpi neither
+    ('MFG:TSC;CMD:TSPL2,ZPL2;MDL:TX600;', 'Unknown', 'Unknown'),
+    ('MFG:TSC;CMD:TSPL2,ZPL2;MDL:TX600;', 'QL-800', 'QL-800'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;', 'Unknown', 'Unknown')])
 def test_driver_and_model_of_a_configured_printer(monkeypatch, device_id, configured, model):
     monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
     driver, known = drivers.resolve('file:///dev/usb/lp0', configured)

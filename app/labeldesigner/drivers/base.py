@@ -42,8 +42,10 @@ class Told:
     """A model as a device ID names it: whether it names the resolution of
     the printhead, which tells models shown alike apart, see
     Driver.shown_as, and whether it names a command set of the driver, not
-    only a model of its table of device IDs, e.g. those LPrint lists."""
-    model: str
+    only a model of its table of device IDs, e.g. those LPrint lists. Model
+    None for a printer of the driver at a resolution it does not print,
+    e.g. 600 dpi, which no other driver takes then either."""
+    model: str | None
     resolution: bool = True
     command_set: bool = True
 

@@ -50,9 +50,17 @@ def resolution_problem(model: str, high_res: bool) -> str:
     return for_model(model).resolution_problem(model, high_res)
 
 
+def _unprinted(device_id: str) -> bool:
+    """Whether a device ID names a printer of a driver at a resolution it
+    does not print, e.g. a TSC TX600 that also names ZPL, see Told."""
+    return any(told is not None and told.model is None for told in (driver.told(device_id) for driver in DRIVERS))
+
+
 def told_model(device_id: str) -> str | None:
     """The model an IEEE 1284 device ID names, None if it is no printer of
     a driver."""
+    if _unprinted(device_id):
+        return None
     return next((model for driver in DRIVERS if (model := driver.model_in(device_id))), None)
 
 
@@ -80,9 +88,12 @@ def resolve(device: str, model: str, assumed: bool = False) -> tuple[Driver, str
     alike, and the device ID names none, e.g. TSC/TSPL-300 for TSC/TSPL.
     Another driver takes it from that model only by its command set, not by
     a device ID of its table alone. An assumed model, e.g. PRINTER_MODEL
-    left at its default, is none of these, only what is left."""
+    left at its default, is none of these, only what is left. A printer of a
+    resolution its driver does not print is the model given."""
     # Read once for all drivers, it may ask the printer
     device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+    if _unprinted(device_id):
+        return for_model(model), model
     named = canonical(model)
     chosen = None if assumed else _BY_MODEL.get(named)
     if chosen and (told := _claim(chosen, device, device_id)):

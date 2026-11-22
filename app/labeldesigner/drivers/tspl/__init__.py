@@ -59,9 +59,19 @@ KNOWN_IDS = {
 # TSC in a device ID or the SNMP system description of a network printer
 MAKER = re.compile(r'\bTSC\b')
 # The resolution in the leading digit of the number of a TSC model, e.g.
-# TE200, TTP-345 or TX600; Alpha-3R and TDM-30 name their width so
-TSC_MODEL = re.compile(r'\b[A-Za-z]+-?([236])\d{2}')
-OF_DIGIT = {'2': MODELS[0], '3': MODELS[1], '6': None}
+# TE200 or TTP-345; Alpha-3R and TDM-30 name their width so, and a 6 is no
+# resolution either, the TDP-643 Plus prints 203 dpi
+# (https://www.barcodesinc.com/media/pdf/TSC/tdp643.pdf)
+TSC_MODEL = re.compile(r'\b[A-Za-z]+-?([23])\d{2}')
+OF_DIGIT = {'2': MODELS[0], '3': MODELS[1]}
+# TSC's models of 600 dpi, as their data sheets name them: TX600
+# (https://fs.tscprinters.com/en/dl/4/2172), TX610
+# (https://fs.tscprinters.com/en/dl/3/7446), TTP-644M Pro
+# (https://www.jarltech.com/ger_new/new/pdf/fr/tsc_ttp2410mpro.pdf), MH641
+# (https://fs.tscprinters.com/en/dl/3/3607), MX640P
+# (https://fs.tscprinters.com/fr/dl/3/2039) and MX641P
+# (https://fs.tscprinters.com/en/dl/3/2841)
+TSC_600_DPI = re.compile(r'\b(TX6[01]0|TTP-644|MH641|MX64[01])', re.IGNORECASE)
 
 
 def _plain(text: str) -> str:
@@ -76,17 +86,17 @@ def _id_key(maker: str, model: str, commands: str) -> tuple[str, str, str]:
 _KNOWN = {_id_key(*fields): known for fields, known in KNOWN_IDS.items()}
 
 
-def _of_resolution(text: str, tsc: bool) -> Told | None:
+def _of_resolution(text: str, tsc: bool) -> Told:
     """The model of the resolution text names, also by the model of TSC it
-    names where tsc, 203 dpi where it names none. None for another
-    resolution, e.g. 600 dpi."""
+    names where tsc, 203 dpi where it names none. Of another resolution,
+    e.g. 600 dpi, none, see Told."""
     if resolution := RESOLUTION.search(text):
-        model = OF_RESOLUTION.get(int(resolution[1]))
-    elif tsc and (number := TSC_MODEL.search(text)):
-        model = OF_DIGIT[number[1]]
-    else:
-        return Told(MODELS[0], resolution=False)
-    return Told(model) if model else None
+        return Told(OF_RESOLUTION.get(int(resolution[1])))
+    if tsc and TSC_600_DPI.search(text):
+        return Told(None)
+    if tsc and (number := TSC_MODEL.search(text)):
+        return Told(OF_DIGIT[number[1]])
+    return Told(MODELS[0], resolution=False)
 
 
 def _answer_key(device: str) -> str:
@@ -155,8 +165,7 @@ class Tspl(Driver):
         return _of_resolution(fields.get('MDL', ''), bool(MAKER.search(fields.get('MFG', ''))))
 
     def described(self, description):
-        told = _of_resolution(description, tsc=True) if MAKER.search(description) else None
-        return told.model if told else None
+        return _of_resolution(description, tsc=True).model if MAKER.search(description) else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

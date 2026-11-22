@@ -283,7 +283,17 @@ def test_every_status_the_printer_tells(monkeypatch, answer, errors, status_type
     ('MFG:TSC;CMD:TSPL2;MDL:DA310;', 'TSC/TSPL-300'),
     ('MFG:TSC Auto ID Technology;CMD:TSPL2;MDL:DA210;', 'TSC/TSPL'),
     ('MFG:TSC;CMD:TSPL2;MDL:TX600;', None),
-    # Of others the width, or a printer of another maker
+    # TSC's models of 600 dpi, by their data sheets
+    ('MFG:TSC;CMD:TSPL2;MDL:TX610;', None),
+    ('MFG:TSC;CMD:TSPL2;MDL:TTP-644MT;', None),
+    ('MFG:TSC;CMD:TSPL-EZD;MDL:MH641T;', None),
+    ('MFG:TSC;CMD:TSPL2;MDL:MX640P;', None),
+    ('MFG:TSC;CMD:TSPL2;MDL:MX641P;', None),
+    # Nor any other driver
+    ('MFG:TSC;CMD:TSPL2,ZPL2;MDL:TX600;', None),
+    # Of others the width, or a printer of another maker, or a 6 that is no
+    # resolution, the TDP-643 Plus prints 203 dpi
+    ('MFG:TSC;CMD:TSPL2;MDL:TDP-643 Plus;', 'TSC/TSPL'),
     ('MFG:TSC;CMD:TSPL2;MDL:Alpha-3R;', 'TSC/TSPL'),
     ('MFG:TSC;CMD:TSPL2;MDL:TDM-30;', 'TSC/TSPL'),
     ('MFG:Printer;CMD:TSPL;MDL:XP-365B;', 'TSC/TSPL'),
@@ -329,6 +339,8 @@ def test_known_by_the_device_id_of_its_usb_device(monkeypatch):
     ('TSC TTP-345', 'TSC/TSPL-300'),
     ('TSC DA310', 'TSC/TSPL-300'),
     ('TSC TX600', None),
+    ('TSC TX610', None),
+    ('TSC TDP-643 Plus', 'TSC/TSPL'),
     ('Brother NC-18002w, Firmware Ver.1.10', None),
     ('Linux printserver 6.1.0', None),
     ('TSCHUESS', None)])
