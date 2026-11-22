@@ -18,6 +18,9 @@ from . import backends, devices
 CONNECT_WAIT = 10
 # The channel of an RfcommPrinter whose address names none
 RFCOMM_CHANNEL = 1
+# How Linux tells a refused pairing (Authentication Failure, Pairing Not
+# Allowed, PIN or Key Missing), unlike one switched off (EHOSTDOWN)
+NOT_PAIRED = (errno.EACCES, getattr(errno, 'EBADE', errno.EACCES))
 
 
 def bt_address(device: str, channel: int) -> tuple[str, int]:
@@ -35,8 +38,10 @@ def rfcomm(device: str, channel: int) -> socket.socket:
     try:
         with devices.bluetooth_turn:
             s.connect(bt_address(device, channel))
-    except OSError:
+    except OSError as e:
         s.close()
+        if e.errno in NOT_PAIRED:
+            raise backends.NotPaired(e.errno, e.strerror) from e
         raise
     return s
 
