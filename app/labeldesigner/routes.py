@@ -2526,8 +2526,9 @@ def history_print(job_id):
             images = kept
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             # Values of the request for its blanks, the others as printed
-            given = _blank_values(_requested('blanks'))
-            data['blanks'] = {**_blank_values(data.get('blanks')), **given}
+            given, printed_values = _blank_values(_requested('blanks')), _blank_values(data.get('blanks'))
+            data['blanks'] = {**printed_values, **given}
+            same_values = data['blanks'] == printed_values
             printer, data, high_res, fast = _stored_job(data)
             collate = entry.get('collate', True)
             order = _copies(list(range(len(images))) or [None], copies, collate)
@@ -2541,12 +2542,12 @@ def history_print(job_id):
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
             dates = entry.get('dates') if as_before else None
             # The first labels as they were count as they did, e.g. Box 1 of 3
-            total = (entry.get('total') or len(entry['order'])) if as_before and order == entry['order'][:len(order)] else None
+            total = (entry.get('total') or len(entry['order'])) if as_before and same_values and order == entry['order'][:len(order)] else None
             recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
                       'copies': copies, 'collate': collate, 'sizes': entry.get('sizes'), 'dates': dates or _dates_set(), 'total': total,
                       'named': entry.get('named')}
             # With values of its own named anew by its first line as printed
-            title = None if given else entry.get('title')
+            title = entry.get('title') if same_values else None
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)

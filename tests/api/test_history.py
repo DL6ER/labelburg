@@ -440,3 +440,17 @@ def test_the_answer_of_a_print_names_it_as_the_list_does(client):
     answers.append(client.post(f'{API}/history/{answers[0]["job"]}/print', json={'printer': 'simulation', 'blanks': {'What': 'Beans'}}).get_json())
     assert [answer['title'] for answer in answers] == ['Jar Peas', 'Spice Chili', 'Jar Beans']
     assert [entry(client, answer['job'])['title'] for answer in answers] == ['Jar Peas', 'Spice Chili', 'Jar Beans']
+
+
+def test_a_label_printed_again_with_other_values_counts_anew(client, monkeypatch):
+    totals, create = [], routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: (totals.append(kwargs.get('total')), create(*args, **kwargs))[1])
+    job = printed(client, data=dict(LABEL, text=lines('Box {{counter}} of {{total}} {{blank:What}}'), blanks=json.dumps({'What': 'Peas'}), print_count='3'))
+    del totals[:]
+    # Box 1 of 1 Beans, a label of its own
+    beans = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 1, 'blanks': {'What': 'Beans'}})
+    assert set(totals) == {1} and entry(client, beans)['title'] == 'Box 1 of 1 Beans'
+    del totals[:]
+    # The same values, as the label designer sends them: one of the three
+    printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 1, 'blanks': {'What': 'Peas'}})
+    assert set(totals) == {3}
