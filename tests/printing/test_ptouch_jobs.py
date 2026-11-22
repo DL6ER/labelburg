@@ -24,13 +24,16 @@ def test_pt_p900w_prints_at_high_resolution_in_bit_6(half_cut, flags):
     raster = Raster('PT-P900W')
     convert(raster, [Image.new('1', (2 * 454, 4), 1)], 'pt36', rotate=0, dpi_600=True, half_cut=half_cut, compress=True)
     assert expanded_modes(raster.data) == [flags]
-    assert b'\x1b\x69\x7a\xcc\x00\x24\x00\x04\x00\x00\x00\x00\x00' in raster.data
+    # Media type 09h, laminated tape, and its flag (p. 33): 4 lines, the first page
+    assert b'\x1b\x69\x7a\xce\x09\x24\x00\x04\x00\x00\x00\x00\x00' in raster.data
 
 
-def test_pt_p900w_prints_normally_without_bit_6():
-    raster = Raster('PT-P900W')
+@pytest.mark.parametrize('model', ['PT-P900W', 'PT-P950NW'])
+def test_pt_p900_series_prints_normally_without_bit_6_nor_media_type(model):
+    raster = Raster(model)
     convert(raster, [Image.new('1', (454, 4), 1)], 'pt36', rotate=0, half_cut=False)
     assert expanded_modes(raster.data) == [0x08]
+    assert b'\x1b\x69\x7a\xcc\x00\x24\x00\x04\x00\x00\x00\x00\x00' in raster.data
 
 
 def test_pt_p700_is_not_told_to_half_cut():

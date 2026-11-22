@@ -162,8 +162,9 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             raster.add_media_and_quality(im.size[1], 0x0A, tape[0], 0, hq)
         else:
             # A P-touch printer reads media type 0 as "no tape", a PT-E550W
-            # half cut the tape and hung in the printing state
-            raster.add_media_and_quality(im.size[1], None, tape[0], 0, hq)
+            # half cut the tape and hung in the printing state. The PT-P900
+            # series prints at high resolution on laminated tape, told as 09h.
+            raster.add_media_and_quality(im.size[1], 0x09 if dpi_600 else None, tape[0], 0, hq)
         if cut:
             # A printer without ESC i A cuts after each page told to cut, the
             # last one also after more labels than ESC i A counts
