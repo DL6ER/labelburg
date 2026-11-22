@@ -348,3 +348,25 @@ def test_a_label_printed_days_ago_opens_in_the_editor_following_the_day(page, se
     with page.expect_request('**/api/print') as request:
         page.click('#print')
     assert 'Day' not in json.loads(sent(request.value)['blanks'])
+
+
+def test_a_saved_label_of_a_picture_alone_is_named_by_its_title(page, server):
+    from tests.browser.test_gallery import open_saved, with_image
+    with_image(page, png(160, 90), 'IMG_0042.png')
+    page.click('#save')
+    page.fill('#saveName', 'Rack')
+    page.click('#saveGo')
+    page.wait_for_function('n => labelEditor.S.saved.some(s => s.title === n)', arg='Rack')
+    page.wait_for_selector('.dialog', state='detached')
+    page.click('#newLabel')
+    open_saved(page, 'Rack')
+    with page.expect_response('**/api/print') as answer:
+        page.click('#tplPrint')
+    assert answer.value.json()['title'] == 'Rack'
+    page.wait_for_selector('#toast:has-text("Printed 1 label: Rack")')
+    page.click('#tplOpen')
+    page.wait_for_selector('.tpl', state='detached')
+    wait_for_preview(page)
+    with page.expect_response('**/api/print') as answer:
+        page.click('#print')
+    assert answer.value.json()['title'] == 'Rack'

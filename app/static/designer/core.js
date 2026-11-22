@@ -1058,8 +1058,11 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
     return sendJob(entry, printer, () => {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
-        // Named by the server by its first line as printed, a job of no text by job.name
-        if (job.name) form.set('title', job.name);
+        // Named by the server by its first line or code as printed, a label
+        // of neither by job.name, else its title once it has one
+        const worded = (job.design.text || []).some(l => String(l.text || '').trim()) || (withCode(job.design) && String(job.design.code_text || '').trim());
+        const name = job.name || (!worded && job.title !== 'New label' ? job.title : '');
+        if (name) form.set('title', name);
         form.set('source', 'designer');
         return ['/print', form];
     }, onDone, onAccepted);
