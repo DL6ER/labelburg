@@ -312,3 +312,10 @@ def test_a_picture_printed_again_takes_copies(client, monkeypatch):
     again = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '3', 'blanks': '{"x": "y"}'})
     assert (entry(client, again)['labels'], entry(client, again)['copies']) == (3, 3)
     assert print_queue.get(again).state == 'printed'
+
+
+def test_a_picture_printed_again_is_cut_as_the_request_or_the_printer_says(client, monkeypatch):
+    job = webhook_job(client, monkeypatch)
+    assert print_store.entry(printed(client, f'history/{job}/print', data={'printer': 'simulation', 'cut': 'last'}))['printer']['cut'] == 'last'
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'cut': 'none'}).status_code == 200
+    assert print_store.entry(printed(client, f'history/{job}/print', data={'printer': 'simulation'}))['printer']['cut'] == 'none'

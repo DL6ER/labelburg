@@ -3805,39 +3805,66 @@
         }
       },
       "PrintAgain": {
-        "type": "object",
-        "properties": {
-          "printer": {
-            "type": "string",
-            "description": "The device or name of the printer, as `/labeldesigner/api/print` takes it. Default: the configured printer."
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "printer": {
+                "type": "string",
+                "description": "The device or name of the printer, as `/labeldesigner/api/print` takes it. Default: the configured printer."
+              },
+              "model": {
+                "type": "string"
+              },
+              "as_before": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them at most as many labels as before. 0: today's date and the next numbers. Default: 1."
+              },
+              "print_count": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Copies, as for `/labeldesigner/api/print`, e.g. 1 for one label that tore of 10. Default: the copies it was printed with."
+              },
+              "blanks": {
+                "$ref": "#/components/schemas/BlankValues",
+                "description": "Values for blanks in place of those it printed with, the others as printed, also as a JSON object in a JSON body. Not for an image of the webhook or Homebox."
+              },
+              "title": {
+                "type": "string",
+                "description": "The title of the job in the queue. Default: as before, else, with values of its own, its first line."
+              },
+              "source": {
+                "type": "string",
+                "enum": ["designer", "mcp"],
+                "description": "Where the job comes from, as for `/labeldesigner/api/print`."
+              },
+              "high_res": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "Default: as set in the printer settings (`/labeldesigner/api/settings`) of the printer it prints on, not as it printed before."
+              },
+              "fast_printing": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "Default: as set in the printer settings."
+              },
+              "leaves_first": {
+                "type": "string",
+                "enum": ["top", "bottom"],
+                "description": "Default: as set in the printer settings."
+              },
+              "cut_once": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "1 cuts only after the last label, like `cut` `last`. Without `cut` and `cut_once` it is cut as set in the printer settings."
+              }
+            }
           },
-          "model": {
-            "type": "string"
-          },
-          "as_before": {
-            "type": "integer",
-            "enum": [0, 1],
-            "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them at most as many labels as before. 0: today's date and the next numbers. Default: 1."
-          },
-          "print_count": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Copies, as for `/labeldesigner/api/print`, e.g. 1 for one label that tore of 10. Default: the copies it was printed with."
-          },
-          "blanks": {
-            "$ref": "#/components/schemas/BlankValues",
-            "description": "Values for blanks in place of those it printed with, the others as printed. Not for an image of the webhook or Homebox."
-          },
-          "title": {
-            "type": "string",
-            "description": "The title of the job in the queue. Default: as before, else, with values of its own, its first line."
-          },
-          "source": {
-            "type": "string",
-            "enum": ["designer", "mcp"],
-            "description": "Where the job comes from, as for `/labeldesigner/api/print`."
+          {
+            "$ref": "#/components/schemas/Cutting"
           }
-        }
+        ]
       },
       "QueueNotFound": {
         "type": "object",

@@ -2447,7 +2447,7 @@ def _image_job_again(entry: dict, images: list, copies: int) -> tuple[PrinterQue
     label_size = entry['printer']['label_size']
     if label_size_problem(label_size, model):
         raise ValueError(refusals.OTHER_LABEL)
-    given = printer_settings.for_printing(_settings_of(device), model, {key: _requested(key) for key in ('high_res', 'fast_printing', 'leaves_first')})
+    given = printer_settings.for_printing(_settings_of(device), model, {key: _requested(key) for key in PRINTER_PARAMETERS})
     # Images stay in color on the tapes of the VC-500W, printed at its resolution
     high_res = _whole_or(given.get('high_res'), 0) != 0 and _palette(label_size) != 'color'
     fast = _whole_or(given.get('fast_printing'), 0) != 0
