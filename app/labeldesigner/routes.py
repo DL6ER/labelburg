@@ -947,14 +947,17 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
 
 
 def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool, fast: bool, starts: list,
-                  printed_for: float | None = None, dates: dict | None = None, total: int | None = None) -> None:
+                  printed_for: float | None = None, dates: dict | None = None, total: int | None = None,
+                  sizes: list | None = None) -> None:
     """Adds the labels of order to the queue, each with its image by its
     index in images, None without, the printer cuts them as printer.cut
     says. They are added once for each archive serial number in starts, the
     one the first label of order takes. printed_for is the time their dates
     show, e.g. of a label printed again as it was, else they show now, and
     dates the label settings they are written with, see _dates_set(). total
-    is the number {{total}} shows, of order where it is not given."""
+    is the number {{total}} shows, of order where it is not given. sizes are
+    those of the pictures smaller copies in images were made of, see
+    _kept_copy()."""
     if printed_for is not None:
         data = dict(data, timestamp=int(printed_for))
     # The copies share the text measured, alike where nothing changes
@@ -963,7 +966,8 @@ def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool
         for i, index in enumerate(order):
             # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
             label = create_label_from_request(data, {}, i, None if index is None else images[index], layouts=layouts, asn=asn,
-                                              total=total or len(order), dates=dates)
+                                              total=total or len(order), dates=dates,
+                                              image_size=sizes[index] if sizes and index is not None else None)
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
 
 
@@ -1116,8 +1120,8 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
         for shape in _copies(record['shapes'], record.get('copies') or 1, True):
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     elif record['kind'] == 'request':
-        _queue_labels(printer, record['data'], _as_printed(images, record.get('sizes')), record['order'], record['high_res'],
-                      record['fast'], [record['asn']], record.get('printed_for'), record.get('dates'), record.get('total'))
+        _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']],
+                      record.get('printed_for'), record.get('dates'), record.get('total'), record.get('sizes'))
     return printer
 
 
@@ -1418,8 +1422,9 @@ def _dates_set() -> dict:
 
 
 def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None]:
-    """A copy of a picture to keep with its job, and the size it was printed
-    at where the copy is smaller, see _as_printed(). A picture fitted to the
+    """A copy of a picture to keep with its job, and the size of the picture
+    where the copy is smaller: a label made of the copy is fitted as of the
+    picture, so that it comes out as it did. A picture fitted to the
     label is kept as small as the label shows it, also at 600 dpi or on a
     label of a set length: its shorter side as long as the longest side of
     the label. Cropped or turned the label shows a part of it, scaled by
@@ -1436,11 +1441,6 @@ def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None
     scale = longest / min(image.size)
     return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS), list(image.size)
 
-
-def _as_printed(images: list, sizes: list | None) -> list:
-    """The pictures kept with a job at the size it printed them, so that it
-    prints again as it did, see _kept_copy()."""
-    return [image.resize(tuple(size), Image.Resampling.LANCZOS) if size else image for image, size in zip(images, sizes or [None] * len(images))]
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -2496,7 +2496,7 @@ def history_print(job_id):
             printer, recipe, kept = _image_job_again(entry, kept, copies)
             images, data, title = kept, {}, entry.get('title')
         else:
-            images = _as_printed(kept, entry.get('sizes'))
+            images = kept
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             # Values of the request for its blanks, the others as printed
             given = _blank_values(_requested('blanks'))
@@ -2527,7 +2527,7 @@ def history_print(job_id):
                 asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(recipe['order']))
             recipe['asn'] = asn
             _queue_labels(printer, recipe['data'], images, recipe['order'], recipe['high_res'], recipe['fast'], [asn], printed_for,
-                          recipe['dates'], total)
+                          recipe['dates'], total, recipe['sizes'])
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
@@ -2824,7 +2824,7 @@ def _image_contrast(d: dict) -> bool:
 
 
 def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
-                              asn: int | None = None, total: int = 1, dates: dict | None = None):
+                              asn: int | None = None, total: int = 1, dates: dict | None = None, image_size: tuple | None = None):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
     if size is None:
@@ -2995,6 +2995,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         dpi=label_dpi(label_size, context['high_res']),
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
+        image_size=image_size,
         date_format=settings['date_format'] or '%Y-%m-%d',
         date_language=settings['date_language'],
     )

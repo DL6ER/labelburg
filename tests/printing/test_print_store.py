@@ -584,14 +584,16 @@ def logo() -> tuple:
     return io.BytesIO(out.getvalue()), 'logo.png'
 
 
-@pytest.mark.parametrize('crop', ['0', '1'])
-def test_a_photo_printed_again_prints_as_it_did(server, crop):
-    def shown(path, **kwargs) -> Image.Image:
+@pytest.mark.parametrize('picture, crop', [(logo, '0'), (logo, '1'), (lambda: photo(2004, 1500), '0')], ids=['logo', 'cropped', 'photo'])
+def test_a_photo_printed_again_prints_as_it_did(server, picture, crop):
+    def shown(path, **kwargs) -> tuple[str, Image.Image]:
         answer = server.post(f'{API}/{path}?return_format=png', **kwargs).get_json()
         return answer['job'], Image.open(io.BytesIO(base64.b64decode(answer['image']))).convert('L')
-    job, first = shown('print', data=dict(LABEL, print_type='image', image_crop=crop, image=logo()), content_type='multipart/form-data')
+    job, first = shown('print', data=dict(LABEL, print_type='image', image_crop=crop, image=picture()), content_type='multipart/form-data')
     assert ended(job).state == 'printed'
     _, again = shown(f'history/{job}/print', data={'printer': 'simulation'})
+    # Of the same size, also where the smaller copy kept has another
+    # aspect ratio by a part of a pixel: 2004 x 1500 kept as 1860 x 1392
     assert again.size == first.size
     differences = [abs(a - b) for a, b in zip(first.tobytes(), again.tobytes())]
     if crop == '1':
@@ -600,6 +602,8 @@ def test_a_photo_printed_again_prints_as_it_did(server, crop):
     else:
         # Kept smaller, printed again at the size it had
         assert sum(differences) / len(differences) < 2
+
+
 def test_the_images_are_written_while_the_label_is_drawn(server, monkeypatch):
     order, stage, check = [], print_store.stage, printer.PrinterQueue.check
     monkeypatch.setattr(print_store, 'stage', lambda *args: (order.append('stage'), stage(*args))[1])

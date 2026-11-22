@@ -403,6 +403,7 @@ class SimpleLabel:
         fixed_length: bool = False,
         vertical_align: str = 'center',
         mirror: bool = False,
+        image_size: tuple | None = None,
         date_format: str = '%Y-%m-%d',
         date_language: str = '',
     ):
@@ -539,6 +540,9 @@ class SimpleLabel:
         # Printed mirror-inverted, to be read through clear tape stuck behind
         # glass
         self._mirror = mirror
+        # Of the picture a smaller copy in image was made of, which it is
+        # fitted as, so that the label comes out as it did with the picture
+        self._image_size = tuple(image_size) if image_size else None
         # The pieces of lines measured, see _measured_piece()
         self._pieces: dict[tuple, tuple] = {}
 
@@ -1178,7 +1182,7 @@ class SimpleLabel:
                     max_height = max((max_height - between) // parts, 1)
 
             # Get image dimensions
-            img_width, img_height = img.size
+            img_width, img_height = self._image_size if own_look and self._image_size else img.size
 
             # Print the original image size
             logger.debug(f"Maximal allowed dimensions: {max_width}x{max_height} mm")
@@ -1198,7 +1202,8 @@ class SimpleLabel:
             # Use image_scaling_factor if provided
             scale = self._image_scaling_factor / 100.0 if own_look else 1.0
             logger.debug(f"Manual image scaling factor: {scale}")
-        new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+        width_of, height_of = self._image_size if self._image_fit and own_look and self._image_size else img.size
+        new_size = (max(1, int(width_of * scale)), max(1, int(height_of * scale)))
         logger.debug(f"Resized image size: {new_size} px")
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale
