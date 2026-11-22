@@ -636,11 +636,9 @@ def repo_save():
         check_code_correction(check_code_type(data.get('barcode_type')), data.get('qrcode_correction'))
     except ValueError as e:
         return _refused('Saving the label', e, refusals.INVALID_INPUT)
-    filename = secure_filename(name)
+    filename = _label_file_name(name)
     if not filename:
         return _fail('Invalid name', 400)
-    if not filename.lower().endswith('.json'):
-        filename = filename + '.json'
     # The name kept with it is the one it is saved under
     data['name'] = filename
     repo = _get_repo_dir()
@@ -779,13 +777,34 @@ def repo_load():
         return _fail('Failed to load file', 500)
 
 
-def _saved_path(repo: str, name: str) -> str:
-    """The file of the saved label name in repo, FileNotFoundError for a
-    name that leaves no file name, e.g. '..'."""
+def _label_file_name(name: str) -> str:
+    """The file a label saved under name is saved in, e.g. Frozen_on.json for
+    Frozen on, empty for a name that leaves none, e.g. '..'."""
     filename = secure_filename(name)
-    if not filename:
-        raise FileNotFoundError(name)
-    return os.path.join(repo, filename)
+    if filename and not filename.lower().endswith('.json'):
+        filename += '.json'
+    return filename
+
+
+def _saved_path(repo: str, name: str) -> str:
+    """The file of the saved label name in repo: the one of that name, .json
+    may be left out, else the first label with name as its title, which the
+    file name may lack, e.g. "&". FileNotFoundError where none is."""
+    filename = _label_file_name(name)
+    if filename and os.path.isfile(path := os.path.join(repo, filename)):
+        return path
+    for entry in sorted(os.listdir(repo)):
+        if entry.startswith('.') or not entry.lower().endswith('.json'):
+            continue
+        try:
+            with open(path := os.path.join(repo, entry), encoding='utf-8') as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        title = data.get('title') if isinstance(data, dict) else None
+        if isinstance(title, str) and title.strip() and title.strip() == name.strip():
+            return path
+    raise FileNotFoundError(name)
 
 
 def _label_for_designer(data: dict, image_dir: str) -> dict:
@@ -850,7 +869,11 @@ def repo_delete():
         return _fail('No name specified', 400)
     repo = _get_repo_dir()
     try:
-        path = _saved_path(repo, name)
+        # Only the exact file: a title may name several labels
+        filename = secure_filename(name)
+        if not filename:
+            raise FileNotFoundError(name)
+        path = os.path.join(repo, filename)
         with _saving(repo):
             os.remove(path)
             # Also remove the image file stored alongside the JSON
@@ -3073,7 +3096,7 @@ def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes 
         endless = _label_type(label_of(label_size).form_factor) == LabelType.ENDLESS_LABEL
         data.update(label_size=label_size, orientation='rotated' if endless else 'standard', text=json.dumps(data['text']))
         return data, demos.IMAGE_DIR, None
-    data, image_bytes = _load_repo_json(name if name.endswith('.json') else f'{name}.json')
+    data, image_bytes = _load_repo_json(name)
     return data, _get_repo_dir(), image_bytes
 
 
