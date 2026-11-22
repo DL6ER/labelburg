@@ -78,7 +78,8 @@ KNOWN_IDS = {
     ('4BARCODE', '4B-2054A'): MODELS[0],
     # HP KE103, 300 dpi
     ('HP', 'KE103'): MODELS[1],
-    # The GX430d and GX430t print 300 dpi, as Zebra's data sheet says; LPrint has them at 203
+    # The GX430 prints 300 dpi, LPrint has it at 203: Zebra's GX series spec sheet,
+    # https://www.zebra.com/content/dam/external-dam/knowledge-base/cpws/docs/gseries/gx_specs.pdf
     ('Zebra Technologies', 'ZTC GX430d'): MODELS[1],
     ('Zebra Technologies', 'ZTC GX430t'): MODELS[1],
 }
