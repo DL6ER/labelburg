@@ -1,11 +1,14 @@
 """Status of network printers over IPP, with answers recorded from a
 QL-810W and a fake printer for the network part."""
+import datetime
 import os
 import socket
+import ssl
 import struct
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from itertools import count
 
 import pytest
 
@@ -112,6 +115,212 @@ def test_request_asks_for_the_status_attributes():
     attributes = ipp.decode_response(request)
     assert attributes['printer-uri'] == 'ipp://192.0.2.1:631/ipp/print'
     assert attributes['requested-attributes'] == list(ipp.STATUS_ATTRIBUTES)
+
+
+# A Print-Job request as RFC 8010 encodes it, request-id 7. Each attribute is
+# its value-tag, name-length, name, value-length and value (3.1.4), further
+# values of one attribute have no name (3.1.5).
+PRINT_JOB_REQUEST = (
+    # version-number 2.0, operation-id Print-Job, request-id (3.1.1, 3.1.2, RFC 8011 4.2.1)
+    b'\x02\x00' b'\x00\x02' b'\x00\x00\x00\x07'
+    # operation-attributes-tag (3.5.1), charset, naturalLanguage and uri
+    # first (RFC 8011 4.1.4, 4.1.5), then nameWithoutLanguage and
+    # mimeMediaType (3.5.2, RFC 8011 4.2.1.1)
+    b'\x01'
+    b'\x47\x00\x12attributes-charset\x00\x05utf-8'
+    b'\x48\x00\x1battributes-natural-language\x00\x02en'
+    b'\x45\x00\x0bprinter-uri\x00\x1dipp://192.0.2.1:631/ipp/print'
+    b'\x42\x00\x14requesting-user-name\x00\x09labelburg'
+    b'\x42\x00\x08job-name\x00\x09Labelburg'
+    b'\x49\x00\x0fdocument-format\x00\x10image/pwg-raster'
+    # job-attributes-tag; media-col a collection (3.1.6): begCollection
+    # without a value, each member a memberAttrName with its name as the
+    # value and its value without a name, endCollection without name and
+    # value. media-size in hundredths of a millimeter, 4 x 6 in, and no
+    # margins (PWG 5100.7).
+    b'\x02'
+    b'\x34\x00\x09media-col\x00\x00'
+    b'\x4a\x00\x00\x00\x0amedia-size' b'\x34\x00\x00\x00\x00'
+    b'\x4a\x00\x00\x00\x0bx-dimension' b'\x21\x00\x00\x00\x04\x00\x00\x27\xb0'
+    b'\x4a\x00\x00\x00\x0by-dimension' b'\x21\x00\x00\x00\x04\x00\x00\x3b\x88'
+    b'\x37\x00\x00\x00\x00'
+    b'\x4a\x00\x00\x00\x13media-bottom-margin' b'\x21\x00\x00\x00\x04\x00\x00\x00\x00'
+    b'\x4a\x00\x00\x00\x11media-left-margin' b'\x21\x00\x00\x00\x04\x00\x00\x00\x00'
+    b'\x4a\x00\x00\x00\x12media-right-margin' b'\x21\x00\x00\x00\x04\x00\x00\x00\x00'
+    b'\x4a\x00\x00\x00\x10media-top-margin' b'\x21\x00\x00\x00\x04\x00\x00\x00\x00'
+    b'\x37\x00\x00\x00\x00'
+    # print-scaling, a keyword (PWG 5100.16)
+    b'\x44\x00\x0dprint-scaling\x00\x04none'
+    # end-of-attributes-tag, the document follows
+    b'\x03'
+)
+
+GET_JOB_ATTRIBUTES_REQUEST = (
+    # operation-id Get-Job-Attributes, request-id 8 (RFC 8011 4.3.4)
+    b'\x02\x00' b'\x00\x09' b'\x00\x00\x00\x08'
+    b'\x01'
+    b'\x47\x00\x12attributes-charset\x00\x05utf-8'
+    b'\x48\x00\x1battributes-natural-language\x00\x02en'
+    b'\x45\x00\x0bprinter-uri\x00\x1dipp://192.0.2.1:631/ipp/print'
+    # The job by printer-uri and job-id (RFC 8011 4.3.4.1), an integer
+    b'\x21\x00\x06job-id\x00\x04\x00\x00\x00\x2a'
+    b'\x42\x00\x14requesting-user-name\x00\x09labelburg'
+    # Two keywords, the second without a name (3.1.5)
+    b'\x44\x00\x14requested-attributes\x00\x09job-state'
+    b'\x44\x00\x00\x00\x11job-state-reasons'
+    b'\x03'
+)
+
+
+def test_print_job_request_as_rfc_8010_encodes_it(monkeypatch):
+    monkeypatch.setattr(ipp, '_request_ids', count(7))
+    assert ipp.encode_print_job('ipp://192.0.2.1:631/ipp/print', 'image/pwg-raster', (10160, 15240)) == PRINT_JOB_REQUEST
+
+
+def test_get_job_attributes_request_as_rfc_8010_encodes_it(monkeypatch):
+    monkeypatch.setattr(ipp, '_request_ids', count(8))
+    assert ipp.encode_get_job_attributes('ipp://192.0.2.1:631/ipp/print', 42) == GET_JOB_ATTRIBUTES_REQUEST
+
+
+def test_print_job_request_decodes_as_sent():
+    attributes = ipp.decode_response(PRINT_JOB_REQUEST)
+    assert attributes['media-col'] == {'media-size': {'x-dimension': 10160, 'y-dimension': 15240}, 'media-bottom-margin': 0,
+                                       'media-left-margin': 0, 'media-right-margin': 0, 'media-top-margin': 0}
+    assert (attributes['document-format'], attributes['print-scaling']) == ('image/pwg-raster', 'none')
+
+
+def test_resolutions_are_decoded():
+    # 300 dpi across and along, units 3 dots per inch (RFC 8010 3.9)
+    answer = response(attribute(ipp.TAG_RESOLUTION, 'printer-resolution-default', struct.pack('>iib', 300, 300, 3)))
+    assert ipp.decode_response(answer)['printer-resolution-default'] == (300, 300, ipp.DOTS_PER_INCH)
+
+
+def test_a_refused_request_tells_its_status():
+    with pytest.raises(ipp.IPPError) as refused:
+        ipp.decode_response(response(status=0x040A))
+    assert refused.value.status == 0x040A
+
+
+@pytest.mark.parametrize('device, printer', [
+    ('ipp://printer.local/ipp/print', ipp.Printer(False, 'printer.local', 631, '/ipp/print')),
+    ('IPP://Printer.local', ipp.Printer(False, 'printer.local', 631, '/ipp/print')),
+    ('ipps://192.0.2.5:8631/ipp/print/zebra', ipp.Printer(True, '192.0.2.5', 8631, '/ipp/print/zebra')),
+    ('ipp://[fd00::5]/printers/dymo', ipp.Printer(False, 'fd00::5', 631, '/printers/dymo')),
+    ('cups://Dymo_LabelWriter_450', ipp.Printer(False, 'localhost', 631, '/printers/Dymo_LabelWriter_450')),
+    # A port given is taken as it is
+    ('ipp://printer.local:0/ipp/print', ipp.Printer(False, 'printer.local', 0, '/ipp/print')),
+])
+def test_printers_on_ipp_by_their_address(device, printer):
+    assert ipp.is_address(device)
+    assert ipp.printer_at(device) == printer
+
+
+def test_printer_uris():
+    assert ipp.Printer(True, 'fd00::5', 631, '/ipp/print').uri == 'ipps://[fd00::5]:631/ipp/print'
+    assert ipp.printer_at('cups://dymo').uri == 'ipp://localhost:631/printers/dymo'
+
+
+@pytest.mark.parametrize('device', ['tcp://192.0.2.1', 'ipp:///ipp/print', 'ipp://printer:99999/ipp/print', None])
+def test_no_printers_on_ipp(device):
+    with pytest.raises(ValueError):
+        ipp.printer_at(device)
+
+
+class Recording:
+    """An IPP server on localhost that keeps each request with its path and
+    content type and answers with self.answer, over TLS with context."""
+
+    def __init__(self, context: ssl.SSLContext | None = None):
+        self.requests, self.answer = [], response()
+        kept = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                kept.requests.append((self.path, self.headers['Content-Type'],
+                                      self.rfile.read(int(self.headers['Content-Length']))))
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/ipp')
+                self.end_headers()
+                self.wfile.write(kept.answer)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = HTTPServer(('127.0.0.1', 0), Handler)
+        if context:
+            self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
+        self.port = self.server.server_port
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def recording():
+    server = Recording()
+    yield server
+    server.close()
+
+
+def job(job_id: int, job_state: int) -> bytes:
+    """An answer naming a job and its state."""
+    return struct.pack('>BBHI', 2, 0, 0, 1) + b'\x02' + attribute(ipp.TAG_INTEGER, 'job-id', struct.pack('>i', job_id)) + \
+        attribute(ipp.TAG_ENUM, 'job-state', struct.pack('>i', job_state)) + b'\x03'
+
+
+def test_a_document_is_printed_after_its_request(recording, monkeypatch):
+    recording.answer = job(42, ipp.PENDING)
+    printer = ipp.Printer(False, '127.0.0.1', recording.port, '/ipp/print/zebra')
+    monkeypatch.setattr(ipp, '_request_ids', count(7))
+    request = ipp.encode_print_job(printer.uri, 'image/png', (10160, 15240))
+    monkeypatch.setattr(ipp, '_request_ids', count(7))
+    answer = ipp.print_job(printer, 'image/png', (10160, 15240), b'PNG data')
+    assert (answer['job-id'], answer['job-state']) == (42, ipp.PENDING)
+    (path, kind, body), = recording.requests
+    assert (path, kind, body) == ('/ipp/print/zebra', 'application/ipp', request + b'PNG data')
+    assert ipp.decode_response(body)['printer-uri'] == f'ipp://127.0.0.1:{printer.port}/ipp/print/zebra'
+
+
+def test_the_state_of_a_job_is_asked(recording):
+    recording.answer = job(42, ipp.COMPLETED)
+    printer = ipp.Printer(False, '127.0.0.1', recording.port, '/ipp/print')
+    assert ipp.get_job_attributes(printer, 42)['job-state'] == ipp.COMPLETED
+    asked = ipp.decode_response(recording.requests[0][2])
+    assert (asked['job-id'], asked['requested-attributes']) == (42, ['job-state', 'job-state-reasons'])
+
+
+def _self_signed(tmp_path):
+    """A certificate and key as a printer makes them for itself."""
+    pytest.importorskip('cryptography')
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'printer.local')])
+    now = datetime.datetime.now(datetime.UTC)
+    certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                   .serial_number(1).not_valid_before(now).not_valid_after(now + datetime.timedelta(days=1))
+                   .sign(key, hashes.SHA256()))
+    path = tmp_path / 'printer.pem'
+    path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+                     + certificate.public_bytes(serialization.Encoding.PEM))
+    return str(path)
+
+
+def test_ipps_takes_the_certificate_of_the_printer(tmp_path):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(_self_signed(tmp_path))
+    printer = Recording(context)
+    try:
+        printer.answer = response(attribute(0x41, 'printer-make-and-model', b'Zebra ZD421'))
+        attributes = ipp.get_printer_attributes('127.0.0.1', printer.port, tls=True)
+        assert attributes['printer-make-and-model'] == 'Zebra ZD421'
+        assert ipp.decode_response(printer.requests[0][2])['printer-uri'] == f'ipps://127.0.0.1:{printer.port}/ipp/print'
+    finally:
+        printer.close()
 
 
 @pytest.mark.parametrize('reasons, expected', [

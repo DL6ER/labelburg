@@ -1,31 +1,42 @@
-"""Status of network printers over IPP (RFC 8010, 8011).
+"""Network printers over IPP (RFC 8010, 8011): their status, and jobs.
 
 Network printers do not answer status requests on the raw printing port
 9100, but many answer IPP on port 631: whether they are ready, why not
 (e.g. "cover-open") and which labels are loaded. This module sends a
-Get-Printer-Attributes request for these and decodes the answer, with the
-standard library only."""
+Get-Printer-Attributes request for these and decodes the answer, and
+Print-Job and Get-Job-Attributes requests for printers that take jobs over
+IPP, with the standard library only."""
 
+import functools
 import socket
+import ssl
 import struct
 import threading
 import http.client
 from itertools import count
+from typing import NamedTuple
+from urllib.parse import urlsplit
 
-# Operation and the tags of RFC 8010 that are needed here
+# The operations of RFC 8011 and the tags of RFC 8010 that are needed here
+PRINT_JOB = 0x0002
+GET_JOB_ATTRIBUTES = 0x0009
 GET_PRINTER_ATTRIBUTES = 0x000B
 TAG_OPERATION = 0x01
+TAG_JOB = 0x02
 TAG_END = 0x03
 TAG_INTEGER = 0x21
 TAG_BOOLEAN = 0x22
 TAG_ENUM = 0x23
+TAG_RESOLUTION = 0x32
 TAG_RANGE = 0x33
 TAG_BEGIN_COLLECTION = 0x34
 TAG_END_COLLECTION = 0x37
+TAG_NAME = 0x42
 TAG_KEYWORD = 0x44
 TAG_URI = 0x45
 TAG_CHARSET = 0x47
 TAG_LANGUAGE = 0x48
+TAG_MIME_TYPE = 0x49
 TAG_MEMBER_NAME = 0x4A
 
 STATUS_ATTRIBUTES = (
@@ -37,6 +48,26 @@ STATUS_ATTRIBUTES = (
 
 # printer-state
 IDLE, PROCESSING, STOPPED = 3, 4, 5
+# job-state (RFC 8011 5.3.7)
+PENDING, HELD, JOB_PROCESSING, JOB_STOPPED, CANCELED, ABORTED, COMPLETED = range(3, 10)
+# Status codes of refused requests (RFC 8011 B.1.4, B.1.5): a login is
+# asked for, no such job, no jobs taken at the moment
+LOGIN = (0x0401, 0x0402, 0x0403)
+NOT_FOUND = 0x0406
+NOT_TAKING = (0x0506, 0x0507)
+# Units of a resolution (RFC 8010 3.9)
+DOTS_PER_INCH, DOTS_PER_CM = 3, 4
+
+# The port of IPP, also over TLS (RFC 7472). Printers that name no path
+# take jobs at /ipp/print, as for IPP Everywhere, the queues of CUPS at
+# /printers/<queue>.
+PORT = 631
+DEFAULT_PATH = '/ipp/print'
+SCHEMES = ('ipp://', 'ipps://', 'cups://')
+# Who sends the jobs and their name, as the printer lists them
+USER = b'labelburg'
+JOB_NAME = b'Labelburg'
+JOB_ATTRIBUTES = ('job-state', 'job-state-reasons')
 
 # Messages for the reasons a printer gives over IPP why it cannot print
 # (printer-state-reasons, RFC 8011), without the -error suffix
@@ -62,7 +93,45 @@ _request_ids = count(1)
 
 
 class IPPError(Exception):
-    """The printer answered, but not with the attributes."""
+    """The printer answered, but not with the attributes. status: the
+    status code of an answer that refuses the request."""
+
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class Printer(NamedTuple):
+    """A printer on IPP: whether it is asked over TLS, its host, port and path."""
+    tls: bool
+    host: str
+    port: int
+    path: str
+
+    @property
+    def uri(self) -> str:
+        host = f'[{self.host}]' if ':' in self.host else self.host
+        return f"{'ipps' if self.tls else 'ipp'}://{host}:{self.port}{self.path}"
+
+
+def is_address(device) -> bool:
+    """Whether device is the address of a printer on IPP, see printer_at()."""
+    return isinstance(device, str) and device.lower().startswith(SCHEMES)
+
+
+def printer_at(device: str) -> Printer:
+    """The printer at ipp://<host>[:<port>][/<path>], ipps:// alike over
+    TLS, or cups://<queue>, a queue of CUPS on this computer. ValueError
+    for another address."""
+    if not is_address(device):
+        raise ValueError('No address of a printer on IPP')
+    if device.lower().startswith('cups://'):
+        device = f'ipp://localhost:{PORT}/printers/{device[len("cups://"):]}'
+    parts = urlsplit(device)
+    if not parts.hostname:
+        raise ValueError('No address of a printer on IPP')
+    return Printer(parts.scheme.lower() == 'ipps', parts.hostname, PORT if parts.port is None else parts.port,
+                   parts.path or DEFAULT_PATH)
 
 
 def loaded_media(media) -> tuple:
@@ -114,17 +183,64 @@ def _attribute(tag: int, name: str, value: bytes) -> bytes:
     return struct.pack('>BH', tag, len(name_bytes)) + name_bytes + struct.pack('>H', len(value)) + value
 
 
+def _integer(value: int) -> bytes:
+    return struct.pack('>i', value)
+
+
+def _keywords(name: str, values) -> bytes:
+    # Further values of the same attribute have an empty name
+    return b''.join(_attribute(TAG_KEYWORD, name if i == 0 else '', value.encode()) for i, value in enumerate(values))
+
+
+def _member(name: str, tag: int, value: bytes) -> bytes:
+    """A member of a collection (RFC 8010 3.1.6): its name, then its value
+    without a name."""
+    return _attribute(TAG_MEMBER_NAME, '', name.encode()) + _attribute(tag, '', value)
+
+
+def _collection(name: str, members: bytes) -> bytes:
+    return _attribute(TAG_BEGIN_COLLECTION, name, b'') + members + _attribute(TAG_END_COLLECTION, '', b'')
+
+
+def _operation(operation: int, uri: str) -> bytes:
+    """The start of a request (RFC 8010 3.1.1) with the operation attributes
+    every request starts with (RFC 8011 4.1.4, 4.1.5)."""
+    return (struct.pack('>BBHI', 2, 0, operation, next(_request_ids) & 0x7FFFFFFF) + bytes([TAG_OPERATION])
+            + _attribute(TAG_CHARSET, 'attributes-charset', b'utf-8')
+            + _attribute(TAG_LANGUAGE, 'attributes-natural-language', b'en')
+            + _attribute(TAG_URI, 'printer-uri', uri.encode()))
+
+
 def encode_request(uri: str, attributes=STATUS_ATTRIBUTES) -> bytes:
     """A Get-Printer-Attributes request for the given attributes."""
-    body = struct.pack('>BBHI', 2, 0, GET_PRINTER_ATTRIBUTES, next(_request_ids) & 0x7FFFFFFF)
-    body += bytes([TAG_OPERATION])
-    body += _attribute(TAG_CHARSET, 'attributes-charset', b'utf-8')
-    body += _attribute(TAG_LANGUAGE, 'attributes-natural-language', b'en')
-    body += _attribute(TAG_URI, 'printer-uri', uri.encode())
-    for i, name in enumerate(attributes):
-        # Further values of the same attribute have an empty name
-        body += _attribute(TAG_KEYWORD, 'requested-attributes' if i == 0 else '', name.encode())
-    return body + bytes([TAG_END])
+    return _operation(GET_PRINTER_ATTRIBUTES, uri) + _keywords('requested-attributes', attributes) + bytes([TAG_END])
+
+
+def encode_print_job(uri: str, document_format: str, media_size: tuple[int, int]) -> bytes:
+    """A Print-Job request (RFC 8011 4.2.1), its document follows it: the
+    media of media_size, width and length in hundredths of a millimeter,
+    without margins (media-col, PWG 5100.7), and the document printed as
+    large as it is (print-scaling, PWG 5100.16)."""
+    size = _member('x-dimension', TAG_INTEGER, _integer(media_size[0])) + _member('y-dimension', TAG_INTEGER, _integer(media_size[1]))
+    media = (_attribute(TAG_MEMBER_NAME, '', b'media-size') + _collection('', size)
+             + b''.join(_member(f'media-{side}-margin', TAG_INTEGER, _integer(0)) for side in ('bottom', 'left', 'right', 'top')))
+    return (_operation(PRINT_JOB, uri)
+            + _attribute(TAG_NAME, 'requesting-user-name', USER)
+            + _attribute(TAG_NAME, 'job-name', JOB_NAME)
+            + _attribute(TAG_MIME_TYPE, 'document-format', document_format.encode())
+            + bytes([TAG_JOB])
+            + _collection('media-col', media)
+            + _attribute(TAG_KEYWORD, 'print-scaling', b'none')
+            + bytes([TAG_END]))
+
+
+def encode_get_job_attributes(uri: str, job_id: int) -> bytes:
+    """A Get-Job-Attributes request (RFC 8011 4.3.4) for the state of a job."""
+    return (_operation(GET_JOB_ATTRIBUTES, uri)
+            + _attribute(TAG_INTEGER, 'job-id', _integer(job_id))
+            + _attribute(TAG_NAME, 'requesting-user-name', USER)
+            + _keywords('requested-attributes', JOB_ATTRIBUTES)
+            + bytes([TAG_END]))
 
 
 def _value(tag: int, raw: bytes):
@@ -134,8 +250,10 @@ def _value(tag: int, raw: bytes):
         return raw != b'\x00'
     if tag == TAG_RANGE and len(raw) == 8:
         return struct.unpack('>ii', raw)
-    # Strings of all kinds; octetString, dateTime and resolution are not
-    # needed here
+    # Across, along and their unit, see DOTS_PER_INCH
+    if tag == TAG_RESOLUTION and len(raw) == 9:
+        return struct.unpack('>iib', raw)
+    # Strings of all kinds; octetString and dateTime are not needed here
     return raw.decode('utf-8', 'replace')
 
 
@@ -148,7 +266,7 @@ def decode_response(data: bytes) -> dict:
     # 0x0000 to 0x00FF are successful, e.g. 0x0001 when some requested
     # attributes are not supported
     if status > 0x00FF:
-        raise IPPError(f'The printer answers with status 0x{status:04x}')
+        raise IPPError(f'The printer answers with status 0x{status:04x}', status)
     try:
         return _attributes(data)
     except struct.error as e:
@@ -226,17 +344,47 @@ def _end(connection: http.client.HTTPConnection, ended: threading.Event):
             pass
 
 
-def get_printer_attributes(host: str, port: int = 631, path: str = '/ipp/print',
-                           attributes=STATUS_ATTRIBUTES, timeout: float = 3.0) -> dict:
-    """Ask a printer for attributes. Raises OSError if it does not answer,
-    e.g. ConnectionRefusedError without IPP, and IPPError for an answer
-    that is not one, longer than MAX_ANSWER, or not there within twice the
-    timeout after connecting, also when it trickles in."""
+@functools.cache
+def _tls() -> ssl.SSLContext:
+    """TLS without checking the certificate: printers and CUPS make their
+    own, which no authority signs."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def get_printer_attributes(host: str, port: int = PORT, path: str = DEFAULT_PATH,
+                           attributes=STATUS_ATTRIBUTES, timeout: float = 3.0, tls: bool = False) -> dict:
+    """Ask a printer for attributes, see ask()."""
+    printer = Printer(tls, host, port, path)
+    return ask(printer, encode_request(printer.uri, attributes), timeout)
+
+
+def print_job(printer: Printer, document_format: str, media_size: tuple[int, int], document: bytes,
+              timeout: float = 10.0) -> dict:
+    """Print a document, see encode_print_job() and ask(). The answer has
+    job-id and job-state."""
+    return ask(printer, encode_print_job(printer.uri, document_format, media_size) + document, timeout)
+
+
+def get_job_attributes(printer: Printer, job_id: int, timeout: float = 3.0) -> dict:
+    """The state of a job, see encode_get_job_attributes() and ask()."""
+    return ask(printer, encode_get_job_attributes(printer.uri, job_id), timeout)
+
+
+def ask(printer: Printer, body: bytes, timeout: float) -> dict:
+    """Send a request to a printer and decode its answer. Raises OSError if
+    it does not answer, e.g. ConnectionRefusedError without IPP, and
+    IPPError for an answer that is not one, refuses the request, is longer
+    than MAX_ANSWER, or not there within twice the timeout after
+    connecting, also when it trickles in."""
     # Here, the drivers import this module
     from .drivers import reach
-    host_in_uri = f'[{host}]' if ':' in host else host
-    body = encode_request(f'ipp://{host_in_uri}:{port}{path}', attributes)
-    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    if printer.tls:
+        connection = http.client.HTTPSConnection(printer.host, printer.port, timeout=timeout, context=_tls())
+    else:
+        connection = http.client.HTTPConnection(printer.host, printer.port, timeout=timeout)
     # To the host of an added printer only where ADD_PRINTERS allows
     connection._create_connection = reach.create_connection
     try:
@@ -250,7 +398,7 @@ def get_printer_attributes(host: str, port: int = 631, path: str = '/ipp/print',
     stop = threading.Timer(2 * timeout, _end, (connection, ended))
     stop.start()
     try:
-        connection.request('POST', path, body, {'Content-Type': 'application/ipp'})
+        connection.request('POST', printer.path, body, {'Content-Type': 'application/ipp'})
         response = connection.getresponse()
         length = response.getheader('Content-Length') or ''
         if length.strip().isdigit() and int(length) > MAX_ANSWER:
