@@ -927,7 +927,8 @@ def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLa
     layouts = {}
     queued = []
     for i, image in enumerate(labels):
-        queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn))
+        # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
+        queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn, total=len(labels)))
         printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
     return queued
 
@@ -1139,7 +1140,9 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
         if on_tape:
             data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
         images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
-        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data))
+        # As many labels as printed with the copies of the request
+        total = _count(_option('print_count', data, 1)) * _pages(data, page_count)
+        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data), total=total)
         im = label.generate()
     except Exception as e:
         return _preview_refused(e)
@@ -1357,7 +1360,9 @@ def preview_from_image():
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
         marks, asn = _whole_or(values.get('mark_blanks'), 0) != 0, _next_asn(values)
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn)
+        # As many labels as printed: the copies of the files and pages the request tells, else of the file sent
+        copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), _pages(values, page_count))
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=copies * per_copy)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im, model):
@@ -1366,10 +1371,10 @@ def preview_from_image():
         # last page, and the first page with them, each with its counter
         size, state = label_of(values.get('label_size', DEFAULT_LABEL_SIZE)), None
         if sheets.per_sheet(size) > 1:
-            copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), _pages(values, page_count))
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
             layouts = {}
-            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
+            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn,
+                                              total=copies * per_copy).generate()
                     for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
             im = sheets.page_view(size, [im] + more)
     except HTTPException:
@@ -2292,7 +2297,7 @@ def _image_contrast(d: dict) -> bool:
 
 
 def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
-                              asn: int | None = None):
+                              asn: int | None = None, total: int = 1):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
     if size is None:
@@ -2438,6 +2443,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         border_color=border_color,
         timestamp=context['timestamp'],
         counter=counter,
+        total=total,
         asn=asn,
         code_text=context['code_text'],
         template_env_vars=_template_env_vars(),

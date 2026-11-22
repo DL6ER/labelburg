@@ -57,12 +57,12 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                        "description": "Number of labels to be printed, for `X-Label-Sheet` and `{{total}}`."
                       },
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -102,12 +102,12 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels to be printed, for `X-Label-Sheet`."
+                        "description": "Number of labels to be printed, for `X-Label-Sheet` and `{{total}}`."
                       },
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
                       }
                     }
                   }
@@ -650,7 +650,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -714,7 +714,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2044,6 +2044,16 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "responses": {
@@ -2144,10 +2154,20 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "requestBody": {
-          "description": "name and blanks may also be sent in the body instead of the query.",
+          "description": "name, blanks and print_count may also be sent in the body instead of the query.",
           "required": false,
           "content": {
             "application/json": {
@@ -2159,6 +2179,10 @@
                   },
                   "blanks": {
                     "$ref": "#/components/schemas/SavedLabelBlanks"
+                  },
+                  "print_count": {
+                    "type": "integer",
+                    "minimum": 1
                   }
                 }
               }
@@ -2172,6 +2196,10 @@
                   },
                   "blanks": {
                     "$ref": "#/components/schemas/SavedLabelBlanks"
+                  },
+                  "print_count": {
+                    "type": "integer",
+                    "minimum": 1
                   }
                 }
               }
@@ -2326,7 +2354,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2591,6 +2619,16 @@
             "schema": {
               "$ref": "#/components/schemas/SavedLabelBlanks"
             }
+          },
+          {
+            "name": "print_count",
+            "in": "query",
+            "description": "Number of labels it is printed with, for `{{total}}`. Default: as saved with the label, else 1.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
           }
         ],
         "responses": {
@@ -2726,7 +2764,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label, `{{total}}` is the number of labels of the job: the copies of every file and PDF page. On a roll of several labels to a page they fill the pages one after the other."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -3536,7 +3574,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{total}}` (the number of labels of the print job, which the counter counts, e.g., `Box {{counter}} of {{total}}` for Box 1 of 6 to Box 6 of 6), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"

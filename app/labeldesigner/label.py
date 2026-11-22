@@ -331,6 +331,7 @@ class SimpleLabel:
         border_color: Tuple[int, int, int] = (0, 0, 0),
         timestamp: int = 0,
         counter: int = 0,
+        total: int = 1,
         asn: int | None = None,
         red_support: bool = False,
         code_text: str = '',
@@ -410,6 +411,8 @@ class SimpleLabel:
         self._border_distance = border_distance
         self._border_color = border_color
         self._counter = counter
+        # The number of labels of the print job, which {{total}} shows
+        self._total = total
         # The archive serial number of the first label of the job, see paperless.py
         self._asn = asn
         self._timestamp = timestamp
@@ -624,6 +627,8 @@ class SimpleLabel:
             start, step = match.group(1) or '1', match.group(2) or '1'
             return counter_value(start, check_counter(start, step), self._counter)
         substitute(r"\{\{counter(?::([0-9A-Za-z]+)(?::(-?\d+))?)?\}\}", counter_replacer)
+        # Replace {{total}} with the number of labels the counter counts
+        substitute(r"\{\{total\}\}", lambda match: str(self._total))
 
         # Replace {{asn[:<digits>]}} with the archive serial number of the copy
         if self._asn is not None:
