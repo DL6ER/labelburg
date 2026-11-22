@@ -5,7 +5,7 @@
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
-    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
+    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
@@ -481,12 +481,15 @@ async function keepLabels(box, changes, told) {
 }
 
 DRAW.labels = box => {
-    const server = familyOf(C.default_font), chosen = chosenFamily();
+    const server = familyOf(C.default_font), chosen = chosenFamily(), names = dateCodeExamples();
     box.innerHTML = `<header class="set-h"><div class="grow"><h2>Labels</h2><p class="muted">Kept on the server, the same in every browser.</p></div></header>
         <section class="set-card"><div class="set-grid">
             <label class="k" for="setDate">Dates on labels</label>
             <div class="set-stack"><select class="in set-sel" id="setDate">${DATES().map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_format || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
                 <small class="muted">For dates put on labels from now on and for date blanks. A date already on a label keeps its format.</small></div>
+            <label class="k" for="setDateLang">Language of dates</label>
+            <div class="set-stack"><select class="in set-sel" id="setDateLang">${C.date_languages.map(([v, n]) => `<option value="${esc(v)}"${(S.settings.date_language || '') === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select>
+                <small class="muted">For dates with the name of the month or weekday, e.g. ${esc(names['%B'])} or ${esc(names['%A'])}.</small></div>
             <span class="k">Copies of several files</span>
             <div class="set-stack">${seg('collate', [['1', 'As sets: ABC ABC'], ['0', 'Grouped: AA BB CC']], S.settings.collate === '0' ? '0' : '1', 'Copies of several files')}
                 <small class="muted">For several images or PDF pages printed more than once.</small></div>
@@ -498,6 +501,10 @@ DRAW.labels = box => {
         const f = e.target.value;
         keepLabels(box, { date_format: f }, () => 'Dates on new labels are written as ' + formatDate('2026-11-01', f || browserDateFormat()));
     };
+    $('#setDateLang').onchange = e => keepLabels(box, { date_language: e.target.value }, () => {
+        const named = dateCodeExamples();
+        return `Months and weekdays are written like ${named['%B']} and ${named['%A']}`;
+    });
     $$('[data-k="collate"]', box).forEach(b => b.onclick = () => keepLabels(box, { collate: b.dataset.v },
         () => b.dataset.v === '0' ? 'Copies of several files are grouped' : 'Copies of several files are printed as sets'));
     // A family only, new labels start with its regular style
@@ -561,7 +568,7 @@ async function nextThumb() {
     if (!img.isConnected || !h) return nextThumb();
     thumbsRunning++;
     try {
-        const p = await preview(h.design, h.values || {});
+        const p = await preview(h.design, h.values || {}, 1, 0, h.labels || 0);
         if (img.isConnected) { img.src = p.url; img.parentElement.classList.add('shown'); }
     } catch (e) {
         if (img.isConnected) img.parentElement.classList.add('none');
