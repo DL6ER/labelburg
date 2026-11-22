@@ -125,7 +125,7 @@ def test_labels_printed_are_not_remembered_while_switched_off(page, server):
     # Those remembered go, it asks first
     page.click('[data-k="history"][data-v="0"]')
     page.wait_for_selector('[role=alertdialog] h2:text-is("Stop remembering printed labels?")')
-    assert page.inner_text('[role=alertdialog] p') == 'The list is cleared.'
+    assert page.inner_text('[role=alertdialog] p') == 'The list will be cleared.'
     page.click('[role=alertdialog] button:text-is("Cancel")')
     assert page.locator('[data-k="history"][data-v="1"].on').count() == 1 and len(rows(page)) == 1
     page.click('[data-k="history"][data-v="0"]')

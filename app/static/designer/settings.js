@@ -592,7 +592,7 @@ DRAW.printed = box => {
     const remember = on => keepLabels(box, { history: on ? '' : '0' }, () => on ? 'Printed labels are remembered' : 'Printed labels are not remembered', DRAW.printed);
     $$('[data-k="history"]', box).forEach(b => b.onclick = () => {
         if (b.dataset.v === '1') remember(true);
-        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askFirst('Stop remembering printed labels?', 'The list is cleared.', 'Turn off', () => remember(false)) : remember(false);
+        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askFirst('Stop remembering printed labels?', 'The list will be cleared.', 'Turn off', () => remember(false)) : remember(false);
     });
     $('#setClear').onclick = () => askFirst('Clear all printed labels?', '', icon('trash') + 'Clear the list', async () => {
         try {
