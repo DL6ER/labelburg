@@ -68,9 +68,9 @@ _no_serial: set[str] = set()
 # model ID, by device, and when they were asked. One that told none is asked
 # again once the label designer looks for printers.
 _told_models: dict[str, tuple[models.Model | None, float]] = {}
-# Printers found on Bluetooth LE by Niimbot's service alone, without a name:
-# their model is the one they tell
-_by_service: set[str] = set()
+# Printers found on Bluetooth LE whose name names no single model, e.g. by
+# Niimbot's service alone without a name: their model is the one they tell
+_to_ask: set[str] = set()
 # Printers on Bluetooth LE, the others paired
 _LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
@@ -174,8 +174,7 @@ NAMES = {label.identifier: _name(label) for label in LABELS}
 
 def _bluetooth_name(model: models.Model) -> re.Pattern:
     """The name a model is guessed to advertise on Bluetooth LE, B1-<serial>
-    as a B1, the parts of a name like B21_PRO also apart; the status asks
-    the printer for its model."""
+    as a B1, the parts of a name like B21_PRO also apart."""
     return re.compile(r'[_ -]?'.join(map(re.escape, model.short.split('_'))) + '-.*', re.IGNORECASE | re.DOTALL)
 
 
@@ -344,11 +343,15 @@ class Niimbot(Driver):
     def found_on_bluetooth(self, device):
         # Other models advertise the service too: it counts only without a name
         name = device.get('name')
-        if name and not any(re.fullmatch(pattern, name) for pattern in self.bluetooth_names):
+        named = {model for pattern, model in self.bluetooth_names.items() if re.fullmatch(pattern, name or '')}
+        if name and not named:
             return None
         found = super().found_on_bluetooth(device)
-        if found and not name:
-            _by_service.add(devices.lock_key(found[0]))
+        # One whose name names no single model is asked for it, see _status()
+        if found and len(named) != 1:
+            _to_ask.add(devices.lock_key(found[0]))
+        elif found:
+            _to_ask.discard(devices.lock_key(found[0]))
         return found
 
     def followed(self, device, model):
@@ -364,7 +367,7 @@ class Niimbot(Driver):
     def _status(self, device, model, fresh):
         cached = devices.status_cache.get(devices.lock_key(device))
         known = _told_models.get(devices.lock_key(device))
-        if device.startswith('bt://') and known and known[0] and known[0] not in models.PRINTED:
+        if devices.lock_key(device) in _to_ask and known and known[0] and known[0] not in models.PRINTED:
             return self._refused(device, model, known[0])
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
@@ -376,15 +379,14 @@ class Niimbot(Driver):
             if not acquired:
                 return devices.busy_state(device, network_status(device, model))
             with protocol.connect(device, _over_le(model)) as c:
-                # Its name was a guess: the model it tells is used
-                if device.startswith('bt://') and _over_le(model):
+                # Its name names no single model: the one it tells is used
+                if devices.lock_key(device) in _to_ask:
                     named = _told(c, device)
-                    if named is not None and named not in models.PRINTED:
-                        return self._refused(device, model, named)
-                    if named is not None:
-                        model = named.name
-                    elif devices.lock_key(device) in _by_service:
+                    if named is None:
                         raise protocol.NoAnswer('no model ID')
+                    if named not in models.PRINTED:
+                        return self._refused(device, model, named)
+                    model = named.name
                 told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])

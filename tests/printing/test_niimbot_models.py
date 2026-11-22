@@ -54,7 +54,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(niimbot, '_told_models', {})
-    monkeypatch.setattr(niimbot, '_by_service', set())
+    monkeypatch.setattr(niimbot, '_to_ask', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
 
 
@@ -304,19 +304,37 @@ def test_name_on_bluetooth_le_is_a_first_guess(name, model):
 B1_PRO_HEARTBEAT = (0xdd, bytes.fromhex('1ff7006100610000' '4f00040001'))
 
 
-def test_printer_on_bluetooth_le_is_the_model_it_tells(fake, monkeypatch):
-    # Found as a B1 by its name, it tells it is a B1 Pro: asked once
+def found(name):
+    """The printer at DEVICE as the search on Bluetooth LE found it."""
+    return niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': name, 'le': True,
+                                              'services': [protocol.NIIMBOT_SERVICE]})
+
+
+def test_b1_found_by_its_name_is_asked_as_before(fake, monkeypatch):
+    # Its first status sends what it sent on 7f15c4c4: heartbeat, roll and
+    # serial number, no model ID
+    told(monkeypatch, 4096)
+    monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
+    monkeypatch.setitem(REPLIES, (0x40, 0x0b), (0x4b, b'TEST000001'))
+    assert found('B1-TEST0001') == (DEVICE, 'Niimbot/B1')
+    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')['model'] == 'Niimbot/B1'
+    p = niimbluelib_packet
+    assert fake.packets == [p(0xdc, [1]), p(0x1a, [1]), p(0x40, [0x0b])]
+
+
+@pytest.mark.parametrize('name', ['', 'B1-PRO-L123'])
+def test_printer_whose_name_names_no_single_model_is_the_model_it_tells(fake, monkeypatch, name):
+    # Without a name, or one like a B1's and a B1 Pro's: asked once
     told(monkeypatch, 4097)
     monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
+    assert found(name) == (DEVICE, 'Niimbot/B1')
     for _ in range(2):
         assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)['model'] == 'Niimbot/B1_PRO'
     assert fake.commands.count(0x40) == 1 and fake.commands.count(0xdc) == 2
 
 
 def test_printer_found_by_niimbots_service_alone_is_no_b1_until_it_says_so(fake, monkeypatch):
-    found = niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': '', 'le': True,
-                                               'services': [protocol.NIIMBOT_SERVICE]})
-    assert found == (DEVICE, 'Niimbot/B1')
+    assert found('') == (DEVICE, 'Niimbot/B1')
     monkeypatch.delitem(REPLIES, 0x40)
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     with pytest.raises(protocol.NoAnswer):
@@ -331,16 +349,19 @@ def test_printer_found_by_niimbots_service_alone_is_no_b1_until_it_says_so(fake,
 
 
 def test_printer_on_bluetooth_le_of_a_model_labelburg_cannot_print_on(fake, monkeypatch):
-    # A D110 that advertises a name like a B1, asked no more
+    # A D110 without a name, asked no more
     told(monkeypatch, 2304)
+    found('')
     for _ in range(2):
         state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)
         assert state['errors'] == ['This printer is a Niimbot D110, Labelburg cannot print on it yet']
     assert fake.commands == [0x40]
 
 
-def test_paired_d110_m_is_not_asked_for_its_model(fake):
-    niimbot.DRIVER.status(DEVICE, 'Niimbot/D110_M')
+@pytest.mark.parametrize('model', ['Niimbot/D110_M', 'Niimbot/B21_PRO'])
+def test_printer_set_up_by_its_address_is_not_asked_for_its_model(fake, model):
+    # A paired D110_M, a printer of PRINTERS
+    niimbot.DRIVER.status(DEVICE, model)
     assert fake.commands == [0xdc, 0x1a]
 
 
