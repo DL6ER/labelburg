@@ -931,7 +931,8 @@ def _queue_labels(printer, labels, data, files, high_res, fast) -> list[SimpleLa
     layouts = {}
     queued = []
     for i, image in enumerate(labels):
-        queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn))
+        # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
+        queued.append(create_label_from_request(data, files, i, image, layouts=layouts, asn=asn, total=len(labels)))
         printer.add_label_to_queue(queued[-1], high_res=high_res, fast=fast)
     return queued
 
@@ -963,7 +964,7 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
                               explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
     except print_queue.Full as full:
         return _line_full(printer, str(full))
-    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
+    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
@@ -1143,7 +1144,9 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
         if on_tape:
             data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
         images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
-        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data))
+        # As many labels as printed with the copies of the request
+        total = _count(_option('print_count', data, 1)) * _labels_per_copy(data, page_count)
+        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data), total=total)
         im = label.generate()
     except Exception as e:
         return _preview_refused(e)
@@ -1361,7 +1364,12 @@ def preview_from_image():
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
         marks, asn = _whole_or(values.get('mark_blanks'), 0) != 0, _next_asn(values)
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn)
+        # As many labels as printed: the copies of the files and pages the request tells, else of those sent
+        copies = _count(values.get('print_count'))
+        per_copy = _count(values.get('labels_per_copy'), _labels_per_copy(values, page_count, request.files.getlist('image')))
+        # A job printed before tells its number of labels, a page of it shows the first label only
+        total = _count(values.get('total'), copies * per_copy)
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=total)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im, model):
@@ -1370,11 +1378,10 @@ def preview_from_image():
         # last page, and the first page with them, each with its counter
         size, state = label_of(values.get('label_size', DEFAULT_LABEL_SIZE)), None
         if sheets.per_sheet(size) > 1:
-            pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
-            copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
             layouts = {}
-            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
+            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn,
+                                              total=total).generate()
                     for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
             im = sheets.page_view(size, [im] + more)
     except HTTPException:
@@ -1396,6 +1403,16 @@ def preview_from_image():
             and not _image_contrast(values) and looks_faint(images[0])):
         response.headers.set('X-Image-Faint', '1')
     return response
+
+
+def _labels_per_copy(d: dict, page_count: int | None, uploads: list = ()) -> int:
+    """The labels each copy of a label prints, as load_label_images() makes
+    them: of an image label those of each of several uploads, else those of
+    the one file sent or stored, of page_count pages, see _file_labels()."""
+    if d.get('print_type', 'text') not in ('image', 'image_qrcode_text'):
+        return 1
+    counts = _page_counts(uploads) if len(uploads) > 1 else [page_count]
+    return sum(_file_labels(str(d.get('pdf_pages') or ''), count) for count in counts)
 
 
 def _count(value, default: int = 1) -> int:
@@ -2332,7 +2349,7 @@ def _image_contrast(d: dict) -> bool:
 
 
 def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
-                              asn: int | None = None):
+                              asn: int | None = None, total: int = 1):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
     if size is None:
@@ -2478,6 +2495,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         border_color=border_color,
         timestamp=context['timestamp'],
         counter=counter,
+        total=total,
         asn=asn,
         code_text=context['code_text'],
         template_env_vars=_template_env_vars(),
@@ -2746,8 +2764,8 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
             uploads = uploads[:1]
         elif len(uploads) > 1:
             # Checked before any file is rendered
-            counts = [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
-            labels = sum(len(selected_pdf_pages(pdf_pages, count)) if count is not None else 1 for count in counts)
+            counts = _page_counts(uploads)
+            labels = sum(_file_labels(pdf_pages, count) for count in counts)
             max_count = current_app.config['PRINT_MAX_COUNT']
             if labels * copies > max_count:
                 raise PageSelectionError(f"A print job must not have more than {max_count} labels, {len(uploads)} files "
@@ -2776,6 +2794,17 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
         except Exception:
             current_app.logger.exception('Failed to load repository image')
     return [None], None
+
+
+def _page_counts(uploads: list) -> list[int | None]:
+    """The page count of each upload that is a PDF, None for other files."""
+    return [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
+
+
+def _file_labels(pdf_pages: str, page_count: int | None) -> int:
+    """The labels a file prints: of a PDF of page_count pages each page
+    pdf_pages selects, one of another file."""
+    return len(selected_pdf_pages(pdf_pages, page_count)) if page_count is not None else 1
 
 
 def _placed_image_size(image: Image.Image, crop: bool, rotation: int) -> tuple[float, float]:

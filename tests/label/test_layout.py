@@ -9,6 +9,7 @@ from PIL import Image
 from flask.testing import FlaskClient
 
 from app.labeldesigner.enums import LabelOrientation
+from app.labeldesigner.label import SMALL_CODE
 from app.labeldesigner.routes import create_label_from_request
 
 from tests.helpers import _image_and_text_boxes, _upload, EXAMPLE_FORMDATA, make_client, pixels, TEXT, verify_image
@@ -179,7 +180,8 @@ def test_a_code_fitted_next_to_text_leaves_the_text_room(tmp_path, label_size, o
             'image_fit': '1', 'text_fit': 'shrink', 'text': json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Chili', 'size': '60'}])}
     response = client.post('/labeldesigner/api/preview', data=data)
     assert response.status_code == 200
-    assert response.headers.get('X-Label-Warning') is None
+    # Half of a 17 mm label is too little for the dots of a link
+    assert response.headers.get('X-Label-Warning') == (SMALL_CODE if label_size == '17x54' else None)
     other = client.post('/labeldesigner/api/preview', data=dict(data, text=json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Beans', 'size': '60'}])))
     assert pixels(other.data) != pixels(response.data)
 
