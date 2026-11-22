@@ -16,7 +16,7 @@ import time
 import tty
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app import create_app
 from app.labeldesigner import drivers, printer
@@ -571,6 +571,20 @@ def test_edges_are_repeated_beyond_the_tape_and_the_cuts():
         assert _is(image.getpixel((166, image.height - 1)), (0, 255, 0))
 
 
+def test_beyond_the_ends_is_the_color_most_of_each_end_has():
+    # A background reaching the first end goes on beyond it, a few dots
+    # reaching the last end do not, the rest of that end is white
+    label = Image.new('RGB', (640, 313), 'white')
+    label.paste(RED, (620, 50, 640, 313))
+    label.paste(BLUE, (0, 100, 20, 120))
+    image = _printed(label, LabelOrientation.ROTATED)
+    ends = 10
+    assert all(_is(image.getpixel((x, row)), RED) for x in (13, 166, 332) for row in range(ends))
+    # 13 dots beyond the edge of the tape at the first pixel
+    assert _is(image.getpixel((13 + 110, image.height - ends - 1)), BLUE)
+    assert all(_is(image.getpixel((x, row)), WHITE) for x in (13, 123, 332) for row in range(image.height - ends, image.height))
+
+
 def test_colors_are_saturated_for_the_paper():
     image = Image.new('RGB', (600, 313), 'white')
     image.paste((192, 0, 0), (0, 0, 200, 313))
@@ -608,6 +622,21 @@ def test_labels_print_at_their_length(label_size, mode, lpi):
     image = _printed(_image(960, 80), LabelOrientation.ROTATED, label_size, mode)
     ends = round(0.8 / 25.4 * lpi)
     assert (image.height - 2 * ends) / lpi == pytest.approx(3, abs=1 / lpi)
+
+
+def test_text_reaching_the_ends_of_a_short_label_stays_on_it(client, fake):
+    # The cuts of a label this short take nothing off, the rows beyond its
+    # ends stay on it: white, no copies of the letters that reach them
+    text = [{'font': 'DejaVu Serif,Bold', 'text': 'nuc', 'size': '30'}]
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'vc25', 'model': 'VC-500W', 'print_type': 'text', 'text': json.dumps(text), 'text_fit': 'fill',
+        'margin_top': '0', 'margin_bottom': '0', 'margin_left': '0', 'margin_right': '0'})
+    assert outcome(client, response) == ('printed', '')
+    image = _sent(fake)[0]
+    assert image.height < 200
+    ink = lambda rows: ImageOps.invert(image.crop((0, rows[0], image.width, rows[1])).convert('L')).getbbox()  # noqa: E731
+    assert ink((0, 10)) is None and ink((image.height - 10, image.height)) is None
+    assert ink((10, 11)) is not None and ink((image.height - 11, image.height - 10)) is not None
 
 
 @pytest.mark.parametrize('orientation', ['standard', 'rotated'])
