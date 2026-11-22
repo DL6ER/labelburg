@@ -147,6 +147,21 @@ def test_preview_of_the_pages_of_a_pdf(client, drawn, print_type, pages, shown):
     assert previewed(client, drawn, print_type=print_type, pdf_pages=pages, print_count='2', image=pdf) == [[shown]]
 
 
+@pytest.mark.parametrize('values, shown', [
+    ({}, 'Box 1 of 6'),
+    # The label designer tells them, it sends the file shown only
+    ({'labels_per_copy': '4'}, 'Box 1 of 8'),
+    # A text label prints once for each copy
+    ({'print_type': 'text'}, 'Box 1 of 2'),
+])
+def test_preview_of_several_files(client, drawn, values, shown):
+    # Without labels_per_copy every file sent and its pages, as printed
+    files = [(io.BytesIO(_pdf((300, 200), (200, 300))), 'two.pdf', 'application/pdf'),
+             (io.BytesIO(_upload(Image.new('L', (400, 100), 'black'), 'wide.png').stream.read()), 'wide.png', 'image/png')]
+    data = {'print_type': 'image', 'image_fit': '1', 'print_count': '2', 'pdf_pages': 'all', 'image': files, **values}
+    assert previewed(client, drawn, **data) == [[shown]]
+
+
 def test_saved_label(client, drawn):
     text = [{'font': 'DejaVu Sans,Book', 'size': '40', 'text': BOX}]
     assert client.post(f'{API}/repository/save', json={'name': 'Box.json', 'label_size': '62', 'text': text}).status_code == 200

@@ -1141,7 +1141,7 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
             data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
         images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
         # As many labels as printed with the copies of the request
-        total = _count(_option('print_count', data, 1)) * _pages(data, page_count)
+        total = _count(_option('print_count', data, 1)) * _labels_per_copy(data, page_count)
         label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data), total=total)
         im = label.generate()
     except Exception as e:
@@ -1360,8 +1360,9 @@ def preview_from_image():
         # Only its previews show the blanks still to fill in, never a label
         # printed or saved
         marks, asn = _whole_or(values.get('mark_blanks'), 0) != 0, _next_asn(values)
-        # As many labels as printed: the copies of the files and pages the request tells, else of the file sent
-        copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), _pages(values, page_count))
+        # As many labels as printed: the copies of the files and pages the request tells, else of those sent
+        copies = _count(values.get('print_count'))
+        per_copy = _count(values.get('labels_per_copy'), _labels_per_copy(values, page_count, request.files.getlist('image')))
         # A job printed before tells its number of labels, a page of it shows the first label only
         total = _count(values.get('total'), copies * per_copy)
         label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=total)
@@ -1400,12 +1401,14 @@ def preview_from_image():
     return response
 
 
-def _pages(d: dict, page_count: int | None) -> int:
-    """The labels each copy of a label prints of the file sent or stored
-    with it: of an image label the pages pdf_pages selects of a PDF, else one."""
-    if not page_count or d.get('print_type', 'text') not in ('image', 'image_qrcode_text'):
+def _labels_per_copy(d: dict, page_count: int | None, uploads: list = ()) -> int:
+    """The labels each copy of a label prints, as load_label_images() makes
+    them: of an image label those of each of several uploads, else those of
+    the one file sent or stored, of page_count pages, see _file_labels()."""
+    if d.get('print_type', 'text') not in ('image', 'image_qrcode_text'):
         return 1
-    return len(selected_pdf_pages(str(d.get('pdf_pages') or ''), page_count))
+    counts = _page_counts(uploads) if len(uploads) > 1 else [page_count]
+    return sum(_file_labels(str(d.get('pdf_pages') or ''), count) for count in counts)
 
 
 def _count(value, default: int = 1) -> int:
@@ -2714,8 +2717,8 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
             uploads = uploads[:1]
         elif len(uploads) > 1:
             # Checked before any file is rendered
-            counts = [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
-            labels = sum(len(selected_pdf_pages(pdf_pages, count)) if count is not None else 1 for count in counts)
+            counts = _page_counts(uploads)
+            labels = sum(_file_labels(pdf_pages, count) for count in counts)
             max_count = current_app.config['PRINT_MAX_COUNT']
             if labels * copies > max_count:
                 raise PageSelectionError(f"A print job must not have more than {max_count} labels, {len(uploads)} files "
@@ -2744,6 +2747,17 @@ def load_label_images(d: dict, files: dict, first_only: bool = False, copies: in
         except Exception:
             current_app.logger.exception('Failed to load repository image')
     return [None], None
+
+
+def _page_counts(uploads: list) -> list[int | None]:
+    """The page count of each upload that is a PDF, None for other files."""
+    return [pdf_page_count(upload) if _is_pdf(upload, upload.filename) else None for upload in uploads]
+
+
+def _file_labels(pdf_pages: str, page_count: int | None) -> int:
+    """The labels a file prints: of a PDF of page_count pages each page
+    pdf_pages selects, one of another file."""
+    return len(selected_pdf_pages(pdf_pages, page_count)) if page_count is not None else 1
 
 
 def _placed_image_size(image: Image.Image, crop: bool, rotation: int) -> tuple[float, float]:

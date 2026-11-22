@@ -62,7 +62,7 @@
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, as the files sent print: of an image label one of each file, of a PDF one of each page `pdf_pages` selects, else 1."
                       },
                       "total": {
                         "type": "integer",
@@ -112,7 +112,7 @@
                       "labels_per_copy": {
                         "type": "integer",
                         "minimum": 1,
-                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                        "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, as the files sent print: of an image label one of each file, of a PDF one of each page `pdf_pages` selects, else 1."
                       },
                       "total": {
                         "type": "integer",
