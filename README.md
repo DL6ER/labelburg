@@ -19,6 +19,10 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
+| Phomemo | M110, M120, M220 (USB, Bluetooth) | 20 to 50 mm wide die-cut thermal labels, on the M220 also 70 mm wide, and 50 mm wide continuous labels, torn off |
+| Phomemo | M421 (Bluetooth) | 40 to 70 mm wide die-cut thermal labels and 4 x 6 in shipping labels, torn off |
+| Phomemo | D30, D35, Q30 (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, also 14 mm round ones, torn off |
+| Phomemo | M02, M02 Pro, T02 (USB, Bluetooth) | 50 mm wide thermal paper, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
 | Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
 
