@@ -3518,7 +3518,7 @@
           "date_language": {
             "type": "string",
             "enum": ["", "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl", "pt", "sv"],
-            "description": "The language of the names of months and weekdays (`%a`, `%A`, `%b`, `%B`) in dates on labels, as CLDR writes them: a month as in a date where the format has the day of the month (Polish `22 listopada 2026`), else on its own (`listopad 2026`). Empty: English."
+            "description": "The language of the names of months and weekdays (`%a`, `%A`, `%b` or `%h`, `%B`, in capitals with `^` or `#`) in dates on labels, as CLDR writes them: a month as in a date where the format has the day of the month (Polish `22 listopada 2026`), else on its own (`listopad 2026`). A name with a width (`%10B`) or the `E` or `O` modifier, and `%c`, `%x` and `%p`, stay as `strftime()` writes them, in English. Empty: English."
           },
           "collate": {
             "type": "string",

@@ -38,11 +38,21 @@ SUNDAY = date(2026, 11, 22)
     # The - of %-d next to a name, also on a name
     (SATURDAY, '%-d.%B', 'de', '7.März'),
     (SATURDAY, '%-d. %-B %-m.', 'de', '7. März 3.'),
+    # %h is %b, ^ and # write a name in capitals as glibc does
+    (SUNDAY, '%d %h', 'pl', '22 lis'),
+    (SUNDAY, '%h %Y', 'de', 'Nov 2026'),
+    (SUNDAY, '%^B %Y', 'de', 'NOVEMBER 2026'),
+    (SATURDAY, '%#A, %-^b', 'de', 'SAMSTAG, MÄR'),
+    (SUNDAY, '%^a %^B', 'pl', 'NIEDZ. LISTOPAD'),
+    # The O of %Od is a day of the month too
+    (SUNDAY, '%Od %B', 'pl', '22 listopada'),
     # Finnish weekdays as in a full date, on their own
     (SATURDAY, '%A %-d. %B', 'fi', 'lauantai 7. maaliskuuta'),
     # English is that of strftime(), also for a language it does not know
     (SATURDAY, '%A, %d %B %Y, %a %b', '', 'Saturday, 07 March 2026, Sat Mar'),
     (SATURDAY, '%A %B', 'xx', 'Saturday March'),
+    # In capitals also where strftime() knows no ^, e.g. in Alpine
+    (SUNDAY, '%^B %Y, %#a %h', '', 'NOVEMBER 2026, SUN Nov'),
     # With the time
     (datetime(2026, 3, 7, 14, 5, 9), '%A %H:%M', 'de', 'Samstag 14:05'),
 ])
@@ -50,7 +60,9 @@ def test_names_of_months_and_weekdays_in_the_language(when, date_format, languag
     assert format_date(when, date_format, language) == expected
 
 
-@pytest.mark.parametrize('date_format', ['%Y-%m-%d %H:%M:%S', '%d.%m.%Y', 'week %V, day %j, %u', '%x %X %p', '%I %y %%', 'no codes', '%Q %', ''])
+@pytest.mark.parametrize('date_format', ['%Y-%m-%d %H:%M:%S', '%d.%m.%Y', 'week %V, day %j, %u', '%x %X %p', '%c', '%I %y %%', 'no codes', '%Q %', '',
+                                         # Names with a width or a modifier
+                                         '%10B', '%OB %d', '%EB', '%Ea %Ob'])
 def test_other_codes_are_written_by_strftime(date_format):
     when = datetime(2026, 3, 7, 14, 5, 9)
     for language in dates.LANGUAGES:
