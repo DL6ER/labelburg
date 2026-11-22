@@ -78,6 +78,14 @@ class Driver:
     # (vendor, product) of its printers on USB that are reached through their
     # serial interface, not a printer interface, see backends.UsbSerialPrinter
     usb_serial_ids: tuple = ()
+    # How its printers are found on Bluetooth, see found_on_bluetooth(): by
+    # the names they tell, regular expressions, or by the 128-bit UUIDs of the
+    # services they advertise, with their models; over Bluetooth LE ('le') or
+    # classic Bluetooth ('classic'), which is searched only for drivers that
+    # name printers there
+    bluetooth_names: dict = {}
+    bluetooth_services: dict = {}
+    bluetooth_kind: str = 'le'
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
@@ -208,9 +216,17 @@ class Driver:
         return None
 
     def found_on_bluetooth(self, device: dict) -> tuple[str, str] | None:
-        """(address, model) of a printer of this driver on Bluetooth LE as
-        bluetooth.discover() found it, None for other devices."""
-        return None
+        """(address, model) of a printer of this driver on Bluetooth as
+        bluetooth.discover() found it, None for other devices: one reached
+        the way of bluetooth_kind whose name is one of bluetooth_names, else
+        that advertises one of bluetooth_services."""
+        if not device.get('classic' if self.bluetooth_kind == 'classic' else 'le'):
+            return None
+        name = device.get('name', '')
+        model = next((model for pattern, model in self.bluetooth_names.items() if re.fullmatch(pattern, name)), None)
+        if model is None:
+            model = next((model for service, model in self.bluetooth_services.items() if service in device.get('services', [])), None)
+        return (f"bt://{device['address']}", model) if model else None
 
     def network_device(self, address: str) -> str:
         """The address of a printer found by its MAC address."""

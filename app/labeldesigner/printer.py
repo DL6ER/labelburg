@@ -52,7 +52,9 @@ _discovered = None
 # Printers on Bluetooth LE, e.g. a Niimbot B1. Searched for in the background
 # for BLUETOOTH_SEARCH seconds, first at the first detection, then when the
 # label designer looks for printers, at most every BLUETOOTH_INTERVAL
-# seconds: the search takes the radio. Kept while the server runs, by address
+# seconds: the search takes the radio. Classic Bluetooth is searched too only
+# when it looks for printers and a driver names printers there, see
+# drivers.classic_bluetooth(). Kept while the server runs, by address
 # with their model, since a printer connected stops advertising.
 BLUETOOTH_DISCOVERY = True
 BLUETOOTH_SEARCH = 5.0
@@ -309,10 +311,11 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
     return printers
 
 
-def _search_bluetooth():
+def _search_bluetooth(classic: bool = False):
     global _last_scan_ts
     found = {}
-    for device in bluetooth.discover(BLUETOOTH_SEARCH):
+    nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
+    for device in nearby:
         printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
         if printer:
             found[printer[0]] = printer[1]
@@ -327,17 +330,19 @@ def bluetooth_searching() -> bool:
 
 
 def _bluetooth_printers() -> list[tuple[str, str]]:
-    """The printers found on Bluetooth LE as (address, model), a search
+    """The printers found on Bluetooth as (address, model), a search
     started where one is due, see BLUETOOTH_INTERVAL."""
     global _bluetooth_searched, _bluetooth_thread
     if not BLUETOOTH_DISCOVERY:
         return []
     with _bluetooth_lock:
         now = time.monotonic()
-        due = _bluetooth_searched is None or (devices.looked > _bluetooth_searched and now - _bluetooth_searched >= BLUETOOTH_INTERVAL)
+        looked = devices.looked > (_bluetooth_searched or 0.0)
+        due = _bluetooth_searched is None or (looked and now - _bluetooth_searched >= BLUETOOTH_INTERVAL)
         if due and not bluetooth_searching():
             _bluetooth_searched = now
-            _bluetooth_thread = threading.Thread(target=_search_bluetooth, daemon=True)
+            classic = looked and drivers.classic_bluetooth()
+            _bluetooth_thread = threading.Thread(target=_search_bluetooth, args=(classic,), daemon=True)
             _bluetooth_thread.start()
         return list(_bluetooth.items())
 

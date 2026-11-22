@@ -1,7 +1,7 @@
 """The connections several drivers share: a serial port against a pseudo
 terminal, the serial interface of a USB printer against a fake PyUSB, a
-printer on classic Bluetooth over a socket pair and Bluetooth LE against a
-fake printer."""
+printer on classic Bluetooth over a socket pair, Bluetooth LE against a fake
+printer, and the search on classic Bluetooth."""
 import errno
 import os
 import socket
@@ -13,8 +13,11 @@ import types
 
 import pytest
 
-from app.labeldesigner import drivers
-from app.labeldesigner.drivers import backends, niimbot, transports
+from app.labeldesigner import bluetooth, drivers, printer
+from app.labeldesigner.drivers import backends, devices, niimbot, transports
+from app.labeldesigner.drivers.base import Driver
+from tests.helpers import make_client
+from tests.printing.test_bluetooth import Management, found
 from tests.printing.test_niimbot import FakePrinter
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
 from tests.printing.test_usb_backends import Endpoint, USBError, USBTimeoutError
@@ -400,3 +403,102 @@ def test_dropped_bluetooth_le_link_is_closed_when_given_back(le):
         link.sendall(b'x')
     transports.release_le(DEVICE, link)
     assert le.closed == 1 and transports._kept == {} and link.timer is None
+
+
+# A class of device as a printer tells it: imaging, printer
+PRINTER_CLASS = 0x040680
+
+
+def class_of_device(value):
+    return bytes([4, 0x0d]) + value.to_bytes(3, 'little')
+
+
+@pytest.fixture
+def management(monkeypatch):
+    def install(*args, **kwargs):
+        fake = Management(*args, **kwargs)
+        monkeypatch.setattr(bluetooth.socket, 'socket', fake)
+        monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: (r if fake.incoming else [], [], []))
+        return fake
+    return install
+
+
+def test_classic_search_finds_devices_with_their_class(management):
+    classic, le_only, both = '00:00:5E:00:53:0A', '00:00:5E:00:53:0B', '00:00:5E:00:53:0C'
+    fake = management([found(classic, kind=0, name='PT-P710BT0001', raw=class_of_device(PRINTER_CLASS)),
+                       found(le_only, name='B1-TEST0001'),
+                       found(both, kind=0, raw=class_of_device(0x5a020c)), found(both, kind=1, name='Phone')])
+    devices_found = {device['address']: device for device in bluetooth.discover(1, classic=True)}
+    assert devices_found[classic] == {'address': classic, 'name': 'PT-P710BT0001', 'le': False, 'services': [],
+                                      'classic': True, 'device_class': PRINTER_CLASS}
+    assert devices_found[le_only] == {'address': le_only, 'name': 'B1-TEST0001', 'le': True, 'services': [],
+                                      'classic': False, 'device_class': None}
+    assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [],
+                                   'classic': True, 'device_class': 0x5a020c}
+    # Classic Bluetooth and LE, and stopped again
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
+
+
+class ClassicDriver(Driver):
+    models = ('Maker/BT1',)
+    bluetooth_kind = 'classic'
+    bluetooth_names = {r'BT1-\d+': 'Maker/BT1'}
+
+
+@pytest.mark.parametrize('device, printer_', [
+    ({'address': MAC, 'name': 'BT1-0001', 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS},
+     (DEVICE, 'Maker/BT1')),
+    # Found by its name on the way the driver reaches it only
+    ({'address': MAC, 'name': 'BT1-0001', 'le': True, 'services': [], 'classic': False, 'device_class': None}, None),
+    ({'address': MAC, 'name': 'BT1-0001', 'le': True, 'services': []}, None),
+    ({'address': MAC, 'name': 'BT2-0001', 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS}, None),
+])
+def test_printers_on_classic_bluetooth_are_known_by_their_names(device, printer_):
+    assert ClassicDriver().found_on_bluetooth(device) == printer_
+
+
+def test_printers_on_bluetooth_le_are_known_by_their_services():
+    driver = Driver()
+    driver.bluetooth_services = {NIIMBOT: 'Maker/LE1'}
+    assert driver.found_on_bluetooth({'address': MAC, 'name': 'LE1', 'le': True, 'services': [NIIMBOT]}) == (DEVICE, 'Maker/LE1')
+    assert driver.found_on_bluetooth({'address': MAC, 'name': 'LE1', 'le': True, 'services': []}) is None
+
+
+@pytest.fixture
+def searches(tmp_path, monkeypatch):
+    """The automatic detection with the kind of each Bluetooth search."""
+    kinds = []
+
+    def discover(timeout, classic=False):
+        kinds.append(classic)
+        return []
+    monkeypatch.setattr(printer, 'BLUETOOTH_DISCOVERY', True)
+    monkeypatch.setattr(printer, 'BLUETOOTH_INTERVAL', 0)
+    monkeypatch.setattr(printer.bluetooth, 'discover', discover)
+    monkeypatch.setattr(printer, '_bluetooth', {})
+    monkeypatch.setattr(printer, '_bluetooth_searched', None)
+    monkeypatch.setattr(printer, '_bluetooth_thread', None)
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(devices, 'looked', 0.0)
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+
+    def search(look=False):
+        client.get('/labeldesigner/api/printer_status' + ('?look=1' if look else ''))
+        printer._bluetooth_thread.join(5)
+        return kinds[-1]
+    return search, kinds
+
+
+def test_classic_bluetooth_is_not_searched_while_no_driver_names_printers_there(searches):
+    search, kinds = searches
+    assert search() is False
+    assert search(look=True) is False and kinds == [False, False]
+
+
+def test_classic_bluetooth_is_searched_only_when_looking_for_printers(searches, monkeypatch):
+    monkeypatch.setattr(drivers.NIIMBOT, 'bluetooth_kind', 'classic')
+    search, kinds = searches
+    # Not at the first detection, which runs without being asked for
+    assert search() is False
+    assert search(look=True) is True and kinds == [False, True]

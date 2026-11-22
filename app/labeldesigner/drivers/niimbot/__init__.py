@@ -168,6 +168,10 @@ class Niimbot(Driver):
                        re.compile(r'usb://0x3513:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.NiimbotError)
     refusals = (calibration.KIND_MESSAGE,)
+    # Over Bluetooth LE only the B1 prints. It tells its name, B1-<serial>,
+    # or Niimbot's service where it leaves the name out.
+    bluetooth_names = {re.compile(r'B1-.*', re.IGNORECASE | re.DOTALL): 'Niimbot/B1'}
+    bluetooth_services = {protocol.NIIMBOT_SERVICE: 'Niimbot/B1'}
 
     def model_of(self, device, device_id=None):
         if device_id is None:
@@ -218,12 +222,11 @@ class Niimbot(Driver):
         return calibration.example(kind)
 
     def found_on_bluetooth(self, device):
-        # Over Bluetooth LE only the B1 prints. It tells its name, B1-<serial>,
-        # or Niimbot's service where it leaves the name out.
-        name = device.get('name', '').upper()
-        if device.get('le') and (name.startswith('B1-') or (not name and protocol.NIIMBOT_SERVICE in device.get('services', []))):
-            return f"bt://{device['address']}", 'Niimbot/B1'
-        return None
+        # Other models advertise the service too: it counts only without a name
+        name = device.get('name')
+        if name and not any(re.fullmatch(pattern, name) for pattern in self.bluetooth_names):
+            return None
+        return super().found_on_bluetooth(device)
 
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
