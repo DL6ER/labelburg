@@ -10,10 +10,13 @@ type, the pins skipped and the bytes of each row, each row after SYN, blank
 rows that feed the print past the cutter, and ESC A for the status byte,
 which also paces a job."""
 
+import logging
 import time
 
 from .. import backends
 from ..dymo.protocol import Connection
+
+logger = logging.getLogger(__name__)
 
 ESC = b'\x1b'
 NUL = b'\x00'
@@ -150,8 +153,12 @@ class UsbConnection(Connection):
     def _dispose(self):
         self._usb.util.dispose_resources(self.dev)
         if self.detached:
-            self.dev.attach_kernel_driver(self.number)
             self.detached = False
+            # The job or status is done either way, e.g. if it was unplugged
+            try:
+                self.dev.attach_kernel_driver(self.number)
+            except self._usb.core.USBError as e:
+                logger.warning('The driver of the kernel was not given back its interface: %s', e)
 
     def write(self, data: bytes):
         self.out.write(data, WRITE_TIMEOUT)

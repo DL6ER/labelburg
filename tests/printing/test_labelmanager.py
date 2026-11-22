@@ -587,3 +587,17 @@ def test_a_printer_of_another_maker_is_reached_on_its_printer_interface_only(pyu
         protocol.connect('usb://0x04f9:0x2042', labelmanager.DRIVER.usb_ids)
     assert hid.calls == []
 
+
+def test_a_job_is_printed_also_where_the_kernel_does_not_take_its_interface_back(pyusb, caplog):
+    device = Device(0x1001, [8, 3])
+
+    def attach(number):
+        raise USBError('No such device (it may have been disconnected)')
+    device.attach_kernel_driver = attach
+    pyusb.append(device)
+    address = 'usb://0x0922:0x1001/01234'
+    assert labelmanager.DRIVER.status(address, PNP)['errors'] == []
+    queue = SimpleNamespace(device_specifier=address, model=PNP, label_size='d1-12')
+    assert labelmanager.DRIVER.send(queue, labelmanager.DRIVER.render(queue, [{'label': _black(64, 10), 'cut': True}])) == ''
+    assert [len(label[3]) for label in device.printer.labels] == [10]
+    assert 'not given back' in caplog.text
