@@ -104,8 +104,7 @@ LAYOUTS = (
     Layout('Avery', ('5163',), 'Letter', (inch(4), inch(2)), 2, 5, (inch(0.156), inch(0.5)), (inch(4.188), inch(2)), inch(0.2)),
     Layout('Avery', ('5164',), 'Letter', (inch(4), inch(10 / 3)), 2, 3, (inch(0.156), inch(0.5)), (inch(4.188), inch(10 / 3)), inch(0.19)),
     Layout('Avery', ('5167',), 'Letter', (inch(1.75), inch(0.5)), 4, 20, (inch(0.3), inch(0.5)), (inch(2.05), inch(0.5)), inch(0.05)),
-    # As in Avery's templates of the sheet, rows of 0.66 in
-    Layout('Avery', ('5195',), 'Letter', (inch(1.75), inch(0.66)), 4, 15, (inch(0.3), inch(0.55)), (inch(2.05), inch(0.66)), inch(0.094)),
+    Layout('Avery', ('5195',), 'Letter', (inch(1.75), inch(2 / 3)), 4, 15, (inch(0.3), inch(0.5)), (inch(2.05), inch(2 / 3)), inch(0.094)),
     Layout('Avery', ('5168',), 'Letter', (inch(3.5), inch(5)), 2, 2, (inch(0.5), inch(0.5)), (inch(4), inch(5)), inch(0.1)),
     Layout('Avery', ('5165',), 'Letter', (inch(8.5), inch(11)), 1, 1, (0, 0), (inch(8.5), inch(11))),
 )

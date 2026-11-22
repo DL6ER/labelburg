@@ -29,10 +29,8 @@ MAKERS = {
     '5160': ('Letter', '1" x 2-5/8"', 30, '3/16"', '1/2"'), '5161': ('Letter', '1" x 4"', 20, '0.167"', '0.5"'),
     '5162': ('Letter', '1-1/3" x 4"', 14, '0.156"', '0.833"'), '5163': ('Letter', '2" x 4"', 10),
     '5164': ('Letter', '3-1/3" x 4"', 6, '0.156"', '0.5"'), '5167': ('Letter', '1/2" x 1-3/4"', 80, '0.3"', '0.5"'),
-    '5195': ('Letter', '2/3" x 1-3/4"', 60, '0.3"'), '5168': ('Letter', '3-1/2" x 5"', 4), '5165': ('Letter', '8-1/2" x 11"', 1),
+    '5195': ('Letter', '2/3" x 1-3/4"', 60, '0.3"', '0.5"'), '5168': ('Letter', '3-1/2" x 5"', 4), '5165': ('Letter', '8-1/2" x 11"', 1),
 }
-# Avery's templates of 5195 lay out rows of 0.66 in, which it names 2/3 in
-OFF = {'5195': 0.2}
 
 
 def mm(text: str, unit: str = '') -> float:
@@ -57,7 +55,7 @@ def test_sheet_is_as_its_maker_gives_it(product):
     if page == 'Letter':
         told.reverse()
     assert layout.page == page
-    assert sorted(abs(a - b) for a, b in zip(sorted(layout.label), sorted(told)))[-1] <= OFF.get(product, 0.05)
+    assert sorted(abs(a - b) for a, b in zip(sorted(layout.label), sorted(told)))[-1] <= 0.05
     assert layout.columns * layout.rows == count
     for given, kept in zip(margins, layout.left_top):
         if given is not None:
