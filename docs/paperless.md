@@ -31,3 +31,11 @@ curl -X POST 'http://localhost:8013/labeldesigner/api/demos/print?id=office/015-
 ```
 
 The next number not printed yet is kept in the file `.next_asn` in the folder of the labels.
+
+## On a sheet of labels
+
+Without a label printer, the numbers print on an A4 sheet of 189 labels of 25.4 x 10 mm, e.g. Avery L4731REV or Herma 10001, in an office printer. Add the printer in the Settings as "Office printer" and choose the sheet there. A whole sheet prints at once, and a print that leaves the sheet partly used is remembered: the next one goes on at the label after it.
+
+```bash
+curl -X POST 'http://localhost:8013/labeldesigner/api/demos/print?id=office/015-paperless-asn-17x54.json&printer=<name of the office printer>&print_count=189&sheet_start=next'
+```

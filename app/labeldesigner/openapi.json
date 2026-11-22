@@ -9,7 +9,7 @@
     "/labeldesigner/api/preview": {
       "post": {
         "summary": "Generate the label image without printing",
-        "description": "The label as it is printed: the quality the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label size the request names is shown as it is, not placed on the tape loaded in the printer. On a roll of several labels to a page, the preview is its first page as the label is seen upright: the label first, top left, followed by as many of the `print_count` copies as fit, each with its counter, the rest of the page blank.",
+        "description": "The label as it is printed: the quality the request leaves out is taken from the printer settings (`/labeldesigner/api/settings`) of its printer. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A label size the request names is shown as it is, not placed on the tape loaded in the printer. On a roll of several labels to a page, the preview is its first page as the label is seen upright: the label first, top left, followed by as many of the `print_count` copies as fit, each with its counter, the rest of the page blank. On a sheet of labels of an office printer it is one label, the whole sheet with `whole_sheet`.",
         "operationId": "preview",
         "parameters": [
           {
@@ -33,6 +33,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "$ref": "#/components/schemas/Label"
                   },
                   {
@@ -63,6 +66,15 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                      },
+                      "whole_sheet": {
+                        "type": "string",
+                        "enum": [
+                          "0",
+                          "1"
+                        ],
+                        "default": "0",
+                        "description": "On a sheet of labels of an office printer: 1 shows the whole first sheet with the copies from `sheet_start` on, and the lines to cut along with `cut_lines`, instead of one label."
                       }
                     }
                   }
@@ -78,6 +90,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "$ref": "#/components/schemas/Label"
                   },
                   {
@@ -108,6 +123,15 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                      },
+                      "whole_sheet": {
+                        "type": "string",
+                        "enum": [
+                          "0",
+                          "1"
+                        ],
+                        "default": "0",
+                        "description": "On a sheet of labels of an office printer: 1 shows the whole first sheet with the copies from `sheet_start` on, and the lines to cut along with `cut_lines`, instead of one label."
                       }
                     }
                   }
@@ -127,7 +151,7 @@
                 }
               },
               "X-Label-Sheet": {
-                "description": "On a roll of several labels to a page, how `print_count` copies of `labels_per_copy` labels fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. Not set for other label sizes.",
+                "description": "On a roll of several labels to a page, how `print_count` copies of `labels_per_copy` labels fill the last page, as JSON: `size` of the page and its `labels` as `[x, y, width, height]` in mm as the label is seen upright, in the order they are filled, how many of them are `filled`, and the `print_count` that would `fill` the page, null where it is full or that would be more than `PRINT_MAX_COUNT` labels. On a sheet of labels of an office printer, also of one label, the copies start at label `start` of the first sheet, `sheets` is how many sheets they take, `labels` are as the sheet lies and `filled` is the last label of the last sheet. Not set for other label sizes.",
                 "schema": {
                   "type": "string"
                 }
@@ -248,7 +272,7 @@
     "/labeldesigner/api/calibration": {
       "get": {
         "summary": "Calibration of a printer",
-        "description": "How far the labels of a printer that offers it (the Niimbot B1) are moved, kept on the server for every print on it, and which calibration label fits the label size.",
+        "description": "How far the labels of a printer that offers it (the Niimbot B1, an office printer) are moved, kept on the server for every print on it, and which calibration label fits the label size.",
         "operationId": "getCalibration",
         "parameters": [
           {
@@ -293,8 +317,8 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["narrow", "wide", "round", ""],
-                          "description": "narrow: the calibration label is read at triangles on both edges; wide: the roll is wider than the printhead, its white strips are compared; round: round labels, the white ring around a circle is compared."
+                          "enum": ["narrow", "wide", "round", "sheet", ""],
+                          "description": "narrow: the calibration label is read at triangles on both edges; wide: the roll is wider than the printhead, its white strips are compared; round: round labels, the white ring around a circle is compared; sheet: an office printer prints a test sheet, read where its scales cross the cuts."
                         }
                       }
                     }
@@ -342,7 +366,15 @@
                   },
                   "across": {
                     "type": "number",
-                    "description": "Moved right, in place of left and right."
+                    "description": "Moved right, in place of left and right; with read_across and read_along, the offsets the test sheet was printed with."
+                  },
+                  "read_across": {
+                    "type": "number",
+                    "description": "Of an office printer, the number read where the cut crosses the scale across on its test sheet, in steps of 0.25 from -3 to 3: the labels are moved right by it."
+                  },
+                  "read_along": {
+                    "type": "number",
+                    "description": "The number read where the cut crosses the scale down on the test sheet, likewise: the labels are moved down by it."
                   },
                   "along": {
                     "type": "number",
@@ -381,7 +413,15 @@
                   },
                   "across": {
                     "type": "number",
-                    "description": "Moved right, in place of left and right."
+                    "description": "Moved right, in place of left and right; with read_across and read_along, the offsets the test sheet was printed with."
+                  },
+                  "read_across": {
+                    "type": "number",
+                    "description": "Of an office printer, the number read where the cut crosses the scale across on its test sheet, in steps of 0.25 from -3 to 3: the labels are moved right by it."
+                  },
+                  "read_along": {
+                    "type": "number",
+                    "description": "The number read where the cut crosses the scale down on the test sheet, likewise: the labels are moved down by it."
                   },
                   "along": {
                     "type": "number",
@@ -460,7 +500,7 @@
     "/labeldesigner/api/calibration/print": {
       "post": {
         "summary": "Print a calibration label",
-        "description": "Prints the calibration label for the roll in a printer that offers calibration, moved as the printer is calibrated: on a narrow roll a triangle at each edge to read the numbers at, on a wider one a frame to compare the white strips beside, on round labels a circle to compare the white ring around.",
+        "description": "Prints the calibration label for the roll in a printer that offers calibration, moved as the printer is calibrated: on a narrow roll a triangle at each edge to read the numbers at, on a wider one a frame to compare the white strips beside, on round labels a circle to compare the white ring around. An office printer prints a test sheet on its sheet of labels: a scale across the cut right of the first label and one down the cut below it, 0 where the cut is meant to be, and a line of 100 mm.",
         "operationId": "printCalibration",
         "requestBody": {
           "content": {
@@ -555,7 +595,7 @@
     "/labeldesigner/api/calibration/example.png": {
       "get": {
         "summary": "Example of a calibration label",
-        "description": "A calibration label of the kind printed 1 mm too far right, which shows where to read it.",
+        "description": "A calibration label of the kind printed 1 mm too far right, which shows where to read it; a test sheet (`sheet`) also 0.5 mm too far down.",
         "operationId": "calibrationExample",
         "parameters": [
           {
@@ -581,7 +621,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": ["narrow", "wide", "round"]
+              "enum": ["narrow", "wide", "round", "sheet"]
             }
           }
         ],
@@ -633,6 +673,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "$ref": "#/components/schemas/Label"
                   },
                   {
@@ -650,7 +693,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100), but a whole sheet of labels of an office printer. `{{counter}}` counts up from label to label. On a roll of several labels to a page or on sheets of labels they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -697,6 +740,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "$ref": "#/components/schemas/Label"
                   },
                   {
@@ -714,7 +760,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100), but a whole sheet of labels of an office printer. `{{counter}}` counts up from label to label. On a roll of several labels to a page or on sheets of labels they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2287,6 +2333,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "type": "object",
                     "properties": {
                       "name": {
@@ -2326,7 +2375,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100), but a whole sheet of labels of an office printer. `{{counter}}` counts up from label to label. On a roll of several labels to a page or on sheets of labels they fill the pages one after the other."
                       },
                       "collate": {
                         "type": "integer",
@@ -2687,6 +2736,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "type": "object",
                     "properties": {
                       "id": {
@@ -2726,7 +2778,7 @@
                         "type": "integer",
                         "minimum": 1,
                         "default": 1,
-                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100). `{{counter}}` counts up from label to label. On a roll of several labels to a page they fill the pages one after the other."
+                        "description": "Number of labels, at most `PRINT_MAX_COUNT` (default 100), but a whole sheet of labels of an office printer. `{{counter}}` counts up from label to label. On a roll of several labels to a page or on sheets of labels they fill the pages one after the other."
                       },
                       "cut_once": {
                         "type": "integer",
@@ -2835,6 +2887,9 @@
               "schema": {
                 "allOf": [
                   {
+                    "$ref": "#/components/schemas/SheetOptions"
+                  },
+                  {
                     "$ref": "#/components/schemas/WebhookOptions"
                   },
                   {
@@ -2881,6 +2936,9 @@
               "application/json": {
                 "schema": {
                   "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SheetOptions"
+                    },
                     {
                       "$ref": "#/components/schemas/QueuedAnswer"
                     },
@@ -3456,6 +3514,22 @@
       "PrinterSettings": {
         "type": "object",
         "properties": {
+          "cut_lines": {
+            "type": "string",
+            "enum": [
+              "0",
+              "1"
+            ],
+            "description": "Of an office printer: 1 for plain paper, the labels of a sheet get thin lines to cut along, else label sheets."
+          },
+          "continue_at": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "readOnly": true,
+            "description": "Of an office printer, by sheet of labels, e.g. `{\"sheet-l7160\": 7}`: the label where the last print on a sheet partly used ended, which `sheet_start=next` goes on at. Kept once a print is printed, left out for a sheet used to its end."
+          },
           "label_size": {
             "type": "string",
             "description": "The label size set by hand, used where the printer does not report its media."
@@ -3617,7 +3691,7 @@
           "label_size": {
             "type": "string",
             "default": "62",
-            "description": "Label size identifier, e.g. `62`, `62x29`, `103x164`, `d24`, or a tape of the VC-500W (`vc9`, `vc12`, `vc19`, `vc25`, `vc50`). The label designer lists them."
+            "description": "Label size identifier, e.g. `62`, `62x29`, `103x164`, `d24`, a tape of the VC-500W (`vc9`, `vc12`, `vc19`, `vc25`, `vc50`), or a sheet of labels of an office printer (`Other/Office`) by its product, e.g. `sheet-l7160` (Avery L7160 / J8160), `sheet-5160` (Avery 5160) or `sheet-a4`, a whole A4 page. The label designer lists them, a sheet prints one label of it at a time."
           },
           "orientation": {
             "type": "string",
@@ -4076,6 +4150,17 @@
       "PrinterState": {
         "type": "object",
         "properties": {
+          "paper_margin": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Of an office printer, the paper it leaves blank at the edges, in mm, as it tells it over IPP; null where it tells none."
+          },
+          "blank_edge": {
+            "type": "integer",
+            "description": "Of an office printer, where labels of its sheet lie in the paper it leaves blank at the edges: that margin, in whole mm. Left out otherwise."
+          },
           "path": {
             "type": "string",
             "description": "Printer to pass as `printer`, e.g. `file:///dev/usb/lp0` or `simulation`."
@@ -4490,6 +4575,24 @@
             "Room": "Garage"
           }
         ]
+      },
+      "SheetOptions": {
+        "type": "object",
+        "description": "On a sheet of labels of an office printer, e.g. `sheet-l7160`; other label sizes leave them out.",
+        "properties": {
+          "sheet_start": {
+            "type": "string",
+            "description": "The label of the sheet the first copy goes on, from 1, counted row by row from the top left, or `next`: where the last print on this printer and sheet ended, see `continue_at` of the printer settings. The copies fill the sheets one after the other. Default 1, a new sheet."
+          },
+          "cut_lines": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ],
+            "description": "1 prints thin lines around each label, to cut plain paper along. Default: as set for the printer (`cut_lines` of `/labeldesigner/api/settings`), else 0."
+          }
+        }
       },
       "Cutting": {
         "type": "object",

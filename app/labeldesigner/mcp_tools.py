@@ -12,10 +12,11 @@ from importlib.util import find_spec
 
 from werkzeug.wrappers import Response
 
-from . import tape
+from . import sheets, tape
 from .drivers.backends import _same_serial
+from .drivers.ipp import catalog
 from .label import DATE_OFFSET, _iso_date
-from .label_names import LABELS
+from .label_names import LABELS, label_of
 from .refusals import BARCODE_TYPES
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,9 @@ def label_size_for(model: str | None, label_size: str) -> str:
     takes = [label.identifier for label in LABELS] if model is None else tape.takes(model)
     if not takes or label_size in takes:
         return label_size
+    # A sheet of labels by the number on its pack, e.g. L7160 or Avery 5160
+    if (sheet := catalog.named(label_size)) in takes:
+        return sheet
     plain = re.sub(r'\s|mm', '', str(label_size).lower()).replace('×', 'x')
     found = [size for size in takes if size == plain or (size.endswith(plain) and size[:-len(plain)].isalpha())]
     if len(found) != 1 and model is None:
@@ -390,7 +394,7 @@ class Tools:
         return base64.b64decode(self._call('POST', f'{path}?return_format=png', **kwargs)['image'])
 
     def print_label(self, name: str, printer: str, label_size: str | None, fillings: list[dict],
-                    count: int) -> tuple[str, list[dict], list[bytes]]:
+                    count: int, sheet_start: str | None = None) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
         # As a print job of the label designer is logged, without what the label says
         logger.info('MCP print_label %s on %s, count %d, fillings %d', name, printer, count, len(fillings or [{}]))
@@ -410,16 +414,17 @@ class Tools:
         told = [self.checked(spec) for spec in specs]
         labels = count * sum(int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told)
         self._cap(labels)
+        starts = _starts(found, label_size, sheet_start, [count * int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told])
         images = []
         for done, spec in enumerate(specs):
             try:
-                images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count, source='mcp')))
+                images.append(self._printed('/repository/print', json=dict(spec['json'], print_count=count, source='mcp', **starts[done])))
             except ToolError as e:
                 raise ToolError(f'{e} ({done * labels // len(specs)} of {_labels(labels)} added to the queue)') from None
         return _noted(f'Added {_labels(labels)} of {name} to the queue of {printer}', told), specs, images
 
     def print_text(self, lines: list[str], printer: str, label_size: str | None, count: int, font_size: int,
-                   code: str | None, code_type: str) -> tuple[str, list[dict], list[bytes]]:
+                   code: str | None, code_type: str, sheet_start: str | None = None) -> tuple[str, list[dict], list[bytes]]:
         from mcp.server.mcpserver.exceptions import ToolError
         logger.info('MCP print_text on %s, count %d', printer, count)
         if not (lines or code):
@@ -430,8 +435,28 @@ class Tools:
         form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'])
         spec = {'path': '/preview', 'data': form}
         self.checked(spec)
-        image = self._printed('/print', data=dict(form, print_count=count, source='mcp'))
+        image = self._printed('/print', data=dict(form, print_count=count, source='mcp', **_starts(found, label_size, sheet_start, [count])[0]))
         return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
+
+
+def _starts(found: dict, label_size: str, sheet_start, labels: list[int]) -> list[dict]:
+    """The sheet_start of each job of a call of labels jobs on the printer
+    found: sheet_start, next where the last print ended as its settings
+    keep it, for the first, each further one on after the one before; they
+    are queued before the first one prints."""
+    if sheet_start in (None, ''):
+        return [{} for _ in labels]
+    size = label_of(label_size)
+    start = str(sheet_start).strip().lower()
+    if start == 'next':
+        start = ((found.get('settings') or {}).get('continue_at') or {}).get(label_size, 1)
+    if not sheets.is_paper(size) or not str(start).isdigit():
+        return [{'sheet_start': str(sheet_start)} for _ in labels]
+    starts, at = [], int(start)
+    for count in labels:
+        starts.append({'sheet_start': str(at)})
+        at = (at - 1 + count) % sheets.per_sheet(size) + 1
+    return starts
 
 
 # The note of the label designer about a font that is not installed
@@ -531,28 +556,35 @@ def _server(app):
 
     @server.tool(annotations=printing, meta=confirm)
     def print_label(name: str, printer: str, count: int, label_size: str | None = None,
-                    fillings: list[dict[str, str]] | None = None, ctx: Context = None) -> list:
+                    fillings: list[dict[str, str]] | None = None, sheet_start: str | None = None, ctx: Context = None) -> list:
         """Print a saved label on printer, count labels of each filling of
         its blanks, e.g. [{"Name": "Anna"}, {"Name": "Ben"}] prints a badge
         for each, on the label size it is saved for. label_size only as the
         user told it, refused if the printer has another one loaded. Prints
         nothing where a label is cut off or a filling is refused. The labels
         are added to the queue of the printer, which prints them in turn.
-        Returns the first label of each filling as it will print."""
-        return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count))
+        On a sheet of labels of an office printer, sheet_start is the label
+        to start at, 1 for a new sheet or next where the last print ended;
+        without it label 1. Returns the first label of each filling as it
+        will print."""
+        return shown(ctx, lambda: tools.print_label(name, printer, label_size, fillings or [], count, sheet_start))
 
     @server.tool(annotations=printing, meta=confirm)
     @coded
     def print_text(printer: str, count: int, label_size: str | None = None, lines: list[str] | None = None,
-                   font_size: int = 60, code: str | None = None, code_type: str = 'QR', ctx: Context = None) -> list:
+                   font_size: int = 60, code: str | None = None, code_type: str = 'QR', sheet_start: str | None = None,
+                   ctx: Context = None) -> list:
         """Print lines of text and/or a code (QR, e.g. a URL or
         WIFI:T:WPA;S:<name>;P:<password>;;, or a barcode type like EAN13 or
-        CODE128) on printer, count labels. label_size, e.g. 62 or 100x30,
-        only as the user told it, else the one loaded; refused if the printer
-        has another one loaded. Prints nothing where the label is cut off.
-        The labels are added to the queue of the printer, which prints them
-        in turn. Returns the first label as it will print."""
-        return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type))
+        CODE128) on printer, count labels. label_size, e.g. 62, 100x30 or
+        a sheet of labels by the number on its pack like L7160, only as the
+        user told it, else the one loaded; refused if the printer has
+        another one loaded. Prints nothing where the label is cut off. On a
+        sheet of labels, sheet_start is the label to start at, 1 for a new
+        sheet or next where the last print ended; without it label 1. The
+        labels are added to the queue of the printer, which prints them in
+        turn. Returns the first label as it will print."""
+        return shown(ctx, lambda: tools.print_text(lines or [], printer, label_size, count, font_size, code, code_type, sheet_start))
 
     return server
 
