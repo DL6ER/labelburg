@@ -226,7 +226,8 @@ def test_a_job_is_told_from_the_history_after_a_restart(client, tmp_path):
 
 def test_the_texts_of_the_history_reach_the_client():
     for text in (print_store.NO_SUCH_ENTRY, print_store.NO_IMAGE, print_store.NOT_MADE_HERE, print_store.NOT_KEPT,
-                 print_store.NOT_CLEARED, print_store.PRINTING_AT_RESTART, print_store.LIMIT_REFUSED, refusals.OTHER_LABEL):
+                 print_store.NOT_CLEARED, print_store.PRINTING_AT_RESTART, print_store.LIMIT_REFUSED, refusals.OTHER_LABEL,
+                 refusals.SAME_NUMBERS):
         assert refusals.message(ValueError(text), refusals.INVALID_INPUT) == text
 
 
@@ -259,3 +260,52 @@ def test_an_image_is_not_printed_again_on_a_printer_without_its_label(client, mo
     job = webhook_job(client, monkeypatch)
     response = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'model': model})
     assert (response.status_code, response.get_json()['message']) == (400, refusals.OTHER_LABEL)
+
+
+def test_printed_again_with_copies_and_values_of_its_own(client):
+    job = printed(client, data=dict(LABEL, text=lines('Jar {{blank:What}}'), blanks=json.dumps({'What': 'Peas'}), print_count='10',
+                                    title='Peas'))
+    told = entry(client, job)
+    assert (told['labels'], told['copies']) == (10, 10)
+    # A torn one of them
+    one = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '1'})
+    assert (entry(client, one)['labels'], entry(client, one)['title']) == (1, 'Peas')
+    # As many as before, unless told
+    assert entry(client, printed(client, f'history/{job}/print', data={'printer': 'simulation'}))['labels'] == 10
+    beans = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 2, 'blanks': {'What': 'Beans'}, 'title': 'Beans'})
+    told = entry(client, beans)
+    assert (told['labels'], told['copies'], told['title']) == (2, 2, 'Beans')
+    assert client.get(f'{API}/history/{beans}/label').get_json()['blanks'] == {'What': 'Beans'}
+    response = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '0'})
+    assert response.get_json()['message'] == 'print_count must be greater than 0'
+
+
+def test_the_same_numbers_are_never_more_than_before(client):
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    job = printed(client, data=dict(LABEL, text=lines('ASN{{asn:5}}'), print_count='3'))
+    one = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '1'})
+    assert print_store.entry(one)['asn'] == 1
+    response = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '4'})
+    assert (response.status_code, response.get_json()['message']) == (400, refusals.SAME_NUMBERS)
+    assert paperless.next_asn(client.application.config, repo) == 4
+    fresh = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '4', 'as_before': '0'})
+    assert (print_store.entry(fresh)['asn'], paperless.next_asn(client.application.config, repo)) == (4, 8)
+
+
+def test_the_date_blanks_that_follow_the_day_are_told(client):
+    fields = {'Day': {'type': 'date'}, 'Best': {'type': 'date', 'default': '+5d'}, 'Made': {'type': 'date'}}
+    job = printed(client, data=dict(LABEL, text=lines('{{blank:Day}} {{blank:Best}} {{blank:Made}}'), fields=json.dumps(fields),
+                                    blanks=json.dumps({'Made': '2026-11-03'})))
+    told = entry(client, job)
+    assert (told['again_asks'], told['date_blanks']) == (['date'], ['Day', 'Best'])
+    # A date of its own for each of them, nothing follows the day
+    fixed = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'blanks': {'Day': '2026-11-01', 'Best': '2026-11-06'}})
+    assert (entry(client, fixed)['again_asks'], entry(client, fixed)['date_blanks']) == ([], [])
+
+
+def test_a_picture_printed_again_takes_copies(client, monkeypatch):
+    job = webhook_job(client, monkeypatch)
+    assert entry(client, job)['copies'] == 1
+    again = printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '3', 'blanks': '{"x": "y"}'})
+    assert (entry(client, again)['labels'], entry(client, again)['copies']) == (3, 3)
+    assert print_queue.get(again).state == 'printed'

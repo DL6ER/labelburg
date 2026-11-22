@@ -3752,6 +3752,17 @@
           "labels": {
             "type": "integer"
           },
+          "copies": {
+            "type": "integer",
+            "description": "The copies it was printed with, which printing it again takes unless `print_count` is given."
+          },
+          "date_blanks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The date blanks that show the day it printed, e.g. today or 5 days later, not a date of their own. A value given for one in `blanks` printing it again takes its place."
+          },
           "from": {
             "type": "string",
             "description": "As `from` of a job of the queue, empty for the label designer."
@@ -3806,7 +3817,20 @@
           "as_before": {
             "type": "integer",
             "enum": [0, 1],
-            "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore. 0: today's date and the next numbers. Default: 1."
+            "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them at most as many labels as before. 0: today's date and the next numbers. Default: 1."
+          },
+          "print_count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Copies, as for `/labeldesigner/api/print`, e.g. 1 for one label that tore of 10. Default: the copies it was printed with."
+          },
+          "blanks": {
+            "$ref": "#/components/schemas/BlankValues",
+            "description": "Values for blanks in place of those it printed with, the others as printed. Not for an image of the webhook or Homebox."
+          },
+          "title": {
+            "type": "string",
+            "description": "The title of the job in the queue. Default: as before, else, with values of its own, its first line."
           },
           "source": {
             "type": "string",

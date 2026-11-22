@@ -31,6 +31,8 @@ from .printer_settings import (CALIBRATION_MESSAGE, LABEL_SETTINGS_MESSAGE, NO_C
 SETTINGS_NOT_SAVED = 'The printer settings could not be saved, the log of the server names the reason'
 # A picture of the webhook or Homebox printed again on a printer that has not its label
 OTHER_LABEL = 'It was made for a label this printer does not take'
+# Printed again with the numbers of Paperless it had, more labels would need others
+SAME_NUMBERS = 'With the same numbers, print at most as many labels as before'
 LABEL_SETTINGS_NOT_SAVED = 'The label settings could not be saved, the log of the server names the reason'
 
 IMAGE_MODE_REFUSED = 'image_mode must be grayscale, black_and_white, red_and_black or colored'
@@ -120,6 +122,7 @@ MESSAGES = (
     PRINTING_AT_RESTART,
     LIMIT_REFUSED,
     OTHER_LABEL,
+    SAME_NUMBERS,
     'print_count must be greater than 0',
     *check_digit_problems(),
     *code_problems(),

@@ -1362,7 +1362,8 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
     return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
-                   recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast},
+                   recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast,
+                           'copies': print_count, 'collate': collate},
                    images=images, drawn=drawn, return_format=return_format)
 
 
@@ -2243,33 +2244,42 @@ def _timestamp(data: dict) -> int:
 
 def _dated(data: dict) -> bool:
     """Whether a label shows when it is printed: {{datetime}} in its text or
-    code, or a date blank without a date of its own, e.g. today or +5d."""
+    code, or a date blank without a date of its own, see _date_blanks()."""
     if _timestamp(data) > 0:
         return False
     text = data.get('text')
-    if any('{{datetime' in value for value in (text if isinstance(text, str) else json.dumps(text), str(data.get('code_text') or ''))):
-        return True
+    return (any('{{datetime' in value for value in (text if isinstance(text, str) else json.dumps(text), str(data.get('code_text') or '')))
+            or bool(_date_blanks(data)))
+
+
+def _date_blanks(data: dict) -> list[str]:
+    """The date blanks of a label that show the day it is printed, e.g. today
+    or +5d, not a date of their own; none for a label with a time of its own."""
     try:
         blanks, fields = _blank_values(data.get('blanks')), _blank_fields(data.get('fields'))
     except ValueError:
-        return False
+        return []
+    if _timestamp(data) > 0:
+        return []
+    names = []
     for name in _blank_names(data):
         field = fields.get(name) or {}
         if field.get('type') != 'date' or blanks.get(name, None) == '':
             continue
         value = blanks.get(name, '' if field.get('default') is None else str(field['default'])).strip()
         if not value or DATE_OFFSET.fullmatch(value):
-            return True
-    return False
+            names.append(name)
+    return names
 
 
 def _entry_told(entry: dict) -> dict:
     """A label printed as /api/history lists it."""
     told_from, detail = print_queue.SOURCES.get(entry.get('source'), ('', ''))
-    request_kind = entry.get('kind') == 'request'
-    asks = [ask for ask, asked in (('date', _dated(entry.get('data') or {})), ('asn', entry.get('asn') is not None)) if request_kind and asked]
+    request_kind, data = entry.get('kind') == 'request', entry.get('data') or {}
+    asks = [ask for ask, asked in (('date', _dated(data)), ('asn', entry.get('asn') is not None)) if request_kind and asked]
     return {'id': entry['id'], 'time': datetime.datetime.fromtimestamp(_printed_at(entry), datetime.UTC).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'title': entry.get('title') or 'Label', 'labels': entry.get('labels') or 1, 'from': told_from, 'from_detail': detail,
+            'title': entry.get('title') or 'Label', 'labels': entry.get('labels') or 1, 'copies': entry.get('copies') or 1,
+            'date_blanks': _date_blanks(data) if request_kind else [], 'from': told_from, 'from_detail': detail,
             'printer_name': entry.get('printer_name') or '', 'state': entry.get('state'), 'message': entry.get('message') or '',
             'preview': url_for('.history_preview', job_id=entry['id']) if print_store.preview_path(entry['id']) else None,
             'again': entry.get('kind') in ('request', 'image') and print_store.images_kept(entry), 'again_asks': asks, 'open': request_kind}
@@ -2351,15 +2361,29 @@ def history_print(job_id):
         return _fail(print_store.NO_IMAGE, 409)
     try:
         as_before = _whole_or(_requested('as_before'), 1) != 0
+        copies = _check_print_count(_whole_or(_requested('print_count'), entry.get('copies') or 1))
         images = [_read_image(print_store.image_path(job_id, number)) for number in range(entry.get('images', 0))]
         if entry['kind'] == 'image':
-            printer, recipe, images = _image_job_again(entry, images)
+            printer, recipe, images = _image_job_again(entry, images, copies)
+            data, title = {}, entry.get('title')
         else:
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
+            # Values of the request for its blanks, the others as printed
+            given = _blank_values(_requested('blanks'))
+            data['blanks'] = {**_blank_values(data.get('blanks')), **given}
             printer, data, high_res, fast = _stored_job(data)
+            collate = entry.get('collate', True)
+            order = _copies(list(range(len(images))) or [None], copies, collate)
+            if len(order) > current_app.config['PRINT_MAX_COUNT']:
+                raise ValueError(f"A print job must not have more than {current_app.config['PRINT_MAX_COUNT']} labels, "
+                                 f"{copies} copies would be {len(order)}")
+            if as_before and entry.get('asn') is not None and len(order) > len(entry['order']):
+                raise ValueError(refusals.SAME_NUMBERS)
             # Kept apart from the label: printed again, it asks again
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
-            recipe = {'kind': 'request', 'data': data, 'order': entry['order'], 'high_res': high_res, 'fast': fast, 'printed_for': printed_for}
+            recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
+                      'copies': copies, 'collate': collate}
+            title = None if given else entry.get('title')
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
@@ -2372,14 +2396,16 @@ def history_print(job_id):
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=entry.get('title') or 'Label', source=_job_source('api'),
-                   labels=entry.get('labels') or 1, recipe=recipe, images=images, drawn=drawn, return_format=_requested('return_format'))
+    # Named as before, unless the request names it or gives values of its own
+    title = _job_title(data, drawn) if _requested('title') is not None or not title else title
+    return _queued(printer, run=printer.process_queue, title=title, source=_job_source('api'), labels=len(printer.images()),
+                   recipe=recipe, images=images, drawn=drawn, return_format=_requested('return_format'))
 
 
-def _image_job_again(entry: dict, images: list) -> tuple[PrinterQueue, dict, list]:
-    """The labels of images alone of entry on the printer of the request, on
-    the label size they were made for, printed and cut as set for that
-    printer. With their recipe and images."""
+def _image_job_again(entry: dict, images: list, copies: int) -> tuple[PrinterQueue, dict, list]:
+    """copies of the labels of images alone of entry, as sets, on the printer
+    of the request, on the label size they were made for, printed and cut as
+    set for that printer. With their recipe and images."""
     device, model = _resolved_printer(_requested('printer'), _requested('model'))
     label_size = entry['printer']['label_size']
     if label_size_problem(label_size, model):
@@ -2392,11 +2418,13 @@ def _image_job_again(entry: dict, images: list) -> tuple[PrinterQueue, dict, lis
     printer.cut, printer.half_cut, printer.chain = _cutting(given.get)
     printer.leaves_first = _leaves_first(given.get('leaves_first'))
     # Made again at the resolution printed now, as the webhook made them
-    labels = [_image_label(images[shape['image']], label_size, LabelOrientation[shape['orientation']],
-                           IMAGE_MODE_OF[shape['content']], high_res=high_res) for shape in entry['shapes']]
-    for label in labels:
-        printer.add_label_to_queue(label, high_res=high_res, fast=fast)
-    return printer, _image_recipe(labels, high_res, fast), [label.image for label in labels]
+    made = [_image_label(images[shape['image']], label_size, LabelOrientation[shape['orientation']],
+                         IMAGE_MODE_OF[shape['content']], high_res=high_res) for shape in entry['shapes']]
+    order = _copies(list(range(len(made))), copies, True)
+    for i in order:
+        printer.add_label_to_queue(_image_label_of(made[i].shape, made[i].image), high_res=high_res, fast=fast)
+    recipe = {'kind': 'image', 'shapes': [dict(made[i].shape, image=i) for i in order], 'high_res': high_res, 'fast': fast, 'copies': copies}
+    return printer, recipe, [label.image for label in made]
 
 
 @bp.route('/api/history/clear', methods=['POST'])
