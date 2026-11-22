@@ -170,3 +170,34 @@ def test_a_printed_label_opens_in_the_editor_with_its_values(page, server):
     page.click('#setHist [data-open]')
     page.wait_for_selector('#field .ln')
     assert page.evaluate('() => [labelEditor.S.edit.design.text[0].text, labelEditor.S.edit.values.What]') == ['Jar {{blank:What}}', 'Beans']
+
+
+def open_label(page, text, fields, blanks=None):
+    """A label with blanks opened in the editor, as from a saved label."""
+    page.evaluate("""async ([text, fields, blanks]) => {
+        const core = await import('/static/designer/core.js'), editor = await import('/static/designer/editor.js');
+        const design = Object.assign(core.baseDesign('62'), { text: [core.L(text, 40)], fields }, blanks ? { blanks } : {});
+        editor.openEditor({ title: 'Jar', design, values: {}, origin: null });
+    }""", [text, fields, blanks])
+    page.wait_for_selector('#field .ln')
+    wait_for_preview(page)
+
+
+@pytest.mark.parametrize('blanks, fields, sent_blanks, asks', [
+    # Today, and 5 days from today, follow the day the server prints on
+    (None, {'Day': {'type': 'date'}}, {}, ['date']),
+    (None, {'Day': {'type': 'date', 'default': '+5d'}}, {}, ['date']),
+    ({'Day': '+5d'}, {'Day': {'type': 'date'}}, {'Day': '+5d'}, ['date']),
+    # A date of its own stays
+    ({'Day': '2026-11-03'}, {'Day': {'type': 'date'}}, {'Day': '2026-11-03'}, [])])
+def test_a_date_blank_printed_from_the_editor_follows_the_day(page, server, blanks, fields, sent_blanks, asks):
+    with page.expect_request(lambda r: r.url.endswith('/api/preview') and 'Opened' in (r.post_data or '')) as previewed:
+        open_label(page, 'Opened {{blank:Day}}', fields, blanks)
+    with page.expect_request('**/api/print') as request:
+        page.click('#print')
+    assert json.loads(sent(request.value)['blanks']) == sent_blanks
+    # The preview asks the same, so that both show the same day
+    assert json.loads(sent(previewed.value)['blanks']) == sent_blanks
+    page.wait_for_selector('#toast:has-text("Printed 1 label")')
+    with urlopen(server + '/labeldesigner/api/history?limit=1') as r:
+        assert json.load(r)['entries'][0]['again_asks'] == asks

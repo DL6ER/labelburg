@@ -331,7 +331,12 @@ export function blankRequest(design, values) {
         if (f.type === 'date' && !f.format && !S.settings.date_format) f.format = browserDateFormat();
         fields[name] = f;
         const v = values ? values[name] : undefined;
-        if (v !== undefined) blanks[name] = String(v);
+        if (v === undefined) continue;
+        // A date still at its start, e.g. today or 5 days from today, goes as
+        // that start: the server dates it when it prints, a print again asks
+        const saved = design.blanks || {};
+        if (f.type === 'date' && String(v) === startOf({ design }, name)) { if (name in saved) blanks[name] = String(saved[name]); }
+        else blanks[name] = String(v);
     }
     return { blanks, fields };
 }
@@ -543,7 +548,7 @@ export async function preview(design, values, copies = 1, perCopy = 0, total = 0
     }
     const shown = JSON.stringify(Object.assign({}, asked, { image: design.image ? imageKey(design.image) : null, more_images: undefined },
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
-    const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
+    const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && (!(name in blanks.blanks) || DATE_OFFSET_RE.test(blanks.blanks[name])));
     // Several printers can share a path, e.g. simulators of other models
     const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
         counted ? [copies, perCopy, total] : 0]);
