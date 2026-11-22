@@ -545,8 +545,10 @@ def get_ptr_status(config: Config, added=()):
                     hints.append(devices.unanswered_reason(e))
                 hints += [devices.shared_over_usbip(bus_id) for bus_id in shared]
                 for spec in found_usb:
-                    fields = devices.device_id_fields(devices.usb_device_id(spec))
-                    driver, model = drivers.resolve(spec, fields.get('MDL', 'Unknown'))
+                    device_id = devices.usb_device_id(spec)
+                    fields = devices.device_id_fields(device_id)
+                    # As its driver reads the model, e.g. TD-2350D (300 dpi)
+                    driver, model = drivers.resolve(spec, drivers.told_model(device_id) or 'Unknown')
                     # Only where its driver reaches it, a VC-500W only through usblp
                     if not any(pattern.fullmatch(spec) for pattern in driver.device_patterns):
                         continue

@@ -414,3 +414,37 @@ def test_labels_printed_through_the_api(clock, monkeypatch, tmp_path):
     assert written.count(b'\x00' * 350 + b'\x1b\x40' + ESC_I + b'\x61\x01' + ESC_I + b'\x21\x00') == 2
     assert written.count(ESC_I + b'\x7a\x8e\x0b\x66\x98\x92\x04\x00\x00\x00\x00') == 2
     assert written.count(b'\x1a' + ESC_I + b'\x61\xff') == 2 and written.endswith(b'\x1a' + ESC_I + b'\x61\xff')
+
+
+class _Answering:
+    """A TD printer on USB that answers ESC i S with its status."""
+
+    def __init__(self, status):
+        self.status, self.unread = status, b''
+
+    def write(self, data):
+        if data.endswith(ESC_I + b'\x53'):
+            self.unread += self.status
+
+    def read(self, length=32):
+        data, self.unread = self.unread[:length], self.unread[length:]
+        return data
+
+    def dispose(self):
+        pass
+
+
+@pytest.mark.parametrize('device_id', ['MFG:Brother;CMD:XPP;MDL:TD-2350D (300 dpi);', 'MFG:Brother;MDL:TD-2350D;'])
+def test_found_on_usb_by_the_model_its_device_id_names(tmp_path, monkeypatch, device_id):
+    # Also where it names no raster commands and its model with the resolution
+    from app.labeldesigner import printer as printer_module
+    device = 'usb://0x04f9:0x2111/000A1B2C3D4E'
+    monkeypatch.setattr(devices, 'usb_device_id', lambda spec, connect=True: device_id if spec == device else '')
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([device], []))
+    monkeypatch.setattr(printer_module, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(usb, 'get_printer', lambda spec: _Answering(td_status(0x63, 58)))
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert [(p['path'], p['model']) for p in found][0] == (device, 'TD-2350D-300')
+    assert found[0]['tape']['id'] == 'td23-300-58'
