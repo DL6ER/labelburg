@@ -20,6 +20,9 @@ def only_this_host(monkeypatch):
     connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
 
     def elsewhere(sock, address):
+        # Nor to printers on Bluetooth, the tests fake them
+        if sock.family == getattr(socket, 'AF_BLUETOOTH', None):
+            return True
         if sock.family not in (socket.AF_INET, socket.AF_INET6):
             return False
         try:
@@ -77,6 +80,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
+    monkeypatch.setattr(devices, '_unanswered', {})
 
 
 @pytest.fixture(autouse=True)
