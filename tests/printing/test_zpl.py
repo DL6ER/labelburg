@@ -476,7 +476,7 @@ def test_label_length_at_300_dpi():
     from types import SimpleNamespace
     from PIL import Image
     label = SimpleNamespace(label_content=None, generate=lambda: Image.new('1', (1205, 1795), 1))
-    job = zpl.DRIVER.render(SimpleNamespace(label_size='zpl300-102x152'), [{'label': label, 'cut': True}])
+    job = zpl.DRIVER.render(SimpleNamespace(label_size='zpl300-102x152', sensing=None), [{'label': label, 'cut': True}])
     assert zpl.DRIVER.label_lengths(job) == [pytest.approx(152, abs=0.1)]
 
 
@@ -532,3 +532,22 @@ def test_printer_of_600_dpi_is_left_to_be_configured(client, monkeypatch):
     found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert [p['path'] for p in found] == ['simulation']
     assert zpl.DRIVER.model_of('usb://0x0a5f:0x0120/ZT610') is None
+
+
+@pytest.mark.parametrize('sensing, command', [('gap', b'^MNY\n'), ('mark', b'^MNM\n'), ('endless', b'^MNN\n'), (None, b'')])
+def test_how_the_printer_finds_the_labels(sensing, command):
+    # Not set, the printer finds them as it is set up
+    assert protocol.label([b'\x80\x00', b'\x00\x01'], 2, sensing) == (
+        b'^XA\n' + command + b'^PW16\n^LL2\n^FO0,0^GFA,4,4,2,80000001\n^XZ\n')
+
+
+@pytest.mark.parametrize('sensing, command', [('mark', b'^MNM\n'), ('endless', b'^MNN\n'), ('gap', b'^MNY\n')])
+def test_each_label_tells_how_the_printer_finds_them_as_set_for_it(tmp_path, sent, sensing, command):
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer=DEVICE)
+    assert client.post('/labeldesigner/api/settings', data={'sensing': sensing}).status_code == 200
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl57x32', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    assert outcome(client, response) == ('printed', '')
+    (_, data), = sent
+    assert data.count(b'^XA\n' + command + b'^PW456\n^LL256\n') == 2
+    job = [(label, 203) for label in data.split(b'^XZ\n')[:-1]]
+    assert zpl.DRIVER.label_lengths(job) == [32, 32]

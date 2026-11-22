@@ -147,6 +147,15 @@ function qualityHTML(p) {
     return `<div class="set-stack">${seg('quality', opts, on, 'Quality')}<small class="muted">${esc(about)} The same for all printers.</small></div>`;
 }
 
+// How the printer finds the start of each label, for printers whose driver tells them
+const SENSINGS = [['gap', 'Labels with gaps'], ['mark', 'Labels with black marks on the back'], ['endless', 'Continuous roll']];
+
+function sensingHTML(p) {
+    const on = kept(p).sensing || 'gap';
+    const about = on === 'endless' ? 'Each label is as long as the tape chosen above.' : 'How the printer finds where each label starts.';
+    return `<div class="set-stack">${seg('sensing', SENSINGS, on, 'Roll')}<small class="muted">${esc(about)}</small></div>`;
+}
+
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
     if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
@@ -179,6 +188,7 @@ function cardHTML(p, i) {
         <div class="set-grid">
             ${isDemo(p) ? `<span class="k">Model</span>${modelHTML(p)}` : ''}
             <span class="k">Tape</span>${tapeHTML(p)}
+            ${capsOf(p.model).sensing ? `<span class="k">Roll</span>${sensingHTML(p)}` : ''}
             <span class="k">Quality</span>${qualityHTML(p)}
             <span class="k">Cutting</span>${cuttingHTML(p)}
             <span class="k">Leaves first</span><div class="set-stack">${seg('leaves_first', [['top', 'Top'], ['bottom', 'Bottom']], leavesFirst(printerCaps(p), p), 'Leaves the printer first')}

@@ -1,6 +1,7 @@
 """Label printers on ZPL (protocol.py), e.g. a Zebra GK420t or a
 Datamax-O'Neil E-4204B with its ZPL emulation, tested on both. Die-cut
-labels, which the printer finds by their gaps, torn off. The label is sent
+labels, which the printer finds by their gaps or by black marks on their
+back, or a continuous roll, as set for it, torn off. The label is sent
 as an image. The printer is asked for its status with ~HS: its errors and
 the length of the labels it measured, which picks their size where labels
 of a single width have that length."""
@@ -151,7 +152,7 @@ class Zpl(Driver):
     def capabilities(self, model):
         # The labels are torn off, their top leaves it first
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
-                    model_shown=self.shown_as.get(model, model).split('/')[-1])
+                    model_shown=self.shown_as.get(model, model).split('/')[-1], sensing=True)
 
     def device_name(self, device):
         # Zebra's models start with ZTC, Zebra Technologies Corporation
@@ -217,7 +218,7 @@ class Zpl(Driver):
             img, rows, width = label_rows(entry['label'], queue.label_size)
             if keep:
                 keep(img, f'zpl_{i}')
-            job.append((protocol.label(rows, width), dpi))
+            job.append((protocol.label(rows, width, queue.sensing), dpi))
         return job
 
     def send(self, queue, job) -> str:

@@ -1067,7 +1067,7 @@
     "/labeldesigner/api/settings": {
       "get": {
         "summary": "Settings of a printer",
-        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting and which end of the labels leaves first of the printer, the quality of all printers. Print requests and previews take what they leave out from them. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A setting not made is left out.",
+        "description": "The settings made in the printer settings of the label designer, kept on the server for every browser: the label size set by hand, the cutting, which end of the labels leaves first and how it finds its labels of the printer, the quality of all printers. Print requests and previews take what they leave out from them. A label size left out is that of the tape the printer reports, else the one set in its printer settings, else `LABEL_DEFAULT_SIZE`. A setting not made is left out.",
         "operationId": "getSettings",
         "parameters": [
           {
@@ -3480,6 +3480,11 @@
             "type": "string",
             "enum": ["top", "bottom"],
             "description": "The end of the labels that leaves the printer first, else as the driver prints them."
+          },
+          "sensing": {
+            "type": "string",
+            "enum": ["gap", "mark", "endless"],
+            "description": "How the printer finds the start of each label: by the gaps between them, by black marks on their back, or not at all on a continuous roll. Only of ZPL printers, the others find their labels by themselves and refuse it. Not set, the printer finds them as it is set up."
           },
           "quality": {
             "type": "string",

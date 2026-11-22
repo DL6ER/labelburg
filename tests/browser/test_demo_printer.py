@@ -8,7 +8,7 @@ import pytest
 from app.labeldesigner import drivers, printer_settings, tape
 from app.labeldesigner.drivers import MODELS
 from tests.browser.test_editor import sent, type_label, wait_for_preview
-from tests.browser.test_settings import back_to_the_editor, open_settings
+from tests.browser.test_settings import back_to_the_editor, open_settings, setting
 
 MODEL = '[data-card="0"] select[data-k="demo_model"]'
 
@@ -109,3 +109,26 @@ def test_a_model_the_server_refuses_is_taken_back(designer):
     designer.wait_for_selector('#toast:has-text("Not now")')
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.evaluate('() => labelEditor.S.printers[0].model') == 'QL-800'
+
+
+def test_a_zpl_printer_is_told_how_it_finds_its_labels(designer):
+    choice = '[data-card="0"] button[data-k="sensing"]'
+    open_settings(designer)
+    # A QL printer finds them by itself
+    assert designer.query_selector(choice) is None
+    with designer.expect_response('**/api/settings'):
+        designer.select_option(MODEL, 'Zebra/ZPL')
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Zebra/ZPL'")
+    designer.wait_for_selector(choice)
+    assert designer.eval_on_selector_all(choice, 'bs => bs.map(b => b.textContent)') == [
+        'Labels with gaps', 'Labels with black marks on the back', 'Continuous roll']
+    assert designer.inner_text(f'{choice}.on') == 'Labels with gaps'
+    assert 'How the printer finds where each label starts.' in designer.inner_text('[data-card="0"]')
+    assert setting(designer, f'{choice}[data-v="mark"]') == {'printer': 'simulation', 'model': 'Zebra/ZPL', 'sensing': 'mark'}
+    assert designer.inner_text(f'{choice}.on') == 'Labels with black marks on the back'
+    setting(designer, f'{choice}[data-v="endless"]')
+    assert 'Each label is as long as the tape chosen above.' in designer.inner_text('[data-card="0"]')
+    # Kept on the server, another visit shows it
+    designer.reload()
+    open_settings(designer)
+    assert designer.inner_text(f'{choice}.on') == 'Continuous roll'

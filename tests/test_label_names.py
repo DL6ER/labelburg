@@ -92,18 +92,22 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert set(models) == set(drivers.MODELS)
     assert models['QL-800'] == {'qualities': ['fast', 'quality', 'high'], 'high_res': True, 'cutter': True, 'manual_cutter': False,
                                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': 'red',
-                                'never_cut': '', 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False}
+                                'never_cut': '', 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False,
+                                'sensing': False}
     assert (models['QL-1100']['high_res'], models['PT-P700']['half_cut'], models['PT-P700']['chain']) == (False, False, True)
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                                  'half_cut': True, 'chain': False, 'feed_waste': False, 'colors': 'color',
-                                 'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False}
+                                 'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False,
+                                 'sensing': False}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
     assert models['PUQU/Q00']['cutter'] is False and models['PUQU/Q00']['leaves_turned'] is True
     assert (models['PUQU/Q00']['manual_cutter'], models['QL-500']['cutter'], models['QL-500']['manual_cutter']) == (False, False, True)
     assert {model for model, caps in models.items() if not caps['cutter']} == {'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'Zebra/ZPL', 'Zebra/ZPL-300'}
     assert models['Zebra/ZPL']['leaves_turned'] is True
+    # Told how they find their labels, the others find them by themselves
+    assert {model for model, caps in models.items() if caps['sensing']} == {'Zebra/ZPL', 'Zebra/ZPL-300'}
     assert models['PUQU/Q00']['vendor'] == 'PUQU'
 
 

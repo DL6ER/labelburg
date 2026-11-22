@@ -133,3 +133,14 @@ def test_a_configured_name_names_the_demo_printer(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['PRINTERS'] = [('QL-1100', 'simulation', 'Try-out')]
     assert demo(client)['name'] == 'Try-out'
+
+
+def test_a_new_model_keeps_how_it_finds_its_labels_where_it_is_told(tmp_path):
+    client = make_client(tmp_path, empty_repo=True, model='QL-800')
+    client.post(URL, data={'printer': 'simulation', 'demo_model': 'Zebra/ZPL'})
+    assert client.post(URL, data={'printer': 'simulation', 'sensing': 'mark'}).status_code == 200
+    r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'Zebra/ZPL-300'})
+    assert r.get_json()['settings']['sensing'] == 'mark'
+    # A QL printer finds its labels by itself
+    r = client.post(URL, data={'printer': 'simulation', 'demo_model': 'QL-1100'})
+    assert 'sensing' not in r.get_json()['settings']

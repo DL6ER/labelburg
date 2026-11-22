@@ -18,13 +18,18 @@ HOST_STATUS = b'~HS'
 # A label goes to a printer on PyUSB in pieces: PyUSB gives up on a single
 # write after 15 s
 WRITE_CHUNK = 16384
+# Media tracking by diecut.SENSINGS: by the gaps between labels, by black
+# marks, none on a continuous roll
+MEDIA_TRACKING = {'gap': '^MNY\n', 'mark': '^MNM\n', 'endless': '^MNN\n'}
 
 
-def label(rows: list[bytes], width: int) -> bytes:
+def label(rows: list[bytes], width: int, sensing: str | None = None) -> bytes:
     """One label of rows of packed dots, width bytes each, MSB left, 1
-    printed: as wide and long as its image, which starts at its top left."""
+    printed: as wide and long as its image, which starts at its top left.
+    sensing tells the printer how it finds the labels, see diecut.SENSINGS,
+    None leaves it as the printer is set up."""
     data = b''.join(rows)
-    return (f'^XA\n^PW{width * 8}\n^LL{len(rows)}\n'
+    return (f'^XA\n{MEDIA_TRACKING.get(sensing, "")}^PW{width * 8}\n^LL{len(rows)}\n'
             f'^FO0,0^GFA,{len(data)},{len(data)},{width},{data.hex().upper()}\n^XZ\n').encode()
 
 

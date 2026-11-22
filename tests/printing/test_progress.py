@@ -224,7 +224,7 @@ def test_label_length_of_a_zpl_printer():
     # 150 mm along the paper at 8 dots per mm
     label = SimpleNamespace(label_type=LabelType.DIE_CUT_LABEL, label_orientation=LabelOrientation.STANDARD,
                             label_content=LabelContent.IMAGE_BW, generate=lambda: Image.new('1', (800, 1200), 1))
-    queue = SimpleNamespace(model='Zebra/ZPL', label_size='zpl100x150', cut='each')
+    queue = SimpleNamespace(model='Zebra/ZPL', label_size='zpl100x150', cut='each', sensing=None)
     driver = drivers.for_model('Zebra/ZPL')
     assert driver.label_lengths(driver.render(queue, [{'label': label, 'cut': True}])) == [pytest.approx(150)]
 

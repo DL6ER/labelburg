@@ -1539,10 +1539,12 @@ def get_printer_status():
 
 def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
     """A print queue for the printer, resolved before, its labels moved as
-    it is calibrated."""
+    it is calibrated and found as set for it."""
     queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
-    calibration = printer_settings.calibration_of(_kept_settings(), device)
+    kept = _kept_settings()
+    calibration = printer_settings.calibration_of(kept, device)
     queue.offset = (calibration['across'], calibration['along'])
+    queue.sensing = printer_settings.of_printer(kept, device).get('sensing')
     return queue
 
 

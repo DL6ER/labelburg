@@ -1,6 +1,6 @@
 """The settings made in the printer settings of the label designer: the
-label size set by hand, the cutting, which end of the labels leaves first
-and the quality. They are kept on the
+label size set by hand, the cutting, which end of the labels leaves first,
+how the printer finds its labels and the quality. They are kept on the
 server, so that every browser, the API and the MCP tools use the same: a
 print request takes what it leaves out from them. The roll is in the
 printer, its settings belong to it rather than to a browser. The settings
@@ -16,6 +16,7 @@ import re
 
 from .drivers import MODELS, devices, for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
+from .drivers.diecut import SENSINGS
 from .label_names import check_cut, check_label_size
 from .tape import assumed_size, hand_set
 
@@ -24,7 +25,7 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
 ENDS = ('top', 'bottom')
@@ -39,9 +40,11 @@ NAMED_BY = {'cut': ('cut', 'cut_once'), 'half_cut': ('cut', 'cut_once', 'half_cu
 DEMO_MODEL = 'demo_model'
 DEMO = 'simulation'
 
-SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1) and '
-                    'leaves_first (top or bottom) of a printer, demo_model (a supported model) of the demo printer '
-                    'simulation, and quality (quality, high or fast), an empty value removes one')
+SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1), '
+                    'leaves_first (top or bottom) and sensing (gap, mark or endless) of a printer, demo_model (a supported '
+                    'model) of the demo printer simulation, and quality (quality, high or fast), an empty value removes one')
+# Of a printer that is not told how it finds its labels, see Driver.capabilities()
+NO_SENSING = 'This printer finds the start of each label by itself'
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # The printers added in the Settings, each with its address, model and name
 ADDED = 'added'
@@ -170,6 +173,11 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
         elif name == 'leaves_first':
             if value not in ENDS:
                 raise ValueError(SETTINGS_MESSAGE)
+        elif name == 'sensing':
+            if value not in SENSINGS:
+                raise ValueError(SETTINGS_MESSAGE)
+            if not for_model(model).capabilities(model)['sensing']:
+                raise ValueError(NO_SENSING)
         elif value not in QUALITIES:
             raise ValueError(SETTINGS_MESSAGE)
     return changes
@@ -211,13 +219,16 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
     """data with the printer set to a tape of its model, e.g. after another
     model was chosen for the demo printer: the one kept if the model takes
     it or its paper, else the one it is assumed to have, see
-    tape.assumed_size(). A cutting the model cannot do is left out."""
+    tape.assumed_size(). A cutting the model cannot do is left out, as how
+    the printer finds its labels where the model is not told."""
     printer = _key(data, device)
     own = data['printers'].get(printer)
     own = dict(own) if isinstance(own, dict) else {}
     own['label_size'] = hand_set(own.get('label_size', ''), model) or assumed_size(model, default_size)
     if own.get('cut') and for_model(model).cut_problem(own['cut'], model):
         own.pop('cut')
+    if not for_model(model).capabilities(model)['sensing']:
+        own.pop('sensing', None)
     data['printers'][printer] = own
     return data
 
@@ -225,10 +236,11 @@ def fitted(data: dict, device: str, model: str, default_size: str) -> dict:
 def for_printing(kept: dict, model: str, values: dict) -> dict:
     """values of a print request, what it leaves out as set for the printer
     in kept, its settings as of_printer() gives them: 600 dpi and fast
-    printing only where the model prints them."""
+    printing only where the model prints them. How the printer finds its
+    labels goes to the job, see PrinterQueue.sensing."""
     def named(name):
         return any(values.get(k) not in (None, '') for k in NAMED_BY.get(name, (name,)))
-    taken = {name: kept[name] for name in OWN if name in kept and not named(name)}
+    taken = {name: kept[name] for name in OWN if name in kept and name != 'sensing' and not named(name)}
     if 'quality' in kept and not named('quality'):
         caps = for_model(model).capabilities(model)
         taken['high_res'] = '1' if kept['quality'] == 'high' and caps['high_res'] else '0'
