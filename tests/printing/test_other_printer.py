@@ -190,40 +190,84 @@ def pages(document: bytes) -> list[tuple[bytes, list[bytes]]]:
 # --- PWG raster ------------------------------------------------------------------
 
 
+def numbers(*values: int) -> bytes:
+    """Integers and unsigned integers of 32 bits, most significant octet first
+    (4.1, 4.3.1.6, 4.3.1.12)."""
+    return b''.join(value.to_bytes(4, 'big', signed=True) for value in values)
+
+
+def cstring(text: bytes = b'') -> bytes:
+    """A CString: up to 63 characters, then NUL to 64 octets (4.3.1.2)."""
+    return text.ljust(64, b'\0')
+
+
+def table_1(bits: int, per_line: int, color_space: int) -> list[tuple[int, int, str, bytes]]:
+    """A page header as PWG 5102.4 Table 1 lists its fields, row by row: the
+    first and last byte, the name and the value of a page of 816 x 1216
+    dots at 203 dpi on 4 x 6 in labels, of a document of two pages."""
+    return [
+        (0, 63, 'PwgRaster', cstring(b'PwgRaster')),  # 4.3.2.1
+        (64, 127, 'MediaColor', cstring()),
+        (128, 191, 'MediaType', cstring()),
+        (192, 255, 'PrintContentOptimize', cstring()),
+        (256, 267, 'Reserved', bytes(12)),  # 4.3.1.10: 0
+        (268, 271, 'CutMedia', numbers(0)),
+        (272, 275, 'Duplex', numbers(0)),
+        (276, 283, 'HWResolution', numbers(203, 203)),  # 4.3.2.2: cross-feed, feed
+        (284, 299, 'Reserved', bytes(16)),
+        (300, 303, 'InsertSheet', numbers(0)),
+        (304, 307, 'Jog', numbers(0)),
+        (308, 311, 'LeadingEdge', numbers(0)),
+        (312, 323, 'Reserved', bytes(12)),
+        (324, 327, 'MediaPosition', numbers(0)),
+        (328, 331, 'MediaWeightMetric', numbers(0)),
+        (332, 339, 'Reserved', bytes(8)),
+        (340, 343, 'NumCopies', numbers(0)),  # 4.3.3.9: 0 for the default
+        (344, 347, 'Orientation', numbers(0)),
+        (348, 351, 'Reserved', bytes(4)),
+        (352, 359, 'PageSize', numbers(288, 432)),  # 4.3.3.11: in points
+        (360, 367, 'Reserved', bytes(8)),
+        (368, 371, 'Tumble', numbers(0)),
+        (372, 375, 'Width', numbers(816)),  # 4.3.2.4
+        (376, 379, 'Height', numbers(1216)),
+        (380, 383, 'Reserved', bytes(4)),
+        (384, 387, 'BitsPerColor', numbers(bits)),  # 4.3.2.5, Table 12
+        (388, 391, 'BitsPerPixel', numbers(bits)),
+        (392, 395, 'BytesPerLine', numbers(per_line)),  # 4.3.2.6
+        (396, 399, 'ColorOrder', numbers(0)),  # Table 2: chunky
+        (400, 403, 'ColorSpace', numbers(color_space)),  # Table 3
+        (404, 419, 'Reserved', bytes(16)),
+        (420, 423, 'NumColors', numbers(1)),
+        (424, 451, 'Reserved', bytes(28)),
+        (452, 455, 'TotalPageCount', numbers(2)),  # 4.3.2.7
+        (456, 459, 'CrossFeedTransform', numbers(1)),  # 4.3.2.8, Table 9: a front side
+        (460, 463, 'FeedTransform', numbers(1)),
+        (464, 467, 'ImageBoxLeft', numbers(0)),  # 4.3.2.9: all of the page
+        (468, 471, 'ImageBoxTop', numbers(0)),
+        (472, 475, 'ImageBoxRight', numbers(816)),
+        (476, 479, 'ImageBoxBottom', numbers(1216)),
+        (480, 483, 'AlternatePrimary', numbers(0)),  # 4.3.2.10: black
+        (484, 487, 'PrintQuality', numbers(0)),  # Table 7: the default
+        (488, 507, 'Reserved', bytes(20)),
+        (508, 511, 'VendorIdentifier', numbers(0)),  # 4.3.2.11: not used
+        (512, 515, 'VendorLength', numbers(0)),
+        (516, 1603, 'VendorData', bytes(1088)),
+        (1604, 1667, 'Reserved', bytes(64)),
+        (1668, 1731, 'RenderingIntent', cstring()),
+        (1732, 1795, 'PageSizeName', cstring(b'custom_101.6x152.4mm_101.6x152.4mm')),  # 4.3.3.11, PWG 5101.1
+    ]
+
+
 @pytest.mark.parametrize('raster_type, bits, per_line, color_space', [
-    # Table 12: sgray_8 of 8 bits, ColorSpace 18 (Table 3); black_1 of 1 bit, ColorSpace 3
+    # Table 12: sgray_8 of 8 bits, ColorSpace 18; black_1 of 1 bit, ColorSpace 3
     ('sgray_8', 8, 816, 18), ('black_1', 1, 102, 3),
 ])
 def test_page_header_as_pwg_5102_4_lays_it_out(raster_type, bits, per_line, color_space):
-    header = documents.page_header(816, 1216, 203, (10160, 15240), 2, raster_type)
-    expected = bytearray(1796)
-
-    def fields(offset: int, *numbers: int):
-        expected[offset:offset + 4 * len(numbers)] = b''.join(number.to_bytes(4, 'big') for number in numbers)
-    # 4.3.2.1 PwgRaster, bytes 0-63: "PwgRaster" padded with NUL as a CString (4.3.1.2)
-    expected[0:64] = b'PwgRaster'.ljust(64, b'\0')
-    # 4.3.2.2 HWResolution, bytes 276-283: cross-feed and feed resolution in dpi
-    fields(276, 203, 203)
-    # 4.3.3.11 PageSize, bytes 352-359: width and length in points, 4 x 6 in
-    fields(352, 288, 432)
-    # 4.3.2.4 Width and Height, bytes 372-379, in dots of HWResolution
-    fields(372, 816, 1216)
-    # 4.3.2.5 with Table 12: BitsPerColor and BitsPerPixel (384-391); 4.3.2.6
-    # BytesPerLine (392-395), (BitsPerPixel * 816 + 7) / 8; Table 2
-    # ColorOrder 0, chunky (396-399); ColorSpace (400-403)
-    fields(384, bits, bits, per_line, 0, color_space)
-    # 4.3.2.5 NumColors 1 (420-423)
-    fields(420, 1)
-    # 4.3.2.7 TotalPageCount (452-455); 4.3.2.8 CrossFeedTransform and
-    # FeedTransform (456-463) 1, as on a front side (Table 9)
-    fields(452, 2, 1, 1)
-    # 4.3.2.9 ImageBoxLeft, ImageBoxTop, ImageBoxRight, ImageBoxBottom (464-479): all of the page
-    fields(464, 0, 0, 816, 1216)
-    # 4.3.3.11 PageSizeName (1732-1795), a size name of PWG 5101.1
-    expected[1732:1796] = b'custom_101.6x152.4mm_101.6x152.4mm'.ljust(64, b'\0')
-    # All others 0: the reserved fields, as 4.3 asks, and CutMedia,
-    # NumCopies, Orientation, PrintQuality and the like as the printer sets them
-    assert header == bytes(expected)
+    rows = table_1(bits, per_line, color_space)
+    # The rows of the table follow each other over all 1796 octets (4.3)
+    assert [first for first, _, _, _ in rows] == [0] + [last + 1 for _, last, _, _ in rows[:-1]] and rows[-1][1] == 1795
+    assert all(len(value) == last - first + 1 for first, last, _, value in rows)
+    assert documents.page_header(816, 1216, 203, (10160, 15240), 2, raster_type) == b''.join(value for *_, value in rows)
 
 
 def test_page_of_one_bit_as_pwg_5102_4_compresses_it():
