@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, printer_settings, problem_report, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -1509,6 +1509,13 @@ def get_printer_status():
     else:
         status = get_ptr_status(current_app.config, added)
         told = [status] + status.get('printers', [])
+    _described(told)
+    return status
+
+
+def _described(told: list[dict]):
+    """Adds what the server keeps and knows of each printer to its status:
+    its settings, the tape it prints on, its queue and job."""
     kept = _kept_settings()
     demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors
@@ -1534,7 +1541,16 @@ def get_printer_status():
         job = progress.state(printer['path']) if printer.get('path') else None
         if job:
             printer['job'] = dict(printer.get('job') or {}, **job)
-    return status
+
+
+@bp.route('/api/problem_report', methods=['GET'])
+def problem_report_route():
+    """The details a problem report needs and the bug form on GitHub with
+    them filled in. Nothing is sent from here, the user opens the form."""
+    printers = get_ptr_status(current_app.config, _added_printers()).get('printers', [])
+    _described(printers)
+    details = problem_report.details(current_app.extensions['build'], printers)
+    return jsonify({'details': details, 'text': problem_report.text(details), 'url': problem_report.url(details)})
 
 
 def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
