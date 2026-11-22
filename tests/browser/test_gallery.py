@@ -11,7 +11,9 @@ import pytest
 from PIL import Image
 
 from tests.browser.helpers import png
+from tests.browser.test_demo_printer import MODEL, designer  # noqa: F401
 from tests.browser.test_editor import changed_preview, editor, sent, type_label, wait_for_preview  # noqa: F401
+from tests.browser.test_settings import back_to_the_editor, open_settings
 
 
 def save_new(page, name, *lines):
@@ -28,6 +30,34 @@ def open_saved(page, title):
     page.click('.tpl-nav [data-cat="saved"]')
     page.click(f'.thumb:has-text("{title}")')
     page.wait_for_selector('#tplPrint')
+
+
+def shown_width(page, group):
+    """The width of the Templates showing the group, once the thumbnails in
+    sight are drawn."""
+    page.click(f'.tpl-nav [data-cat="{group}"]')
+    page.wait_for_selector(f'.tpl-nav [data-cat="{group}"].on')
+    page.wait_for_function("""() => { const g = document.querySelector('.tpl-grid').getBoundingClientRect();
+        return [...document.querySelectorAll('.tpl-grid .thumb img')].filter(i => i.getBoundingClientRect().top < g.bottom)
+            .every(i => i.complete && i.naturalWidth > 0); }""")
+    return page.evaluate("() => document.querySelector('.dialog.tpl').getBoundingClientRect().width")
+
+
+def test_the_templates_keep_their_width_for_every_group_and_tape(designer):  # noqa: F811
+    # As wide as set, whatever the size of the thumbnails shown
+    widths = set()
+    for model, size in (('QL-800', '62'), ('Niimbot/B1', 'niimbot50x30')):
+        if model != 'QL-800':
+            open_settings(designer)
+            designer.select_option(MODEL, model)
+            designer.wait_for_function('m => labelEditor.S.printers[0].model === m', arg=model)
+            designer.select_option('[data-card="0"] select[data-k="label_size"]', size)
+            back_to_the_editor(designer)
+        designer.wait_for_function('t => labelEditor.S.tape === t', arg=size)
+        designer.click('#templates')
+        widths |= {shown_width(designer, group) for group in ('all', 'workshop', 'kitchen', 'office', 'saved')}
+        designer.click('.dialog [data-close]')
+    assert widths == {1060}
 
 
 def test_templates_replace_the_wizard(editor):  # noqa: F811
