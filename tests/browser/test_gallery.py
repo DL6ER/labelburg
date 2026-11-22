@@ -145,6 +145,11 @@ def test_use_from_anywhere_and_the_links_to_the_gallery(editor, server):  # noqa
     link = editor.input_value('#tplLink')
     assert link.endswith(f'/labeldesigner/#fill/{name}?What=Chili')
     editor.wait_for_function("() => document.querySelector('#tplSticker').src.startsWith('blob:')")
+    # Named, its first line says nothing of it
+    with editor.expect_request('**/api/print') as request:
+        editor.click('#tplPrintSticker')
+    assert sent(request.value)['title'] == 'Gallery box sticker'
+    editor.wait_for_selector('#toast:has-text("Printed the sticker")')
     # The link opens the label in the gallery, its blank filled in
     editor.goto(f'{server}/labeldesigner/#fill/{name}?What=Beans')
     editor.wait_for_selector('#tplFields [data-blank="What"]')

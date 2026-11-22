@@ -422,3 +422,11 @@ def test_the_date_is_asked_for_only_where_it_comes_out_otherwise_today(client):
     assert asks('{{datetime:%H:%M}}', days=1 / 1440) == ['date']
     # Neither a date nor a time
     assert asks('Jar', days=1) == []
+
+
+def test_a_label_without_text_is_named_by_its_code_else_by_the_name_of_its_picture(client):
+    from tests.helpers import _pdf
+    code = printed(client, data=dict(LABEL, print_type='qrcode_text', text=lines(''), code_text='Shelf {{blank:No}}', blanks=json.dumps({'No': '7'})))
+    picture = printed(client, data=dict(LABEL, print_type='image', text='[]', image=(io.BytesIO(png()), 'cat.jpg')), content_type='multipart/form-data')
+    pdf = printed(client, data=dict(LABEL, print_type='image', text='[]', image=(io.BytesIO(_pdf((100, 50))), 'manual.pdf')), content_type='multipart/form-data')
+    assert [entry(client, job)['title'] for job in (code, picture, pdf)] == ['Shelf 7', 'cat', 'manual']

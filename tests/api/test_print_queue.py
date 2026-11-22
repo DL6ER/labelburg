@@ -168,10 +168,13 @@ def test_the_title_of_a_job(client, tmp_path, monkeypatch):
     assert title('print', data=dict(EXAMPLE_FORMDATA, text=lines, title='x' * 300)) == 'x' * 200
     assert title('print', data=dict(EXAMPLE_FORMDATA, text=lines)) == 'Spices'
     assert title('print', data=EXAMPLE_FORMDATA) == 'Label'
-    # A saved label without text by the name it is saved under
-    for saved, name in (({'name': 'Rack', 'title': 'Gewürzregal'}, 'Gewürzregal'), ({'name': 'Shelf'}, 'Shelf')):
-        assert client.post(f'{API}/repository/save', json={
-            **saved, 'label_size': '62', 'print_type': 'qrcode', 'code_text': 'x', 'text': []}).status_code == 200
+    # A saved label without text by its code as printed, one of a picture alone by the name it is saved under
+    picture = io.BytesIO()
+    Image.new('L', (40, 20), 0).save(picture, 'PNG')
+    picture = {'print_type': 'image', 'image_data': base64.b64encode(picture.getvalue()).decode(), 'image_mime': 'image/png'}
+    for saved, name in (({'name': 'Rack', 'title': 'Gewürzregal', 'print_type': 'qrcode', 'code_text': 'x'}, 'x'),
+                        ({'name': 'Rack2', 'title': 'Gewürzregal', **picture}, 'Gewürzregal'), ({'name': 'Shelf', **picture}, 'Shelf')):
+        assert client.post(f'{API}/repository/save', json={**saved, 'label_size': '62', 'text': []}).status_code == 200
         assert title('repository/print', json={'name': f'{saved["name"]}.json'}) == name
     assert title('repository/print', json={'name': 'Shelf.json', 'title': 'Pantry'}) == 'Pantry'
 

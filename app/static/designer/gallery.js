@@ -391,7 +391,7 @@ function linksPanel(item, design) {
         try { await navigator.clipboard.writeText($('#tplLink').value); toast('Link copied'); } catch (e) { $('#tplLink').select(); toast('Press Ctrl C to copy'); }
     };
     $('#tplPrintSticker').onclick = async () => {
-        const entry = await printJob({ title: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
+        const entry = await printJob({ title: item.title + ' sticker', name: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
         if (!untold(entry)) toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT[entry.state]}: ${entry.message}`);
     };
 }

@@ -1149,16 +1149,19 @@ def _as_in_this_request(call):
     return called
 
 
-def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label') -> str:
+def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', upload: str | None = None) -> str:
     """The title of a print job in the queue: the one of the request, else
     the first line of the first label as printer.check() drew it, its icons
-    left out, else the name it is saved under, else fallback."""
+    left out, else its code as printed, else the name of the file of its
+    picture (upload), else the name it is saved under, else fallback."""
     lines = [line for item in (drawn.label.text or [] if drawn else []) if isinstance(item, dict)
              for line in str(item.get('text', '')).splitlines()]
     # Icons are drawn with fonts of their own, a title shows them as boxes
     lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
+    code = getattr(drawn.label, 'code_text', '') if drawn else ''
     name = data.get('name')
-    for title in (_requested('title'), *lines, data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
+    for title in (_requested('title'), *lines, *str(code or '').splitlines()[:1], os.path.splitext(os.path.basename(upload or ''))[0],
+                  data.get('title'), name.removesuffix('.json') if isinstance(name, str) else None):
         if isinstance(title, str) and (title := ' '.join(title.split())):
             return title[:MAX_TITLE_LENGTH]
     return fallback
@@ -1411,7 +1414,9 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
     except Exception as e:
         print_store.discard(job_id, staged)
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
+    uploads = files.getlist('image') if hasattr(files, 'getlist') else []
+    title = _job_title(data, drawn, upload=uploads[0].filename if uploads else None)
+    return _queued(printer, run=printer.process_queue, title=title, source=_job_source('api'), labels=len(order),
                    recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast, 'named': named,
                            'copies': print_count, 'collate': collate, 'sizes': [size for _, size in kept], 'dates': _dates_set()},
                    images=[copy for copy, _ in kept], drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
@@ -3592,7 +3597,8 @@ def webhook_print():
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
-    return _queued(printer, run=printer.process_queue, title=_job_title({}, drawn), source=_job_source('webhook'), labels=len(labels),
+    title = _job_title({}, drawn, upload=uploaded_files[0].filename if uploaded_files else None)
+    return _queued(printer, run=printer.process_queue, title=title, source=_job_source('webhook'), labels=len(labels),
                    recipe=_image_recipe(labels, high_res, fast), images=[label.image for label in labels], drawn=drawn,
                    extra={'count': len(labels)})
 
