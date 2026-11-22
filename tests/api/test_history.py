@@ -228,3 +228,10 @@ def test_the_texts_of_the_history_reach_the_client():
     for text in (print_store.NO_SUCH_ENTRY, print_store.NO_IMAGE, print_store.NOT_MADE_HERE, print_store.NOT_KEPT,
                  print_store.NOT_CLEARED, print_store.PRINTING_AT_RESTART):
         assert refusals.message(ValueError(text), refusals.INVALID_INPUT) == text
+
+
+def test_printed_again_it_is_cut_as_the_printer_is_set(client):
+    job = printed(client, data=dict(LABEL, cut='each', half_cut='1', chain='0', print_count='2'))
+    assert client.post(f'{API}/settings', data={'printer': 'simulation', 'cut': 'last'}).status_code == 200
+    again = printed(client, f'history/{job}/print', data={'printer': 'simulation'})
+    assert print_store.entry(again)['printer']['cut'] == 'last'

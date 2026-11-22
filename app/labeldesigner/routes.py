@@ -2207,6 +2207,8 @@ def queue_continue():
 
 # Parameters of a print request, not of the label it printed
 PRINT_PARAMETERS = ('printer', 'model', 'print_count', 'source', 'return_format', 'timestamp', 'title')
+# Set for the printer a label printed again prints on, not taken from the first print
+PRINTER_PARAMETERS = ('high_res', 'fast_printing', 'leaves_first', 'cut', 'cut_once', 'half_cut', 'chain')
 
 
 def _history_entry(job_id: str) -> tuple[dict | None, object]:
@@ -2353,7 +2355,7 @@ def history_print(job_id):
         if entry['kind'] == 'image':
             printer, recipe = _image_job_again(entry, images)
         else:
-            data = {key: value for key, value in entry['data'].items() if key not in ('high_res', 'fast_printing', 'leaves_first')}
+            data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             printer, data, high_res, fast = _stored_job(data)
             # Kept apart from the label: printed again, it asks again
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
