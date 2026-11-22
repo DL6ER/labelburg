@@ -11,9 +11,11 @@ from .tapes import LABELS
 SATURATION = 2.0
 
 # The printer places an image this many dots off the middle of the tape,
-# toward its first pixel, and its cuts take off this many millimeters of
-# both ends of a long label, of a short one none (docs/vc500w.md)
+# toward its first pixel, on 9 mm tape in the middle, and its cuts take off
+# this many millimeters of both ends of a long label, of a short one none
+# (docs/vc500w.md)
 OFFSET = 3
+OFFSETS = {'vc9': 0}
 CUT_MM = 0.8
 
 
@@ -59,7 +61,7 @@ def label_image(label, label_size: str, mode: str) -> Image.Image:
     lpi = protocol.MODES[mode][2]
     img = img.resize((round(img.width * lpi / protocol.DPI), img.height), Image.Resampling.LANCZOS)
     extra = max(tape.dots_total[0] - img.height, 0)
-    top = min(extra // 2 + OFFSET, extra)
+    top = min(extra // 2 + OFFSETS.get(label_size, OFFSET), extra)
     img = _repeat_rows(img, top, extra - top).transpose(Image.Transpose.TRANSPOSE)
     ends = round(CUT_MM / 25.4 * lpi)
     img = _color_rows(img, ends, ends).transpose(Image.Transpose.TRANSPOSE)

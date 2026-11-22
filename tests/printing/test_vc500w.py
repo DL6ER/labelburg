@@ -583,6 +583,16 @@ def test_edges_are_repeated_beyond_the_tape_and_the_cuts():
         assert _is(image.getpixel((166, image.height - 1)), (0, 255, 0))
 
 
+def test_labels_on_9_mm_tape_are_in_the_middle():
+    # 117 dots across the tape, 10 printed beyond each edge
+    label = Image.new('RGB', (640, 117), 'white')
+    label.paste(RED, (0, 0, 640, 1))
+    label.paste(BLUE, (0, 116, 640, 117))
+    image = _printed(label, LabelOrientation.ROTATED, label_size='vc9')
+    row = image.height // 2
+    assert [image.getpixel((column, row)) for column in (0, 10, 11, 125, 126, 136)] == [RED, RED, WHITE, WHITE, BLUE, BLUE]
+
+
 def test_beyond_the_ends_is_the_color_most_of_each_end_has():
     # A background reaching the first end goes on beyond it, a few dots
     # reaching the last end do not, the rest of that end is white
