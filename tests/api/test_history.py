@@ -342,3 +342,21 @@ def test_the_same_numbers_go_only_on_the_labels_that_had_them(client, collate, a
         assert (response.status_code, response.get_json()['message']) == (400, refusals.SAME_NUMBERS)
     fresh = client.post(f'{API}/history/{job}/print', data={'printer': 'simulation', 'print_count': '1', 'as_before': '0'})
     assert fresh.status_code == 200
+
+
+def test_the_same_date_is_written_as_it_was(client, monkeypatch):
+    made, label = [], routes.SimpleLabel
+
+    def recorded(*args, **kwargs):
+        made.append((kwargs['date_format'], kwargs['date_language']))
+        return label(*args, **kwargs)
+    monkeypatch.setattr(routes, 'SimpleLabel', recorded)
+    assert client.post(f'{API}/settings/labels', data={'date_format': '%d.%m.%Y', 'date_language': 'de'}).status_code == 200
+    job = printed(client, data=dict(LABEL, text=lines('{{datetime:%d. %B %Y}}', '{{blank:Day}}'), fields=json.dumps({'Day': {'type': 'date'}})))
+    assert client.post(f'{API}/settings/labels', data={'date_format': '', 'date_language': ''}).status_code == 200
+    del made[:]
+    printed(client, f'history/{job}/print', data={'printer': 'simulation'})
+    assert set(made) == {('%d.%m.%Y', 'de')}
+    del made[:]
+    printed(client, f'history/{job}/print', data={'printer': 'simulation', 'as_before': '0'})
+    assert set(made) == {('%Y-%m-%d', '')}

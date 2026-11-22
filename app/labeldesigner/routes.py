@@ -947,12 +947,13 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
 
 
 def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool, fast: bool, starts: list,
-                  printed_for: float | None = None) -> None:
+                  printed_for: float | None = None, dates: dict | None = None) -> None:
     """Adds the labels of order to the queue, each with its image by its
     index in images, None without, the printer cuts them as printer.cut
     says. They are added once for each archive serial number in starts, the
     one the first label of order takes. printed_for is the time their dates
-    show, e.g. of a label printed again as it was, else they show now."""
+    show, e.g. of a label printed again as it was, else they show now, and
+    dates the label settings they are written with, see _dates_set()."""
     if printed_for is not None:
         data = dict(data, timestamp=int(printed_for))
     # The copies share the text measured, alike where nothing changes
@@ -961,7 +962,7 @@ def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool
         for i, index in enumerate(order):
             # {{total}}: the counter counts each copy of each file and PDF page, as sets or grouped
             label = create_label_from_request(data, {}, i, None if index is None else images[index], layouts=layouts, asn=asn,
-                                              total=len(order))
+                                              total=len(order), dates=dates)
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
 
 
@@ -1115,7 +1116,7 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     elif record['kind'] == 'request':
         _queue_labels(printer, record['data'], _as_printed(images, record.get('sizes')), record['order'], record['high_res'],
-                      record['fast'], [record['asn']], record.get('printed_for'))
+                      record['fast'], [record['asn']], record.get('printed_for'), record.get('dates'))
     return printer
 
 
@@ -1405,8 +1406,14 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
         return _refused('Print job', e, refusals.PRINT_FAILED)
     return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
                    recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast,
-                           'copies': print_count, 'collate': collate, 'sizes': [size for _, size in kept]},
+                           'copies': print_count, 'collate': collate, 'sizes': [size for _, size in kept], 'dates': _dates_set()},
                    images=[copy for copy, _ in kept], drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
+
+
+def _dates_set() -> dict:
+    """The label settings dates are written with, kept with a job: printed
+    again with the same date it is written as it was."""
+    return {name: _label_settings()[name] for name in ('date_format', 'date_language')}
 
 
 def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None]:
@@ -2504,8 +2511,9 @@ def history_print(job_id):
                 raise ValueError(refusals.SAME_NUMBERS)
             # Kept apart from the label: printed again, it asks again
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
+            dates = entry.get('dates') if as_before else None
             recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
-                      'copies': copies, 'collate': collate, 'sizes': entry.get('sizes')}
+                      'copies': copies, 'collate': collate, 'sizes': entry.get('sizes'), 'dates': dates or _dates_set()}
             title = None if given else entry.get('title')
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
@@ -2515,7 +2523,8 @@ def history_print(job_id):
             if asn is None and paperless.uses_asn(recipe['data']):
                 asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(recipe['order']))
             recipe['asn'] = asn
-            _queue_labels(printer, recipe['data'], images, recipe['order'], recipe['high_res'], recipe['fast'], [asn], printed_for)
+            _queue_labels(printer, recipe['data'], images, recipe['order'], recipe['high_res'], recipe['fast'], [asn], printed_for,
+                          recipe['dates'])
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
@@ -2812,7 +2821,7 @@ def _image_contrast(d: dict) -> bool:
 
 
 def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, image=_LOAD_IMAGE, mark_blanks: bool = False, layouts: dict | None = None,
-                              asn: int | None = None, total: int = 1):
+                              asn: int | None = None, total: int = 1, dates: dict | None = None):
     label_size = d.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
     if size is None:
@@ -2892,7 +2901,8 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
     # For each line in text, we determine and add the font path
     fonts = get_fonts()
     default_font = ','.join(fonts.get_default_font())
-    settings = _label_settings()
+    # Dates as a job kept them, see _dates_set()
+    settings = {**_label_settings(), **(dates or {})}
     family = settings['font_family']
     new_font = fonts.family_font(family) if family else default_font
     warnings = []
