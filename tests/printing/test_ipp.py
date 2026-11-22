@@ -68,8 +68,8 @@ def test_ready_ql_810w_is_decoded():
     # Several values become a list
     assert 'om_brother-label-62x100mm_62x100mm' in attributes['media-supported']
     # The 62 mm wide DK-11209, as the USB status reports it
-    assert network._ipp_media(loaded) == (62, 29, 'Die-cut labels')
-    assert network._ipp_errors(attributes) == []
+    assert ipp.loaded_media(loaded) == (62, 29, 'Die-cut labels')
+    assert ipp.state_errors(attributes) == []
 
 
 def test_address_labels_are_fed_short_edge_first():
@@ -77,23 +77,23 @@ def test_address_labels_are_fed_short_edge_first():
     attributes = ipp.decode_response(fixture('ql810w-ready-29x90.bin'))
     loaded = attributes['media-col-ready']
     assert loaded['media-source-properties']['media-source-feed-direction'] == 'short-edge-first'
-    assert network._ipp_media(loaded) == (29, 90, 'Die-cut labels')
+    assert ipp.loaded_media(loaded) == (29, 90, 'Die-cut labels')
 
 
 def test_stopped_ql_810w_reports_an_error():
     # After a job for endless labels on a die-cut roll
     attributes = ipp.decode_response(fixture('ql810w-stopped-other-error.bin'))
     assert attributes['printer-state'] == ipp.STOPPED
-    assert network._ipp_errors(attributes) == ['See the lights or display of the printer']
+    assert ipp.state_errors(attributes) == ['See the lights or display of the printer']
 
 
 def test_open_cover_of_a_ql_810w():
     # The QL-810W gives no reason more specific than "other"
     attributes = ipp.decode_response(fixture('ql810w-cover-open.bin'))
     assert attributes['printer-state'] == ipp.STOPPED
-    assert network._ipp_errors(attributes) == ['See the lights or display of the printer']
+    assert ipp.state_errors(attributes) == ['See the lights or display of the printer']
     # The labels are still named
-    assert network._ipp_media(attributes['media-col-ready']) == (62, 29, 'Die-cut labels')
+    assert ipp.loaded_media(attributes['media-col-ready']) == (62, 29, 'Die-cut labels')
 
 
 def test_endless_roll_in_a_ql_810w_is_not_reported():
@@ -102,8 +102,8 @@ def test_endless_roll_in_a_ql_810w_is_not_reported():
     attributes = ipp.decode_response(fixture('ql810w-ready-endless.bin'))
     assert attributes['media-ready'] == ''
     assert 'media-col-ready' not in attributes
-    assert network._ipp_media(attributes.get('media-col-ready')) == (None, 0, None)
-    assert network._ipp_errors(attributes) == []
+    assert ipp.loaded_media(attributes.get('media-col-ready')) == (None, 0, None)
+    assert ipp.state_errors(attributes) == []
 
 
 def test_request_asks_for_the_status_attributes():
@@ -124,13 +124,13 @@ def test_request_asks_for_the_status_attributes():
 ])
 def test_reasons_that_stop_the_printer(reasons, expected):
     attributes = ipp.decode_response(response(state(ipp.STOPPED if expected else ipp.IDLE), keywords('printer-state-reasons', *reasons)))
-    assert network._ipp_errors(attributes) == expected
+    assert ipp.state_errors(attributes) == expected
 
 
 def test_stopped_printer_without_reason():
     # A QL-810W at the end of every job, no error
     attributes = ipp.decode_response(response(state(ipp.STOPPED), keywords('printer-state-reasons', 'none')))
-    assert network._ipp_errors(attributes) == []
+    assert ipp.state_errors(attributes) == []
 
 
 @pytest.mark.parametrize('x, y, media_type, expected', [
@@ -140,7 +140,7 @@ def test_stopped_printer_without_reason():
 ])
 def test_loaded_media(x, y, media_type, expected):
     attributes = ipp.decode_response(response(media(x, y, media_type)))
-    assert network._ipp_media(attributes['media-col-ready']) == expected
+    assert ipp.loaded_media(attributes['media-col-ready']) == expected
 
 
 def test_error_status_is_refused():

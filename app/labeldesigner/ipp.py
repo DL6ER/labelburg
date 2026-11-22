@@ -12,8 +12,6 @@ import threading
 import http.client
 from itertools import count
 
-from .drivers import reach
-
 # Operation and the tags of RFC 8010 that are needed here
 GET_PRINTER_ATTRIBUTES = 0x000B
 TAG_OPERATION = 0x01
@@ -40,6 +38,23 @@ STATUS_ATTRIBUTES = (
 # printer-state
 IDLE, PROCESSING, STOPPED = 3, 4, 5
 
+# Messages for the reasons a printer gives over IPP why it cannot print
+# (printer-state-reasons, RFC 8011), without the -error suffix
+REASON_MESSAGES = {
+    'cover-open': 'The cover is open',
+    'media-empty': 'There are no labels in the printer',
+    'media-needed': 'There are no labels in the printer',
+    'media-jam': 'The labels are jammed',
+    'offline': 'The printer is offline',
+    'paused': 'The printer is paused',
+    'shutdown': 'The printer is shutting down',
+    # e.g. a QL-810W after a job for labels other than the loaded ones
+    'other': 'See the lights or display of the printer',
+}
+
+# media-type values of endless rolls (PWG 5100.7)
+ENDLESS_MEDIA_TYPES = {'continuous', 'continuous-long', 'continuous-short', 'roll'}
+
 # A longer answer is refused, the attributes asked for take a few KB
 MAX_ANSWER = 256 * 1024
 
@@ -48,6 +63,50 @@ _request_ids = count(1)
 
 class IPPError(Exception):
     """The printer answered, but not with the attributes."""
+
+
+def loaded_media(media) -> tuple:
+    """Width across the print head and length of the loaded labels in mm
+    (length 0 for endless rolls), and their type, from media-col-ready.
+    IPP gives the size of the label as x by y, and with
+    long-edge-first the longer side runs across the print head, e.g.
+    29 x 62 mm for the 62 mm wide DK-11209."""
+    if isinstance(media, list):
+        media = media[0] if media else None
+    if not isinstance(media, dict):
+        return None, 0, None
+    # Values of other types than asked for tell nothing
+    size, source = media.get('media-size'), media.get('media-source-properties')
+    size = size if isinstance(size, dict) else {}
+    x, y = size.get('x-dimension'), size.get('y-dimension')
+    if not isinstance(x, int) or x <= 0:
+        return None, 0, None
+    feed = source.get('media-source-feed-direction') if isinstance(source, dict) else None
+    kind = media.get('media-type')
+    endless = isinstance(kind, str) and kind in ENDLESS_MEDIA_TYPES or not isinstance(y, int) or y <= 0
+    if endless:
+        return round(x / 100), 0, 'Continuous length tape'
+    across, along = (max(x, y), min(x, y)) if feed == 'long-edge-first' else (x, y)
+    return round(across / 100), round(along / 100), 'Die-cut labels'
+
+
+def state_errors(attributes: dict) -> list:
+    """Messages for the reasons why the printer cannot print. Reasons with
+    the suffix -report or -warning do not stop it, the others do. A
+    QL-810W is briefly "stopped" without a reason at the end of every job,
+    so only reasons count."""
+    reasons = attributes.get('printer-state-reasons') or []
+    if not isinstance(reasons, list):
+        reasons = [reasons]
+    errors = []
+    for reason in reasons:
+        if not isinstance(reason, str) or reason == 'none' or reason.endswith(('-report', '-warning')):
+            continue
+        keyword = reason.removesuffix('-error')
+        message = REASON_MESSAGES.get(keyword, f'The printer reports "{keyword}"')
+        if message not in errors:
+            errors.append(message)
+    return errors
 
 
 def _attribute(tag: int, name: str, value: bytes) -> bytes:
@@ -173,6 +232,8 @@ def get_printer_attributes(host: str, port: int = 631, path: str = '/ipp/print',
     e.g. ConnectionRefusedError without IPP, and IPPError for an answer
     that is not one, longer than MAX_ANSWER, or not there within twice the
     timeout after connecting, also when it trickles in."""
+    # Here, the drivers import this module
+    from .drivers import reach
     host_in_uri = f'[{host}]' if ':' in host else host
     body = encode_request(f'ipp://{host_in_uri}:{port}{path}', attributes)
     connection = http.client.HTTPConnection(host, port, timeout=timeout)

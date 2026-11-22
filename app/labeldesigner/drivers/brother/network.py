@@ -31,23 +31,6 @@ NETWORK_JOB_POLL = 0.5
 # Network printers answer status requests over IPP, if at all
 IPP_PORT = 631
 
-# Messages for the reasons a network printer gives over IPP why it cannot
-# print (printer-state-reasons, RFC 8011), without the -error suffix
-IPP_REASON_MESSAGES = {
-    'cover-open': 'The cover is open',
-    'media-empty': 'There are no labels in the printer',
-    'media-needed': 'There are no labels in the printer',
-    'media-jam': 'The labels are jammed',
-    'offline': 'The printer is offline',
-    'paused': 'The printer is paused',
-    'shutdown': 'The printer is shutting down',
-    # e.g. a QL-810W after a job for labels other than the loaded ones
-    'other': 'See the lights or display of the printer',
-}
-
-# media-type values of endless rolls (PWG 5100.7)
-IPP_ENDLESS_MEDIA_TYPES = {'continuous', 'continuous-long', 'continuous-short', 'roll'}
-
 # Brother printers answer SNMP requests like those of Brother's apps: with
 # the status they send back over USB for "ESC i S", which tells the cause
 # of an error and the loaded roll, and whether they print (Host Resources
@@ -69,7 +52,7 @@ SNMP_TIMEOUT = 3.0
 SNMP_RETRY = 60
 _snmp_unavailable = {}
 
-NO_LABELS = IPP_REASON_MESSAGES['media-empty']
+NO_LABELS = ipp.REASON_MESSAGES['media-empty']
 # The printer keeps the job and prints it once the labels are fed
 FEED_ERROR = ('The labels cannot be fed. Feed them into the slot (or insert a new roll) and close the cover, '
               'then the printer prints the waiting label by itself. Do not print it again')
@@ -80,7 +63,7 @@ STATUS_ERROR_MESSAGES = {
     'End of media (die-cut size only)': 'The labels are used up',
     'Tape cutter jam': 'The cutter is jammed',
     'Replace media error': 'The loaded labels do not fit the job',
-    'Cover opened while printing (Except QL-500)': IPP_REASON_MESSAGES['cover-open'],
+    'Cover opened while printing (Except QL-500)': ipp.REASON_MESSAGES['cover-open'],
     'Media cannot be fed (also when the media end is detected)': FEED_ERROR,
 }
 
@@ -132,50 +115,6 @@ def job_result(device_specifier: str, model: str, page_lengths: list) -> str:
             return 'The printer did not report that it finished the label, check whether it was printed'
 
 
-def _ipp_media(media) -> tuple:
-    """Width across the print head and length of the loaded labels in mm
-    (length 0 for endless rolls), and their type, from media-col-ready.
-    IPP gives the size of the label as x by y, and with
-    long-edge-first the longer side runs across the print head, e.g.
-    29 x 62 mm for the 62 mm wide DK-11209."""
-    if isinstance(media, list):
-        media = media[0] if media else None
-    if not isinstance(media, dict):
-        return None, 0, None
-    # Values of other types than asked for tell nothing
-    size, source = media.get('media-size'), media.get('media-source-properties')
-    size = size if isinstance(size, dict) else {}
-    x, y = size.get('x-dimension'), size.get('y-dimension')
-    if not isinstance(x, int) or x <= 0:
-        return None, 0, None
-    feed = source.get('media-source-feed-direction') if isinstance(source, dict) else None
-    kind = media.get('media-type')
-    endless = isinstance(kind, str) and kind in IPP_ENDLESS_MEDIA_TYPES or not isinstance(y, int) or y <= 0
-    if endless:
-        return round(x / 100), 0, 'Continuous length tape'
-    across, along = (max(x, y), min(x, y)) if feed == 'long-edge-first' else (x, y)
-    return round(across / 100), round(along / 100), 'Die-cut labels'
-
-
-def _ipp_errors(attributes: dict) -> list:
-    """Messages for the reasons why the printer cannot print. Reasons with
-    the suffix -report or -warning do not stop it, the others do. A
-    QL-810W is briefly "stopped" without a reason at the end of every job,
-    so only reasons count."""
-    reasons = attributes.get('printer-state-reasons') or []
-    if not isinstance(reasons, list):
-        reasons = [reasons]
-    errors = []
-    for reason in reasons:
-        if not isinstance(reason, str) or reason == 'none' or reason.endswith(('-report', '-warning')):
-            continue
-        keyword = reason.removesuffix('-error')
-        message = IPP_REASON_MESSAGES.get(keyword, f'The printer reports "{keyword}"')
-        if message not in errors:
-            errors.append(message)
-    return errors
-
-
 def _snmp_network_status(device_specifier: str, host: str, default_model: str) -> dict | None:
     """Status of a Brother printer over SNMP: model, loaded labels, why it
     cannot print and whether it prints. None if it does not answer."""
@@ -204,20 +143,8 @@ def _snmp_network_status(device_specifier: str, host: str, default_model: str) -
     elif not errors:
         errors = [NO_LABELS]
     status['errors'] = errors
-    _set_state(status, printer_status == SNMP_PRINTING, printer_status not in SNMP_READY)
+    devices.set_state(status, printer_status == SNMP_PRINTING, printer_status not in SNMP_READY)
     return status
-
-
-def _set_state(status: dict, printing: bool, stopped: bool):
-    """The status and phase type of a network printer by its errors, whether
-    it prints and whether it is stopped otherwise."""
-    if status['errors']:
-        status['status_type'] = 'Error occurred'
-    elif printing:
-        status['status_type'] = devices.BUSY_STATUS_TYPE
-    else:
-        status['status_type'] = devices.STOPPED_STATUS_TYPE if stopped else 'Reply to status request'
-    status['phase_type'] = 'Printing state' if printing else 'Waiting to receive'
 
 
 def label_printer_model(name: str) -> str | None:
@@ -258,10 +185,10 @@ def _ipp_network_status(device_specifier: str, host: str, default_model: str, la
             return None
         model = default_model
     status = network_printer(device_specifier, model)
-    status['media_width'], status['media_length'], status['media_type'] = _ipp_media(attributes.get('media-col-ready'))
-    status['errors'] = _ipp_errors(attributes)
+    status['media_width'], status['media_length'], status['media_type'] = ipp.loaded_media(attributes.get('media-col-ready'))
+    status['errors'] = ipp.state_errors(attributes)
     state = attributes.get('printer-state')
-    _set_state(status, state == ipp.PROCESSING, state == ipp.STOPPED)
+    devices.set_state(status, state == ipp.PROCESSING, state == ipp.STOPPED)
     # Kept for when the printer does not answer
     devices.status_cache[devices.lock_key(device_specifier)] = status
     return dict(status)

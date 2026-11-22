@@ -69,6 +69,18 @@ def status_type(errors: list) -> str:
     return 'Error occurred' if errors else 'Reply to status request'
 
 
+def set_state(status: dict, printing: bool, stopped: bool):
+    """The status and phase type of a network printer by its errors, whether
+    it prints and whether it is stopped otherwise."""
+    if status['errors']:
+        status['status_type'] = 'Error occurred'
+    elif printing:
+        status['status_type'] = BUSY_STATUS_TYPE
+    else:
+        status['status_type'] = STOPPED_STATUS_TYPE if stopped else 'Reply to status request'
+    status['phase_type'] = 'Printing state' if printing else 'Waiting to receive'
+
+
 def busy_state(device_specifier: str, base: dict) -> dict:
     """Status of a printer a job holds: its last status, else base, in the
     state of the job. Errors from before the job no longer apply."""
