@@ -54,3 +54,18 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends hunspell hunspell-de-de
       - name: Check the spelling of the German demo labels
         run: python tools/spelling_de.py
+
+  # The names of months and weekdays are the ones tools/date_names.py writes
+  # with the Babel of requirements-dates.txt: on a pull request that raises
+  # it, they are written again by hand
+  dates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.15'
+      - name: Install Babel
+        run: pip install -r requirements-dates.txt
+      - name: Check that the names are the ones committed
+        run: python tools/date_names.py && git diff --exit-code -- app/labeldesigner/cldr

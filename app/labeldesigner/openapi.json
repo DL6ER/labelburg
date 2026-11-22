@@ -1418,7 +1418,7 @@
     "/labeldesigner/api/settings/labels": {
       "get": {
         "summary": "Settings of labels",
-        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
+        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written and the language of their names, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
         "operationId": "getLabelSettings",
         "responses": {
           "200": {
@@ -3567,6 +3567,11 @@
             "enum": ["", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y"],
             "description": "How dates are written: of date blanks without a format of their own, and of dates the label designer puts on labels. Empty: as the browser writes dates, `%Y-%m-%d` for date blanks of API requests."
           },
+          "date_language": {
+            "type": "string",
+            "enum": ["", "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl", "pt", "sv"],
+            "description": "The language of the names of months and weekdays (`%a`, `%A`, `%b` or `%h`, `%B`, in capitals with `^` or `#`) in dates on labels, as CLDR writes them: a month as in a date where the format has the day of the month (Polish `22 listopada 2026`), else on its own (`listopad 2026`). A name with a width (`%10B`) or the `E` or `O` modifier, and `%c`, `%x` and `%p`, stay as `strftime()` writes them, in English. Empty: English."
+          },
           "collate": {
             "type": "string",
             "enum": ["", "0", "1"],
@@ -3588,7 +3593,7 @@
       },
       "TextLine": {
         "type": "object",
-        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{total}}` (the number of labels of the print job, which the counter counts, e.g., `Box {{counter}} of {{total}}` for Box 1 of 6 to Box 6 of 6), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
+        "description": "One line of text. Templates like `{{datetime:%d.%m.%Y}}` (or a date moved from today, e.g., `{{datetime+5d:%d.%m.%Y}}` 5 days later: `d` days, `w` weeks, `m` months, `y` years, `h` hours, `min` minutes, at most a hundred years; names of months and weekdays in the `date_language` of the label settings), `{{counter}}` (or `{{counter:<start>:<step>}}`: the first label gets `<start>`, written as the values should look, e.g., `001` for 001, 002, ... or `A` for A, B, ..., Z, AA, and each next one `<step>` more), `{{total}}` (the number of labels of the print job, which the counter counts, e.g., `Box {{counter}} of {{total}}` for Box 1 of 6 to Box 6 of 6), `{{asn}}` (or `{{asn:<digits>}}`: the next archive serial number for Paperless-ngx, counted on for each label, see `PAPERLESS_URL`), `{{uuid}}`, `{{short-uuid}}`, `{{env:<var>}}`, `{{random}}`, `{{mdi:<name>}}` (a Material Design Icon, e.g., `{{mdi:printer}}`), `{{fastener:<name>}}` and `{{electronic:<name>}}` (a fastener or an electronic component, e.g., `{{fastener:head-torx}}`, the names in `/static/symbols/symbols.json`) are filled in when the label is generated.",
         "required": [
           "text",
           "size"
