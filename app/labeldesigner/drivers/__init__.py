@@ -57,6 +57,13 @@ def _unprinted(device_id: str) -> bool:
     return any(told is not None and told.model is None for told in (driver.told(device_id) for driver in DRIVERS))
 
 
+def note_settings(device: str, settings: dict):
+    """Tell every driver the settings of a printer whose model is not known
+    yet, see Driver.note_settings()."""
+    for driver in DRIVERS:
+        driver.note_settings(device, settings)
+
+
 def told_model(device_id: str) -> str | None:
     """The model an IEEE 1284 device ID names, None if it is no printer of
     a driver."""

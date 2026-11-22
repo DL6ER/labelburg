@@ -1503,6 +1503,11 @@ def get_printer_status():
     if request.args.get('look') == '1':
         look_again()
     added = _added_printers()
+    kept = _kept_settings()
+    # Also before the first status after a restart: a Twin Turbo is asked for
+    # the roll chosen
+    for device in [device for device, _ in _configured_devices()] + [device for _, device, _ in added]:
+        drivers.note_settings(device, printer_settings.of_printer(kept, device))
     # One printer, e.g. on USB, which the label designer asks every 2 s
     if 'printer' in request.args:
         one = status_of_printer(current_app.config, request.args['printer'], added)
@@ -1515,7 +1520,6 @@ def get_printer_status():
         # Copies, the search keeps the states the printers told
         status['printers'] = [dict(printer) for printer in status.get('printers', [])]
         told = [status] + status['printers']
-    kept = _kept_settings()
     demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors
     for printer in told:

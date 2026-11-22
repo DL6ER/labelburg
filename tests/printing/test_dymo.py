@@ -669,12 +669,32 @@ def test_the_status_of_a_twin_turbo_is_that_of_the_roll_chosen(tmp_path, printer
     def errors():
         found = client.get('/labeldesigner/api/printer_status', query_string={'printer': device} if followed else {})
         return next(p for p in found.get_json()['printers'] if p['path'] == device)['errors']
+    # Not set, the left roll
     assert errors() == []
-    # Before its settings were read the roll is left as selected
-    assert printer.written[-1] == ASK
+    assert printer.written[-1] == ESC * 85 + b'\x1bq1\x1bA'
     client.post('/labeldesigner/api/settings', data={'side': 'right'})
     assert errors() == ['No labels are in the printer']
     assert printer.written[-1] == ESC * 85 + b'\x1bq2\x1bA'
     client.post('/labeldesigner/api/settings', data={'side': ''})
     assert errors() == []
     assert printer.written[-1] == ESC * 85 + b'\x1bq1\x1bA'
+
+
+@pytest.mark.parametrize('configured', ['printer', 'model unset', 'printers'])
+@pytest.mark.parametrize('followed', [False, True], ids=['list', 'followed'])
+def test_the_first_status_after_a_restart_is_that_of_the_roll_chosen(tmp_path, monkeypatch, printer, configured, followed):
+    printer.by_roll, printer.roll = {b'1': READY, b'2': 0xa1}, b'1'
+    device = 'file:///dev/usb/lp_dymo'
+    # Kept by its serial number, as the device ID tells it
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: 'MFG:DYMO;MDL:LabelWriter 450 Twin Turbo;SERN:01010112345;')
+    model = None if configured == 'model unset' else 'DYMO/LabelWriter-450-Twin-Turbo'
+    client = make_client(tmp_path, empty_repo=True, model=model, printer=device)
+    if configured == 'printers':
+        client.application.config['PRINTERS'] = [('DYMO/LabelWriter-450-Twin-Turbo', device, 'Shipping')]
+    assert client.post('/labeldesigner/api/settings', data={'printer': device, 'side': 'right'}).status_code == 200
+    # The server starts again
+    monkeypatch.setattr(dymo, '_sides', {})
+    found = client.get('/labeldesigner/api/printer_status', query_string={'printer': device} if followed else {})
+    shown = next(p for p in found.get_json()['printers'] if p['path'] == device)
+    assert (shown['model'], shown['errors']) == ('DYMO/LabelWriter-450-Twin-Turbo', ['No labels are in the printer'])
+    assert printer.written == [ESC * 85 + b'\x1bq2\x1bA']
