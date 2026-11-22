@@ -298,6 +298,13 @@ def test_print_speed(model, speed):
     assert DRIVER.print_speed(model, True, False)[0] == speed
 
 
+def test_quality_is_slower_only_where_the_printer_takes_it():
+    from app.labeldesigner.drivers.brother.models import QL_BESIDES, QUALITY_SLOWER
+    # Only the TD-2000 series takes the flag of print quality
+    assert DRIVER.print_speed('TD-4420DN', False, False) == DRIVER.print_speed('TD-4420DN', True, False) == (203.2, QL_BESIDES)
+    assert DRIVER.print_speed('TD-2120N', False, False) == (152.4 / QUALITY_SLOWER, QL_BESIDES * QUALITY_SLOWER)
+
+
 def test_names_of_the_rolls():
     assert DRIVER.label_names['td4-102x152'] == '102 x 152 mm die-cut (RD)'
     assert DRIVER.label_names['td2-300-58'] == '58 mm endless (RD)'

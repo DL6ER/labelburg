@@ -121,7 +121,8 @@ class BrotherRaster(Driver):
 
     def print_speed(self, model, fast, red):
         spec = MODELS[model]
-        slower = 1 if fast else QUALITY_SLOWER
+        # A printer without the flag of print quality prints alike either way
+        slower = 1 if fast or not spec.quality_flag else QUALITY_SLOWER
         speed = RED_SPEED if red and spec.two_color else spec.speed
         return speed / slower, (PTOUCH_BESIDES if model.startswith('PT-') else QL_BESIDES) * slower
 
