@@ -2453,6 +2453,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
         date_format=settings['date_format'] or '%Y-%m-%d',
+        fallback_fonts=fonts.fallbacks(),
     )
     # In "standard" orientation die-cut labels are landscape, so a portrait
     # image (e.g. a shipping label on a 103 x 164 mm label) came out small and

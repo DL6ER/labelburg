@@ -26,7 +26,7 @@ Labelburg finds printers plugged in with USB by itself, most network printers to
 
 ## Features
 
-- **Text:** font, size, alignment and line spacing for each line, inverted text, checkboxes for to-do lists, red text on black/red labels and any color on the VC-500W. Long lines wrap, and the text can shrink to fit the label or grow as large as fits, at the top, in the middle or at the bottom of die-cut labels.
+- **Text:** font, size, alignment and line spacing for each line, inverted text, checkboxes for to-do lists, red text on black/red labels and any color on the VC-500W. Long lines wrap, and the text can shrink to fit the label or grow as large as fits, at the top, in the middle or at the bottom of die-cut labels. Emoji and symbols, e.g., check marks, stars and arrows, can be typed right into the text.
 - **Codes:** QR, DataMatrix, Micro QR, Aztec and PDF417 codes, a long, flat QR code for narrow tape, and barcodes like EAN, UPC, Code 128, Code 39, ITF, GS1-128 and ISBN, alone or with text.
 - **Pictures:** photos, drawings and PDFs, dropped, chosen or pasted, several at once, alone or with text and a code. Labelburg fits, crops and turns them and makes them black and white (or black and red) for the printer, and on the VC-500W it can make faint drawings stronger.
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, and today's date or a date some days ahead, e.g., "best before".
@@ -150,7 +150,7 @@ Network printers are found when they announce themselves like for Bonjour, which
 
 ### Fonts
 
-The label designer offers all `.ttf` and `.otf` fonts it finds in the system font folders when it starts. The image comes with DejaVu, Droid, FreeFont, Liberation, Noto and Inconsolata. To add fonts, mount a folder with them, e.g. `./fonts:/usr/local/share/fonts/custom:ro`, and restart the container. A saved label whose font is not installed is shown and printed with the default font, and the preview says so. To offer only a few fonts, put them (or links to them) into a folder, set `FONT_FOLDER` to it and `SYSTEM_FONTS=false`, and set the default font in `instance/application.py` to one of them.
+The label designer offers all `.ttf` and `.otf` fonts it finds in the system font folders when it starts. The image comes with DejaVu, Droid, FreeFont, Liberation, Noto and Inconsolata. To add fonts, mount a folder with them, e.g. `./fonts:/usr/local/share/fonts/custom:ro`, and restart the container. A saved label whose font is not installed is shown and printed with the default font, and the preview says so. Characters a font has no glyph for, e.g. emoji, are drawn with the first of DejaVu Sans, Noto Sans Symbols 2, Noto Sans Symbols, Noto Sans Math, FreeSerif and the black and white Noto Emoji of Labelburg that has them. To offer only a few fonts, put them (or links to them) into a folder, set `FONT_FOLDER` to it and `SYSTEM_FONTS=false`, and set the default font in `instance/application.py` to one of them.
 
 ### Label designer
 
