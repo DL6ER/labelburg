@@ -789,3 +789,17 @@ def test_epson_swapped_for_a_clone_at_the_same_address(client, fake, clock, told
     printer.silent = True
     assert print_one(client) == ('printed', '')
     assert printer.sent.count(protocol.INIT) == 1
+
+
+def test_clone_that_cannot_be_reached_keeps_its_name(client, fake, told, monkeypatch):
+    import errno
+    told(CLONE)
+    printer = fake()
+    printer.silent = True
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['device_name'] == 'POS-58'
+
+    def busy(device):
+        raise OSError(errno.EBUSY, 'Device or resource busy')
+    monkeypatch.setattr(protocol, 'connect', busy)
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert state['errors'] == ['The printer is in use by another program'] and state['device_name'] == 'POS-58'

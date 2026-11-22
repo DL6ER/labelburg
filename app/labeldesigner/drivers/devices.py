@@ -204,9 +204,11 @@ def known_device_id(device_specifier: str) -> str:
     """The device ID usb_device_id() tells without asking the printer: the
     one usblp read, else the one a printer on usb:// or usbip:// told
     before, empty if none."""
+    if usbip.is_address(device_specifier):
+        return usbip.known_device_id(device_specifier)
     if device_specifier.startswith('usb://'):
         return _usb_device_ids.get(_usb_key(device_specifier), '')
-    return usb_device_id(device_specifier, connect=False)
+    return usb_device_id(device_specifier)
 
 
 def device_id_fields(device_id: str) -> dict:
@@ -425,7 +427,8 @@ def unanswered(error: Exception) -> str:
 
 def failed_printer_state(device_specifier: str, error: Exception, model: str = 'Unknown') -> dict:
     """Status of a printer that did not answer the status query: model,
-    media and name from its last answer, if there was one, and the error."""
+    media and name from its last answer, if there was one, else the name of
+    its device ID, and the error."""
     known = status_cache.get(lock_key(device_specifier), {})
     state = {
         'path': device_specifier,
@@ -438,6 +441,11 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',
     }
-    if known.get('device_name'):
-        state['device_name'] = known['device_name']
+    name = known.get('device_name')
+    if not name:
+        # Of one that never answered, by the driver its device ID tells
+        from . import for_model, told_model
+        name = for_model(told_model(known_device_id(device_specifier)) or state['model']).device_name(device_specifier)
+    if name:
+        state['device_name'] = name
     return state

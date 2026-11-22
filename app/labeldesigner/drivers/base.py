@@ -75,6 +75,9 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
+    # Whether each of its models is one for printers of many makers, whose
+    # name its status tells, see device_name()
+    names_devices: bool = False
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
@@ -180,8 +183,10 @@ class Driver:
 
     def device_name(self, device: str) -> str:
         """Maker and model a printer on USB names in its device ID, e.g.
-        Xprinter XP-58IIH, which status() may tell as device_name where its
-        model is one for printers of many makers; empty if it names none."""
+        Xprinter XP-58IIH, which status() tells as device_name where its
+        driver names_devices; empty otherwise or if it names none."""
+        if not self.names_devices:
+            return ''
         # usb://<vendor>:<product>/<serial number>
         serial = device.removeprefix('usb://').partition('/')[2] if device.startswith('usb://') else ''
         return devices.device_name(devices.known_device_id(device), self.vendor, serial)

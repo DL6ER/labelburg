@@ -225,3 +225,17 @@ def test_device_name_without_the_serial_number_of_the_address(monkeypatch):
     monkeypatch.setattr(backends, 'device_id', lambda device: 'MFG:Printer;CMD:ESC/POS;MDL:POS-58 AB12;')
     devices.usb_device_id('usb://0x0416:0x5011/AB12')
     assert escpos.DRIVER.device_name('usb://0x0416:0x5011/AB12') == 'POS-58'
+
+
+@pytest.mark.parametrize('device_id, model, name', [
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-58;', 'Epson/ESC-POS', 'POS-58'),
+    # Found by the search, of a model not known yet
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-58;', 'Unknown', 'POS-58'),
+    # A Brother is named by its model
+    ('MFG:Brother;CMD:PT-CBP;MDL:QL-700;', 'QL-700', None)])
+def test_printer_that_did_not_answer_is_named_by_its_device_id(monkeypatch, tmp_path, device_id, model, name):
+    (tmp_path / 'lp7').mkdir()
+    (tmp_path / 'lp7' / 'ieee1284_id').write_text(device_id)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / '{name}' / 'ieee1284_id'))
+    monkeypatch.setattr(devices, 'status_cache', {})
+    assert devices.failed_printer_state('file:///dev/usb/lp7', TimeoutError(), model).get('device_name') == name

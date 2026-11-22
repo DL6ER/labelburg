@@ -93,6 +93,8 @@ class Escpos(Driver):
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
     errors = (OSError, protocol.EscposError)
     reports_tape = False
+    # Its models are those of many makers
+    names_devices = True
 
     def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...

@@ -144,6 +144,8 @@ class Zpl(Driver):
     label_names = NAMES
     # Both models are shown alike
     shown_as = {MODELS[1]: MODELS[0]}
+    # Its models are those of many makers
+    names_devices = True
     # usblp's device, also a name a udev rule gives it, e.g.
     # /dev/usb/lp_datamax, or the printer on the network on the port of raw
     # printing only, as the other drivers
