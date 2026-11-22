@@ -344,9 +344,12 @@ async function showDetail(item, values = null) {
             } catch (e) { toast(e.message); return; }
         }
         closeLayer(true);
-        // A label printed opens as the saved label it was printed from
+        // A label printed opens as the saved label it was printed from, its
+        // days as printed following the day again
         const origin = before ? item.opened.origin : originOf(open.kind, open.id, open.mtime);
-        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : item.title, design, values: work.values, origin });
+        const values = Object.assign({}, work.values);
+        for (const [name, day] of Object.entries(printedDates)) if (values[name] === day) values[name] = starts[name];
+        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : item.title, design, values, origin });
     };
     if (saved) {
         $('#tplLinks').onclick = () => linksPanel(item, work.design);

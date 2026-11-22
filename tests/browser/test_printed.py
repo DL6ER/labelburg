@@ -332,3 +332,19 @@ def test_a_label_printed_days_ago_shows_its_dates_as_printed_in_templates(page, 
         page.click('#againSame')
     fields = sent(request.value)
     assert fields['as_before'] == '1' and 'Day' not in json.loads(fields['blanks'])
+
+
+def test_a_label_printed_days_ago_opens_in_the_editor_following_the_day(page, server):
+    job = print_over_the_api(server, 'Opened {{blank:Day}}', fields=json.dumps({'Day': {'type': 'date'}}))
+    printed_days_ago(job, 3)
+    page.click('#templates')
+    page.click('.tpl-nav [data-cat="printed"]')
+    page.click('.tpl-grid .thumb >> nth=0')
+    page.wait_for_selector('#tplFields [data-blank="Day"]')
+    page.click('#tplOpen')
+    page.wait_for_selector('.tpl', state='detached')
+    wait_for_preview(page)
+    # The day it printed was not typed, in the editor it follows the day again
+    with page.expect_request('**/api/print') as request:
+        page.click('#print')
+    assert 'Day' not in json.loads(sent(request.value)['blanks'])
