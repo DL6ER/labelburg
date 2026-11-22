@@ -7,6 +7,7 @@ resumed or nothing waits anymore.
 """
 import atexit
 import contextvars
+import itertools
 import logging
 import sys
 import threading
@@ -79,6 +80,8 @@ class Job:
     # done is set
     on_start: Callable[['Job'], None] | None = field(default=None, repr=False)
     on_end: Callable[['Job'], None] | None = field(default=None, repr=False)
+    # Waited when the server stopped, see restore()
+    restored: bool = False
 
     def told(self) -> dict:
         told_from, detail = SOURCES.get(self.source, ('', ''))
@@ -248,7 +251,8 @@ def restore(device: str, run: Callable[[], str], *, job_id: str, title: str, lab
             explain: Callable[[Exception], str], preview: bytes | None = None,
             on_start: Callable[[Job], None] | None = None, on_end: Callable[[Job], None] | None = None) -> Job:
     """Queue a job that waited when the server stopped, with its id, also
-    beyond MAX_WAITING. Its images are read once it prints."""
+    beyond MAX_WAITING, before the jobs added since. Its images are read once
+    it prints."""
     return _add(device, run, False, title=title, labels=labels, source=source, preview=preview, size=0,
                 explain=explain, job_id=job_id, on_start=on_start, on_end=on_end)
 
@@ -266,9 +270,13 @@ def _add(device, run, check: bool, *, title, labels, source, preview, size, expl
         # Told by the latest spelling, the demo printer as the status lists it
         line.device = 'simulation' if key == 'simulation' else device
         job = Job(job_id or uuid.uuid4().hex, key, title, labels, source, preview=preview, size=size, run=run, explain=explain,
-                  on_start=on_start, on_end=on_end)
+                  on_start=on_start, on_end=on_end, restored=not check)
         _jobs[job.id] = job
-        line.waiting.append(job)
+        if job.restored:
+            # After those restored before, they are older
+            line.waiting.insert(sum(1 for _ in itertools.takewhile(lambda waiting: waiting.restored, line.waiting)), job)
+        else:
+            line.waiting.append(job)
         try:
             _start_worker(key, line)
         except BaseException:

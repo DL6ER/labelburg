@@ -589,3 +589,17 @@ def test_a_job_is_never_queued_twice():
     release.set()
     assert job.done.wait(WAIT)
     assert print_queue.line(USB)['waiting'] == []
+
+
+def test_restored_jobs_go_before_those_added_meanwhile():
+    # E.g. a new worker of gunicorn takes jobs before the queue of the old one
+    run, started, release = blocked()
+    add(USB, run)
+    assert started.wait(WAIT)
+    order = []
+    newer = add(USB, recorder(order, 'newer'))
+    for name in ('old', 'older'):
+        print_queue.restore(USB, recorder(order, name), job_id=name, title=name, labels=1, source='api', explain=explain)
+    assert [job['id'] for job in print_queue.line(USB)['waiting']] == ['old', 'older', newer.id]
+    release.set()
+    assert newer.done.wait(WAIT) and order == ['old', 'older', 'newer']
