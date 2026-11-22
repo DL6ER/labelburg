@@ -72,13 +72,10 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list, confirmed: 
         unanswered = _drain(printer, unanswered, key=key)
         received = _write_reading(printer, data)
         if not confirmed:
-            until = time.monotonic() + JOB_REPLY_WAIT
-            while not _status_messages(received)[0] and time.monotonic() < until:
-                received += printer.read(32) or b''
-                time.sleep(0.02)
-            info['printer_state'] = next((state for state in _status_messages(received)[0] if state['errors']), None)
-            if info['printer_state']:
-                devices.status_cache[key] = info['printer_state']
+            reply, unanswered = _job_reply(printer, received, unanswered)
+            info['printer_state'] = reply
+            if reply and reply['errors']:
+                devices.status_cache[key] = reply
             else:
                 info.update(did_print=True, ready_for_next_job=True, confirmed=len(page_lengths))
             return info
@@ -139,6 +136,24 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list, confirmed: 
             # In place of e.g. an error told before the job, which is gone
             devices.status_cache[key] = info['printer_state']
         _release(printer)
+
+
+def _job_reply(printer, received: bytes, unanswered: int) -> tuple[dict | None, int]:
+    """The reply to the status request in a job, or an error the printer
+    tells unasked, None if neither comes within JOB_REPLY_WAIT. The replies
+    of the unanswered requests before come first, they are counted off."""
+    until = time.monotonic() + JOB_REPLY_WAIT
+    while True:
+        states, received = _status_messages(received)
+        for state in states:
+            if state['status_code'] == 0x00 and unanswered:
+                unanswered -= 1
+            elif state['status_code'] == 0x00 or state['errors']:
+                return state, unanswered
+        if time.monotonic() >= until:
+            return None, unanswered
+        time.sleep(0.02)
+        received += printer.read(32) or b''
 
 
 def _write_reading(printer, data: bytes) -> bytes:

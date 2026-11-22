@@ -152,27 +152,31 @@ def test_printing_on_bluetooth(tmp_path, brother_on_bluetooth, model):  # noqa: 
     assert set(fake.addresses) == {(MAC, 1)}
 
 
-class JobBrother(UsbBrother):
-    """A printer on USB that also answers the status request in a job, with
-    the errors of byte 8 of its status."""
+class Answering(UsbBrother):
+    """A printer on USB that sends these messages when a job is written:
+    (status type, errors of byte 8), else as UsbBrother."""
 
-    def __init__(self, model_code: int, errors: int = 0):
-        super().__init__(model_code)
-        self.errors = errors
+    def __init__(self, *messages: tuple[int, int]):
+        super().__init__(UNNAMED)
+        self.messages = messages
 
     def write(self, data: bytes):
-        if len(data) > 3 and b'\x1b\x69\x53' in data:
-            packet = bytearray(told(self.model_code))
-            packet[8] = self.errors
+        if len(data) <= 3:
+            return super().write(data)
+        for status_type, errors in self.messages:
+            packet = bytearray(told(self.model_code, status_type=status_type))
+            packet[8] = errors
             self.unread += bytes(packet)
-        else:
-            super().write(data)
+
+
+# A job of one label of 2 mm as the family gets it, without its lines
+JOB = bytes(100) + b'\x1b\x40\x1b\x69\x53' + b'\x1a'
 
 
 @pytest.mark.parametrize('model', FAMILY)
 def test_a_job_sent_is_printed(tmp_path, monkeypatch, model):
     # The printer tells nothing after the job, no source says it reports printed labels
-    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: JobBrother(UNNAMED))
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x00)))
     client = make_client(tmp_path, model=model, printer='/dev/usb/lp0')
     assert client.get(STATUS).get_json()['printers'][0]['model'] == model
     start = time.monotonic()
@@ -182,7 +186,7 @@ def test_a_job_sent_is_printed(tmp_path, monkeypatch, model):
 
 def test_an_error_in_the_reply_to_the_job_is_shown(tmp_path, monkeypatch):
     # No tape in the reply to the status request of the job
-    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: JobBrother(UNNAMED, errors=0x01))
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x01)))
     client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
     assert outcome(client, response) == ('failed', 'The printer reports: No media when printing')
@@ -195,3 +199,29 @@ def test_other_brother_printers_still_wait_until_printed(tmp_path, monkeypatch):
     client = make_client(tmp_path, model='PT-P710BT', printer='/dev/usb/lp0')
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
     assert outcome(client, response) == ('failed', 'The printer did not answer after receiving the label, check whether it was printed')
+
+
+@pytest.mark.parametrize('owed, messages, printed, errors', [
+    # A late "No media" of an earlier request fails no job, a late reply
+    # without one hides no "No media" of the job's own
+    (1, ((0x00, 0x01), (0x00, 0x00)), True, []), (1, ((0x00, 0x00), (0x00, 0x01)), False, ['No media when printing']),
+    # An error told unasked fails it
+    (0, ((0x02, 0x01),), False, ['No media when printing'])])
+def test_the_reply_to_the_job_comes_after_those_owed(monkeypatch, owed, messages, printed, errors):
+    device = '/dev/usb/lp0'
+    key = devices.lock_key(device)
+    if owed:
+        monkeypatch.setitem(brother.usb._unanswered, key, owed)
+        monkeypatch.setitem(brother.usb._asked, key, time.monotonic())
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering(*messages))
+    info = brother.usb.send_job(JOB, device, [2.0], confirmed=False)
+    assert info['did_print'] is printed and devices.status_cache[key]['errors'] == errors
+    # Those owed are answered, the next status query asks at once
+    assert brother.usb._unanswered[key] == 0 and key not in brother.usb._asked
+
+
+def test_no_reply_to_the_job_within_the_wait_counts_as_printed(monkeypatch):
+    monkeypatch.setattr(brother.usb, 'JOB_REPLY_WAIT', 0.1)
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    info = brother.usb.send_job(JOB, '/dev/usb/lp0', [2.0], confirmed=False)
+    assert (info['did_print'], info['ready_for_next_job'], info['printer_state']) == (True, True, None)
