@@ -34,9 +34,10 @@ class Raster:
         return self.spec.number_bytes_per_row * 8
 
     def add_switch_mode(self):
-        """Raster mode, on printers that have other modes (ESC i a)."""
+        """Raster mode, on printers that have other modes (ESC i a, on the
+        PT-D410 ESC i R)."""
         if self.spec.mode_setting:
-            self.data += b'\x1b\x69\x61\x01'
+            self.data += self.spec.mode_command
 
     def add_invalidate(self):
         """Clear the command buffer."""
@@ -122,6 +123,20 @@ class Raster:
                     data += bytes([len(row)])
                 data += row
         self.data += data
+
+    def add_alone(self, image: Image.Image, width: int, margin: int):
+        """A page of the PT-D460BT family, as ptouch-print sends each copy
+        (src/libptouch.c and src/ptouch-print.c, print_img()): raster mode,
+        print information without valid flags and as the last page (n9 = 2),
+        margins, no compression, the lines and print with feeding."""
+        self.add_switch_mode()
+        self.data += b'\x1b\x69\x7a' + bytes([0, 0, width & 0xFF, 0]) + struct.pack('<L', image.size[1]) + b'\x02\x00'
+        # Followed by M directly, ptouch-print finds the print corrupted otherwise
+        self.add_margins(margin)
+        self.compression = False
+        self.data += b'\x4d\x00'
+        self.add_raster_data(image)
+        self.add_print()
 
     def add_print(self, last_page: bool = True):
         self.data += b'\x1a' if last_page else b'\x0c'

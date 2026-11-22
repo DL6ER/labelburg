@@ -118,10 +118,10 @@ Labelburg answers only requests for the names a home network uses, IP addresses,
 | `tcp://<host>` | A network printer, an IPv6 address in brackets |
 | `vc500w://<host>` | A VC-500W on the network |
 | `usbip://<host>` | A USB printer another device shares, see [USB/IP](docs/usbip.md) |
-| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M, Niimbot B1, Brother PT-P710BT or PT-P910BT on Bluetooth, channel 2 on a PUQU and 1 on a D110_M and the Brother printers if left out. A D110_M and the Brother printers have to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`. |
+| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M, Niimbot B1, Brother PT-P710BT, PT-P910BT, PT-D460BT, PT-D610BT, PT-E310BT or PT-E560BT on Bluetooth, channel 2 on a PUQU and 1 on a D110_M and the Brother printers if left out. A D110_M and the Brother printers have to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`. |
 | `simulation` | The demo printer, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them. Its model and roll are chosen in the Settings of the label designer, else it is `PRINTER_MODEL` or the model listed with it in `PRINTERS`. |
 
-The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth, and a PT-P710BT or PT-P910BT when the label designer looks for printers. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
+The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth, and a PT-P710BT, PT-P910BT, PT-D460BT or PT-D610BT when the label designer looks for printers. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
 
 To give it a single printer instead, map that one and name it:
 
@@ -141,6 +141,8 @@ services:
       - PRINTER_MODEL=QL-800
       - PRINTER_PRINTER=file:///dev/usb/lp0
 ```
+
+The PT-D410, PT-D460BT, PT-D610BT, PT-E310BT and PT-E560BT, for which Brother publishes no command reference, get the jobs [ptouch-print](https://github.com/probonopd/ptouch-print) sends them. They are known on USB by their product IDs `0x20df`, `0x20e0`, `0x20e1`, `0x2201` and `0x2203`, take labels of at most 300 mm (PT-D) or 999 mm (PT-E) and are not told to cut.
 
 Address each printer in one way only (e.g. always `file:///dev/usb/lp0`). Two addresses of the same printer are not recognized as one, and their jobs could get in each other's way.
 
@@ -232,7 +234,7 @@ Pull requests are welcome: [fork the repository](https://github.com/DL6ER/labelb
 
 ## Credits and license
 
-Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_web`](https://github.com/pklaus/brother_ql_web). It carries the printer code of [`pklaus/brother_ql`](https://github.com/pklaus/brother_ql) and its fork [`matmair/brother_ql-inventree`](https://github.com/matmair/brother_ql-inventree), both GPLv3, in its Brother driver, and builds on improvements from [`tbnobody/brother_ql_web`](https://github.com/tbnobody/brother_ql_web), [`dersimn/brother_ql_web`](https://github.com/dersimn/brother_ql_web) and [`davidramiro/brother_ql_web`](https://github.com/davidramiro/brother_ql_web), for which we are grateful. Brother, P-touch and PUQU are trademarks of their owners, Labelburg is not affiliated with them.
+Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_web`](https://github.com/pklaus/brother_ql_web). It carries the printer code of [`pklaus/brother_ql`](https://github.com/pklaus/brother_ql) and its fork [`matmair/brother_ql-inventree`](https://github.com/matmair/brother_ql-inventree), both GPLv3, in its Brother driver, with the jobs of the PT-D and PT-E models after [`ptouch-print`](https://github.com/probonopd/ptouch-print) by Dominic Radermacher, GPLv3, and builds on improvements from [`tbnobody/brother_ql_web`](https://github.com/tbnobody/brother_ql_web), [`dersimn/brother_ql_web`](https://github.com/dersimn/brother_ql_web) and [`davidramiro/brother_ql_web`](https://github.com/davidramiro/brother_ql_web), for which we are grateful. Brother, P-touch and PUQU are trademarks of their owners, Labelburg is not affiliated with them.
 
 It is published under the terms of the GPLv3, see [LICENSE](./LICENSE). It includes software of third parties under other licenses:
 

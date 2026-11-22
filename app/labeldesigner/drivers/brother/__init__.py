@@ -13,10 +13,15 @@ from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, TUBE_TOO_LONG, length_problem, longest_label, resolution_problem, tube_lines)
+                     RED_SPEED, TUBE_TOO_LONG, UNNAMED_ON_BLUETOOTH, UNUSED_CUTTERS, length_problem, longest_label,
+                     resolution_problem, tube_lines)
 
 logger = logging.getLogger(__name__)
 
+
+# Brother's USB vendor ID, the models known by their product ID on USB
+USB_VENDOR = 0x04F9
+USB_PRODUCTS = {spec.usb_product: model for model, spec in MODELS.items() if spec.usb_product}
 
 # A printer on Bluetooth is asked at most every BLUETOOTH_STATUS_EVERY s, or
 # when looking for printers or printing; status queries between get its last
@@ -74,13 +79,17 @@ class BrotherRaster(Driver):
         re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
     )
     mac_address_prefixes = network.MAC_ADDRESS_PREFIXES
-    # On classic Bluetooth by the model and digits of the serial number, e.g.
-    # PT-P710BT1234, as Brother's User's Guide names it
-    bluetooth_names = {re.escape(model) + r'\d*': model for model, spec in MODELS.items() if spec.bluetooth}
+    # On classic Bluetooth by the model and digits, see UNNAMED_ON_BLUETOOTH
+    bluetooth_names = {re.escape(model) + r'\d*': model for model, spec in MODELS.items()
+                       if spec.bluetooth and model not in UNNAMED_ON_BLUETOOTH}
     bluetooth_kind = 'classic'
     refusals = (*(length_problem(model) for model in MODELS), TUBE_TOO_LONG)
 
     def model_of(self, device, device_id=None):
+        # On USB the product ID of a model known by it
+        ids = devices.usb_ids(device) if isinstance(device, str) else None
+        if ids and ids[0] == USB_VENDOR and ids[1] in USB_PRODUCTS:
+            return USB_PRODUCTS[ids[1]]
         # Over USB/IP the device ID read at the import names the model, on USB
         # that of a model whose status names it by no documented model code
         told = self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
@@ -132,9 +141,12 @@ class BrotherRaster(Driver):
         ptouch = model.startswith('PT-')
         # The QL-500 takes no cut commands, its labels are cut with a lever
         cutting = MODELS[model].cutting
-        return dict(super().capabilities(model), qualities=['fast', 'quality', 'high'],
-                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting,
-                    half_cut=model in HALF_CUTTERS, chain=ptouch, feed_waste=ptouch,
+        unused = model in UNUSED_CUTTERS
+        # The PT-D460BT family is told no print quality
+        qualities = ['quality'] if MODELS[model].d460bt_family else ['fast', 'quality', 'high']
+        return dict(super().capabilities(model), qualities=qualities,
+                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting and not unused,
+                    cutter_unused=unused, half_cut=model in HALF_CUTTERS, chain=ptouch and cutting, feed_waste=ptouch,
                     # The top of a label leaves a QL or P-touch printer first
                     leaves_turned=True)
 

@@ -13,7 +13,10 @@ class Model:
     whether it prints red, the zero bytes that clear its command buffer, and
     the codes it gives in its status (series and model). Its longest label
     has max_length_dots lines at dpi. It prints speed mm/s, as Brother's
-    data sheets give it. With bluetooth it is reached on bt:// too."""
+    data sheets give it. With bluetooth it is reached on bt:// too.
+    mode_command selects raster mode, usb_product (vendor 04F9h) tells the
+    model on USB where its status does not, and a model of the PT-D460BT
+    family is sent the jobs ptouch-print sends it, see Raster.add_alone()."""
     identifier: str
     speed: int = 0
     max_length_dots: int = 11811
@@ -31,6 +34,9 @@ class Model:
     series_code: int = 0xFFFF
     model_code: int = 0xFFFF
     bluetooth: bool = False
+    mode_command: bytes = b'\x1b\x69\x61\x01'
+    usb_product: int | None = None
+    d460bt_family: bool = False
 
 
 MODELS = {model.identifier: model for model in (
@@ -74,6 +80,23 @@ MODELS = {model.identifier: model for model in (
     # https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf
     Model('PT-P910BT', speed=20, max_length_dots=14173, dpi=360, number_bytes_per_row=70, status_notification=True,
           series_code=0x30, model_code=0x78, bluetooth=True),
+    # The PT-D460BT family of ptouch-print by Dominic Radermacher (GPLv3): USB
+    # product IDs, 128 pixels a line at 180 dpi, ESC i R 01 on the PT-D410
+    # (src/libptouch.c, ptdevs[] and ptouch_rasterstart()). Brother names no
+    # model codes of them. Speeds and the longest labels they make themselves,
+    # 300 mm on the PT-D and 999 mm on the PT-E models, after Brother's User's
+    # Guides, the speed of the PT-E560BT with its adapter.
+    # https://github.com/probonopd/ptouch-print/blob/master/src/libptouch.c
+    Model('PT-D410', speed=20, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, mode_command=b'\x1b\x69\x52\x01', usb_product=0x20DF, d460bt_family=True),
+    Model('PT-D460BT', speed=30, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x20E0, d460bt_family=True),
+    Model('PT-D610BT', speed=30, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x20E1, d460bt_family=True),
+    Model('PT-E310BT', speed=20, max_length_dots=7079, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x2201, d460bt_family=True),
+    Model('PT-E560BT', speed=30, max_length_dots=7079, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x2203, d460bt_family=True),
 )}
 
 # The QL-1100 series prints at 300 dpi only. Brother's raster command
@@ -81,8 +104,9 @@ MODELS = {model.identifier: model for model in (
 # QL-800, and a 600 dpi label came out twice as long on a QL-1100 (#103):
 # https://download.brother.com/welcome/docp100366/cv_ql1100_eng_raster_100.pdf
 # The P-touch printers print at 180 dpi, their reference has no 600 dpi, nor
-# has the PT-P910BT high-resolution printing.
-MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', 'PT-P910BT')
+# has the PT-P910BT high-resolution printing, nor the PT-D460BT family.
+MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', 'PT-P910BT',
+                          *(model for model, spec in MODELS.items() if spec.d460bt_family))
 
 # Black and red on the QL-800 series, after Brother's data sheets
 RED_SPEED = 24
@@ -95,6 +119,16 @@ QUALITY_SLOWER = 1.7
 
 # P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
 HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
+# The PT-D610BT and the PT-E560BT have an automatic cutter, after their User's
+# Guides, which is not told to cut: ptouch-print sends the PT-D460BT family no
+# cut command, ESC i M 40 only for a cut before the label. The others of the
+# family are cut with a lever.
+UNUSED_CUTTERS = ('PT-D610BT', 'PT-E560BT')
+# Models found on classic Bluetooth by their name, the model and digits, e.g.
+# PT-P710BT1234, as Brother's User's Guide names it, PT-D460BT**** and
+# PT-D610BT**** in their Quick Setup Guides (D033P6001, D033PX001, p. 4).
+# Brother names none of the PT-E310BT and PT-E560BT.
+UNNAMED_ON_BLUETOOTH = ('PT-E310BT', 'PT-E560BT')
 
 # Brother's raster command references: a print of at least 12.7 mm (150
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape

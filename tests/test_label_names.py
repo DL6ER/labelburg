@@ -50,7 +50,8 @@ def test_label_printers():
 def test_tapes_of_the_small_print_head_are_not_offered_to_the_pt_p900_series(identifier):
     # Made for the 128-pin print head at 180 dpi, the PT-P900 series printed
     # them half as large and in the wrong place
-    assert label_printers(_label(identifier)) == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT']
+    wide = ['PT-D610BT', 'PT-E560BT'] if identifier == 'pt24' else ['PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT']
+    assert label_printers(_label(identifier)) == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', *wide]
     with pytest.raises(ValueError, match='cannot be printed on a PT-P900W$'):
         check_label_size(identifier, 'PT-P900W')
     # Its own tapes stay
@@ -91,18 +92,23 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     models = config['models']
     assert set(models) == set(drivers.MODELS)
     assert models['QL-800'] == {'qualities': ['fast', 'quality', 'high'], 'high_res': True, 'cutter': True, 'manual_cutter': False,
-                                'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': 'red',
+                                'cutter_unused': False, 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': 'red',
                                 'never_cut': '', 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False}
     assert (models['QL-1100']['high_res'], models['PT-P700']['half_cut'], models['PT-P700']['chain']) == (False, False, True)
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
-                                 'half_cut': True, 'chain': False, 'feed_waste': False, 'colors': 'color',
+                                 'cutter_unused': False, 'half_cut': True, 'chain': False, 'feed_waste': False, 'colors': 'color',
                                  'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
     assert models['PUQU/Q00']['cutter'] is False and models['PUQU/Q00']['leaves_turned'] is True
     assert (models['PUQU/Q00']['manual_cutter'], models['QL-500']['cutter'], models['QL-500']['manual_cutter']) == (False, False, True)
-    assert {model for model, caps in models.items() if not caps['cutter']} == {'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'Zebra/ZPL'}
+    assert {model for model, caps in models.items() if not caps['cutter']} == {
+        'QL-500', 'PUQU/Q00', 'Niimbot/D110_M', 'Niimbot/B1', 'Zebra/ZPL', 'PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT'}
+    # The PT-D610BT and the PT-E560BT have a cutter that is not told to cut,
+    # the others of the PT-D460BT family a lever
+    assert {model for model, caps in models.items() if caps['cutter_unused']} == {'PT-D610BT', 'PT-E560BT'}
+    assert all(models[model]['manual_cutter'] for model in ('PT-D410', 'PT-D460BT', 'PT-E310BT'))
     assert models['Zebra/ZPL']['leaves_turned'] is True
     assert models['PUQU/Q00']['vendor'] == 'PUQU'
 

@@ -64,7 +64,8 @@ def test_the_demo_printer_offers_every_model(designer):
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == ['Brother', 'Epson', 'Niimbot', 'PUQU', 'Zebra']
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(MODELS)
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
-    assert brother[:10] == ['PT-E550W', 'PT-P700', 'PT-P710BT', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P910BT', 'PT-P950NW', 'QL-500', 'QL-550']
+    assert brother[:15] == ['PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E550W', 'PT-E560BT', 'PT-P700', 'PT-P710BT',
+                            'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P910BT', 'PT-P950NW', 'QL-500', 'QL-550']
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']
@@ -95,6 +96,24 @@ def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):
     designer.reload()
     open_settings(designer)
     assert designer.input_value(MODEL) == 'VC-500W'
+
+
+@pytest.mark.parametrize('model, tapes, cutting', [
+    ('PT-D610BT', ['pt6', 'pt9', 'pt12', 'pt18', 'pt24'], 'Cut at the printer'),
+    ('PT-E310BT', ['pt6', 'pt9', 'pt12', 'pt18'], 'Cut by hand')])
+def test_the_demo_printer_offers_the_pt_d460bt_family_with_its_tapes(designer, model, tapes, cutting):
+    open_settings(designer)
+    with designer.expect_response('**/api/settings') as answer:
+        designer.select_option(MODEL, model)
+    assert answer.value.ok
+    designer.wait_for_function(f"() => labelEditor.S.printers[0].model === '{model}' && labelEditor.S.tape === 'pt6'")
+    offered = designer.eval_on_selector_all('[data-card="0"] select[data-k="label_size"] option', 'os => os.map(o => o.value)')
+    assert offered == [''] + tapes
+    card = designer.inner_text('[data-card="0"]')
+    assert f'Brother {model}' in card and cutting in card
+    assert 'This printer prints in one quality only.' in card
+    back_to_the_editor(designer)
+    assert designer.text_content('#slot .model') == f'Demo Brother {model}'
 
 
 def test_a_model_the_server_refuses_is_taken_back(designer):
