@@ -4,12 +4,15 @@ import io
 import json
 import os
 import re
+from collections import Counter
+from datetime import date, datetime
 
 import pytest
 from PIL import Image
 
 from app.labeldesigner import demos
 from app.labeldesigner.drivers import LABELS
+from app.labeldesigner.routes import create_label_from_request
 from tests.helpers import make_client, outcome
 
 LABEL_SIZES = {label.identifier for label in LABELS}
@@ -222,6 +225,46 @@ def test_sticker_of_this_project(client, label_id, tagline):
     # The address in red, the tagline in gray
     colors = {color for _, color in preview.getcolors(1 << 20)}
     assert {(0xc8, 0x10, 0x2e), (0x3d, 0x44, 0x4b)} <= colors
+
+
+def _printed_lines(client, label_id, when, blanks=None):
+    """The lines of the demo label as printed at the time when, with blanks."""
+    form = {key: json.dumps(value) if isinstance(value, (list, dict)) else str(value) for key, value in demos.load(label_id).items()}
+    with client.application.test_request_context():
+        label = create_label_from_request(dict(form, timestamp=str(int(when.timestamp())), blanks=blanks or {}))
+        label.process_templates()
+    return [line['text'] for line in label.text]
+
+
+# Best by this day when frozen on January 31, 2024: frozen food stays safe
+# but loses quality. Leftovers in the fridge are used by then.
+FOOD_KEPT = {'bread-and-cake': date(2024, 4, 30), 'soups-and-meals': date(2024, 4, 30), 'ground-meat': date(2024, 4, 30),
+             'poultry': date(2024, 10, 31), 'fatty-fish': date(2024, 3, 31), 'lean-fish': date(2024, 6, 30), 'vegetables': date(2024, 11, 30),
+             'fruit': date(2024, 11, 30), 'leftovers': date(2024, 2, 3)}
+FOOD_IDS = [label_id for label_id in DEMO_IDS if re.fullmatch(r'kitchen/\d{3}-(%s)-\w+(-de)?\.json' % '|'.join(FOOD_KEPT), label_id)]
+
+
+def test_food_labels_in_each_size_and_language():
+    sizes = Counter(demos.load(label_id)['label_size'] for label_id in FOOD_IDS)
+    assert sizes == {size: len(FOOD_KEPT) * 2 for size in ('62x29', '62', '29x90', 'niimbot40x30', 'niimbot50x30')}
+
+
+@pytest.mark.parametrize('label_id', FOOD_IDS)
+def test_food_is_best_by_its_keep_time(client, label_id):
+    kind = next(kind for kind in FOOD_KEPT if f'-{kind}-' in label_id)
+    field, = demos.load(label_id)['fields'].values()
+    food = field['choices'][0] if field['type'] == 'choice' else field['default']
+    made, kept = date(2024, 1, 31), FOOD_KEPT[kind]
+    if label_id.endswith('-de.json'):
+        words = ('Gekocht am', 'Zu verbrauchen bis') if kind == 'leftovers' else ('Eingefroren am', 'Am besten bis')
+        dates = made.strftime('%d.%m.%Y'), kept.strftime('%d.%m.%Y')
+    else:
+        words = ('Cooked on', 'Use by') if kind == 'leftovers' else ('Frozen on', 'Best by')
+        dates = made.isoformat(), kept.isoformat()
+    lines = _printed_lines(client, label_id, datetime(2024, 1, 31, 12))
+    # The small labels have the words and the dates on lines of their own
+    assert ' '.join(lines) == f'{food} {words[0]} {dates[0]} {words[1]} {dates[1]}'
+    assert lines[0] == food and len(lines) in (3, 5)
 
 
 def test_a_model_that_is_no_text_is_refused(client):
