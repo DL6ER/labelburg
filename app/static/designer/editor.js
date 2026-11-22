@@ -884,19 +884,49 @@ function stepper() {
 const sizeStep = stepper(), spacingStep = stepper(), allStep = stepper();
 const ALIGNS = { left: ['left', 'Left'], center: ['center', 'Centered'], right: ['right', 'Right'] };
 
-// Above the label with its dimensions and the printer
+// While a button of the toolbar is pressed, a preview neither moves nor
+// redraws it, so the click lands where the press began
+let held = false;
+const owed = new Set();
+addEventListener('pointerdown', e => { if (e.target.closest('#ltb')) held = true; }, true);
+const release = () => {
+    if (!held) return;
+    held = false;
+    // After the click of this press
+    const due = [...owed];
+    owed.clear();
+    setTimeout(() => due.forEach(fn => fn()));
+};
+addEventListener('pointerup', release, true);
+addEventListener('pointercancel', release, true);
+addEventListener('blur', e => { if (e.target === window) release(); });
+// Whether fn waits for the press on the toolbar to be let go
+function heldBack(fn) {
+    if (held) owed.add(fn);
+    return held;
+}
+
+// Above the label with its dimensions and the printer; the menus opened
+// from it move along
 function positionToolbar() {
     const bar = $('#ltb');
     if (!bar || bar.hidden) return;
+    if (heldBack(positionToolbar)) return;
     const lb = $('#labelbox'), above = Math.min(0, ...$$('.dim', lb).filter(e => !e.hidden).map(e => e.offsetTop));
     // The printer is above the label where the bottom leaves first
     const slot = $('#slot'), top = Math.min(lb.offsetTop + above, slot.offsetParent ? slot.offsetTop : Infinity);
+    const was = bar.offsetTop;
     bar.style.top = `${Math.max(8, top - bar.offsetHeight - 12)}px`;
+    const by = bar.offsetTop - was;
+    if (!by) return;
+    $$('#center > .menu').forEach(m => { m.style.top = `${m.offsetTop + by}px`; });
+    refreshFontMenu();
 }
 
 export function renderToolbar() {
     const bar = $('#ltb');
     if (!bar) return;
+    if (heldBack(renderToolbar)) return;
     const p = ui.pick, d = S.edit.design;
     if (p && p.part !== 'line' && hooks.toolbars[p.part]) {
         bar.hidden = false;
@@ -1276,4 +1306,4 @@ export function printerChanged() {
     drawPreview();
 }
 
-mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, redraw: () => drawPreview() });
+mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, heldBack, redraw: () => drawPreview() });
