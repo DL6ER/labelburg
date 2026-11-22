@@ -26,6 +26,7 @@ SIMULATED_LABELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirn
 
 BUSY = 'Printer is busy with another print job, please try again'
 WRONG_MODEL = 'The printer is another model than the label was made for, print it again'
+NO_FEED = 'This printer offers no feed and cut'
 
 # Number of simulated labels kept in SIMULATED_LABELS_DIR, older ones are
 # deleted so that printing to the simulator cannot fill up the disk
@@ -261,6 +262,14 @@ class PrinterQueue:
         if is_simulation(self.device_specifier):
             return ''
         return self._send_alone(self.driver.calibration_job(self))
+
+    def feed(self) -> str:
+        """Feed the paper of the printer, cut where it cuts, see
+        Driver.feed_kind()."""
+        job = self.driver.feed_job(self)
+        if job is None:
+            raise ValueError(NO_FEED)
+        return '' if is_simulation(self.device_specifier) else self._send_alone(job)
 
     def _send_alone(self, job) -> str:
         """Send a job of its own, e.g. the calibration label, held and checked

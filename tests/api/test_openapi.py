@@ -98,6 +98,7 @@ def test_a_busy_printer_names_both_reasons_of_the_refusal():
     # The line is full, or the waiting jobs hold too many large images
     spec = json.load(open(SPEC))
     for path in ('/labeldesigner/api/print', '/labeldesigner/api/repository/print', '/labeldesigner/api/demos/print',
-                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print'):
+                 '/labeldesigner/api/webhook/print', '/labeldesigner/api/homebox', '/labeldesigner/api/calibration/print',
+                 '/labeldesigner/api/feed'):
         description = spec['paths'][path]['post']['responses']['503']['description']
         assert 'line of the printer is full' in description and 'large images' in description, path

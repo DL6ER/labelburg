@@ -6,7 +6,7 @@ import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
@@ -145,15 +145,61 @@ function qualityHTML(p) {
     return `<div class="set-stack">${seg('quality', opts, on, 'Quality')}<small class="muted">${esc(about)} The same for all printers.</small></div>`;
 }
 
+// What feeding the paper does with the tape in the printer, as the server
+// tells it: the button, its hint and what is said meanwhile
+const FEEDS = {
+    cut: ['Feed and cut', 'Cuts off the last label, e.g. after printing without a cut.', 'Feeding and cutting...'],
+    cut_label: ['Feed one label', 'Cuts off the last label, e.g. after printing without a cut. This uses one empty label.', 'Feeding one label...'],
+    label: ['Feed one label', 'Feeds one empty label, e.g. to tear off the last one.', 'Feeding one label...'],
+};
+// Printers feeding their paper, by path: one at a time, a second click would feed again
+const feeding = new Set();
+function feedHTML(p) {
+    if (!Object.hasOwn(FEEDS, p.feed || '')) return '';
+    const [name, hint] = FEEDS[p.feed];
+    const off = unreachable(p) ? ' disabled title="The printer cannot be reached"' : feeding.has(p.path) ? ' disabled' : '';
+    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(p.feed === 'label' ? 'down' : 'scissors')}${esc(name)}</button>
+        <small class="muted">${esc(hint)}</small>`;
+}
+
+// Through the queue of printer p; the toast tells while it waits there and why it failed
+async function feed(p) {
+    const [name, , doing] = FEEDS[p.feed], path = p.path, behind = lineBusy(p);
+    feeding.add(path);
+    drawCards(true);
+    let shown = toast(doing, null, 120000), message = '';
+    try {
+        const fd = new FormData();
+        fd.set('printer', path);
+        if (C.models[p.model]) fd.set('model', p.model);
+        const r = await post('/feed', fd);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j.success === false) message = j.message || `The printer answered ${r.status}`;
+        else if (j.job && j.state !== 'printed') {
+            const entry = { job: j.job, start: j.start, seen: j.state, seenAt: Date.now(), path };
+            if (behind && j.state === 'waiting') shown = toast(`${name} waits in the queue.`, null, 120000);
+            QUEUE.follow();
+            await followJob(entry);
+            if (entry.state !== 'printed') message = entry.message || 'It was not done';
+        }
+    } catch (e) {
+        message = UNREACHABLE;
+    }
+    feeding.delete(path);
+    drawCards(true);
+    hideToast(shown);
+    if (message) toast(message, { label: 'Try again', run: () => feed(p) }, 10000);
+}
+
 function cuttingHTML(p) {
     const caps = capsOf(p.model), c = printerCut(p);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small></div>`;
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')
         + (caps.chain ? `<label class="set-check"${chainWhy ? ` title="${esc(chainWhy)}"` : ''}><input type="checkbox" data-k="chain"${chainOf(c, caps) ? ' checked' : ''}${chainWhy ? ' disabled' : ''}>Chain printing</label>` : '');
     return `<div class="set-stack"><div class="row">${seg('cut', cuts, c.cut, 'Cutting')}${checks}</div>
-        <small class="muted">${esc(cutText(c, caps))} Labels saved with their own cutting keep it.</small></div>`;
+        <small class="muted">${esc(cutText(c, caps))} Labels saved with their own cutting keep it.</small>${feedHTML(p)}</div>`;
 }
 
 function cardHTML(p, i) {
@@ -220,6 +266,7 @@ function bindCards(box) {
         else if ('show' in b.dataset) { shownAnyway.add(cardKey(p)); drawCards(true); }
         else if ('hide' in b.dataset) { shownAnyway.delete(cardKey(p)); drawCards(true); }
         else if ('test' in b.dataset) testLabel(p);
+        else if ('feed' in b.dataset) feed(p);
         else if ('calOpen' in b.dataset) openCalibration(p, () => drawCards(true));
         else if ('calDismiss' in b.dataset) dismissCalibration(p, () => drawCards(true));
         else if ('remove' in b.dataset) removePrinter(p);
