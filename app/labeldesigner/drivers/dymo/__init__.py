@@ -33,12 +33,8 @@ MODEL_NAMES = {LW450: 'LabelWriter 450', TWIN_TURBO: 'LabelWriter 450 Twin Turbo
 DPI = {LW450: 300, TWIN_TURBO: 300, XL: 300, SE450: 203}
 HEAD_DOTS = {LW450: 672, TWIN_TURBO: 672, XL: 1248, SE450: 448}
 
-# DYMO's labels of the product sheets, width x length in mm, as DYMO sells
-# them: 30252 address labels of 1 1/8 x 3 1/2 in, 30321 of 1.4 x 3 1/2 in,
-# 30330 return address 3/4 x 2 in, 30323 shipping 2 1/8 x 4 in, 30256
-# shipping 2 5/16 x 4 in, 30857 name badges 2 1/4 x 4 in, 30336
-# multi-purpose 1 x 2 1/8 in and 30327 file folder labels 9/16 x 3 7/16 in.
-# The same sizes are in LPrint's list.
+# DYMO's labels in mm, width x length, as DYMO's product sheets of the 450
+# Turbo and the 4XL and LPrint's media list name them in inches
 KINDS = {(28, 89): 'address', (36, 89): 'large address', (19, 51): 'return address', (54, 101): 'shipping',
          (59, 102): 'shipping', (57, 102): 'name badge', (25, 54): 'multi-purpose', (14, 87): 'file folder'}
 # 1744907 shipping labels of 4 x 6 in, of the 4XL only
@@ -63,11 +59,8 @@ ADDRESS_MM = 89
 # lprint-dymo.h, compared in any case and spacing
 NAMED = {'labelwriter 450': LW450, 'labelwriter 450 turbo': LW450, 'labelwriter 450 duo label': LW450,
          'labelwriter 450 twin turbo': TWIN_TURBO, 'labelwriter 4xl': XL, 'labelwriter se450': SE450}
-# Of a printer that tells no device ID by the USB product ID of DYMO (0922):
-# the 450, Turbo and Twin Turbo (the reference, p. 14), the SE450 (SE450
-# reference, USB settings), 0020 and 0400 also in usb.ids, and the 4XL
-# (thermal-label, hardware). The tape side of the Duo has its product ID,
-# 0023, as well: the Duo is known by its device ID only.
+# Without a device ID by DYMO's product IDs: the reference, p. 14, the SE450
+# reference and thermal-label (4XL); not the Duo, whose tape side shares 0023
 VENDOR_ID = 0x0922
 PRODUCT_IDS = {0x0020: LW450, 0x0021: LW450, 0x0022: TWIN_TURBO, 0x001f: XL, 0x0400: SE450}
 
