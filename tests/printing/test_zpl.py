@@ -672,3 +672,16 @@ def test_a_continuous_roll_of_a_width_the_printer_reports():
     state = diecut.as_set({'model': 'Zebra/ZPL', 'media_width': 102, 'media_length': 0}, 'endless')
     found = tape.describe(tape.in_printer(state, 'Zebra/ZPL', '', '62'))
     assert (found['known'], found['unknown']) == (False, '102 mm')
+
+
+
+def test_a_problem_report_leaves_the_states_the_search_keeps(tmp_path, monkeypatch):
+    # As printer_status does: the roll set is not written into them
+    from app.labeldesigner import routes
+    kept = {'path': 'tcp://127.0.0.1', 'model': 'Zebra/ZPL', 'errors': [], 'media_width': 102, 'media_length': 152}
+    told = dict(kept)
+    monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {'printers': [told]})
+    client = make_client(tmp_path, empty_repo=True, model='Zebra/ZPL', printer='tcp://127.0.0.1')
+    client.post('/labeldesigner/api/settings', data={'sensing': 'endless'})
+    assert client.get('/labeldesigner/api/problem_report').status_code == 200
+    assert told == kept
