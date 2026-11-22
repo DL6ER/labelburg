@@ -123,12 +123,13 @@ def test_labels_printed_are_not_remembered_while_switched_off(page, server):
     assert 'Everyone on your network can see them.' in page.inner_text('#setPart .set-grid')
     # Those remembered go, it asks first
     page.click('[data-k="history"][data-v="0"]')
-    page.wait_for_selector('[role=alertdialog] h2:text-is("Clear all printed labels?")')
+    page.wait_for_selector('[role=alertdialog] h2:text-is("Stop remembering printed labels?")')
+    assert page.inner_text('[role=alertdialog] p') == 'The list is cleared.'
     page.click('[role=alertdialog] button:text-is("Cancel")')
     assert page.locator('[data-k="history"][data-v="1"].on').count() == 1 and len(rows(page)) == 1
     page.click('[data-k="history"][data-v="0"]')
     with page.expect_response('**/api/settings/labels'):
-        page.click('#clearGo')
+        page.click('[role=alertdialog] button:text-is("Turn off")')
     page.wait_for_selector('#setHist .set-empty:text-is("Printed labels are not remembered.")')
     page.wait_for_selector('#toast:has-text("Printed labels are not remembered")')
     print_over_the_api(server, 'Sugar')

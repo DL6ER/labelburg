@@ -537,9 +537,9 @@ DRAW.printed = box => {
     const remember = on => keepLabels(box, { history: on ? '' : '0' }, () => on ? 'Printed labels are remembered' : 'Printed labels are not remembered', DRAW.printed);
     $$('[data-k="history"]', box).forEach(b => b.onclick = () => {
         if (b.dataset.v === '1') remember(true);
-        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askClear(() => remember(false)) : remember(false);
+        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askFirst('Stop remembering printed labels?', 'The list is cleared.', 'Turn off', () => remember(false)) : remember(false);
     });
-    $('#setClear').onclick = () => askClear(async () => {
+    $('#setClear').onclick = () => askFirst('Clear all printed labels?', '', icon('trash') + 'Clear the list', async () => {
         try {
             const r = await post('/history/clear', new URLSearchParams());
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The printed labels could not be cleared');
@@ -547,10 +547,11 @@ DRAW.printed = box => {
         drawHistory();
     });
 };
-function askClear(then) {
-    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Clear all printed labels?">
-        <h2>Clear all printed labels?</h2>
-        <div class="acts"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="clearGo">${icon('trash')}Clear the list</button></div></div>`, 'center');
+// button is HTML, e.g. with an icon
+function askFirst(question, hint, button, then) {
+    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="${esc(question)}">
+        <h2>${esc(question)}</h2>${hint ? `<p class="muted">${esc(hint)}</p>` : ''}
+        <div class="acts"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="clearGo">${button}</button></div></div>`, 'center');
     $('#clearGo').onclick = () => { closeLayer(true); then(); };
     $('#clearGo').focus();
 }
