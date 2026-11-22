@@ -16,14 +16,15 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 | Brother | QL-800, QL-810W, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
 | Brother | VC-500W | 9 to 50 mm wide ZINK tape in full color, about 40 s per label |
-| Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
+| DYMO | LabelWriter 450, 450 Turbo, 450 Twin Turbo, 450 Duo label side, 4XL, SE450 (USB) | DYMO die-cut thermal labels, e.g. 28 x 89 mm address and 54 x 101 mm shipping labels, also 4 x 6 in on the 4XL, torn off |
+| Epson | ESC/POS receipt printers (USB or network), tried on a TM-T20II, also those of other makers that report ESC/POS, shown with the name they report, but not the dot-matrix TM-U models | 80 and 58 mm receipt paper, cut, a blank lead of 12 mm before each receipt as on a TM-T20II |
 | Niimbot | D110_M (Bluetooth) | 12 to 15 mm wide die-cut thermal labels, torn off, printed on 12 x 40 mm only |
 | Niimbot | B1 (USB, Bluetooth) | 40 and 50 mm wide die-cut thermal labels, also rolls of several small labels to a page, torn off |
 | PUQU | Q00 (Bluetooth), also sold as the [Reekon P1 Tagger](https://reekon.tools/products/p1-tagger-construction-printer) (P1L) | 50 x 30, 50 x 80, 40 x 30 and 40 x 50 mm die-cut thermal labels, torn off |
-| Zebra | ZPL printers (USB or network) | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
+| TSC | TSPL printers (USB or network): TSC printers and shipping label printers like the Rollo X1038, Marklife X4, Phomemo PM-241-BT and VEVOR Y428BT | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, also with black marks on the back or on a continuous roll, torn off |
+| Zebra | ZPL printers (USB or network), also the 4BARCODE 4B-2054A (Arkscan 2054A) and the HP KE103 | common metric and inch die-cut labels up to 104 mm wide, e.g. 4 x 6 in or A6, torn off |
+| Other printer | Label printers set up in CUPS, driven by LPrint or offered over AirPrint (over IPP, on the network or on this computer) | common die-cut labels, e.g. 4 x 6 in or DYMO address labels, the loaded ones known where the printer tells them, cut or torn off as set on the printer |
 | Office printer | Any office printer (network over IPP, or a queue of CUPS) | A4 sheets of labels, e.g. Avery L7160 or Herma 4226, then US Letter ones, e.g. Avery 5160, and plain paper with thin lines to cut along |
-
-Label printers set up in CUPS, and other printers that take print jobs over IPP, e.g. AirPrint label printers, can be added in the Settings as "Other printer".
 
 Office printers print on sheets of labels, A4 ones like Avery L7160 or Herma 4226 and US Letter ones like Avery 5160, or on plain paper with thin lines to cut along. Add one in the Settings as "Office printer" and choose the number on the pack of your sheets. A print can start at any label of a sheet, and Labelburg remembers where the last one ended.
 
