@@ -219,6 +219,15 @@ def test_the_field_is_marked_in_its_card_when_typing(editor, scheme):  # noqa: F
     assert not off['focused'] and off['border'] != off['select']
 
 
+def test_a_square_label_leaves_the_printer_the_way_its_text_runs(editor):  # noqa: F811
+    status_is(editor, with_tape({'model': 'QL-800', 'name': 'Office', 'settings': {'label_size': '23x23'}}))
+    type_label(editor, 'Shelf 3')
+    assert 'side' not in editor.get_attribute('#center', 'class').split()
+    editor.click('#advBtn')
+    changed_preview(editor, lambda: editor.click('#adv [data-dir="along"]'))
+    editor.wait_for_function("() => document.querySelector('#center').classList.contains('side')")
+
+
 @pytest.mark.parametrize('model, settings, along, width_mm', [
     pytest.param('QL-800', {}, False, '62 mm', id='62 mm across'),
     pytest.param('QL-800', {}, True, '62 mm', id='62 mm along'),
