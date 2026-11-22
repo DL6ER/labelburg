@@ -16,7 +16,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, ipp, paperless, print_queue, printer_settings, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, ipp, paperless, print_queue, printer_settings, problem_report, refusals, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -27,10 +27,11 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, diecut, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
-from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
+from .dates import LANGUAGES as DATE_LANGUAGES
+from .label import BLANK_TEMPLATE, MAX_TEXT_LENGTH, SimpleLabel, LabelContent, LabelOrientation, LabelType, TextTooLong, check_blank_choice, check_blank_choices, check_image_position, check_image_size, check_letter_spacing, check_parts_direction, check_parts_order, check_vertical_align, datetime_codes, parse_color, shift_date
 from .label_names import LABELS, MODELS, check_cut, label_dpi, label_length_problem, label_name, label_of, label_palette, label_size_problem, length_limits
 from .printer_settings import CUTS
 from flask import current_app, g, has_request_context, json, jsonify, redirect, render_template, request, make_response, url_for
@@ -254,6 +255,8 @@ def _designer_config() -> dict:
         'date_formats': list(printer_settings.DATE_FORMATS),
         # How a printer told so finds its labels, by the words of its roll
         'rolls': [[sensing, roll] for sensing, roll in diecut.ROLLS.items()],
+        # Each named in itself, English is the empty one
+        'date_languages': [['', 'English'], *map(list, DATE_LANGUAGES.items())],
     }
 
 
@@ -637,11 +640,9 @@ def repo_save():
         check_code_correction(check_code_type(data.get('barcode_type')), data.get('qrcode_correction'))
     except ValueError as e:
         return _refused('Saving the label', e, refusals.INVALID_INPUT)
-    filename = secure_filename(name)
+    filename = _label_file_name(name)
     if not filename:
         return _fail('Invalid name', 400)
-    if not filename.lower().endswith('.json'):
-        filename = filename + '.json'
     # The name kept with it is the one it is saved under
     data['name'] = filename
     repo = _get_repo_dir()
@@ -780,13 +781,34 @@ def repo_load():
         return _fail('Failed to load file', 500)
 
 
-def _saved_path(repo: str, name: str) -> str:
-    """The file of the saved label name in repo, FileNotFoundError for a
-    name that leaves no file name, e.g. '..'."""
+def _label_file_name(name: str) -> str:
+    """The file a label saved under name is saved in, e.g. Frozen_on.json for
+    Frozen on, empty for a name that leaves none, e.g. '..'."""
     filename = secure_filename(name)
-    if not filename:
-        raise FileNotFoundError(name)
-    return os.path.join(repo, filename)
+    if filename and not filename.lower().endswith('.json'):
+        filename += '.json'
+    return filename
+
+
+def _saved_path(repo: str, name: str) -> str:
+    """The file of the saved label name in repo: the one of that name, .json
+    may be left out, else the first label with name as its title, which the
+    file name may lack, e.g. "&". FileNotFoundError where none is."""
+    filename = _label_file_name(name)
+    if filename and os.path.isfile(path := os.path.join(repo, filename)):
+        return path
+    for entry in sorted(os.listdir(repo)):
+        if entry.startswith('.') or not entry.lower().endswith('.json'):
+            continue
+        try:
+            with open(path := os.path.join(repo, entry), encoding='utf-8') as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        title = data.get('title') if isinstance(data, dict) else None
+        if isinstance(title, str) and title.strip() and title.strip() == name.strip():
+            return path
+    raise FileNotFoundError(name)
 
 
 def _label_for_designer(data: dict, image_dir: str) -> dict:
@@ -851,7 +873,11 @@ def repo_delete():
         return _fail('No name specified', 400)
     repo = _get_repo_dir()
     try:
-        path = _saved_path(repo, name)
+        # Only the exact file: a title may name several labels
+        filename = secure_filename(name)
+        if not filename:
+            raise FileNotFoundError(name)
+        path = os.path.join(repo, filename)
         with _saving(repo):
             os.remove(path)
             # Also remove the image file stored alongside the JSON
@@ -1547,6 +1573,14 @@ def get_printer_status():
         # Copies, the search keeps the states the printers told
         status['printers'] = [dict(printer) for printer in status.get('printers', [])]
         told = [status] + status['printers']
+    _described(told)
+    return status
+
+
+def _described(told: list[dict]):
+    """Adds what the server keeps and knows of each printer to its status:
+    its settings, the tape it prints on, its queue and job."""
+    kept = _kept_settings()
     demo = _demo_model(kept)
     # The VC-500W prints in color, the label designer then offers colors
     for printer in told:
@@ -1565,6 +1599,10 @@ def get_printer_status():
         printed_on = _tape_of(printer, model, printer['settings'])
         printer['tape'] = tape.describe(printed_on)
         printer['takes'] = tape.takes(model)
+        # What /api/feed does with that tape, where the model offers it
+        feed = drivers.for_model(model).feed_kind(model, printed_on.id) if model in drivers.MODELS else ''
+        if feed:
+            printer['feed'] = feed
         # The label size of that tape, for API users
         printer['label_size'], printer['label_size_assumed'] = printed_on.id, printed_on.assumed
         if printer.get('path'):
@@ -1573,7 +1611,21 @@ def get_printer_status():
         job = progress.state(printer['path']) if printer.get('path') else None
         if job:
             printer['job'] = dict(printer.get('job') or {}, **job)
-    return status
+
+
+@bp.route('/api/problem_report', methods=['GET'])
+def problem_report_route():
+    """The details a problem report needs and the bug form on GitHub with
+    them filled in. Nothing is sent from here, the user opens the form."""
+    # Copies, the search keeps the states the printers told
+    printers = [dict(printer) for printer in get_ptr_status(current_app.config, _added_printers()).get('printers', [])]
+    configured = {current_app.config['PRINTER_PRINTER']} | {device for _, device, _ in configured_printers(current_app.config)}
+    # The demo printer listed by itself only where nothing else is listed
+    if 'simulation' not in configured:
+        printers = [p for p in printers if not is_simulation(p.get('path'))] or printers
+    _described(printers)
+    details = problem_report.details(current_app.extensions['build'], printers)
+    return jsonify({'details': details, 'text': problem_report.text(details), 'url': problem_report.url(details)})
 
 
 def _queue(model: str, device: str, label_size: str) -> PrinterQueue:
@@ -1734,9 +1786,9 @@ def _label_settings() -> dict:
 @bp.route('/api/settings/labels', methods=['GET', 'POST'])
 def label_settings_route():
     """The settings of labels, the same for every browser and the API: how
-    dates are written, the order of copies of several files and the font of
-    new labels. POST changes only the ones named, an empty value removes
-    one, and answers all."""
+    dates are written and the language of their names, the order of copies
+    of several files and the font of new labels. POST changes only the ones
+    named, an empty value removes one, and answers all."""
     if request.method == 'GET':
         return jsonify(_label_settings())
     # JSON numbers and true or false as for printing, e.g. 0
@@ -2005,6 +2057,28 @@ def print_calibration():
     except Exception as e:
         return _refused('Printing the calibration label', e, refusals.PRINT_FAILED)
     return _queued(queue, run=queue.print_calibration, title='Calibration label', source=_job_source('calibration'), labels=1)
+
+
+# The title of the job of /api/feed in the queue, as the label designer names its button
+FEED_TITLES = {'cut': 'Feed and cut', 'cut_paper': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label'}
+
+
+@bp.route('/api/feed', methods=['POST'])
+def feed_paper():
+    """Feed the paper of a printer and cut it, e.g. to cut off the last label
+    of a job printed without a cut, or feed one label, as the driver does
+    on the roll in the printer, see Driver.feed_kind()."""
+    values = {**request.values.to_dict(), **_json_body()}
+    try:
+        device, model = _resolved_printer(values.get('printer'), values.get('model'), ask=True)
+        label_size = values.get('label_size') or _loaded_tape(device, model, _settings_of(device)).id
+        queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
+        kind = queue.driver.feed_kind(model, label_size)
+        if not kind:
+            raise ValueError(NO_FEED)
+    except Exception as e:
+        return _refused('Feeding the paper', e, refusals.PRINT_FAILED)
+    return _queued(queue, run=queue.feed, title=FEED_TITLES[kind], source=_job_source('feed'), labels=1)
 
 
 def _job_told(told: dict, printing_on: str | None = None) -> dict:
@@ -2434,6 +2508,8 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
             raise ValueError("Font size is required")
         if int(line['size']) < 1:
             raise ValueError("Font size must be at least 1")
+        if 'letter_spacing' in line:
+            line['letter_spacing'] = check_letter_spacing(line['letter_spacing'])
         # Lines without a font, e.g. from the API, use the font of new labels
         if not line.get('font'):
             line['font'] = new_font
@@ -2514,6 +2590,7 @@ def create_label_from_request(d: dict = {}, files: dict = {}, counter: int = 0, 
         **_flag_wrap(label_size, diameter, context['high_res']),
         mirror=context['mirror'],
         date_format=settings['date_format'] or '%Y-%m-%d',
+        date_language=settings['date_language'],
     )
     # In "standard" orientation die-cut labels are landscape, so a portrait
     # image (e.g. a shipping label on a 103 x 164 mm label) came out small and
@@ -3110,7 +3187,7 @@ def _homebox_label(name: str | None, label_size: str) -> tuple[dict, str, bytes 
         endless = _label_type(label_of(label_size).form_factor) == LabelType.ENDLESS_LABEL
         data.update(label_size=label_size, orientation='rotated' if endless else 'standard', text=json.dumps(data['text']))
         return data, demos.IMAGE_DIR, None
-    data, image_bytes = _load_repo_json(name if name.endswith('.json') else f'{name}.json')
+    data, image_bytes = _load_repo_json(name)
     return data, _get_repo_dir(), image_bytes
 
 
