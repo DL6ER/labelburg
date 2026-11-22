@@ -62,6 +62,7 @@ def test_capitals_and_letter_spacing_reach_the_preview(editor):  # noqa: F811
     assert line['caps'] is True and line['text'] == 'Shelf 3'
     assert editor.inner_text('#field .ln >> nth=0') == 'Shelf 3'
     editor.wait_for_selector('.line-menu [data-act="caps"].on')
+    assert editor.inner_text('.line-menu [data-act="caps"]') == 'All capitals'
     assert 'dot' in editor.get_attribute('#ltb [data-more]', 'class')
     assert editor.inner_text('.line-menu [data-lsv]') == 'Normal'
     steps = []

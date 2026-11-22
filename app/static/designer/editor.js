@@ -979,7 +979,7 @@ function lineMenu(btn, i) {
     const spacing = +(l.line_spacing || 100);
     el.innerHTML = `<button type="button" data-act="invert" class="${l.inverted ? 'on' : ''}">${icon('contrast')}<span>White on black</span>${l.inverted ? icon('check') : ''}</button>
         <button type="button" data-act="todo" class="${l.checkbox ? 'on' : ''}">${icon('todo')}<span>To-do box</span><small>in front</small>${l.checkbox ? icon('check') : ''}</button>
-        <button type="button" data-act="caps" class="${l.caps ? 'on' : ''}">${icon('caps')}<span>Capitals</span>${l.caps ? icon('check') : ''}</button>
+        <button type="button" data-act="caps" class="${l.caps ? 'on' : ''}">${icon('caps')}<span>All capitals</span>${l.caps ? icon('check') : ''}</button>
         <div class="mi">${icon('spacing')}<span>Line spacing</span><span class="az sm"><button type="button" class="azb" data-sp="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-spv>${esc(spacing)} %</span><button type="button" class="azb" data-sp="1" aria-label="More">${icon('plus', '')}</button></span></div>
         <div class="mi">${icon('tracking')}<span>Letter spacing</span><span class="az sm"><button type="button" class="azb" data-ls="-1" aria-label="Less">${icon('minus', '')}</button><span class="anum" data-lsv></span><button type="button" class="azb" data-ls="1" aria-label="More">${icon('plus', '')}</button></span></div>
         <button type="button" data-act="remove" class="danger"${d.text.length > 1 || String(l.text).length ? '' : ' disabled'}>${icon('trash')}<span>Remove the line</span></button>`;
