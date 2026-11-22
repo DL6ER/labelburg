@@ -1062,14 +1062,16 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
     job = Object.assign({}, job, { design: clone(job.design) });
     // Where on a sheet of labels it starts, null where that question was
     // closed; other labels go on at once
-    let start = printHooks.start && printHooks.start(printer, (printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer)).label_size);
+    let start = job.sheetStart || (printHooks.start && printHooks.start(printer, (printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer)).label_size));
     if (start instanceof Promise) start = await start;
     if (start === null) return null;
     const behind = lineBusy(printer), path = (printer && printer.path) || '';
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
         design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
+        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: '',
+        // On a sheet of labels, which a print tried again goes on on
+        ...(start ? { sheet: true } : {})
     };
     S.history.unshift(entry);
     saveHistory();
@@ -1222,7 +1224,9 @@ export function resolvePending() {
 export const NO_IMAGE = 'Its image was not kept, open it in the editor to add it again';
 export function printAgain(h, onDone = announcePrint) {
     if (h.noImage) { toast(NO_IMAGE); return null; }
-    return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source }, onDone);
+    // Tried again, a print on a sheet goes on after the labels used meanwhile
+    const again = h.sheet && h.state !== 'printed' ? { sheetStart: 'next' } : {};
+    return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source, ...again }, onDone);
 }
 export function announcePrint(entry, again = () => printAgain(entry)) {
     if (untold(entry)) return;

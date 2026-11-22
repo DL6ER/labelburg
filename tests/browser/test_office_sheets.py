@@ -202,6 +202,22 @@ def test_two_prints_in_a_row_go_on_on_the_sheet(designer, server, app):  # noqa:
     assert [ask['sheet_start'] for ask in asked] == ['next']
 
 
+def test_a_print_tried_again_goes_on_on_the_sheet(designer, server, app):  # noqa: F811
+    office(designer, server, app, label_size='sheet-l7160')
+    asked = []
+
+    def answer(route):
+        asked.append(sent(route.request))
+        route.fulfill(json={'success': True} if len(asked) > 1 else {'success': False, 'message': 'The printer could not print the label'})
+    designer.route('**/api/print', answer)
+    designer.click('#print')
+    designer.wait_for_selector('#retry')
+    designer.click('#retry')
+    designer.wait_for_function("() => labelEditor.S.history.length === 2 && labelEditor.S.history[0].state === 'printed'")
+    # Where the labels the printer took before it failed end, without a question
+    assert [ask['sheet_start'] for ask in asked] == ['1', 'next']
+
+
 def test_no_question_without_a_sheet_partly_used(designer, server, app):  # noqa: F811
     office(designer, server, app, label_size='sheet-l7160')
     asked = prints(designer)

@@ -1337,14 +1337,16 @@ def _check_print_count(print_count: int, label_size=None) -> int:
     return print_count
 
 
-def _sheet_start(value, label, settings: dict) -> int:
+def _sheet_start(value, label, settings: dict, device: str | None = None) -> int:
     """The label of a sheet of labels a job starts at: 1 where the request
     leaves it out, next where the last print on it ended, see
-    printer_settings.CONTINUE_AT."""
+    printer_settings.CONTINUE_AT, of device after the jobs in its queue,
+    see _going_on()."""
     per = sheets.per_sheet(label)
     value = _given(value, 1)
     if isinstance(value, str) and value.strip().lower() == 'next':
-        return min(settings.get(printer_settings.CONTINUE_AT, {}).get(label.identifier, 1), per)
+        at = _going_on(device) if device else settings.get(printer_settings.CONTINUE_AT, {})
+        return min(at.get(label.identifier, 1), per)
     try:
         start = _whole(value)
     except (TypeError, ValueError):
@@ -1354,61 +1356,84 @@ def _sheet_start(value, label, settings: dict) -> int:
     return start
 
 
-def _sheet_options(label_size: str, get, settings: dict) -> tuple[int, bool, bool]:
+def _sheet_options(label_size: str, get, settings: dict, device: str | None = None) -> tuple[int, bool, bool]:
     """Where a job of label_size starts on a sheet of labels, whether plain
     paper gets lines to cut along, and whether it goes on where the last
     print ended (next), see PrinterQueue.start; get(key) of the request,
-    the lines as set for the printer where it leaves them out."""
+    the lines as set for the printer where it leaves them out. Next on
+    device is where its jobs in the queue end, see _sheet_start()."""
     label = label_of(label_size)
     if not sheets.is_paper(label):
         return 1, False, False
     start = get('sheet_start')
     goes_on = isinstance(start, str) and start.strip().lower() == 'next'
-    return (_sheet_start(start, label, settings), _whole_or(_given(get('cut_lines'), settings.get('cut_lines')), 0) != 0, goes_on)
+    return (_sheet_start(start, label, settings, device), _whole_or(_given(get('cut_lines'), settings.get('cut_lines')), 0) != 0, goes_on)
 
 
 def _on_sheet(printer: PrinterQueue, get, settings: dict):
     """The job of printer on a sheet of labels as _sheet_options() tells."""
-    printer.start, printer.cut_lines, printer.goes_on = _sheet_options(printer.label_size, get, settings)
+    printer.start, printer.cut_lines, printer.goes_on = _sheet_options(printer.label_size, get, settings, printer.device_specifier)
 
 
 # The jobs on sheets of labels in the queues, by their id: the sheet, the
 # label they start at, None for where the job before ends, how many labels
 # they take, and whether they ended
 _SHEET_JOBS: dict[str, dict] = {}
+# Held while where a sheet goes on is kept and a job on a sheet starts or
+# ends, and while _going_on() reads both, so that no job counts twice
+_GOING_ON = threading.Lock()
 
 
 def _noting_sheet(printer: PrinterQueue, labels: int):
     """printer.process_queue(), which on a sheet of labels starts where the
     last print on it ended where asked to, worked out once the jobs before
-    it printed, and notes where the next print goes on, once printed."""
+    it printed, and notes where the next print goes on: once printed, and
+    after each sheet the printer took, which it used up."""
     label = label_of(printer.label_size)
     if not sheets.is_paper(label) or sheets.per_sheet(label) == 1:
         return printer.process_queue
     per = sheets.per_sheet(label)
+    device = printer.device_specifier
 
     def run():
-        if printer.goes_on:
-            printer.start = _sheet_start('next', label, _settings_of(printer.device_specifier))
+        with _GOING_ON:
+            if printer.goes_on:
+                printer.start = _sheet_start('next', label, _settings_of(device))
+            run.sheet['start'] = printer.start
+        # Its sheets, the first one from its start on; each the printer took
+        # before the last one is used up
+        pages = 1 + -(-max(0, labels - (per - printer.start + 1)) // per)
+
+        def sent(taken: int):
+            if taken < pages:
+                with _GOING_ON:
+                    _note_continue(device, label.identifier, 1)
+        printer.sent_pages = sent
+        printed = False
         try:
             message = printer.process_queue()
-            if not message:
-                _note_continue(printer.device_specifier, label.identifier, (printer.start - 1 + labels) % per + 1)
+            printed = not message
             return message
         finally:
-            run.sheet['ended'] = True
+            with _GOING_ON:
+                if printed:
+                    _note_continue(device, label.identifier, (printer.start - 1 + labels) % per + 1)
+                run.sheet['ended'] = True
     run.sheet = {'label_size': label.identifier, 'start': None if printer.goes_on else printer.start, 'labels': labels, 'ended': False}
     return run
 
 
-def _going_on(device: str, kept: dict) -> dict:
+def _going_on(device: str) -> dict:
     """Where the next print on each sheet of labels goes on, as kept for the
     printer, after the jobs on sheets waiting in its queue and printing."""
-    told = print_queue.line(device)
+    with _GOING_ON:
+        kept = printer_settings.of_printer(_kept_settings(), device).get(printer_settings.CONTINUE_AT, {})
+        told = print_queue.line(device)
+        jobs = [dict(_SHEET_JOBS[job['id']]) for job in ([told['printing']] if told['printing'] else []) + told['waiting']
+                if job['id'] in _SHEET_JOBS]
     at = dict(kept)
-    for job in ([told['printing']] if told['printing'] else []) + told['waiting']:
-        sheet = _SHEET_JOBS.get(job['id'])
-        if sheet is None or sheet['ended']:
+    for sheet in jobs:
+        if sheet['ended']:
             continue
         start = sheet['start'] or at.get(sheet['label_size'], 1)
         at[sheet['label_size']] = (start - 1 + sheet['labels']) % sheets.per_sheet(label_of(sheet['label_size'])) + 1
@@ -1464,7 +1489,7 @@ def font_family_sample():
 def preview_from_image():
     try:
         values = request.values.to_dict(flat=True)
-        model, settings = None, {}
+        model, settings, device = None, {}, None
         # Made as printed: the label size and the quality the request leaves
         # out as set for its printer, the label designer sends both
         if any(values.get(key) in (None, '') for key in ('label_size', 'high_res')) or values.get('sheet_start') == 'next':
@@ -1493,7 +1518,7 @@ def preview_from_image():
         if sheets.per_sheet(size) > 1 or paper:
             pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
             copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
-            start, cut_lines, _ = _sheet_options(size.identifier, values.get, settings)
+            start, cut_lines, _ = _sheet_options(size.identifier, values.get, settings, device)
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, _max_count(size.identifier), start)
             if not paper or _whole_or(values.get('whole_sheet'), 0) != 0:
                 layouts = {}
@@ -1666,7 +1691,7 @@ def get_printer_status():
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
         # Where sheets of labels go on once the jobs in the queue printed
-        if printer.get('path') and (going_on := _going_on(printer['path'], printer['settings'].get(printer_settings.CONTINUE_AT, {}))):
+        if printer.get('path') and (going_on := _going_on(printer['path'])):
             printer['settings'][printer_settings.CONTINUE_AT] = going_on
         else:
             printer['settings'].pop(printer_settings.CONTINUE_AT, None)
@@ -3141,7 +3166,7 @@ def webhook_print():
         problem = label_size_problem(label_size, model) or resolution_problem(model, high_res)
         if problem:
             return _fail(problem, 400)
-        on_sheet = _sheet_options(label_size, _requested, settings)
+        on_sheet = _sheet_options(label_size, _requested, settings, device)
         if len(uploaded_files or json_images) > (max_count := _max_count(label_size)):
             return _fail(f'Too many images, at most {max_count} per request', 400)
 

@@ -13,14 +13,14 @@ import time
 import pytest
 from PIL import Image
 
-from app.labeldesigner import adding, ipp, printer, printer_settings, refusals, sheets
+from app.labeldesigner import adding, ipp, printer, printer_settings, refusals, routes, sheets
 from app.labeldesigner.drivers import ipp as other
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.ipp import calibration, documents
 from app.labeldesigner.label_names import SIZES
 from tests.helpers import make_client, outcome, printing
 from tests.printing.test_adding import connections, fake_printer, identity  # noqa: F401
-from tests.printing.test_ipp import attribute, keywords
+from tests.printing.test_ipp import attribute, keywords, response
 from tests.printing.test_other_printer import FakePrinter, pages, printer_attributes, values
 
 API = '/labeldesigner/api'
@@ -615,3 +615,50 @@ def test_pages_are_made_one_at_a_time_as_they_are_sent(tmp_path, monkeypatch, re
     finally:
         fake.close()
     assert len(found) == 3 and steps == ['made', 'sent'] * 3
+
+
+def test_sheets_the_printer_took_before_a_failure_are_used_up(tmp_path, monkeypatch):
+    # A printer of PDF only takes a sheet at a time, the second one is refused
+    monkeypatch.setattr(other, 'JOB_POLL', 0.01)
+    fake = FakePrinter(office_attributes(formats=('application/pdf',)))
+    answer = fake.answer
+    fake.answer = lambda operation: response(status=0x0400) if operation == ipp.PRINT_JOB and len(fake.jobs()) == 3 else answer(operation)
+    try:
+        client = client_of(tmp_path, fake)
+        assert outcome(client, print_sheet(client, print_count=19)) == ('printed', '')
+        assert outcome(client, print_sheet(client, print_count=5, sheet_start='next'))[0] == 'failed'
+        # Labels 20 and 21 were printed, the next print takes a new sheet
+        assert 'continue_at' not in client.get(f'{API}/settings').get_json()
+        assert outcome(client, print_sheet(client, print_count=2, sheet_start='next')) == ('printed', '')
+        assert client.get(f'{API}/settings').get_json()['continue_at'] == {'sheet-l7160': 3}
+    finally:
+        fake.close()
+
+
+def test_the_queue_shows_a_job_where_it_will_print(tmp_path, monkeypatch, queued):
+    shots, gate = [], threading.Event()
+    client = demo_office(tmp_path, monkeypatch, shots, gate)
+    first = on_demo(client, print_count=3, sheet_start=1)
+    answer = client.post(f'{API}/print', data={'printer': 'simulation', 'model': OFFICE, 'label_size': 'sheet-l7160', 'text': BLACK,
+                                               'print_count': 2, 'sheet_start': 'next', 'return_format': 'png'}).get_json()
+    assert labels_of(Image.open(io.BytesIO(base64.b64decode(answer['image'])))) == [4, 5]
+    gate.set()
+    assert (ended(client, first), ended(client, answer['job'])) == ('printed', 'printed')
+
+
+def test_a_job_is_counted_once_while_it_ends(tmp_path, monkeypatch, queued):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    assert ended(client, on_demo(client, print_count=9)) == 'printed'
+    noted, real = threading.Event(), routes._note_continue
+
+    def slowly(*args):
+        real(*args)
+        noted.set()
+        time.sleep(0.3)
+    monkeypatch.setattr(routes, '_note_continue', slowly)
+    job = on_demo(client, print_count=3, sheet_start='next')
+    assert noted.wait(10)
+    # Kept at 13 once printed, never 13 and the job's three labels again
+    assert going_on(client) == {'sheet-l7160': 13}
+    assert ended(client, job) == 'printed'

@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, sheetNote, untold, isPaper, maxCopies, takesSheets, refreshPrinters
+    loadSaved, roomFrom, isSheet, sheetNote, untold, isPaper, maxCopies, takesSheets, refreshPrinters, printAgain
 } from './core.js';
 import { paperLine, openSheet, sheetShown, chosenSheet, sheetHooks } from './sheet.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
@@ -1233,7 +1233,7 @@ function announce(entry) {
     openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="${head}">
         <div class="okc bad">${icon('x', '')}</div><h2>${head}</h2><p>${esc(entry.message)}</p>
         <div class="acts"><button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="retry">${icon('refresh')}${maybe ? 'Print again' : 'Try again'}</button></div></div>`, 'center');
-    $('#retry').onclick = () => { closeLayer(true); printJob(Object.assign({}, entry), announce); };
+    $('#retry').onclick = () => { closeLayer(true); printAgain(entry, announce); };
 }
 
 // Saved labels are saved again, a new one asks for its name and tags first

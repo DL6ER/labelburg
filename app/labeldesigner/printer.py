@@ -142,6 +142,9 @@ class PrinterQueue:
         self.start = 1
         self.goes_on = False
         self.cut_lines = False
+        # Called with how many pages of the job the printer took so far, where
+        # it takes them one at a time, e.g. sheets of labels as PDF
+        self.sent_pages = None
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):

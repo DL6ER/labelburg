@@ -552,6 +552,8 @@ class Ipp(Driver):
             message = _outcome(device, printer, answer, printed)
             if message:
                 return message
+            if office and queue.sent_pages:
+                queue.sent_pages(i + 1 if len(made) > 1 else len(job.images))
         return ''
 
 
