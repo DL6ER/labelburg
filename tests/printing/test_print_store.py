@@ -739,3 +739,13 @@ def test_a_picture_printed_again_with_copies_prints_them_after_a_restart(server,
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda queue: (sent.append(len(queue.images())), process(queue))[1])
     restart(tmp_path)
     assert ended(again).state == 'printed' and sent == [2]
+
+
+def test_a_feed_waiting_at_a_restart_feeds_after_it_and_is_not_listed(server, tmp_path, monkeypatch):
+    print_queue.stop()
+    job = server.post(f'{API}/feed', data={'printer': 'simulation', 'model': 'QL-800'}).get_json()['job']
+    fed = []
+    monkeypatch.setattr(printer.PrinterQueue, 'feed', lambda queue: (fed.append(queue.label_size), '')[1])
+    restart(tmp_path)
+    assert ended(job).state == 'printed' and fed == ['62']
+    assert print_store.entries(10) == []

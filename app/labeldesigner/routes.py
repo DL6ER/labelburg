@@ -1113,7 +1113,7 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
         # The shapes of one set, as many sets as copies
         for shape in _copies(record['shapes'], record.get('copies') or 1, True):
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
-    else:
+    elif record['kind'] == 'request':
         _queue_labels(printer, record['data'], _as_printed(images, record.get('sizes')), record['order'], record['high_res'],
                       record['fast'], [record['asn']], record.get('printed_for'))
     return printer
