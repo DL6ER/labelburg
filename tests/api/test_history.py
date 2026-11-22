@@ -380,3 +380,7 @@ def test_a_label_printed_again_as_it_was_counts_as_it_did(client, monkeypatch):
     del totals[:]
     printed(client, f'history/{job}/print', data={'printer': 'simulation', 'print_count': '1', 'as_before': '0'})
     assert set(totals) == {(0, 1)}
+
+
+def test_the_same_numbers_refused_tell_what_to_do():
+    assert refusals.SAME_NUMBERS == 'Print all its labels again, or choose Next number.'

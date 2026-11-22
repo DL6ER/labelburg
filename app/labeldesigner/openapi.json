@@ -4003,7 +4003,7 @@
               "as_before": {
                 "type": "integer",
                 "enum": [0, 1],
-                "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them only the first labels as they were printed, at most as many as before. 0: today's date and the next numbers. Default: 1."
+                "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them only the first labels as they were printed, at most as many as before, else it is refused with \"Print all its labels again, or choose Next number.\" 0: today's date and the next numbers. Default: 1."
               },
               "print_count": {
                 "type": "integer",
