@@ -28,6 +28,9 @@ ASK_AGAIN = 20
 # When each printer was asked the request it left unanswered, by the key
 # get_errors() is given
 _asked: dict[str, float] = {}
+# By the same key: True for a printer that answered a request once, False
+# for one that was asked and never answered, e.g. a clone without DLE EOT
+_answered: dict[str, bool] = {}
 
 INIT = b'\x1b@'
 # Feed to the cutter and cut. A TM-T20II leaves one corner uncut, as its
@@ -185,6 +188,14 @@ def get_errors(c: Connection, key: str | None = None) -> list[str]:
     except EscposError:
         if key is not None:
             _asked[key] = sent
+            _answered.setdefault(key, False)
         raise
     _asked.pop(key, None)
+    if key is not None:
+        _answered[key] = True
     return found
+
+
+def never_answered(key: str) -> bool:
+    """Whether the printer of the key was asked and never answered."""
+    return _answered.get(key) is False

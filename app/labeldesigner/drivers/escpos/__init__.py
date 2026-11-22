@@ -19,6 +19,8 @@ MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
 # Most heads print 203 dpi, Epson's TM-T88, TM-T90, TM-T70, TM-T81 and
 # TM-T83(II) 180 dpi, by the model in the device ID; a TM-T81III prints 203
 HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
+# ESC/POS in the command sets of a device ID, also as other makers spell it
+COMMAND_SET = re.compile(r'ESC/?POS|ESC/POS-.*', re.IGNORECASE)
 DPI = {MODELS[0]: 203, MODELS[1]: 180}
 # Paper width in mm and the dots across it, the first one assumed, as the
 # printer does not tell. 384 on 58 mm paper as most printers print, a
@@ -54,6 +56,18 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     return img, rows, width
 
 
+def _problems(c, key: str) -> list[str] | None:
+    """What the printer tells is wrong, None if it never answered DLE EOT,
+    e.g. a clone without it: it is told as ready and printed on, as a ZPL
+    printer that never answered ~HS. EscposError if it answered before."""
+    try:
+        return protocol.get_errors(c, key)
+    except protocol.EscposError:
+        if protocol.never_answered(key):
+            return None
+        raise
+
+
 class Escpos(Driver):
     vendor = 'Epson'
     models = MODELS
@@ -79,8 +93,7 @@ class Escpos(Driver):
 
     def model_in(self, device_id):
         fields = devices.device_id_fields(device_id)
-        commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
-        if 'ESC/POS' not in commands:
+        if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
             return None
         return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
 
@@ -114,15 +127,19 @@ class Escpos(Driver):
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
+        key = devices.lock_key(device)
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
-                state.update(devices.status_cache.get(devices.lock_key(device), {}))
+                state.update(devices.status_cache.get(key, {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                state['errors'] = protocol.get_errors(c, devices.lock_key(device))
-        state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
-        devices.status_cache[devices.lock_key(device)] = state
+                errors = _problems(c, key)
+        if errors is None:
+            return state
+        state['errors'] = errors
+        state['status_type'] = 'Error occurred' if errors else 'Reply to status request'
+        devices.status_cache[key] = state
         return state
 
     def print_speed(self, model, fast, red):
@@ -143,9 +160,11 @@ class Escpos(Driver):
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
+        key = devices.lock_key(device)
         try:
             with protocol.connect(device) as c:
-                problems = protocol.get_errors(c, devices.lock_key(device))
+                # A printer that never answered is not asked again before a job
+                problems = None if protocol.never_answered(key) else _problems(c, key)
                 if problems:
                     return problems[0]
                 c.write(protocol.job(job))
