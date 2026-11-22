@@ -487,6 +487,39 @@ def test_values_typed_for_a_label_printed_before_leave_it_as_printed(editor, ser
     assert editor.input_value('#tplFields [data-blank="What"]') == 'Peas'
 
 
+def test_a_label_printed_with_the_day_asks_in_the_templates_unless_its_date_is_set(editor, server):  # noqa: F811
+    clear_printed(server)
+    editor.evaluate("""async () => {
+        const core = await import('/static/designer/core.js'), ed = await import('/static/designer/editor.js');
+        const design = Object.assign(core.baseDesign('62'), { text: [core.L('Opened {{blank:Day}}', 40)], fields: { Day: { type: 'date' } } });
+        ed.openEditor({ title: 'Opened', design, values: {}, origin: null });
+    }""")
+    wait_for_preview(editor)
+    with editor.expect_request('**/api/print'):
+        editor.click('#print')
+    editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.wait_for_function("() => location.hash === '#templates/printed'")
+    editor.click('.tpl-grid .thumb >> nth=0')
+    editor.wait_for_selector('#tplFields [data-blank="Day"]')
+    # Asked in the panel, the Templates stay
+    editor.click('#tplPrint')
+    editor.wait_for_selector('#tplAsk:not([hidden])')
+    assert editor.locator('#tplAsk button.btn').all_inner_texts() == ["Today's date", 'Same date']
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplAsk button:text-is("Same date")')
+    assert sent(request.value)['as_before'] == '1'
+    editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+    assert editor.locator('.tpl').count() == 1 and editor.evaluate('() => location.hash') == '#templates/printed'
+    # A date set by hand is printed as set, nothing to ask
+    editor.fill('#tplFields [data-blank="Day"]', '2026-11-03')
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplPrint')
+    assert json.loads(sent(request.value)['blanks']) == {'Day': '2026-11-03'}
+    assert editor.locator('#tplAsk:not([hidden])').count() == 0
+
+
 def test_a_picture_of_another_program_printed_again_takes_copies(editor, server):  # noqa: F811
     clear_printed(server)
     with urlopen(server + '/labeldesigner/api/homebox', png(200, 100)) as r:

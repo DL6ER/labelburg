@@ -214,6 +214,19 @@ function selectItem(item) {
 const copiesHTML = n => `<span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(n)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>`;
 const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
 const printedDone = (entry, kept) => { announceKept(entry, kept); loadKept(); };
+// The question of printing again in the panel, Templates stay open
+function askHere(same, next, choose) {
+    const box = $('#tplAsk');
+    if (!box) { choose(null); return; }
+    box.innerHTML = `<b>Print again</b><span class="sp"></span><button class="btn" type="button" id="againNext">${esc(next)}</button>
+        <button class="btn primary" type="button" id="againSame">${esc(same)}</button><button class="iconbtn" type="button" id="againNot" aria-label="Close">${icon('x', '')}</button>`;
+    box.hidden = false;
+    const answer = asBefore => { box.hidden = true; box.innerHTML = ''; choose(asBefore); };
+    $('#againSame').onclick = () => answer(true);
+    $('#againNext').onclick = () => answer(false);
+    $('#againNot').onclick = () => answer(null);
+    $('#againSame').focus();
+}
 // A picture of another program printed, as it was printed: printed again
 function showPrinted(item) {
     const box = selectItem(item), h = item.entry;
@@ -248,6 +261,7 @@ async function showDetail(item, values = null) {
         ${blanks.length ? `<div class="tpl-fields" id="tplFields">${blanks.map((b, i) => blankField({ design: work.design }, b, work.values[b], i)).join('')}</div>` : ''}
         <div class="tpl-print">${copiesHTML(before ? before.copies || 1 : 1)}
             <button class="btn primary" type="button" id="tplPrint"${before && !before.again ? ` disabled title="${esc(IMAGE_GONE)}"` : ''}>${icon(before ? 'refresh' : 'printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        ${before ? '<div class="tpl-ask" id="tplAsk" role="group" aria-label="Print again" hidden></div>' : ''}
         <p class="mnote sheetnote" id="tplSheet" hidden></p>
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
@@ -287,7 +301,7 @@ async function showDetail(item, values = null) {
         const now = valuesNow(work.values, starts, { design: work.design });
         // Printed again by the server with the values and copies set here
         if (before) {
-            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, accepted,
+            const opts = { copies, blanks: blankRequest(work.design, now).blanks, design: work.design, ask: askHere, accepted,
                 title: entryName({ design: work.design, values: now, title: before.title }) };
             await printKeptAgain(before, printedDone, opts);
             return;
