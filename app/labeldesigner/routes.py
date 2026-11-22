@@ -920,11 +920,15 @@ def _cutting(requested, stored: dict | None = None) -> tuple[str, bool, bool]:
     return cut, _whole(option('half_cut', 1)) != 0, _whole(option('chain', 0)) != 0 or cut == 'none'
 
 
-def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool, fast: bool, starts: list) -> None:
+def _queue_labels(printer, data: dict, images: list, order: list, high_res: bool, fast: bool, starts: list,
+                  printed_for: float | None = None) -> None:
     """Adds the labels of order to the queue, each with its image by its
     index in images, None without, the printer cuts them as printer.cut
     says. They are added once for each archive serial number in starts, the
-    one the first label of order takes."""
+    one the first label of order takes. printed_for is the time their dates
+    show, e.g. of a label printed again as it was, else they show now."""
+    if printed_for is not None:
+        data = dict(data, timestamp=int(printed_for))
     # The copies share the text measured, alike where nothing changes
     layouts = {}
     for asn in starts:
@@ -1074,7 +1078,8 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
         for shape in record['shapes']:
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     else:
-        _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']])
+        _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']],
+                      record.get('printed_for'))
     return printer
 
 
@@ -2216,8 +2221,14 @@ def _history_entry(job_id: str) -> tuple[dict | None, object]:
 
 
 def _printed_at(entry: dict) -> float:
-    """When the labels of an entry were made, as their dates show it."""
+    """When the labels of an entry were printed."""
     return entry.get('started_at') or entry['ended_at']
+
+
+def _dates_of(entry: dict) -> float:
+    """The time the dates on the labels of an entry show: of the labels it
+    printed again as they were, else when it printed."""
+    return entry.get('printed_for') or _printed_at(entry)
 
 
 def _timestamp(data: dict) -> int:
@@ -2343,10 +2354,10 @@ def history_print(job_id):
             printer, recipe = _image_job_again(entry, images)
         else:
             data = {key: value for key, value in entry['data'].items() if key not in ('high_res', 'fast_printing', 'leaves_first')}
-            if as_before and _timestamp(data) <= 0:
-                data['timestamp'] = int(_printed_at(entry))
             printer, data, high_res, fast = _stored_job(data)
-            recipe = {'kind': 'request', 'data': data, 'order': entry['order'], 'high_res': high_res, 'fast': fast}
+            # Kept apart from the label: printed again, it asks again
+            printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
+            recipe = {'kind': 'request', 'data': data, 'order': entry['order'], 'high_res': high_res, 'fast': fast, 'printed_for': printed_for}
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
@@ -2355,7 +2366,7 @@ def history_print(job_id):
             if asn is None and paperless.uses_asn(recipe['data']):
                 asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(recipe['order']))
             recipe['asn'] = asn
-            _queue_labels(printer, recipe['data'], images, recipe['order'], recipe['high_res'], recipe['fast'], [asn])
+            _queue_labels(printer, recipe['data'], images, recipe['order'], recipe['high_res'], recipe['fast'], [asn], printed_for)
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)

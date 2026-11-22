@@ -504,3 +504,14 @@ def test_a_job_ends_on_disk_also_where_the_setting_cannot_be_read(server, monkey
     assert server.post(f'{API}/queue/{waiting}/remove').status_code == 200
     assert f'{waiting}.json' not in files(os.path.join(repo(server), print_store.QUEUE))
     release.set()
+
+
+def test_a_label_printed_again_as_it_was_keeps_its_date_after_a_restart(server, tmp_path, monkeypatch):
+    first = server.post(f'{API}/print', data=dict(LABEL, text=json.dumps([{'text': '{{datetime:%H:%M}}', 'size': '40'}]))).get_json()['job']
+    assert ended(first).state == 'printed'
+    print_queue.stop()
+    again = server.post(f'{API}/history/{first}/print', data={'printer': 'simulation'}).get_json()['job']
+    calls = made(monkeypatch)
+    restart(tmp_path)
+    assert ended(again).state == 'printed'
+    assert {timestamp for _, _, timestamp, by_queue in calls if by_queue} == {int(print_store.entry(first)['started_at'])}

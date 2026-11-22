@@ -136,12 +136,30 @@ def test_printed_again_on_the_printer_chosen_with_the_same_number(client, monkey
     same = printed(client, f'history/{job}/print', data={'printer': 'simulation'})
     assert calls == [(1, 0, int(started)), (1, 1, int(started))]
     assert paperless.next_asn(client.application.config, repo) == 3
-    assert entry(client, same)['again_asks'] == ['asn']
+    # Printed again, it still asks: the date it printed is kept apart from the label
+    assert entry(client, same)['again_asks'] == ['date', 'asn']
     del calls[:]
-    fresh = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'as_before': 0, 'source': 'designer'})
+    printed(client, f'history/{same}/print', data={'printer': 'simulation'})
+    assert calls == [(1, 0, int(started)), (1, 1, int(started))]
+    del calls[:]
+    fresh = printed(client, f'history/{same}/print', json={'printer': 'simulation', 'as_before': 0, 'source': 'designer'})
     assert calls == [(3, 0, None), (3, 1, None)]
     assert paperless.next_asn(client.application.config, repo) == 5
     assert entry(client, fresh)['from'] == ''
+    assert entry(client, fresh)['again_asks'] == ['date', 'asn']
+
+
+def test_a_label_with_a_time_of_its_own_keeps_it(client, monkeypatch):
+    times, create = [], routes.create_label_from_request
+
+    def recorded(d={}, files={}, counter=0, *args, **kwargs):
+        times.append(d.get('timestamp'))
+        return create(d, files, counter, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
+    job = printed(client, data=dict(LABEL, text=lines('{{datetime:%Y}}'), timestamp='1700000000'))
+    del times[:]
+    printed(client, f'history/{job}/print', data={'printer': 'simulation', 'as_before': '0'})
+    assert set(times) == {'1700000000'}
 
 
 def test_a_date_blank_left_to_the_day_asks_for_the_date(client):
