@@ -93,13 +93,13 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert models['QL-800'] == {'qualities': ['fast', 'quality', 'high'], 'high_res': True, 'cutter': True, 'manual_cutter': False,
                                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': 'red',
                                 'never_cut': '', 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False,
-                                'sensing': False, 'two_rolls': False}
+                                'sensing': False, 'two_rolls': False, 'shown_as': ''}
     assert (models['QL-1100']['high_res'], models['PT-P700']['half_cut'], models['PT-P700']['chain']) == (False, False, True)
     assert models['PT-E550W']['half_cut'] and models['PT-E550W']['feed_waste']
     assert models['VC-500W'] == {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                                  'half_cut': True, 'chain': False, 'feed_waste': False, 'colors': 'color',
                                  'never_cut': NEVER_WHY, 'leaves_turned': True, 'lead_mm': 0, 'vendor': 'Brother', 'calibration': False,
-                                 'sensing': False, 'two_rolls': False}
+                                 'sensing': False, 'two_rolls': False, 'shown_as': ''}
     # The labels of the PUQU Q00 are torn off, those of the QL-500 cut with
     # its lever
     assert models['PUQU/Q00']['cutter'] is False and models['PUQU/Q00']['leaves_turned'] is True
@@ -112,6 +112,10 @@ def test_label_designer_gets_what_each_printer_offers(tmp_path):
     assert {model for model, caps in models.items() if caps['sensing']} == {'TSC/TSPL', 'TSC/TSPL-300', 'Zebra/ZPL', 'Zebra/ZPL-300'}
     assert config['rolls'] == [['gap', 'Labels with gaps'], ['mark', 'Black marks on the back'], ['endless', 'Continuous roll']]
     assert models['PUQU/Q00']['vendor'] == 'PUQU'
+    # Listed as the model they are shown as
+    assert {model: caps['shown_as'] for model, caps in models.items() if caps['shown_as']} == {
+        'Epson/ESC-POS-180': 'Epson/ESC-POS', 'TSC/TSPL-300': 'TSC/TSPL', 'Zebra/ZPL-300': 'Zebra/ZPL',
+        'DYMO/LabelWriter-SE450': 'DYMO/LabelWriter-450'}
 
 
 def test_check_label_size():

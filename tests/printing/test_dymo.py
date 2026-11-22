@@ -331,11 +331,10 @@ def test_labels_of_the_printers():
 
 
 def test_capabilities():
-    from app.labeldesigner.drivers.base import shown
     caps = dymo.DRIVER.capabilities('DYMO/LabelWriter-450')
     assert (caps['cutter'], caps['leaves_turned'], caps['qualities'], caps['vendor'], caps['sensing']) == (False, True, ['quality'], 'DYMO', False)
-    assert dymo.DRIVER.capabilities('DYMO/LabelWriter-SE450')['model_shown'] == 'LabelWriter-450'
-    assert shown('DYMO/LabelWriter-4XL') == 'DYMO LabelWriter-4XL'
+    # Listed as the 450, named as itself
+    assert (dymo.DRIVER.capabilities('DYMO/LabelWriter-SE450')['shown_as'], caps['shown_as']) == ('DYMO/LabelWriter-450', '')
     # Labels per minute of address labels, 89 mm long
     assert dymo.DRIVER.print_speed('DYMO/LabelWriter-450-Twin-Turbo', False, False) == (pytest.approx(71 * 89 / 60), 0)
 
@@ -558,3 +557,27 @@ def test_the_roll_set_for_a_twin_turbo_goes_to_its_jobs(tmp_path, printer):
 def test_only_a_twin_turbo_has_two_rolls():
     assert {model for model in drivers.MODELS if drivers.for_model(model).capabilities(model)['two_rolls']} == {
         'DYMO/LabelWriter-450-Twin-Turbo'}
+
+
+@pytest.mark.parametrize('model, name', [
+    ('DYMO/LabelWriter-450', 'LabelWriter 450'), ('DYMO/LabelWriter-450-Twin-Turbo', 'LabelWriter 450 Twin Turbo'),
+    ('DYMO/LabelWriter-4XL', 'LabelWriter 4XL'), ('DYMO/LabelWriter-SE450', 'LabelWriter SE450')])
+def test_models_are_named_plainly(model, name):
+    from app.labeldesigner.drivers.base import shown
+    assert shown(model) == f'DYMO {name}'
+    assert dymo.DRIVER.capabilities(model)['model_shown'] == name
+    # As before for the models of other drivers
+    assert (shown('Zebra/ZPL-300'), shown('QL-800'), shown('PUQU/Q00')) == ('Zebra ZPL', 'QL-800', 'PUQU Q00')
+
+
+def test_refusals_name_the_printer_plainly(tmp_path, printer):
+    from app.labeldesigner import refusals
+    client = make_client(tmp_path, model='DYMO/LabelWriter-SE450', printer='file:///dev/usb/lp_dymo')
+    job = {'print_type': 'text', 'text': TEXT}
+    r = client.post('/labeldesigner/api/print', data={**job, 'label_size': 'dymo102x152'})
+    message = 'The label size 102 x 152 mm shipping (DYMO) cannot be printed on a DYMO LabelWriter SE450'
+    assert (r.status_code, r.get_json()['message']) == (400, message)
+    r = client.post('/labeldesigner/api/print', data={**job, 'label_size': 'dymo203-28x89', 'high_res': '1'})
+    assert r.get_json()['message'] == 'The DYMO LabelWriter SE450 printer cannot print at 600 dpi, turn off 600 dpi printing'
+    assert message in refusals.MESSAGES and r.get_json()['message'] in refusals.MESSAGES
+    assert printer.written == []

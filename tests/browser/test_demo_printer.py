@@ -68,7 +68,7 @@ def test_the_demo_printer_offers_every_model(designer):
     assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450'}
     assert sorted(designer.eval_on_selector_all(f'{MODEL} option', 'os => os.map(o => o.value)')) == sorted(set(MODELS) - shown_as)
     for vendor, models in (('Epson', ['ESC-POS']), ('TSC', ['TSPL']), ('Zebra', ['ZPL']),
-                           ('DYMO', ['LabelWriter-4XL', 'LabelWriter-450', 'LabelWriter-450-Twin-Turbo'])):
+                           ('DYMO', ['LabelWriter 4XL', 'LabelWriter 450', 'LabelWriter 450 Twin Turbo'])):
         assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="{vendor}"] option', 'os => os.map(o => o.textContent)') == models
     brother = designer.eval_on_selector_all(f'{MODEL} optgroup[label="Brother"] option', 'os => os.map(o => o.textContent)')
     assert brother[:7] == ['PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'QL-500', 'QL-550']
@@ -116,15 +116,27 @@ def test_a_dymo_labelwriter_offers_its_address_labels(designer):
     assert designer.eval_on_selector(f'{sizes} option[value="dymo28x89"]', 'o => o.textContent') == '28 x 89 mm'
     assert designer.input_value(sizes) == 'dymo28x89'
     card = designer.inner_text('[data-card="0"]')
-    assert 'DYMO LabelWriter-450' in card and 'Torn off' in card
+    assert 'DYMO LabelWriter 450' in card and 'Torn off' in card
     back_to_the_editor(designer)
-    assert designer.text_content('#slot .model') == 'Demo DYMO LabelWriter-450'
+    assert designer.text_content('#slot .model') == 'Demo DYMO LabelWriter 450'
     type_label(designer, 'Jane Doe')
     with designer.expect_request('**/api/print') as request:
         designer.click('#print')
     fields = sent(request.value)
     assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'DYMO/LabelWriter-450', 'dymo28x89')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
+
+
+def test_a_model_listed_as_another_one_is_named_while_chosen(designer):
+    base = designer.url.split('/labeldesigner')[0]
+    for model, name, card in (('DYMO/LabelWriter-SE450', 'LabelWriter SE450', 'DYMO LabelWriter SE450'),
+                              ('Zebra/ZPL-300', 'ZPL-300', 'Zebra ZPL')):
+        assert designer.request.post(f'{base}/labeldesigner/api/settings', form={'printer': 'simulation', 'demo_model': model}).ok
+        designer.reload()
+        open_settings(designer)
+        assert designer.input_value(MODEL) == model
+        assert designer.eval_on_selector(f'{MODEL} option[value="{model}"]', 'o => o.textContent') == name
+        assert f'{card}, Ready' in designer.inner_text('[data-card="0"]')
 
 
 def test_a_twin_turbo_prints_on_the_roll_chosen(designer):

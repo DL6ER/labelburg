@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # The 450 is also the 450 Turbo and the label side of the 450 Duo
 MODELS = ('DYMO/LabelWriter-450', 'DYMO/LabelWriter-450-Twin-Turbo', 'DYMO/LabelWriter-4XL', 'DYMO/LabelWriter-SE450')
 LW450, TWIN_TURBO, XL, SE450 = MODELS
+# The models as texts and the label designer name them
+MODEL_NAMES = {LW450: 'LabelWriter 450', TWIN_TURBO: 'LabelWriter 450 Twin Turbo', XL: 'LabelWriter 4XL',
+               SE450: 'LabelWriter SE450'}
 # 300 dpi with 672 dots across, of 57 mm (the reference, p. 7); the 4XL 1248
 # dots, 4.16 in (4XL product sheet; thermal-label, LW_4XL); the SE450 203 dpi
 # with 448 dots (SE450 reference, SYN)
@@ -108,8 +111,10 @@ class Dymo(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
-    # The SE450 is its 203 dpi model
+    # The SE450 is its 203 dpi model: its labels are those of the 450, the
+    # lists of models and of labels show those of the 450 for it
     shown_as = {SE450: LW450}
+    names = {model: f'DYMO {name}' for model, name in MODEL_NAMES.items()}
     # usblp's device, also a name a udev rule gives it, or the printer
     # through PyUSB
     device_patterns = (re.compile(r'(file://)?/dev/usb/lp\w+'),
@@ -155,7 +160,7 @@ class Dymo(Driver):
     def capabilities(self, model):
         # Torn off, their top leaves it first
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
-                    model_shown=self.shown_as.get(model, model).split('/')[-1], two_rolls=model == TWIN_TURBO)
+                    model_shown=MODEL_NAMES[model], two_rolls=model == TWIN_TURBO)
 
     def status(self, device, model, unconfirmed=False):
         state = dict(network_status(device, model), media_type=diecut.MEDIA_TYPE, phase_type='Waiting to receive')

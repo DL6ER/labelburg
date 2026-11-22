@@ -124,13 +124,15 @@ function tapeHTML(p) {
 function modelHTML(p) {
     const groups = new Map();
     const chosen = kept(p).demo_model || p.model;
-    // A model shown as another one, e.g. ZPL-300 as ZPL, only while chosen
-    const listed = m => m === chosen || modelOnly(m) === m.split('/').pop();
+    // A model shown as another one, e.g. ZPL-300 as ZPL, only while chosen,
+    // by its id where it has the name of that one
+    const listed = m => m === chosen || !C.models[m].shown_as;
+    const named = m => C.models[m].shown_as && modelOnly(m) === modelOnly(C.models[m].shown_as) ? m.split('/').pop() : modelOnly(m);
     Object.keys(C.models).filter(listed).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
         .forEach(m => groups.set(C.models[m].vendor, [...(groups.get(C.models[m].vendor) || []), m]));
     return `<div class="set-stack"><select class="in set-sel" data-k="demo_model" aria-label="Model of ${esc(printerLabel(p))}">${[...groups]
         .sort(([a], [b]) => a.localeCompare(b, 'en')).map(([vendor, models]) => `<optgroup label="${esc(vendor)}">${models.map(m =>
-            `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(m.split('/').pop())}</option>`).join('')}</optgroup>`).join('')}</select>
+            `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(named(m))}</option>`).join('')}</optgroup>`).join('')}</select>
         <small class="muted">Try the label designer as with this printer: labels are made for it, nothing is printed.</small></div>`;
 }
 
