@@ -201,3 +201,24 @@ def test_a_date_blank_printed_from_the_editor_follows_the_day(page, server, blan
     page.wait_for_selector('#toast:has-text("Printed 1 label")')
     with urlopen(server + '/labeldesigner/api/history?limit=1') as r:
         assert json.load(r)['entries'][0]['again_asks'] == asks
+
+
+def test_a_label_printed_opens_as_the_saved_label_it_came_from(page, server):
+    from tests.browser.test_gallery import save_new
+    save_new(page, 'Pantry jar', 'Pantry')
+    name = page.evaluate("() => labelEditor.S.edit.origin.id")
+    with page.expect_request('**/api/print'):
+        page.click('#print')
+    page.wait_for_selector('#toast:has-text("Printed 1 label")')
+    # Printed elsewhere by its name
+    with urlopen(f'{server}/labeldesigner/api/repository/print', urlencode({'name': name, 'printer': 'simulation'}).encode()) as r:
+        assert json.load(r)['success']
+    page.click('#newLabel')
+    open_settings(page, 'printed')
+    assert len(rows(page)) == 2
+    for row in (0, 1):
+        open_settings(page, 'printed')
+        rows(page)
+        page.click(f'#setHist .set-hrow >> nth={row} >> [data-open]')
+        page.wait_for_selector('#field .ln')
+        assert page.evaluate('() => [labelEditor.S.edit.origin && labelEditor.S.edit.origin.kind, labelEditor.S.edit.origin && labelEditor.S.edit.origin.id]') == ['saved', name]

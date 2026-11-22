@@ -1088,7 +1088,8 @@ async function sendJob(entry, printer, request, onDone, onAccepted = null) {
             else if (shown()) QUEUE.read().then(() => hideToast(printing));
             await followJob(entry);
         } else {
-            entry.state = 'printed';
+            // Printed already, e.g. on the demo printer: its job names it in the printed labels
+            Object.assign(entry, { state: 'printed' }, data.job ? { job: data.job, start: data.start } : {});
             if (onAccepted) onAccepted(entry);
         }
     } catch (e) {
@@ -1272,12 +1273,16 @@ function sendAgain(h, asBefore, onDone, opts = {}) {
 export function announceKept(entry, h) {
     announcePrint(entry, () => printKeptAgain(h));
 }
-// A label printed as the editor opens it, with the values it was printed with
+// A label printed as the editor opens it, with the values it was printed with,
+// as the saved label it was printed from: told by the print of this browser,
+// else by the name of a saved label printed by name, e.g. by Grocy
 export async function keptLabel(h) {
     const r = await reached(fetch(`${API}/history/${encodeURIComponent(h.id)}/label`));
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The label could not be loaded');
     const raw = await r.json(), design = normalize(raw);
-    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin: null };
+    const own = S.history.find(x => x.job === h.id), saved = typeof raw.name === 'string' && S.saved.find(x => x.name === raw.name);
+    const origin = own && own.source && own.source.kind === 'saved' ? own.source : saved ? originOf('saved', saved.name, saved.mtime) : null;
+    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin };
 }
 
 // What a label printed before is listed with: its copies, the values
