@@ -662,8 +662,8 @@ def test_prints_are_sent_in_order_per_printer(editor):  # noqa: F811
         editor.evaluate("""async () => {
             const core = await import('/static/designer/core.js');
             const on = path => Object.assign({}, core.S.printer, { path });
-            // Saved labels, sent with their names
-            const job = title => ({ title, design: core.S.edit.design, values: {}, copies: 1, source: { kind: 'saved', id: title } });
+            // Sent with their names
+            const job = title => ({ title, name: title, design: core.S.edit.design, values: {}, copies: 1 });
             window.sent = [core.printJob(job('A1'), null, on('file:///dev/usb/lp8')), core.printJob(job('A2'), null, on('file:///dev/usb/lp8')),
                 core.printJob(job('B1'), null, on('file:///dev/usb/lp9'))];
         }""")

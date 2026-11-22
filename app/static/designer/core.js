@@ -1042,7 +1042,8 @@ export function untold(entry) {
 // Sent one after the other per printer, so that its queue gets them in the
 // order they were printed; a slow printer holds back no other
 const sending = new Map();
-// job: { title, design, values, copies, source }. Kept in the history of
+// job: { title, design, values, copies, source, name }, name to name it
+// where the label has no text of its own. Kept in the history of
 // this browser for its search and the values of blanks. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
 // took it, onDone(entry) with its outcome.
@@ -1056,8 +1057,8 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
     return sendJob(entry, printer, () => {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
-        // Named by the server: a saved label as it is saved, else by its first line as printed
-        if (job.source && job.source.kind === 'saved' && job.title) form.set('title', job.title);
+        // Named by the server by its first line as printed, a job of no text by job.name
+        if (job.name) form.set('title', job.name);
         form.set('source', 'designer');
         return ['/print', form];
     }, onDone, onAccepted);

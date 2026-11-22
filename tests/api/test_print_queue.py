@@ -220,11 +220,10 @@ def test_the_title_is_the_first_line_of_the_first_label(client, tmp_path):
             response = client.post(f'{API}/repository/print', json=dict(values, name='Jar.json', printer='simulation'))
         assert response.status_code == 200, response.get_json()
         return _job(response).title
-    # A saved label printed by name by the name it is saved under
+    # With its blanks filled in, also a saved label printed by name, the counter and the archive serial number of the first copy
     assert client.post(f'{API}/repository/save', json={
         'name': 'Jar', 'label_size': '62', 'text': [{'text': '{{blank:Content}}', 'size': '40'}]}).status_code == 200
-    assert title([], path='repository', blanks={'Content': 'Chili'}) == 'Jar'
-    # Else with its blanks filled in, the counter and the archive serial number of the first copy
+    assert title([], path='repository', blanks={'Content': 'Chili'}) == 'Chili'
     assert title(['{{blank:Content}}'], blanks=json.dumps({'Content': 'Chili'})) == 'Chili'
     assert title(['Box {{counter:8}}'], print_count='3') == 'Box 8'
     assert title(['ASN{{asn:5}}']) == 'ASN00001'

@@ -392,15 +392,20 @@ def test_the_same_numbers_refused_tell_what_to_do():
     assert refusals.SAME_NUMBERS == 'Print all its labels again, or choose the next number.'
 
 
-def test_a_label_printed_is_named_by_its_saved_name_else_by_its_first_line_as_printed(client):
-    saved = {'name': 'Pantry_jar.json', 'title': 'Pantry jar', 'label_size': '62', 'text': [{'text': 'Rice', 'size': '40'}]}
+def test_a_label_printed_is_named_by_its_first_line_as_printed_also_a_saved_one(client):
+    saved = {'name': 'Pantry_jar.json', 'title': 'Pantry jar', 'label_size': '62', 'text': [{'text': '{{blank:What}}', 'size': '40'}]}
     assert client.post(f'{API}/repository/save', json=saved).status_code == 200
-    by_name = printed(client, 'repository/print', json={'name': 'Pantry jar', 'printer': 'simulation'})
+    # E.g. Grocy prints its saved label by name for each product
+    by_name = printed(client, 'repository/print', json={'name': 'Pantry jar', 'printer': 'simulation', 'blanks': {'What': 'Rice'}})
     fields = {'Day': {'type': 'date', 'format': '%m/%d/%Y'}}
     filled = printed(client, data=dict(LABEL, text=lines('Opened {{blank:Day}}'), blanks=json.dumps({'Day': '2026-11-22'}), fields=json.dumps(fields)))
-    assert [entry(client, job)['title'] for job in (by_name, filled)] == ['Pantry jar', 'Opened 11/22/2026']
-    # Printed again with other values, a saved label keeps its name, another one is named anew
-    assert entry(client, printed(client, f'history/{by_name}/print', json={'printer': 'simulation', 'blanks': {'Other': 'x'}}))['title'] == 'Pantry jar'
+    assert [entry(client, job)['title'] for job in (by_name, filled)] == ['Rice', 'Opened 11/22/2026']
+    # Printed again with other values it is named anew, twice it still knows the saved label
+    again = printed(client, f'history/{by_name}/print', json={'printer': 'simulation', 'blanks': {'What': 'Pesto'}})
+    twice = printed(client, f'history/{again}/print', json={'printer': 'simulation', 'blanks': {'What': 'Beans'}})
+    assert [entry(client, job)['title'] for job in (again, twice)] == ['Pesto', 'Beans']
+    assert print_store.entry(twice)['named'] == 'Pantry_jar.json'
+    assert client.get(f'{API}/history/{twice}/label').get_json()['name'] == 'Pantry_jar.json'
     again = printed(client, f'history/{filled}/print', json={'printer': 'simulation', 'blanks': {'Day': '2026-12-24'}})
     assert entry(client, again)['title'] == 'Opened 12/24/2026'
 

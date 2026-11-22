@@ -260,7 +260,7 @@ def test_more_labels_printed_are_shown_when_asked(page, server):
     assert page.locator('#setMore').count() == 0 and asked[-1].endswith('limit=60&before=e59')
 
 
-def test_labels_printed_are_listed_by_their_saved_name_else_by_their_first_line(page, server):
+def test_labels_printed_are_listed_by_their_first_line_as_printed(page, server):
     from tests.browser.test_gallery import print_jar, save_new
     save_new(page, 'Rice jar', 'Rice')
     with page.expect_request('**/api/print'):
@@ -269,7 +269,8 @@ def test_labels_printed_are_listed_by_their_saved_name_else_by_their_first_line(
     page.click('#newLabel')
     print_jar(page, 'Beans')
     open_settings(page, 'printed')
-    assert [row.split('\n')[0] for row in rows(page)] == ['Jar Beans', 'Rice jar']
+    # Also a saved one, saved as "Rice jar"
+    assert [row.split('\n')[0] for row in rows(page)] == ['Jar Beans', 'Rice']
 
 
 def test_a_label_printed_earlier_today_with_a_date_asks_nothing(page, server):
