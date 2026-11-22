@@ -1074,6 +1074,54 @@
         }
       }
     },
+    "/labeldesigner/api/problem_report": {
+      "get": {
+        "summary": "Details for a problem report",
+        "description": "The version and each listed printer with its model, kind of connection (USB, network, Bluetooth, USB on another device or demo printer), whether it answered and its labels, in plain words, and the bug form on GitHub with them filled in. The demo printer is left out next to other printers unless it is configured. Nothing is sent anywhere: the label designer opens `url` in a new tab only when the user clicks \"Report a problem\". Addresses, host names, serial numbers, the names of printers, files and label texts are never included.",
+        "operationId": "problemReport",
+        "responses": {
+          "200": {
+            "description": "The details.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "details": {
+                      "type": "object",
+                      "description": "The fields of the bug form by their id. Several printers are separated by `; `, those beyond a few hundred characters counted.",
+                      "properties": {
+                        "version": {
+                          "type": "string",
+                          "example": "v8.0.0, commit 42ef2db, built 2026-11-20 21:17 UTC"
+                        },
+                        "printer": {
+                          "type": "string",
+                          "example": "QL-810W over the network; QL-800 as the demo printer"
+                        },
+                        "label_size": {
+                          "type": "string",
+                          "example": "QL-810W: 62 mm endless (DK-22205 / DK-2205), reported by the printer; Demo printer: 29 x 90 mm die-cut (DK-11201 / DK-1201), chosen in the Settings"
+                        }
+                      }
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The details as lines named like the fields of the form, to copy."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The bug form on GitHub with the details filled in.",
+                      "example": "https://github.com/DL6ER/labelburg/issues/new?template=bug_report.yml&version=v8.0.0%2C%20commit%2042ef2db&printer=QL-810W%20over%20the%20network&label_size=62%20mm%20endless%20%28DK-22205%20%2F%20DK-2205%29%2C%20reported%20by%20the%20printer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/settings": {
       "get": {
         "summary": "Settings of a printer",
