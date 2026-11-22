@@ -80,6 +80,26 @@ def test_a_blank_without_a_default_shows_its_name(client, monkeypatch):
     assert [line['text'] for line in label.text] == ['', '']
 
 
+@pytest.mark.parametrize('label_id, room, rooms, box', [
+    ('storage/014-moving-box-of-62x100.json', 'Room', ('Kitchen', 'Bathroom'), 'Box {} of 3'),
+    ('storage/014-moving-box-of-62x100-de.json', 'Raum', ('Küche', 'Bad'), 'Karton {} von 3'),
+])
+def test_moving_boxes_with_the_number_of_boxes(client, monkeypatch, label_id, room, rooms, box):
+    # The room chosen, the first one unless told, on every box of the job
+    from app.labeldesigner import printer
+    queued = []
+    monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
+    assert demos.load(label_id)['fields'][room]['choices'][0] == rooms[0]
+    for chosen, blanks in ((rooms[0], {}), (rooms[1], {room: rooms[1]})):
+        queued.clear()
+        response = client.post('/labeldesigner/api/demos/print', json={'id': label_id, 'print_count': 3, 'blanks': blanks})
+        assert outcome(client, response) == ('printed', '')
+        for label in queued:
+            label.process_templates()
+        assert [[line['text'] for line in label.text][:2] for label in queued] == [[chosen, box.format(n)] for n in (1, 2, 3)]
+
+
 @pytest.mark.parametrize('old, new', sorted(demos.REPLACED.items()))
 def test_replaced_demo_labels_lead_to_those_in_their_place(client, old, new):
     # Links to them, e.g. for printing, answered not found

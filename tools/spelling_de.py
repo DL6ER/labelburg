@@ -22,7 +22,9 @@ def label_words():
     for path in sorted(glob.glob(os.path.join(DEMOS, '*', '*-de.json'))):
         with open(path, encoding='utf-8') as fh:
             label = json.load(fh)
-        text = '\n'.join([label['title']] + [line['text'] for line in label['text']])
+        # The choices of blanks are printed as well, e.g. the rooms of a moving box
+        choices = [str(choice) for field in label.get('fields', {}).values() for choice in field.get('choices', [])]
+        text = '\n'.join([label['title']] + [line['text'] for line in label['text']] + choices)
         # A word broken over two lines, e.g. "Notruf-" and "telefon"
         text = re.sub(r'-\n(?=[a-zäöüß])', '', text)
         # Templates like {{datetime:%d.%m.%Y}}
