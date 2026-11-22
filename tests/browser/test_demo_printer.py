@@ -68,7 +68,8 @@ def test_the_demo_printer_offers_every_model(designer):
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == [
-        'B1', 'B1 Pro', 'B21 C2B', 'B21 Pro', 'D11-H', 'D101', 'D110_M', 'M2-H', 'N1']
+        'B1', 'B1 Pro', 'B3S', 'B18', 'B21', 'B21 C2B', 'B21 L2B', 'B21 Pro', 'B21S', 'B21S C2B', 'D11', 'D11-H', 'D11S',
+        'D101', 'D110', 'D110_M', 'H1S', 'M2-H', 'N1']
     # Two of a maker shown alike are told apart by their ids
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Epson"] option', 'os => os.map(o => o.textContent)') == [
         'ESC-POS', 'ESC-POS-180']

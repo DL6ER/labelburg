@@ -118,8 +118,9 @@ def test_no_bluetooth_finds_nothing(monkeypatch):
 @pytest.mark.parametrize('device, printer_', [
     ({'address': B1, 'name': 'B1-TEST0001', 'le': True, 'services': []}, (f'bt://{B1}', 'Niimbot/B1')),
     ({'address': B1, 'name': '', 'le': True, 'services': [NIIMBOT]}, (f'bt://{B1}', 'Niimbot/B1')),
-    # Over Bluetooth LE only the B1 is printed on
-    ({'address': B1, 'name': 'D110-TEST0001', 'le': True, 'services': [NIIMBOT]}, None),
+    ({'address': B1, 'name': 'D110-TEST0001', 'le': True, 'services': [NIIMBOT]}, (f'bt://{B1}', 'Niimbot/D110')),
+    # Not a model Labelburg prints on
+    ({'address': B1, 'name': 'K3-TEST0001', 'le': True, 'services': [NIIMBOT]}, None),
     ({'address': OTHER, 'name': 'Phone', 'le': True, 'services': []}, None),
     ({'address': OTHER, 'name': 'B1 Speaker', 'le': True, 'services': []}, None),
 ])

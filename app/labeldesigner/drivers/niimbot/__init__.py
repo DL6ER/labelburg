@@ -1,7 +1,9 @@
 """Niimbot thermal printers for die-cut labels on Bluetooth and USB
-(protocol.py): the D110_M, the B1 and the models niimbluelib prints with the
-same commands, see models.py. They have no cutter, the labels are torn off.
-Other models, e.g. the D110, are refused by the model ID they tell."""
+(protocol.py): the D110_M, the B1 and the models niimbluelib prints, with
+the commands it sends them, see models.py. They have no cutter, the labels
+are torn off. A model whose print task niimbluelib picks by the protocol
+version of the printer is refused where it picks none, e.g. a B18 before
+version 4."""
 
 import logging
 import re
@@ -181,8 +183,10 @@ def _bluetooth_name(model: models.Model) -> re.Pattern:
     return re.compile(r'[_ -]?'.join(map(re.escape, model.short.split('_'))) + '-.*', re.IGNORECASE | re.DOTALL)
 
 
+# Those whose sequence is picked by their protocol version may get none
 REFUSALS = (tuple(models.other_model(model) for model in models.PRINTED)
-            + tuple(models.cannot_print(model) for model in models.MODELS if model not in models.PRINTED))
+            + tuple(models.cannot_print(model) for model in models.MODELS
+                    if model not in models.PRINTED or not model.sequence))
 # The names of the models where they differ from their ids, e.g. B1 Pro
 SHOWN_AS = {model.name: f'Niimbot/{model.shown}' for model in models.PRINTED if model.shown != model.short}
 BLUETOOTH_NAMES = {_bluetooth_name(model): model.name for model in models.PRINTED if model.name in _LE}
@@ -420,8 +424,9 @@ class Niimbot(Driver):
         told = {}
         for step in steps:
             waiting = owed is not None and step == owed[0]
+            asked = {'inverted': getattr(models.BY_NAME.get(model), 'inverted', False)} if step == 'heartbeat' else {}
             try:
-                told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None)
+                told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None, **asked)
             except protocol.NoAnswer:
                 if _beeps(device, model):
                     raise
@@ -451,11 +456,13 @@ class Niimbot(Driver):
         if roll is None and not state['errors'] and getattr(models.BY_NAME.get(model), 'needs_tag', True):
             state['errors'] = ['No Niimbot roll with its RFID tag is in the printer']
         state['status_type'] = devices.status_type(state['errors'])
-        # It tells 0 to 4, shown as a percentage, low at 1 of 4 or less
+        # It tells 0 to 4, shown as a percentage, low at 1 of 4 or less;
+        # niimbluelib takes more as a percentage
         battery = beat.get('battery')
-        state['battery_low'] = battery in (0, 1)
+        state['battery_low'] = False
         if isinstance(battery, int):
-            state['battery'] = min(battery, 4) * 25
+            state['battery'] = battery * 25 if battery <= 4 else min(battery, 100)
+            state['battery_low'] = state['battery'] <= 25
         # The settings of a B1 follow it by its serial number, the label
         # designer tells when another roll is in it
         state['serial'] = serial
@@ -501,19 +508,24 @@ class Niimbot(Driver):
                 told = models.BY_ID.get(protocol.model_id(c))
                 if told is not None and told.name != model:
                     return models.other_model(told) if told in models.PRINTED else models.cannot_print(told)
+                known = models.BY_NAME[model]
+                sequence = known.sequence
+                if known.asks_version:
+                    sequence = models.sequence(known, protocol.protocol_version(c))
+                    if not sequence:
+                        return models.cannot_print(known)
                 # What the status keeps is updated, e.g. another roll
-                beat = protocol.heartbeat(c)
+                beat = protocol.heartbeat(c, inverted=known.inverted)
                 loaded = protocol.roll(c)
                 state = self._keep(device, model, beat, loaded, self._serial(c, device, model))
                 if state['errors']:
                     devices.note_answer(device)
                     return state['errors'][0]
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
-                known = models.BY_NAME[model]
                 head = known.counted if known.exact else known.dots
                 progress.counting(device)
                 for i, rows in enumerate(job):
-                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], head, known.exact)
+                    protocol.print_label(c, rows, label_type, sequence, known.density[2], head, known.exact)
                     progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:
