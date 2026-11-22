@@ -398,6 +398,11 @@ def test_asked_right_after_boot(monkeypatch):
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL-300'),
     ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD621-300dpi ZPL;', 'Zebra/ZPL-300'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra/ZPL-300'),
+    # Other spellings of the known ones
+    ('MFG:4barcode;CMD:CEZD;MDL:4b-2054a;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra  Technologies;COMMAND SET:ZPL;MODEL: ztc  GX430t ;', 'Zebra/ZPL-300'),
+    ('MFG:hp;CMD:Bixolon_01;MDL:ke103;', 'Zebra/ZPL-300'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZTC ZD611_300dpi ZPL;', 'Zebra/ZPL-300'),
     # 200 dpi as some Zebras name their 203 dpi
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT230-200dpi ZPL;', 'Zebra/ZPL'),
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZP 450-200dpi;', 'Zebra/ZPL'),
@@ -497,6 +502,8 @@ def test_status_of_a_300_dpi_printer(monkeypatch):
 @pytest.mark.parametrize('device_id, name', [
     ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra ZD611'),
     ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420t;SN:12J123456;', 'Zebra GX420t'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ztc GX420t;', 'Zebra GX420t'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZD611_300dpi ZPL;', 'Zebra ZD611'),
     ('MFG:4BARCODE;CMD:CEZD;MDL:4B-2054A;', '4BARCODE 4B-2054A'),
     ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'HP KE103'),
     ('CMD:ZPL;', None)])

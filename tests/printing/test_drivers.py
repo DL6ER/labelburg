@@ -170,6 +170,9 @@ def test_every_name_before_ends_at_a_model():
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;SN:X5JK012345;', 'Epson', 'Epson TM-T20II'),
     ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra', 'Zebra ZTC ZD611'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra', 'Zebra ZD420'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD611_300dpi;', 'Zebra', 'Zebra ZD611'),
+    # A number before dpi in the model stays
+    ('MFG:Printer;CMD:ZPL;MDL:LP300dpi;', '', 'LP300dpi'),
     ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra', 'HP KE103'),
     ('MFG:Xprinter;CMD:ESC/POS;MDL:Xprinter XP-58IIH;', 'Epson', 'Xprinter XP-58IIH'),
     ('MFG:Printer;CMD:ESC/POS,Raster;MDL:POS58;', 'Epson', 'POS58'),

@@ -86,6 +86,14 @@ KNOWN_IDS = {
     ('Zebra Technologies', 'ZTC GX430t'): MODELS[1],
 }
 
+
+def _plain(text: str) -> str:
+    """A field of a device ID compared in any case and spacing."""
+    return ' '.join(text.split()).casefold()
+
+
+_KNOWN = {(_plain(maker), _plain(model)): known for (maker, model), known in KNOWN_IDS.items()}
+
 # A measured length further off than this from all sizes is not taken
 LENGTH_TOLERANCE = 2
 
@@ -156,7 +164,7 @@ class Zpl(Driver):
 
     def model_in(self, device_id):
         fields = devices.device_id_fields(device_id)
-        known = KNOWN_IDS.get((fields.get('MFG', ''), fields.get('MDL', '')))
+        known = _KNOWN.get((_plain(fields.get('MFG', '')), _plain(fields.get('MDL', ''))))
         if known or not ZPL_DEVICE_ID.search(device_id):
             return known
         resolution = RESOLUTION.search(fields.get('MDL', ''))
@@ -186,7 +194,7 @@ class Zpl(Driver):
 
     def device_name(self, device):
         # Zebra's models start with ZTC, Zebra Technologies Corporation
-        return re.sub(r'\bZTC\s+', '', super().device_name(device), count=1)
+        return re.sub(r'\bZTC\s+', '', super().device_name(device), count=1, flags=re.IGNORECASE)
 
     def status(self, device, model, unconfirmed=False):
         path = device.removeprefix('file://')

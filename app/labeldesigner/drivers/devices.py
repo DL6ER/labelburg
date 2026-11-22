@@ -224,8 +224,9 @@ def device_id_fields(device_id: str) -> dict:
 
 # Makers some printers name that name none
 NO_MAKER = ('printer', 'generic', 'unknown')
-# A resolution in the model, e.g. ZD611-300dpi
-_RESOLUTION = re.compile(r'[-_\s]*\b\d+\s*dpi\b', re.IGNORECASE)
+# A resolution in the model, e.g. ZD611-300dpi or ZD611_300dpi, not digits
+# of the model before it
+_RESOLUTION = re.compile(r'[-_\s]*(?<![A-Za-z0-9])\d+\s*dpi(?![A-Za-z0-9])', re.IGNORECASE)
 DEVICE_NAME_LENGTH = 40
 
 
