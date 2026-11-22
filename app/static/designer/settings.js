@@ -689,7 +689,7 @@ DRAW.about = (box, report) => {
             <div class="set-stack"><div class="set-report"><a class="btn soft sm" id="setReport" href="${esc(SOURCE)}/issues/new?template=bug_report.yml" target="_blank" rel="noopener">Report a problem${ic('out')}</a>
                 <button class="btn ghost sm" type="button" id="setReportCopy" hidden>${ic('copy')}Copy details</button></div>
                 <div class="set-details" id="setDetails" hidden></div>
-                <small class="muted">Opens the form on GitHub with these details filled in. Nothing is sent until you send the form.</small></div>
+                <small class="muted">Opens a GitHub form with these details filled in.</small></div>
         </div></section>`;
     let shown = report;
     // From the server, which knows the printers, see /api/problem_report
