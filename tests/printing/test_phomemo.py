@@ -432,6 +432,13 @@ def test_each_model_has_its_labels():
     assert all(takes[model] for model in phomemo.MODELS)
 
 
+@pytest.mark.parametrize('model, size', [('Phomemo/M110', 'phomemo40x30'), ('Phomemo/M220', 'phomemo40x30'),
+                                         ('Phomemo/M421', 'phomemo102x152'), ('Phomemo/D30', 'phomemo-d12x40'),
+                                         ('Phomemo/Q30', 'phomemo-d12x50'), ('Phomemo/M02Pro', 'phomemo-m02pro')])
+def test_each_model_is_assumed_to_have_the_labels_its_source_starts_with(model, size):
+    assert tape.assumed_size(model, '62') == size
+
+
 def test_what_the_label_designer_offers():
     caps = phomemo.DRIVER.capabilities('Phomemo/M02Pro')
     assert (caps['qualities'], caps['cutter'], caps['model_shown'], caps['vendor']) == (['quality'], False, 'M02 Pro', 'Phomemo')

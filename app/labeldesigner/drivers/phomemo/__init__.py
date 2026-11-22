@@ -105,10 +105,22 @@ def _paper(identifier: str, models: tuple, dpi: int = DPI) -> Label:
     return Label(identifier, (PAPER_WIDTH, 0), FormFactor.ENDLESS, (total, 0), (printable, 0), 0, models=models)
 
 
-LABELS = (tuple(_die_cut(width, length) for width, length in sorted(set().union(*M_SIZES.values())))
+# The size each source starts with comes first, the label designer assumes
+# the first one a model takes: 4 x 6 in on the M421 ([PT]
+# cups/drv/phomemo-m421.drv:94), 40 x 30 mm on the other M models
+# (phomemo-m110.drv:56), 12 x 50 mm on the Q30 ([TP] Q30/index.html:83), 12 x
+# 40 mm on the D30 and D35 ([PT] cups/drv/phomemo-d30.drv:25)
+FIRST = ((102, 152), (40, 30), (12, 50), (12, 40))
+
+
+def _first(sizes) -> list:
+    return sorted(sizes, key=lambda size: (FIRST.index(size) if size in FIRST else len(FIRST), size))
+
+
+LABELS = (tuple(_die_cut(width, length) for width, length in _first(set().union(*M_SIZES.values())))
           + (_paper(f'phomemo{ENDLESS_WIDTH}', (M110, M120, M220)),)
           + tuple(_small(width, length, (D30, D35, Q30) if (width, length) in D_SIZES else (Q30,))
-                  for width, length in sorted(D_SIZES + Q30_SIZES))
+                  for width, length in _first(D_SIZES + Q30_SIZES))
           + tuple(_small(d, d, (D30, D35, Q30), FormFactor.ROUND_DIE_CUT) for d in D_ROUND)
           + (_paper('phomemo-m02', (M02, T02)), _paper('phomemo-m02pro', (M02PRO,), 300)))
 
