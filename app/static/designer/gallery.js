@@ -7,9 +7,10 @@ import {
     $, $$, esc, icon, clone, debounce, toast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
     savedItem, demoItem, itemDesign, thumbUrl, drawThumb, preview, defaults, blanksOf, fieldType, blankChoices, valuesNow,
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
-    printedSub, NO_IMAGE, sheetNote, untold
+    printedSub, NO_IMAGE, sheetNote, untold, isPaper, takesSheets, maxCopies, onTape
 } from './core.js';
 import { perCopyOf } from './media.js';
+import { paperLine, openSheet, sheetShown, chosenSheet } from './sheet.js';
 
 let ctx = null;
 const G = { cat: 'saved', fitsOnly: true, typed: '', typedCat: false, sel: null };
@@ -222,7 +223,8 @@ async function showDetail(item, values = null) {
         </div>
         <div id="tplMore"></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
-    const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+    const copiesNow = () => Math.min(maxCopies(onTape(work.design).label_size), Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+    let lastSheet = null;
     // Only the answer to the last preview asked is shown, earlier ones may come later
     let asked = 0;
     const shot = () => {
@@ -233,8 +235,13 @@ async function showDetail(item, values = null) {
         const img = $('#tplShot'), note = $('#tplSheet');
         if (!img || G.sel !== item || mine !== asked) return;
         img.src = p.url;
-        note.innerHTML = sheetNote(p.sheet);
+        const paper = isPaper(p.labelSize) && takesSheets();
+        lastSheet = p.sheet;
+        note.innerHTML = paper ? paperLine(p.sheet, p.labelSize) : sheetNote(p.sheet);
         note.hidden = !note.innerHTML;
+        note.classList.toggle('paperline', paper);
+        note.classList.toggle('warn', paper && !chosenSheet(S.printer));
+        if (paper) sheetShown();
     };
     shot();
     const later = debounce(shot, 250);
@@ -265,13 +272,16 @@ async function showDetail(item, values = null) {
         inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => { work.values[inp.dataset.blank] = inp.value; later(); });
         inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); if (!e.repeat) print(); } });
     });
-    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(100, Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); later(); });
+    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(maxCopies(onTape(work.design).label_size), Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); later(); });
     $('#tplCopies').addEventListener('input', later);
+    const fillTo = n => { $('#tplCopies').value = n; shot(); };
     $('#tplSheet').onclick = e => {
+        if (e.target.closest('[data-sheet]')) {
+            openSheet(S.printer, { state: () => lastSheet, fill: fillTo, changed: shot });
+            return;
+        }
         const fill = e.target.closest('[data-fill]');
-        if (!fill) return;
-        $('#tplCopies').value = fill.dataset.fill;
-        shot();
+        if (fill) fillTo(fill.dataset.fill);
     };
     $('#tplPrint').onclick = print;
     $('#tplOpen').onclick = async () => {

@@ -6,7 +6,7 @@ import {
     $, $$, esc, icon, S, C, API, toast, own, load, storeQuiet, refreshPrinters, tapeState, printerState, printerLabel, printerName, isDemo, sizeShort,
     sizeName, rollOf, asksLength, unsizedRoll, ASK_LENGTH, tapeKnown, tapeLeft, loadDemos, loadSaved, demoItem, savedItem, itemDesign, thumbUrl, drawThumb, detectTape, fitsTape, placed,
     allTags, tagsOf, hasTag, openLayer, closeLayer, layerOpen, entryName, savedAs, thePrinter, L, isEmptyDesign, originOf, carryOverLabelSettings,
-    loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending
+    loadLabelSettings, savedNow, forgetGoneKeys, printAgain, printedSub, followPrinter, resolvePending, maxCopies, onTape
 } from './core.js';
 import { calibrationHTML, bindCalibration } from './calibration.js';
 import { renderEditor, openEditor, stepHistory, printNow, saveNow, printerChanged, drawPrinter, hooks, editorUI, newEdit, setEdit, loadEdit, copiesChanged } from './editor.js';
@@ -355,7 +355,7 @@ function bindTop() {
     hooks.save = then => saveNow(saveDialog, then);
     $$('.printbtn [data-step]').forEach(b => b.onclick = () => {
         const inp = $('#copies');
-        inp.value = Math.min(100, Math.max(1, (parseInt(inp.value, 10) || 1) + +b.dataset.step));
+        inp.value = Math.min(S.edit ? maxCopies(onTape(S.edit.design).label_size) : 100, Math.max(1, (parseInt(inp.value, 10) || 1) + +b.dataset.step));
         if (S.edit) { S.edit.copies = +inp.value; delete S.edit.filledFrom; }
         copiesChanged();
     });

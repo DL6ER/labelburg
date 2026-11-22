@@ -62,7 +62,7 @@ def test_the_demo_printer_offers_every_model(designer):
     open_settings(designer)
     assert designer.input_value(MODEL) == 'QL-800'
     assert designer.eval_on_selector_all(f'{MODEL} optgroup', 'gs => gs.map(g => g.label)') == [
-        'Brother', 'DYMO', 'Epson', 'Niimbot', 'PUQU', 'TSC', 'Zebra']
+        'Brother', 'DYMO', 'Epson', 'Niimbot', 'Other', 'PUQU', 'TSC', 'Zebra']
     # Once each name: not the models shown as another one, nor "Other printer"
     shown_as = {model for driver in drivers.DRIVERS for model in driver.shown_as}
     assert shown_as == {'Epson/ESC-POS-180', 'TSC/TSPL-300', 'Zebra/ZPL-300', 'DYMO/LabelWriter-SE450',
@@ -76,6 +76,8 @@ def test_the_demo_printer_offers_every_model(designer):
     assert brother[-2:] == ['QL-1115NWB', 'VC-500W']
     # Shown without the maker, the group names it
     assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Niimbot"] option', 'os => os.map(o => o.textContent)') == ['B1', 'D110_M']
+    # An office printer, to try sheets of labels
+    assert designer.eval_on_selector_all(f'{MODEL} optgroup[label="Other"] option', 'os => os.map(o => o.textContent)') == ['Office printer']
 
 
 def test_the_model_chosen_brings_its_tapes_and_prints_as_it(designer):

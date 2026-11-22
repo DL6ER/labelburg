@@ -37,9 +37,9 @@ class Tape:
 
 def _takes(size_id: str, model) -> bool:
     """Whether a printer takes a label size, any size that has printers if
-    no label lists its model."""
+    no label lists its model, but sheets of labels for office printers."""
     known = bool(model) and model in _LISTED
-    return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id])
+    return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id]) and not sheets.is_paper(SIZES[size_id])
 
 
 def _shown_as_another(size_id: str) -> bool:
@@ -206,23 +206,35 @@ def fits(size_id: str, tape: Tape) -> bool:
     """Whether a label of this size is on the tape as it is: of the same
     size, a black one also on a black and red roll, one for black and red
     where the printer cannot tell whether its roll has red, also one for the
-    same paper of another model."""
+    same paper of another model. On a sheet of labels, or for one, a label
+    of the size of one of its labels."""
     if size_id == tape.id:
         return True
     a, b = SIZES.get(size_id), SIZES.get(tape.id)
+    if a and b and (sheets.is_paper(a) or sheets.is_paper(b)):
+        return a.form_factor == b.form_factor and sheets.same_size(a, b)
     return bool(a and b and a.form_factor == b.form_factor
                 and tuple(a.tape_size) == tuple(b.tape_size) and (a.color != 1 or tape.red_unknown))
 
 
+def _onto_sheet(size_id: str, tape: Tape) -> bool:
+    """Whether a label goes on the sheet assumed for an office printer that
+    is not told its sheets: one made for anything but a sheet, of no size of
+    its sheets."""
+    return (not tape.known and sheets.is_paper(SIZES.get(tape.id)) and not sheets.is_paper(SIZES[size_id])
+            and same_paper(size_id, tape.model) == size_id)
+
+
 def moves(size_id: str, tape: Tape) -> bool:
     """Whether a label of this size is put on the tape, where it is not known,
-    on the printer's size of the same paper, see same_paper(). One of the
-    size of the tape only takes its name, one for black and red keeps it
-    where the printer cannot tell whether its roll has red."""
+    on the printer's size of the same paper, see same_paper(), on an office
+    printer else on its sheet, see _onto_sheet(). One of the size of the
+    tape only takes its name, one for black and red keeps it where the
+    printer cannot tell whether its roll has red."""
     if size_id not in SIZES:
         return False
     if not tape.known:
-        return same_paper(size_id, tape.model) != size_id
+        return same_paper(size_id, tape.model) != size_id or _onto_sheet(size_id, tape)
     return size_id != tape.id and not (tape.red_unknown and fits(size_id, tape))
 
 
@@ -236,6 +248,8 @@ def on_tape(design: dict, tape: Tape) -> dict:
     if not moves(design['label_size'], tape):
         return design
     copy = dict(design)
+    if _onto_sheet(design['label_size'], tape):
+        return set_size(copy, tape.id)
     if not tape.known:
         copy['label_size'] = same_paper(design['label_size'], tape.model)
     elif fits(design['label_size'], tape):

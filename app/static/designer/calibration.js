@@ -82,6 +82,40 @@ async function printCalibration(p, shown, working, told) {
     return false;
 }
 
+// An office printer prints a test sheet on a sheet of labels: the numbers
+// read where its scales cross the cuts move the labels
+function openSheetCalibration(p, changed) {
+    const readings = ['<option value=""></option>', ...Array.from({ length: 13 }, (_, i) => -3 + i / 2)
+        .map(v => `<option value="${esc(v)}">${v > 0 ? '+' : ''}${esc(v)}</option>`)].join('');
+    openLayer(`<div class="dialog narrow cal-dialog" role="dialog" aria-label="Calibrate printer">
+        <div class="dialog-h"><div><h2>Calibrate printer</h2><p class="muted">Put a label sheet in the printer.</p></div><span class="sp"></span>
+            <button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
+        <button class="btn primary" type="button" data-cal-print>${icon('printer')}Print test sheet</button>
+        <img class="cal-example" alt="A test sheet printed 1 mm too far right and 0.5 mm too low: the cuts cross the scales at -1 and -0.5"
+            src="${esc(`${API}/calibration/example.png?${new URLSearchParams({ printer: p.path, model: p.model, kind: 'sheet' })}`)}">
+        <p>Read the number where each scale crosses the cut.</p>
+        <div class="row"><label class="cal-read">Across <select class="in" id="calAcross">${readings}</select></label>
+            <label class="cal-read">Down <select class="in" id="calDown">${readings}</select></label></div>
+        <p id="calResult" class="cal-result" aria-live="polite"></p>
+        <div class="acts"><button class="btn" type="button" data-close>Cancel</button>
+            <button class="btn primary" type="button" id="calSave">${icon('save')}Save</button></div></div>`, 'center');
+    const box = $('#layer'), result = $('#calResult', box);
+    const say = (text, warn = false) => { result.textContent = text; result.classList.toggle('warn', warn); };
+    const printButton = $('[data-cal-print]', box);
+    printButton.onclick = async () => {
+        printButton.disabled = true;
+        say('Printing the test sheet.');
+        if (await printCalibration(p, text => say(text, true), {}, say)) say('');
+        printButton.disabled = false;
+    };
+    $('#calSave', box).onclick = async () => {
+        const across = $('#calAcross', box).value, down = $('#calDown', box).value;
+        if ((across || down) && !await postCalibration(p, { read_across: across || 0, read_along: down || 0 }, text => say(text, true))) return;
+        closeLayer(true);
+        changed();
+    };
+}
+
 export async function openCalibration(p, changed) {
     let kept;
     try {
@@ -91,6 +125,7 @@ export async function openCalibration(p, changed) {
     } catch (e) {
         return toast(UNREACHABLE);
     }
+    if (kept.kind === 'sheet') return openSheetCalibration(p, changed);
     // Round labels are read as wide ones, on a ring instead of strips
     const round = kept.kind === 'round', narrow = kept.kind !== 'wide' && !round, step = narrow ? 0.5 : 0.25;
     const kind = narrow ? 'narrow' : round ? 'round' : 'wide';

@@ -102,12 +102,13 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '', cut_on_printer: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false, sensing: false, two_rolls: false, shown_as: '', cut_on_printer: false, sheets: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 export const printerCaps = (p = S.printer) => capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
-// The maker and model the server read from the printer, else those of its model
-export const printerName = p => (p && p.device_name) || [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
+// The maker and model the server read from the printer, else those of its
+// model, an office printer by what it is
+export const printerName = p => (p && p.device_name) || [!capsOf(p && p.model).sheets && capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 export const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
 // The demo printer, the simulator of the server, prints as any model
 export const isDemo = p => !!p && /simulat/i.test(p.status_type || p.phase_type || '');
@@ -116,7 +117,7 @@ export const thePrinter = (p, start = false) => p && p.name ? p.name : `${start 
 export function sizeName(id) {
     const s = SIZES[id];
     if (!s) return id;
-    if (isPtouch(id)) return s.name;
+    if (isPtouch(id) || isPaper(id)) return s.name;
     if (isColorTape(id)) return `${s.tape[0]} mm color tape`;
     if (s.form === 'endless') return `${s.tape[0]} mm endless${s.red ? ', black and red' : ''}`;
     if (s.form === 'round_die_cut') return `${s.tape[0]} mm round`;
@@ -132,12 +133,23 @@ export const ASK_LENGTH = 'choose the label length in the Settings';
 export const unsizedRoll = p => [p && p.tape && p.tape.unknown, rollOf(p)].filter(Boolean).join(' ');
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
+// A sheet of labels of an office printer, also one of a single label, e.g. a whole A4 page
+export const isPaper = id => !!(SIZES[id] && SIZES[id].sheet);
+export const perSheet = id => isPaper(id) ? SIZES[id].sheet.labels.length : 1;
+export const takesSheets = (p = S.printer) => !!p && !!capsOf(p.model).sheets;
+// The copies the label designer offers at most, a whole sheet of labels at least
+export const maxCopies = id => Math.max(100, perSheet(id));
+// The label a print on a sheet starts at: chosen for this print, else where
+// the server says the last print on that sheet ended
+export const keptStart = (p, id) => Math.min(+((kept(p).continue_at || {})[id]) || 1, perSheet(id));
+export const sheetStartOf = (p, id) => S.sheetStart && p && S.sheetStart.path === p.path && S.sheetStart.id === id ? S.sheetStart.at : keptStart(p, id);
 // A label that shows the number of labels printed ({{total}}) is drawn for the copies
 export const withTotal = design => (design.text || []).map(l => l.text).concat(design.code_text).some(t => String(t || '').includes('{{total}}'));
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
 export function sizeShort(id) {
     const s = SIZES[id];
     if (!s) return id;
+    if (isPaper(id)) return s.sheet.chip;
     if (isColorTape(id)) return `${s.tape[0]} mm color`;
     if (isEndless(s) || isPtouch(id)) return `${s.tape[0]} mm${s.red ? ' red' : ''}`;
     if (s.form === 'round_die_cut') return `${s.tape[0]} mm round`;
@@ -551,8 +563,10 @@ export function sheetNote(sheet, max = 100) {
 // total: the number of labels of a job printed before, for {{total}} only
 export async function preview(design, values, copies = 1, perCopy = 0, total = 0) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
-    // On a roll with several labels to a page the server tells how the copies fill the last one
-    const sheet = isSheet(asked.label_size), counted = sheet || withTotal(asked);
+    // On a roll with several labels to a page the server tells how the copies fill the last one,
+    // on a sheet of labels also from which label on
+    const sheet = isSheet(asked.label_size) || isPaper(asked.label_size), counted = sheet || withTotal(asked);
+    if (isPaper(asked.label_size) && takesSheets()) asked.sheet_start = String(sheetStartOf(S.printer, asked.label_size));
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -628,6 +642,9 @@ export const S = {
     // The colors of the label in the editor its tape prints otherwise, as its
     // preview told them
     printedAs: {},
+    // The label a print on a sheet of labels starts at, chosen for this
+    // print: { path, id, at }
+    sheetStart: null,
 };
 
 // What gives way first where the browser's storage is full: the images of
@@ -1036,6 +1053,8 @@ export function lineBusy(p = S.printer) {
 // yet, taken out of the queue here, or told by the held queue of the printer
 // chosen
 export function untold(entry) {
+    // Nothing was printed, e.g. the question where to go on was closed
+    if (!entry) return true;
     if (entry.state === 'printed') return S.history.some(h => h !== entry && h.state === 'printing' && h.path === entry.path);
     if (entry.job && QUEUE.removed.has(entry.job)) return true;
     return !!S.printer && entry.path === S.printer.path && QUEUE.path === entry.path && !!(QUEUE.line && QUEUE.line.held);
@@ -1048,13 +1067,23 @@ const sending = new Map();
 // this browser, Settings list it under Printed labels. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
 // took it, onDone(entry) with its outcome.
+// Of sheets of labels, see sheet.js: where a print starts, and what follows
+// a job the server took
+export const printHooks = { start: null, taken: null };
 export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
+    // Where on a sheet of labels it starts, null where that question was
+    // closed; other labels go on at once
+    let start = job.sheetStart || (printHooks.start && printHooks.start(printer, (printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer)).label_size));
+    if (start instanceof Promise) start = await start;
+    if (start === null) return null;
     const behind = lineBusy(printer), path = (printer && printer.path) || '';
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
         design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
+        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: '',
+        // On a sheet of labels, which a print tried again goes on on
+        ...(start ? { sheet: true } : {})
     };
     S.history.unshift(entry);
     saveHistory();
@@ -1066,6 +1095,7 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
         const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
         form.set('title', entryName(entry));
         form.set('source', 'designer');
+        if (start) form.set('sheet_start', String(start));
         const sent = (sending.get(path) || Promise.resolve()).then(() => post('/print', form));
         const settled = sent.catch(() => { }).then(() => { if (sending.get(path) === settled) sending.delete(path); });
         sending.set(path, settled);
@@ -1082,6 +1112,7 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
             // waiting also for one about to print, so behind says which waits.
             Object.assign(entry, { job: data.job, start: data.start, seen: data.state, seenAt: Date.now() });
             saveHistory();
+            if (start && printHooks.taken) printHooks.taken();
             if (onAccepted) onAccepted(entry);
             if (behind && data.state === 'waiting') toast(`Added ${entryName(entry)} to the queue`);
             else if (shown()) QUEUE.read().then(() => hideToast(printing));
@@ -1207,7 +1238,9 @@ export function resolvePending() {
 export const NO_IMAGE = 'Its image was not kept, open it in the editor to add it again';
 export function printAgain(h, onDone = announcePrint) {
     if (h.noImage) { toast(NO_IMAGE); return null; }
-    return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source }, onDone);
+    // Tried again, a print on a sheet goes on after the labels used meanwhile
+    const again = h.sheet && h.state !== 'printed' ? { sheetStart: 'next' } : {};
+    return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source, ...again }, onDone);
 }
 export function announcePrint(entry, again = () => printAgain(entry)) {
     if (untold(entry)) return;

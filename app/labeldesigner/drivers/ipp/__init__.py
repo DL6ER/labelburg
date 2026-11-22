@@ -5,7 +5,8 @@ images as large as the label, in the first format of documents.FORMATS the print
 made at its resolution, 203 or 300 dpi. The printer cuts or tears them off
 as it is set up. Where it tells its loaded media, e.g. in LPrint, that is
 the roll. Its status is its printer-state and the reasons for it, a job
-ends as its job-state tells."""
+ends as its job-state tells. Office printers, shown as "Office printer",
+print sheets of labels (catalog.py), each sheet a page."""
 
 import http.client
 import logging
@@ -15,35 +16,52 @@ from typing import NamedTuple
 
 from PIL import Image
 
-from ... import ipp
+from ... import ipp, sheets
 from .. import bitmap, devices, diecut, dymo
 from ..base import Driver, network_status, shown
 from ..labels import Label
-from . import documents
+from . import calibration, catalog, documents
 
 logger = logging.getLogger(__name__)
 
-# Of 300 dpi, for printers that do not tell, and of 203 dpi
-MODELS = ('Other/IPP', 'Other/IPP-203')
-DPI = {MODELS[0]: 300, MODELS[1]: 203}
+# Label printers of 300 dpi, for printers that do not tell, and of 203 dpi,
+# and office printers
+LABEL_MODELS = ('Other/IPP', 'Other/IPP-203')
+OFFICE = 'Other/Office'
+MODELS = (*LABEL_MODELS, OFFICE)
+DPI = {LABEL_MODELS[0]: 300, LABEL_MODELS[1]: 203, OFFICE: catalog.DPI}
 SHOWN = 'Other printer'
+OFFICE_SHOWN = 'Office printer'
 # The common die-cut labels and DYMO's, which LPrint drives a LabelWriter on;
 # no printhead limits them
 SIZES = diecut.SIZES + tuple(size for size in (*dymo.KINDS, *dymo.WIDE) if size not in diecut.SIZES)
 WIDEST = max(width for width, _ in SIZES)
 # The names of the 300 dpi sizes are the shorter ones, it is the default
-LABELS = tuple(label for model, prefix in zip(MODELS, ('ipp', 'ipp203-'))
+LABELS = tuple(label for model, prefix in zip(LABEL_MODELS, ('ipp', 'ipp203-'))
                for label in diecut.labels(prefix, DPI[model], diecut.dots(WIDEST, DPI[model]), (model,), SIZES))
 # mm a size told in whole mm may be off from one of SIZES it is: 1-1/8 x
 # 3-1/2 in are 29 x 89 mm, DYMO's 28 x 89 mm address labels
 SIZE_TOLERANCE = 1
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut ({SHOWN})' for label in LABELS}
+SHEETS = tuple(catalog.label(layout, OFFICE) for layout in catalog.LAYOUTS)
+NAMES.update((catalog.identifier(layout), catalog.name(layout)) for layout in catalog.LAYOUTS)
 
 # What a printer is asked before a job: its state, the formats it takes and
 # its loaded media; before it is added also its resolution
 ASKED = (*ipp.STATUS_ATTRIBUTES, 'document-format-supported', 'pwg-raster-document-type-supported',
          'pwg-raster-document-resolution-supported')
 OFFERED = (*ASKED, 'printer-resolution-default')
+# Of an office printer also its paper: the pages it takes, how it is asked
+# for them, its margins and whether it prints on both sides
+MARGINS = tuple(f'media-{side}-margin-supported' for side in ('top', 'bottom', 'left', 'right'))
+PAPER = ('media-supported', 'media-col-supported', *MARGINS, 'sides-supported')
+OFFICE_ASKED = (*ASKED, *PAPER)
+# How fast an office printer prints a page, about, in mm/s, and the seconds a
+# job takes besides, to warm up and to take the paper in
+OFFICE_SPEED = 100
+OFFICE_BESIDES = 10.0
+NO_PAGE = 'The printer takes no {} paper'
+NO_PAGES = tuple(NO_PAGE.format(name) for name in catalog.PAGE_NAMES.values())
 # What tells a label printer from others, e.g. an office printer that takes
 # the same formats
 LABEL_SIGNS = ('printer-kind', 'media-ready', 'media-col-ready')
@@ -79,13 +97,33 @@ AUTHENTICATION = 'cups-held-for-authentication'
 
 
 class Job(NamedTuple):
-    """The labels of a job as 1 bit images, each as large as the label size."""
+    """The labels of a job as 1 bit images, each as large as the label size,
+    of sheets of labels Pages."""
     label: Label
     images: list
 
     @property
     def dpi(self) -> int:
         return DPI[self.label.models[0]]
+
+
+class Pages:
+    """The pages of a job on sheets of labels, made one at a time as they are
+    sent, as an A4 page in gray takes about 9 MB: make(i) makes page i. The
+    first one is made at once, which raises what making them raises."""
+
+    def __init__(self, count: int, make):
+        self.count, self.make = count, make
+        self.first = make(0)
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __iter__(self):
+        first, self.first = self.first, None
+        yield first if first is not None else self.make(0)
+        for i in range(1, self.count):
+            yield self.make(i)
 
 
 def dpi_of(resolution) -> int | None:
@@ -101,8 +139,8 @@ def offered(attributes: dict) -> str | None:
     """The model a printer with the attributes is added as, the one of the
     resolution nearest to its own, see OFFERED. None where it takes none of
     the formats labels are sent in."""
-    dpi = dpi_of(attributes.get('printer-resolution-default')) or DPI[MODELS[0]]
-    model = min(MODELS, key=lambda model: abs(DPI[model] - dpi))
+    dpi = dpi_of(attributes.get('printer-resolution-default')) or DPI[LABEL_MODELS[0]]
+    model = min(LABEL_MODELS, key=lambda model: abs(DPI[model] - dpi))
     return model if documents.chosen(attributes, DPI[model]) else None
 
 
@@ -116,6 +154,15 @@ def _labels(media) -> bool:
     kind, source, name = (media.get(member) for member in ('media-type', 'media-source', 'media-size-name'))
     return (isinstance(kind, str) and (kind.startswith('labels') or kind in ipp.ENDLESS_MEDIA_TYPES)
             or isinstance(source, str) and 'roll' in source or isinstance(name, str) and _labels(name))
+
+
+def office(attributes: dict) -> str | None:
+    """OFFICE for a printer that tells no labels but A4 or US Letter paper
+    among its media and takes a format pages are sent in, else None."""
+    told = {name for key in ('media-supported', 'media-ready') for name in _listed(attributes.get(key)) if isinstance(name, str)}
+    if tells_labels(attributes) or not told & set(documents.PAGES.values()):
+        return None
+    return OFFICE if documents.chosen(attributes, DPI[OFFICE], multiples=True) else None
 
 
 def tells_labels(attributes: dict) -> bool:
@@ -171,11 +218,27 @@ def _loaded(media) -> tuple:
     return (*min(near)[1], kind) if near else (width, length, kind)
 
 
+def margin(attributes: dict) -> float | None:
+    """The paper an office printer leaves blank at its edges, in mm: the
+    widest of the smallest margin of each side it tells, None where it tells
+    none."""
+    smallest = [min(told) for name in MARGINS
+                if (told := [value for value in _listed(attributes.get(name)) if isinstance(value, int) and value >= 0])]
+    return max(smallest) / 100 if smallest else None
+
+
+def _listed(value) -> list:
+    return value if isinstance(value, list) else [] if value is None else [value]
+
+
 def told_status(device: str, model: str, attributes: dict) -> dict:
     """Status of the printer of the attributes it told, kept for when it
     does not answer. Its roll is the first of its media that are labels: a
-    queue of CUPS tells e.g. A4 for a label printer."""
+    queue of CUPS tells e.g. A4 for a label printer. Of an office printer
+    the paper it leaves blank at its edges, see margin()."""
     state = network_status(device, model)
+    if model == OFFICE:
+        state['paper_margin'] = margin(attributes)
     name = attributes.get('printer-make-and-model')
     if isinstance(name, str) and name.strip():
         state['device_name'] = ' '.join(name.split())[:MAX_NAME]
@@ -226,7 +289,7 @@ def _refusal(error: ipp.IPPError) -> str:
 def _status(device: str, model: str) -> dict:
     """Status of the printer, also of one that asks for a login or TLS."""
     try:
-        attributes = ask(device, ipp.STATUS_ATTRIBUTES)
+        attributes = ask(device, (*ipp.STATUS_ATTRIBUTES, *MARGINS) if model == OFFICE else ipp.STATUS_ATTRIBUTES)
     except ipp.IPPError as e:
         if not (asked := asked_for(e)):
             raise
@@ -277,16 +340,68 @@ def _outcome(device: str, printer: ipp.Printer, answer: dict, lengths: list[floa
             return NO_ANSWER
 
 
+def page_of(label: Label) -> tuple[str, tuple[int, int]]:
+    """The page of a sheet of labels: its name, as PWG 5101.1 names it,
+    and its size in hundredths of a millimeter."""
+    page = catalog.of(label.identifier).page
+    size = tuple(round(mm * 100) for mm in catalog.PAGES[page])
+    return documents.PAGES[size], size
+
+
+def _paper(label: Label, attributes: dict) -> ipp.Paper:
+    """How a job of an office printer asks for its page: without margins
+    where the printer takes that on every side, else with the smallest it
+    takes on all, without any where it tells none; by media-col where it
+    takes it, else by the name of the page; on one side of the paper."""
+    told = [{value for value in _listed(attributes.get(name)) if isinstance(value, int) and value >= 0} for name in MARGINS]
+    members = _listed(attributes.get('media-col-supported'))
+    margins = None
+    if all(told) and (not members or 'media-top-margin' in members):
+        common = set.intersection(*told)
+        margins = 0 if 0 in common else min(common) if common else max(min(side) for side in told)
+    return ipp.Paper(margins, '' if members else page_of(label)[0], 'one-sided')
+
+
+def page_refused(label: Label, attributes: dict) -> str:
+    """Why an office printer cannot print the page of a sheet of labels: it
+    names the pages it takes and that is none of them. Empty where it can."""
+    told = [name for name in _listed(attributes.get('media-supported')) if isinstance(name, str)]
+    name = page_of(label)[0]
+    if not told or name in told:
+        return ''
+    return NO_PAGE.format(catalog.PAGE_NAMES[catalog.of(label.identifier).page])
+
+
+def _test_sheet_for(label: Label) -> Label:
+    """The sheet a test sheet is drawn for: of a sheet of one label, the
+    first sheet of several labels of its page."""
+    if sheets.per_sheet(label) > 1:
+        return label
+    page = catalog.of(label.identifier).page
+    return next(sheet for sheet in SHEETS if sheets.per_sheet(sheet) > 1 and catalog.of(sheet.identifier).page == page)
+
+
+def _sheet_for(label_size: str) -> str:
+    """The sheet of labels a label made for label_size prints on: the first
+    one of more labels of its size, see sheets.same_size(), else label_size."""
+    from ...label_names import label_of
+    made_for = label_of(label_size)
+    if made_for is None or made_for in SHEETS or made_for.tape_size[1] == 0:
+        return label_size
+    return next((sheet.identifier for sheet in SHEETS if sheets.per_sheet(sheet) > 1 and sheets.same_size(sheet, made_for)),
+                label_size)
+
+
 class Ipp(Driver):
     # Named "Other printer"
     vendor = 'Other'
     models = MODELS
-    labels = LABELS
+    labels = LABELS + SHEETS
     label_names = NAMES
-    # Both are shown alike, by what they are, not by a maker, and never as
-    # a model of the demo printer
-    shown_as = {model: 'Other/printer' for model in MODELS}
-    names = {model: SHOWN for model in MODELS}
+    # Both label printers are shown alike, by what they are, not by a maker,
+    # and never as a model of the demo printer
+    shown_as = {model: 'Other/printer' for model in LABEL_MODELS}
+    names = {**{model: SHOWN for model in LABEL_MODELS}, OFFICE: OFFICE_SHOWN}
     # ipp://<host>[:<port>][/<path>], ipps:// alike, cups://<queue>
     device_patterns = (re.compile(rf'ipps?://[A-Za-z0-9.-]+(:\d{{1,5}})?({ipp.PATH})?'),
                        re.compile(rf'ipps?://\[[0-9A-Fa-f:.]+\](:\d{{1,5}})?({ipp.PATH})?'),
@@ -294,6 +409,7 @@ class Ipp(Driver):
     # Also an address at a raw port or none on IPP, which is never asked
     errors = (OSError, ipp.IPPError, http.client.HTTPException, ipp.RawPort, ipp.NotOnIpp)
     takes_usbip = False
+    refusals = (*NO_PAGES, calibration.KIND_MESSAGE)
 
     def claims(self, device) -> bool:
         """Whether a printer is on IPP, which no other driver prints on."""
@@ -306,18 +422,20 @@ class Ipp(Driver):
         if model in MODELS:
             return model
         if model == 'Unknown':
-            return MODELS[0]
+            return LABEL_MODELS[0]
         raise devices.OtherPrinterOnly()
 
     def fits(self, label, model):
-        return label in LABELS and model in label.models
+        return label in self.labels and model in label.models
 
     def label_for(self, label_size, model):
+        if model == OFFICE:
+            return _sheet_for(label_size)
         # ipp102x152 and ipp203-102x152 are the same labels, also as zpl102x152
         return diecut.label_for(label_size, LABELS, model)
 
     def dpi(self, high_res):
-        return DPI[MODELS[0]]
+        return DPI[LABEL_MODELS[0]]
 
     def label_dpi(self, label):
         return DPI[label.models[0]], DPI[label.models[0]]
@@ -327,19 +445,41 @@ class Ipp(Driver):
 
     def capabilities(self, model):
         # Cut or torn off as the printer is set up, the top of a label leaves it first
+        if model == OFFICE:
+            # Sheets of paper, its top leaves it first, the labels lined up
+            # with a test sheet
+            return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True, sheets=True,
+                        calibration=True, model_shown=OFFICE_SHOWN)
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, cut_on_printer=True,
                     leaves_turned=True, model_shown=self.shown_as[model].split('/')[-1])
+
+    def calibration_kind(self, model, label_size):
+        return calibration.KIND if model == OFFICE else ''
+
+    def calibration_job(self, queue):
+        sheet = next(size for size in SHEETS if size.identifier == queue.label_size)
+        drawn = _test_sheet_for(sheet)
+        return Job(sheet, [sheets.shifted(drawn, calibration.test_sheet(drawn), queue.offset)])
+
+    def calibration_example(self, kind):
+        if kind != calibration.KIND:
+            raise ValueError(calibration.KIND_MESSAGE)
+        return calibration.example(SHEETS[1])
 
     def status(self, device, model, unconfirmed=False):
         return self.noted_status(device, lambda: _status(device, model))
 
     def print_speed(self, model, fast, red):
-        return SPEED, BESIDES
+        return (OFFICE_SPEED, OFFICE_BESIDES) if model == OFFICE else (SPEED, BESIDES)
 
     def label_lengths(self, job):
+        if isinstance(job.images, Pages):
+            return [job.label.tape_size[1]] * len(job.images)
         return [diecut.millimeters(img.height, job.dpi) for img in job.images]
 
     def render(self, queue, entries, keep=None):
+        if queue.model == OFFICE:
+            return self._sheets(queue, entries, keep)
         label = next(size for size in LABELS if size.identifier == queue.label_size)
         images = []
         for i, entry in enumerate(entries):
@@ -351,11 +491,29 @@ class Ipp(Driver):
             images.append(img)
         return Job(label, images)
 
+    def _sheets(self, queue, entries, keep=None) -> Job:
+        """A page in gray for each sheet of labels (sheets.Sheet), plain paper
+        with lines to cut along, moved as the printer is calibrated, see
+        Pages."""
+        label = next(size for size in SHEETS if size.identifier == queue.label_size)
+
+        def page(i):
+            made = entries[i]['label'].generate().convert('L')
+            if queue.cut_lines and sheets.per_sheet(label) > 1:
+                made = sheets.with_cut_lines(label, made)
+            return sheets.shifted(label, made, queue.offset)
+        pages = Pages(len(entries), page)
+        if keep:
+            for i, made in enumerate(pages):
+                keep(made, f'sheet_{i}')
+        return Job(label, pages)
+
     def send(self, queue, job) -> str:
         device = queue.device_specifier
+        office = queue.model == OFFICE
         try:
             printer = ipp.printer_at(device)
-            attributes = ask(device)
+            attributes = ask(device, OFFICE_ASKED if office else ASKED)
         except (ValueError, *self.errors) as e:
             logger.warning('Printing on %s failed: %s', device, e)
             asked = asked_for(e) if isinstance(e, ipp.IPPError) else ''
@@ -364,19 +522,24 @@ class Ipp(Driver):
         if state['errors']:
             # Not sent to a printer that cannot take it, it would wait there
             return reported(attributes)
-        chosen = documents.chosen(attributes, job.dpi)
+        chosen = documents.chosen(attributes, job.dpi, multiples=office)
         if chosen is None:
             logger.warning('%s takes none of %s, only %s', device, documents.FORMATS, attributes.get('document-format-supported'))
             return NO_FORMAT
-        media = media_size(job.label, attributes.get('media-col-ready'))
+        if office and (refused := page_refused(job.label, attributes)):
+            logger.warning('%s takes %s only', device, attributes.get('media-supported'))
+            return refused
+        media = page_of(job.label)[1] if office else media_size(job.label, attributes.get('media-col-ready'))
+        # A page as large as it is, on one side
+        paper = {'paper': _paper(job.label, attributes)} if office else {}
         lengths = self.label_lengths(job)
-        made = documents.documents(chosen, job.images, media)
+        made = documents.documents(chosen, job.images, media, job.dpi)
         for i, document in enumerate(made):
             logger.info('Sending %d bytes of %s %s to %s', len(document), chosen.kind, chosen.raster_type, device)
             # A document of each label, or one of them all
             printed = [lengths[i]] if len(made) > 1 else lengths
             try:
-                answer = ipp.print_job(printer, chosen.kind, media, document, _waited(printed), JOB_TIMEOUT)
+                answer = ipp.print_job(printer, chosen.kind, media, document, _waited(printed), JOB_TIMEOUT, **paper)
             except ipp.Unanswered as e:
                 logger.warning('%s took the label without answering: %s', device, e)
                 return NO_ANSWER
@@ -389,6 +552,8 @@ class Ipp(Driver):
             message = _outcome(device, printer, answer, printed)
             if message:
                 return message
+            if office and queue.sent_pages:
+                queue.sent_pages(i + 1 if len(made) > 1 else len(job.images))
         return ''
 
 

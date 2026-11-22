@@ -292,8 +292,9 @@ def test_status_tells_the_label_sizes_each_printer_takes(client, monkeypatch):
     ql, unknown = client.get('/labeldesigner/api/printer_status').get_json()['printers']
     assert '62' in ql['takes'] and 'pt12' not in ql['takes']
     # A model no label size names takes every size that has printers, each
-    # paper once: not as the size of a model shown as another one
-    assert unknown['takes'] == [s for s in tape.SIZES if tape.TAKEN_BY[s] and not s.startswith(('zpl300-', 'tspl300-', 'dymo203-', 'ipp'))
+    # paper once: not as the size of a model shown as another one, and no
+    # sheets of labels of office printers
+    assert unknown['takes'] == [s for s in tape.SIZES if tape.TAKEN_BY[s] and not s.startswith(('zpl300-', 'tspl300-', 'dymo203-', 'ipp', 'sheet-'))
                                 and not s.endswith('-180')]
 
 

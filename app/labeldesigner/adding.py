@@ -4,7 +4,8 @@ added, it is asked what it is: over USB/IP for its device ID, on the network
 over SNMP and IPP. Nothing goes to the port it prints on before it is known
 as a printer of a model this server prints on, as a laser printer prints
 whatever arrives there. A printer on IPP no other driver prints on is added
-as "Other printer", which prints over IPP, never on the raw port. Where its
+as "Other printer", which prints over IPP, never on the raw port, one that
+tells A4 or US Letter paper and no labels as "Office printer". Where its
 address may be is up to ADD_PRINTERS, see drivers/reach.py."""
 
 import errno
@@ -27,7 +28,7 @@ MAX_LENGTH = 200
 # What a network printer is asked over IPP, also whether it is one for
 # "Other printer"
 IDENTITY = ('printer-make-and-model', 'printer-device-id')
-ASKED_OVER_IPP = tuple(dict.fromkeys((*IDENTITY, *other.OFFERED, *other.LABEL_SIGNS)))
+ASKED_OVER_IPP = tuple(dict.fromkeys((*IDENTITY, *other.OFFERED, *other.LABEL_SIGNS, 'media-supported')))
 # The fields of a device ID that are told, not its serial number
 FIELDS = ('MFG', 'MDL', 'CMD', 'CLS', 'DES')
 
@@ -277,10 +278,10 @@ def _on_network(address: str, host: str) -> dict:
 
 def _other_printer(host: str, told: dict, device_id: str, elsewhere: bool) -> dict:
     """A network printer no driver claims that told over IPP that it prints
-    labels and takes a format of "Other printer", at the address it
-    answered at. An office printer is one only given as ipp://. elsewhere:
-    IPP answers there for printers at other paths only, as CUPS."""
-    model = other.offered(told) if told and other.tells_labels(told) else None
+    labels and takes a format of "Other printer", or that it is an office
+    printer, at the address it answered at. elsewhere: IPP answers there
+    for printers at other paths only, as CUPS."""
+    model = (other.offered(told) if other.tells_labels(told) else other.office(told)) if told else None
     if model is None:
         raise ValueError(QUEUES if elsewhere else NO_PRINTER)
     port = '' if network.IPP_PORT == ipp.PORT else f':{network.IPP_PORT}'
@@ -290,7 +291,7 @@ def _other_printer(host: str, told: dict, device_id: str, elsewhere: bool) -> di
 
 def _on_ipp(address: str) -> dict:
     """The printer at an address on IPP, see ipp.printer_at(), added as an
-    "Other printer" whatever it is."""
+    "Office printer" where it is one, else as an "Other printer"."""
     try:
         told = other.ask(address, ASKED_OVER_IPP)
     except reach.NotAllowed:
@@ -299,7 +300,7 @@ def _on_ipp(address: str) -> dict:
         raise ValueError(other.asked_for(e) or NO_IPP) from e
     except (OSError, http.client.HTTPException) as e:
         raise ValueError(NO_ANSWER) from e
-    model = other.offered(told)
+    model = other.office(told) or other.offered(told)
     if model is None:
         raise ValueError(other.NO_FORMAT)
     return _found(address, 'network', model, str(told.get('printer-device-id') or ''), other.told_status(address, model, told))

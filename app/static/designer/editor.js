@@ -9,8 +9,9 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold
+    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold, isPaper, maxCopies, takesSheets, refreshPrinters, printAgain
 } from './core.js';
+import { paperLine, openSheet, sheetShown, chosenSheet, sheetHooks } from './sheet.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
 import { swatchHTML, openColors, closeColors } from './colors.js';
@@ -362,14 +363,20 @@ function bindStage() {
     $('#templates').onclick = () => hooks.templates && hooks.templates();
     $('#advBtn').onclick = () => toggleAdvanced();
     $('#zoom').onclick = () => toggleLarge();
-    $('#sheetNote').onclick = e => {
-        const fill = e.target.closest('[data-fill]');
-        if (!fill) return;
+    const fillTo = n => {
         // Filled for this page, they go back on a printer without pages
         if (S.edit && S.edit.filledFrom === undefined) S.edit.filledFrom = copies();
-        $('#copies').value = fill.dataset.fill;
-        if (S.edit) S.edit.copies = +fill.dataset.fill;
+        $('#copies').value = n;
+        if (S.edit) S.edit.copies = +n;
         copiesChanged();
+    };
+    $('#sheetNote').onclick = e => {
+        if (e.target.closest('[data-sheet]')) {
+            openSheet(S.printer, { state: () => ui.last && ui.last.sheet, fill: fillTo, changed: () => drawPreview() });
+            return;
+        }
+        const fill = e.target.closest('[data-fill]');
+        if (fill) fillTo(fill.dataset.fill);
     };
     // The label takes the room left once Advanced has moved in or out
     $('#center').addEventListener('transitionend', e => { if (e.target.id === 'center' && e.propertyName === 'margin-right') fitLabel(); });
@@ -462,7 +469,8 @@ function drawTape() {
     const E = S.edit, d = E.design, who = thePrinter(S.printer, true);
     const measured = !tapeKnown() && S.tapeCandidates.length > 0, asks = asksLength();
     // The demo printer has any roll of its model, none is missing
-    const note = !S.printer || tapeKnown() || isDemo(S.printer) ? '' : asks ? `${who} has a continuous roll, choose how long the labels are.`
+    // An office printer asks for its sheets in the line under the label
+    const note = !S.printer || tapeKnown() || isDemo(S.printer) || takesSheets() ? '' : asks ? `${who} has a continuous roll, choose how long the labels are.`
         : measured ? `${who} measures labels ${S.tapeUnknown}.`
         : S.tapeUnknown ? `${who} reports ${S.tapeUnknown} tape, which is not offered here.` : `${who} does not say which tape it has.`;
     const tn = $('#tapeNote');
@@ -634,7 +642,8 @@ const nextPreview = latest(async () => {
 function drawCuts(w, h) {
     const box = $('#pagecuts'), sheet = ui.last && ui.last.sheet;
     if (!box) return;
-    if (!sheet) { box.innerHTML = ''; return; }
+    // Of a sheet of labels one label is shown
+    if (!sheet || isPaper(ui.last.labelSize)) { box.innerHTML = ''; return; }
     const kx = w / sheet.size[0], ky = h / sheet.size[1], r = n => Math.round(n * 10) / 10;
     const rects = sheet.labels.map(([x, y, bw, bh]) => [r(x * kx), r(y * ky), r(bw * kx), r(bh * ky)]);
     const holes = rects.map(([x, y, rw, rh]) => `M${x} ${y}h${rw}v${rh}h${-rw}z`).join('');
@@ -647,14 +656,18 @@ function drawCuts(w, h) {
 // Where the copies leave the last page of a roll with several labels to a
 // page not full, as the server tells it
 function drawSheet(sheet) {
-    const note = $('#sheetNote'), html = sheetNote(sheet);
+    const note = $('#sheetNote'), id = ui.last && ui.last.labelSize;
+    const paper = !!id && isPaper(id) && takesSheets(), html = paper ? paperLine(sheet, id) : sheetNote(sheet);
     note.innerHTML = html;
     note.hidden = !html;
+    note.classList.toggle('paperline', paper);
+    note.classList.toggle('warn', paper && !chosenSheet(S.printer));
+    if (paper) sheetShown();
+    if ($('#copies')) $('#copies').max = maxCopies(id);
 }
-// Only a roll with several labels to a page and the number of labels
-// previews the copies
+// Only pages of several labels and the number of labels preview the copies
 export function copiesChanged() {
-    if ((ui.last && isSheet(ui.last.labelSize)) || (S.edit && withTotal(S.edit.design))) drawPreview();
+    if ((ui.last && (isSheet(ui.last.labelSize) || isPaper(ui.last.labelSize))) || (S.edit && withTotal(S.edit.design))) drawPreview();
 }
 
 function previewValues(E) {
@@ -680,7 +693,10 @@ function toggleLarge() {
 // (back) where the other end leaves first. Some printers feed blank paper
 // before each label (lead).
 function stageOf(v) {
-    const size = SIZES[v.labelSize] || { tape: [62, 0], dots: [696, 0], form: 'endless' };
+    const known = SIZES[v.labelSize] || { tape: [62, 0], dots: [696, 0], form: 'endless' };
+    // Of a sheet of labels one is shown, with its size as it is turned
+    const piece = known.piece && (v.w >= v.h) !== (known.piece[0] >= known.piece[1]) ? [known.piece[1], known.piece[0]] : known.piece;
+    const size = isPaper(v.labelSize) ? Object.assign({}, known, { tape: piece, dots: [v.w, v.h] }) : known;
     const scale = v.highRes ? 2 : 1, dpi = dpiOf(v.labelSize, v.highRes), span = size.dots[0] * scale;
     // One as long as the tape is wide runs the way it was asked for
     const spans = n => Math.abs(n - span) <= 4 * scale;
@@ -708,6 +724,9 @@ export function fitLabel() {
     const w = Math.round(v.w * k), h = Math.round(v.h * k), leadPx = Math.round(g.leadDots * k);
     img.style.width = `${w}px`;
     img.style.height = `${h}px`;
+    // A label of a sheet with its round corners
+    const corner = isPaper(v.labelSize) ? SIZES[v.labelSize].sheet.corner : 0;
+    img.style.borderRadius = $('#paper').style.borderRadius = corner ? `${Math.round(corner / 25.4 * g.dpi * k * (v.highRes ? 2 : 1))}px` : '';
     // Dots of black and red labels stay sharp where they are shown large
     img.classList.toggle('dots', large && !isColorTape(v.labelSize) && k * (devicePixelRatio || 1) >= 2);
     center.classList.toggle('side', g.side);
@@ -1246,7 +1265,7 @@ export function renderAdvanced() {
 // --- Printing and saving ----------------------------------------------------------------------
 
 export function copies() {
-    return Math.min(100, Math.max(1, parseInt($('#copies').value, 10) || 1));
+    return Math.min(maxCopies(onTape(S.edit.design).label_size), Math.max(1, parseInt($('#copies').value, 10) || 1));
 }
 
 export async function printNow() {
@@ -1259,6 +1278,8 @@ export async function printNow() {
 }
 
 function announce(entry) {
+    // A sheet of labels goes on where this print ended, as the server keeps it
+    if (takesSheets() && isPaper(onTape(entry.design).label_size)) refreshPrinters().then(() => drawPreview());
     if (untold(entry)) return;
     hideToast();
     const n = entry.copies, what = `${n} ${n === 1 ? 'label' : 'labels'}`;
@@ -1270,7 +1291,7 @@ function announce(entry) {
     openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="${head}">
         <div class="okc bad">${icon('x', '')}</div><h2>${head}</h2><p>${esc(entry.message)}</p>
         <div class="acts"><button class="btn" type="button" data-close>Close</button><button class="btn primary" type="button" id="retry">${icon('refresh')}${maybe ? 'Print again' : 'Try again'}</button></div></div>`, 'center');
-    $('#retry').onclick = () => { closeLayer(true); printJob(Object.assign({}, entry), announce); };
+    $('#retry').onclick = () => { closeLayer(true); printAgain(entry, announce); };
 }
 
 // Saved labels are saved again, a new one asks for its name and tags first
@@ -1320,7 +1341,7 @@ function askReplace(title, replace, asNew) {
 export function printerChanged() {
     if (!S.edit || !$('#stage')) return;
     placeEdit(S.edit);
-    if (S.edit.filledFrom !== undefined && !isSheet(onTape(S.edit.design).label_size)) {
+    if (S.edit.filledFrom !== undefined && !isSheet(onTape(S.edit.design).label_size) && !isPaper(onTape(S.edit.design).label_size)) {
         S.edit.copies = S.edit.filledFrom;
         $('#copies').value = S.edit.copies;
         delete S.edit.filledFrom;
@@ -1334,3 +1355,4 @@ export function printerChanged() {
 }
 
 mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, heldBack, redraw: () => drawPreview() });
+sheetHooks.changed = () => { if (S.edit && $('#stage')) drawPreview(); };
