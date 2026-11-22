@@ -36,12 +36,15 @@ def dpi(value: int, units: int = ipp.DOTS_PER_INCH) -> bytes:
 
 def printer_attributes(formats=('application/octet-stream', 'image/png', 'image/pwg-raster', 'image/urf'),
                        types=('black_1', 'sgray_8'), resolutions=(203,), default=203, loaded=(10160, 15240),
-                       reasons=('none',), printer_state=ipp.IDLE, name=ZEBRA) -> bytes:
+                       reasons=('none',), printer_state=ipp.IDLE, name=ZEBRA, media_type='labels', kinds=(),
+                       ready=()) -> bytes:
     """What a printer answers, by default as LPrint for a 203 dpi Zebra with
     4 x 6 in labels."""
     return response(attribute(0x41, 'printer-make-and-model', name), state(printer_state),
                     keywords('printer-state-reasons', *reasons),
-                    *([media(*loaded, 'labels')] if loaded else []),
+                    *([media(*loaded, media_type)] if loaded else []),
+                    *([keywords('printer-kind', *kinds)] if kinds else []),
+                    *([keywords('media-ready', *ready)] if ready else []),
                     values(ipp.TAG_MIME_TYPE, 'document-format-supported', [kind.encode() for kind in formats]),
                     keywords('pwg-raster-document-type-supported', *types),
                     values(ipp.TAG_RESOLUTION, 'pwg-raster-document-resolution-supported', [dpi(each) for each in resolutions]),

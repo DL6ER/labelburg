@@ -247,12 +247,41 @@ def test_network_printer_known_over_ipp(fake_printer, connections):  # noqa: F81
     assert 9100 not in connections
 
 
-def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections):  # noqa: F811
-    fake_printer['body'] = identity('HP LaserJet Pro M404dn', 'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;')
+# As an office laser printer tells itself over IPP: formats "Other printer"
+# takes, but no labels
+LASER_OVER_IPP = printer_attributes(
+    formats=('application/octet-stream', 'application/pdf', 'application/postscript', 'application/vnd.hp-PCL',
+             'image/jpeg', 'image/pwg-raster', 'image/urf'),
+    types=('sgray_8',), resolutions=(600,), default=600, loaded=(21590, 27940), media_type='stationery',
+    name=b'HP LaserJet Pro M404dn', kinds=('document', 'envelope'), ready=('na_letter_8.5x11in', 'iso_a4_210x297mm')
+)[:-1] + attribute(TEXT, 'printer-device-id', b'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;') + b'\x03'
+
+
+@pytest.mark.parametrize('answer', [identity('HP LaserJet Pro M404dn', 'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;'),
+                                    LASER_OVER_IPP])
+def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections, answer):  # noqa: F811
+    fake_printer['body'] = answer
     with pytest.raises(ValueError) as refused:
         adding.identify('tcp://127.0.0.1', 'local')
     assert str(refused.value) == adding.NO_PRINTER
     assert connections and set(connections) == {network.IPP_PORT}
+
+
+def test_office_printer_given_on_ipp_is_an_other_printer(fake_printer):  # noqa: F811
+    fake_printer['body'] = LASER_OVER_IPP
+    found = adding.identify(f'ipp://127.0.0.1:{network.IPP_PORT}/ipp/print', 'local')
+    assert (found['model'], found['state']['device_name']) == ('Other/IPP', 'HP LaserJet Pro M404dn')
+
+
+@pytest.mark.parametrize('answer', [
+    # By its kind, by the names of its media, by its roll
+    printer_attributes(loaded=None, kinds=('label',)),
+    printer_attributes(loaded=None, ready=('oe_2.25x1.25-label_2.25x1.25in',)),
+    printer_attributes(media_type='continuous'),
+])
+def test_label_printer_known_by_what_it_tells(fake_printer, answer):  # noqa: F811
+    fake_printer['body'] = answer
+    assert adding.identify('tcp://127.0.0.1', 'local')['model'] == 'Other/IPP-203'
 
 
 def test_network_printer_that_tells_nothing_gets_nothing(monkeypatch, connections):
@@ -320,7 +349,7 @@ def test_identity_is_asked_for_over_ipp():
     assert request['requested-attributes'] == [
         'printer-make-and-model', 'printer-device-id', 'printer-state', 'printer-state-reasons', 'media-col-ready',
         'document-format-supported', 'pwg-raster-document-type-supported', 'pwg-raster-document-resolution-supported',
-        'printer-resolution-default']
+        'printer-resolution-default', 'printer-kind', 'media-ready']
 
 
 def test_network_printer_no_driver_claims_is_an_other_printer(fake_printer, connections):  # noqa: F811

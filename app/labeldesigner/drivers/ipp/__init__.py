@@ -38,6 +38,10 @@ NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-
 ASKED = (*ipp.STATUS_ATTRIBUTES, 'document-format-supported', 'pwg-raster-document-type-supported',
          'pwg-raster-document-resolution-supported')
 OFFERED = (*ASKED, 'printer-resolution-default')
+# What tells a label printer from others, e.g. an office printer that takes
+# the same formats
+LABEL_SIGNS = ('printer-kind', 'media-ready', 'media-col-ready')
+LABEL_KINDS = {'label', 'roll'}
 TIMEOUT = 3.0
 # Seconds to connect for a job, which may then take as long as _waited() tells
 JOB_TIMEOUT = 10.0
@@ -93,6 +97,27 @@ def offered(attributes: dict) -> str | None:
     dpi = dpi_of(attributes.get('printer-resolution-default')) or DPI[MODELS[0]]
     model = min(MODELS, key=lambda model: abs(DPI[model] - dpi))
     return model if documents.chosen(attributes, DPI[model]) else None
+
+
+def _labels(media) -> bool:
+    """Whether media of media-ready (its name, e.g. oe_4x6-label_4x6in) or of
+    media-col-ready are labels or a roll."""
+    if isinstance(media, str):
+        return 'label' in media or media.startswith('roll_')
+    if not isinstance(media, dict):
+        return False
+    kind, source, name = (media.get(member) for member in ('media-type', 'media-source', 'media-size-name'))
+    return (isinstance(kind, str) and (kind.startswith('labels') or kind in ipp.ENDLESS_MEDIA_TYPES)
+            or isinstance(source, str) and 'roll' in source or isinstance(name, str) and _labels(name))
+
+
+def tells_labels(attributes: dict) -> bool:
+    """Whether a printer tells that it prints labels: by its printer-kind
+    (PWG 5100.13) or by its media, see LABEL_SIGNS."""
+    def listed(name):
+        value = attributes.get(name)
+        return value if isinstance(value, list) else [value]
+    return bool(set(listed('printer-kind')) & LABEL_KINDS) or any(map(_labels, listed('media-ready') + listed('media-col-ready')))
 
 
 def ask(device: str, attributes=ASKED) -> dict:

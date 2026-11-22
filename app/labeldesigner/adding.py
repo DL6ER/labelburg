@@ -27,7 +27,7 @@ MAX_LENGTH = 200
 # What a network printer is asked over IPP, also whether it is one for
 # "Other printer"
 IDENTITY = ('printer-make-and-model', 'printer-device-id')
-ASKED_OVER_IPP = (*IDENTITY, *(name for name in other.OFFERED if name not in IDENTITY))
+ASKED_OVER_IPP = tuple(dict.fromkeys((*IDENTITY, *other.OFFERED, *other.LABEL_SIGNS)))
 # The fields of a device ID that are told, not its serial number
 FIELDS = ('MFG', 'MDL', 'CMD', 'CLS', 'DES')
 
@@ -263,9 +263,10 @@ def _on_network(address: str, host: str) -> dict:
 
 
 def _other_printer(host: str, told: dict, device_id: str) -> dict:
-    """A network printer no driver claims that told over IPP that it takes
-    a format of "Other printer", at the address it answered at."""
-    model = other.offered(told) if told else None
+    """A network printer no driver claims that told over IPP that it prints
+    labels and takes a format of "Other printer", at the address it
+    answered at. An office printer is one only given as ipp://."""
+    model = other.offered(told) if told and other.tells_labels(told) else None
     if model is None:
         raise ValueError(NO_PRINTER)
     port = '' if network.IPP_PORT == ipp.PORT else f':{network.IPP_PORT}'
