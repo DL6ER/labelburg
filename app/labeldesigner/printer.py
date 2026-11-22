@@ -17,7 +17,7 @@ from flask import Config
 from PIL import Image
 
 from . import bluetooth, drivers, mdns, sheets
-from .drivers import devices, progress, reach, usbip
+from .drivers import devices, progress, reach, transports, usbip
 from .drivers.backends import NoLibusb
 from .drivers.base import network_status
 from .label_names import check_label_size, label_of
@@ -320,6 +320,8 @@ def _search_bluetooth(classic: bool = False):
         printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
         if printer:
             found[printer[0]] = printer[1]
+            if device['le']:
+                transports.note_le_address(device['address'], device.get('random', False))
     with _bluetooth_lock:
         _bluetooth.update(found)
         # Listed at the next status query

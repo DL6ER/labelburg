@@ -43,14 +43,15 @@ def _fields(data: bytes) -> dict[int, list[bytes]]:
 
 
 def _device(params: bytes, classic: bool = False) -> dict:
-    """A device of a Device Found event: its address, its name, the 128-bit
-    UUIDs of its services and its manufacturer data, each with its company
-    ID, as far as it advertises them. With classic, also whether it is on
-    classic Bluetooth and its class of device, None where it tells none."""
+    """A device of a Device Found event: its address, whether that is a
+    random one, its name, the 128-bit UUIDs of its services and its
+    manufacturer data, each with its company ID, as far as it advertises
+    them. With classic, also whether it is on classic Bluetooth and its
+    class of device, None where it tells none."""
     fields = _fields(params[14:14 + struct.unpack_from('<H', params, 12)[0]])
     name = (fields.get(0x09) or fields.get(0x08) or [b''])[0].decode('utf-8', 'replace').strip('\x00 ')
     services = [block[i:i + 16] for block in fields.get(0x06, []) + fields.get(0x07, []) for i in range(0, len(block) - 15, 16)]
-    device = {'address': ':'.join(f'{b:02X}' for b in params[5::-1]), 'name': name,
+    device = {'address': ':'.join(f'{b:02X}' for b in params[5::-1]), 'random': params[6] == 2, 'name': name,
               'le': params[6] in (1, 2), 'services': services, 'manufacturer': fields.get(MANUFACTURER, [])}
     if classic:
         told = (fields.get(CLASS_OF_DEVICE) or [b''])[0]
@@ -102,6 +103,7 @@ def discover(timeout: float = 5.0, classic: bool = False) -> list[dict]:
                         known['name'] = device['name'] or known['name']
                         known['services'] = known['services'] + [s for s in device['services'] if s not in known['services']]
                         known['manufacturer'] = known['manufacturer'] + [d for d in device['manufacturer'] if d not in known['manufacturer']]
+                        known['random'] = known['random'] or device['random']
                         if classic:
                             # A device on both is found on each
                             known['le'], known['classic'] = known['le'] or device['le'], known['classic'] or device['classic']

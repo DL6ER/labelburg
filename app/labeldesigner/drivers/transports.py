@@ -168,6 +168,14 @@ CLIENT_CONFIGURATION = 0x2902
 # at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
 # app can connect to the printer.
 KEEP_LE = 60
+# Printers the Bluetooth search found with a random address, by MAC address,
+# see note_le_address(). Any other is connected with its public address.
+_random_le: set[str] = set()
+
+
+def note_le_address(address: str, random: bool):
+    """Note whether a device found on Bluetooth LE has a random address."""
+    (_random_le.add if random else _random_le.discard)(address.upper())
 
 
 class LeLink:
@@ -190,7 +198,8 @@ class LeLink:
             self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:
                 try:
-                    self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+                    kind = socket.BDADDR_LE_RANDOM if mac in _random_le else socket.BDADDR_LE_PUBLIC
+                    self.s.connect((mac, 0, ATT_CID, kind))
                 except TimeoutError as e:
                     # Not advertising, e.g. switched off: as classic
                     # Bluetooth tells of a printer it cannot page
