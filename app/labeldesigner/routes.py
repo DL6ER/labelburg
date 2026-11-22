@@ -2573,8 +2573,10 @@ def history_print(job_id):
             recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
                       'copies': copies, 'collate': collate, 'sizes': entry.get('sizes'), 'dates': dates or _dates_set(), 'total': total,
                       'named': entry.get('named')}
-            # With values of its own named anew by its first line as printed
-            title = entry.get('title') if same_values else None
+            # Named as it printed before only while it prints as before, a
+            # title the request told it always
+            told = ' '.join(str(data.get('title') or '').split())[:MAX_TITLE_LENGTH]
+            title = entry.get('title') if as_before and same_values or told == entry.get('title') else None
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
@@ -2588,8 +2590,8 @@ def history_print(job_id):
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    # Named as before, unless the request names it or gives values of its own
-    title = _job_title(data, drawn) if _requested('title') is not None or not title else title
+    # Named as before, unless the request names it, else as it printed now
+    title = _job_title(data, drawn, fallback=entry.get('title') or 'Label') if _requested('title') is not None or not title else title
     return _queued(printer, run=printer.process_queue, title=title, source=_job_source('api'), labels=len(printer.images()),
                    recipe=recipe, images=kept, drawn=drawn, return_format=_requested('return_format'))
 

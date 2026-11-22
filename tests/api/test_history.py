@@ -481,3 +481,19 @@ def test_values_sent_as_they_were_filled_in_are_the_same_values(client, monkeypa
     again = printed(client, f'history/{job}/print', json={'printer': 'simulation', 'print_count': 1,
                                                          'blanks': {'What': 'Peas', 'Note': '', 'Shelf': 'Top', 'Kind': 'Dry'}})
     assert set(totals) == {3} and entry(client, again)['title'] == entry(client, job)['title']
+
+
+def test_a_label_printed_with_new_dates_or_numbers_is_named_as_it_prints(client, monkeypatch):
+    numbered = printed(client, data=dict(LABEL, text=lines('ASN{{asn:5}}')))
+    answer = client.post(f'{API}/history/{numbered}/print', json={'printer': 'simulation', 'as_before': 0}).get_json()
+    assert answer['title'] == entry(client, answer['job'])['title'] == 'ASN00002'
+    assert entry(client, printed(client, f'history/{numbered}/print', json={'printer': 'simulation'}))['title'] == 'ASN00001'
+    with monkeypatch.context() as then:
+        then.setattr(routes.SimpleLabel, '_now', lambda self: datetime.datetime(2026, 11, 3, 12))
+        dated = printed(client, data=dict(LABEL, text=lines('Made {{datetime:%Y-%m-%d}}')))
+        told = printed(client, data=dict(LABEL, text=lines('Made {{datetime:%Y-%m-%d}}'), title='Pantry'))
+    assert entry(client, dated)['title'] == 'Made 2026-11-03'
+    today = datetime.date.today().isoformat()
+    assert entry(client, printed(client, f'history/{dated}/print', json={'printer': 'simulation', 'as_before': 0}))['title'] == f'Made {today}'
+    # A title the request told stays
+    assert entry(client, printed(client, f'history/{told}/print', json={'printer': 'simulation', 'as_before': 0}))['title'] == 'Pantry'
