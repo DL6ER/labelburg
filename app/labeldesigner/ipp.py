@@ -255,21 +255,34 @@ def encode_request(uri: str, attributes=STATUS_ATTRIBUTES) -> bytes:
     return _operation(GET_PRINTER_ATTRIBUTES, uri) + _keywords('requested-attributes', attributes) + bytes([TAG_END])
 
 
-def encode_print_job(uri: str, document_format: str, media_size: tuple[int, int]) -> bytes:
+class Paper(NamedTuple):
+    """How a job asks for its paper, see encode_print_job(): its margins in
+    hundredths of a millimeter, None for none told, its name for a printer
+    that takes no media-col, empty for one that does, and the sides printed
+    on, empty for the printer's default."""
+    margins: int | None = 0
+    name: str = ''
+    sides: str = ''
+
+
+def encode_print_job(uri: str, document_format: str, media_size: tuple[int, int], paper: Paper = Paper()) -> bytes:
     """A Print-Job request (RFC 8011 4.2.1), its document follows it: the
     media of media_size, width and length in hundredths of a millimeter,
-    without margins (media-col, PWG 5100.7), and the document printed as
-    large as it is (print-scaling, PWG 5100.16)."""
+    with the margins of paper (media-col, PWG 5100.7), or by its name
+    where paper names it, and the document printed as large as it is
+    (print-scaling, PWG 5100.16)."""
     size = _member('x-dimension', TAG_INTEGER, _integer(media_size[0])) + _member('y-dimension', TAG_INTEGER, _integer(media_size[1]))
+    margins = () if paper.margins is None else ('bottom', 'left', 'right', 'top')
     media = (_attribute(TAG_MEMBER_NAME, '', b'media-size') + _collection('', size)
-             + b''.join(_member(f'media-{side}-margin', TAG_INTEGER, _integer(0)) for side in ('bottom', 'left', 'right', 'top')))
+             + b''.join(_member(f'media-{side}-margin', TAG_INTEGER, _integer(paper.margins)) for side in margins))
     return (_operation(PRINT_JOB, uri)
             + _attribute(TAG_NAME, 'requesting-user-name', USER)
             + _attribute(TAG_NAME, 'job-name', JOB_NAME)
             + _attribute(TAG_MIME_TYPE, 'document-format', document_format.encode())
             + bytes([TAG_JOB])
-            + _collection('media-col', media)
+            + (_attribute(TAG_KEYWORD, 'media', paper.name.encode()) if paper.name else _collection('media-col', media))
             + _attribute(TAG_KEYWORD, 'print-scaling', b'none')
+            + (_attribute(TAG_KEYWORD, 'sides', paper.sides.encode()) if paper.sides else b'')
             + bytes([TAG_END]))
 
 
@@ -401,11 +414,11 @@ def get_printer_attributes(host: str, port: int = PORT, path: str = DEFAULT_PATH
 
 
 def print_job(printer: Printer, document_format: str, media_size: tuple[int, int], document: bytes,
-              wait: float, timeout: float = 10.0) -> dict:
+              wait: float, timeout: float = 10.0, paper: Paper = Paper()) -> dict:
     """Print a document, see encode_print_job() and ask(): the printer may
     take wait seconds, it may read the document while it prints. The answer
     has job-id and job-state."""
-    return ask(printer, encode_print_job(printer.uri, document_format, media_size) + document, timeout, wait)
+    return ask(printer, encode_print_job(printer.uri, document_format, media_size, paper) + document, timeout, wait)
 
 
 def get_job_attributes(printer: Printer, job_id: int, timeout: float = 3.0) -> dict:

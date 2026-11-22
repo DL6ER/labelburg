@@ -18,6 +18,11 @@ CUT_DOTS = 4
 SAME_SIZE = 0.5
 
 
+def start_problem(per: int) -> str:
+    """The refusal of a start off a sheet of per labels."""
+    return f'sheet_start must be 1 to {per} or next'
+
+
 def per_sheet(label: Label) -> int:
     across, along, _ = label.pieces
     return across * along
@@ -48,6 +53,16 @@ def piece(label: Label) -> Label:
 def same_size(label: Label, other: Label) -> bool:
     """Whether one label of each page is of the same size, see SAME_SIZE."""
     return all(abs(a - b) <= SAME_SIZE for a, b in zip(piece(label).tape_size, piece(other).tape_size))
+
+
+def edge(label: Label) -> float:
+    """The least paper in mm between the labels of a page and its edges."""
+    grid = label.grid
+    if grid is None:
+        return 0
+    right = label.tape_size[0] - grid.left - (grid.columns - 1) * grid.step[0] - grid.size[0]
+    bottom = label.tape_size[1] - grid.top - (grid.rows - 1) * grid.step[1] - grid.size[1]
+    return min(grid.left, grid.top, right, bottom)
 
 
 def lying(label: Label, image: Image.Image) -> bool:

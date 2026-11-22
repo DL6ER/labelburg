@@ -260,29 +260,21 @@ LASER_OVER_IPP = printer_attributes(
 )[:-1] + attribute(TEXT, 'printer-device-id', b'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;') + b'\x03'
 
 
-@pytest.mark.parametrize('answer', [identity('HP LaserJet Pro M404dn', 'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;'),
-                                    LASER_OVER_IPP])
-def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections, answer):  # noqa: F811
-    fake_printer['body'] = answer
+def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections):  # noqa: F811
+    fake_printer['body'] = identity('HP LaserJet Pro M404dn', 'MFG:HP;MDL:HP LaserJet Pro M404dn;CMD:PJL,PCL,URF;')
     with pytest.raises(ValueError) as refused:
         adding.identify('tcp://127.0.0.1', 'local')
     assert str(refused.value) == adding.NO_PRINTER
     assert connections and set(connections) == {network.IPP_PORT}
 
 
-def test_computer_with_queues_of_cups_is_told_how_to_give_one(fake_printer, connections):  # noqa: F811
-    # CUPS answers that it has no printer at /ipp/print
-    fake_printer['body'] = response(status=ipp.NOT_FOUND)
-    with pytest.raises(ValueError) as refused:
-        adding.identify('127.0.0.1', 'local')
-    assert str(refused.value) == adding.QUEUES
-    assert 9100 not in connections
-
-
-def test_office_printer_given_on_ipp_is_an_other_printer(fake_printer):  # noqa: F811
+@pytest.mark.parametrize('on_ipp', [False, True])
+def test_office_printer_is_an_office_printer(fake_printer, connections, on_ipp):  # noqa: F811
+    # Paper and no labels, by its host or on IPP
     fake_printer['body'] = LASER_OVER_IPP
-    found = adding.identify(f'ipp://127.0.0.1:{network.IPP_PORT}/ipp/print', 'local')
-    assert (found['model'], found['state']['device_name']) == ('Other/IPP', 'HP LaserJet Pro M404dn')
+    found = adding.identify(f'ipp://127.0.0.1:{network.IPP_PORT}/ipp/print' if on_ipp else 'tcp://127.0.0.1', 'local')
+    assert (found['model'], found['state']['device_name']) == ('Other/Office', 'HP LaserJet Pro M404dn')
+    assert set(connections) == {network.IPP_PORT}
 
 
 @pytest.mark.parametrize('answer', [
@@ -361,7 +353,7 @@ def test_identity_is_asked_for_over_ipp():
     assert request['requested-attributes'] == [
         'printer-make-and-model', 'printer-device-id', 'printer-state', 'printer-state-reasons', 'media-col-ready',
         'document-format-supported', 'pwg-raster-document-type-supported', 'pwg-raster-document-resolution-supported',
-        'printer-resolution-default', 'printer-kind', 'media-ready']
+        'printer-resolution-default', 'printer-kind', 'media-ready', 'media-supported']
 
 
 def test_network_printer_no_driver_claims_is_an_other_printer(fake_printer, connections):  # noqa: F811

@@ -215,7 +215,8 @@ def _designer_config() -> dict:
          'palette': label_palette(label), 'models': tape.TAKEN_BY[label.identifier],
          'dpi': list(drivers.for_label(label.identifier).label_dpi(label)),
          # The shortest and longest endless label as cut, None without a length to set
-         'length': list(limits[:2]) if (limits := length_limits(label)) else None}
+         'length': list(limits[:2]) if (limits := length_limits(label)) else None,
+         **({'sheet': sheet} if (sheet := _sheet_shown(label)) else {})}
         for label in LABELS
     ]
     return {
@@ -255,6 +256,19 @@ def _designer_config() -> dict:
         # How a printer told so finds its labels, by the words of its roll
         'rolls': [[sensing, roll] for sensing, roll in diecut.ROLLS.items()],
     }
+
+
+def _sheet_shown(label) -> dict | None:
+    """Of a sheet of labels for office printers, what the label designer
+    shows of it: its page, its labels in mm as filled, the radius of their
+    corners, the page it is listed under, and its names in a line and in the
+    printer chip. None for other label sizes."""
+    if not sheets.is_paper(label):
+        return None
+    layout = drivers.ipp.catalog.of(label.identifier)
+    size, boxes = sheets.boxes(label, False)
+    return {'size': list(size), 'labels': [[round(v, 2) for v in box] for box in boxes], 'corner': label.grid.corner,
+            'page': drivers.ipp.catalog.PAGE_NAMES[layout.page], 'short': drivers.ipp.catalog.short(layout), 'chip': layout.products[0]}
 
 
 # --- Label repository utilities and API -------------------------------------------------
@@ -1191,9 +1205,10 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         device, model = _resolved_printer(_requested('printer'), _requested('model'))
         data, kept = _stored_as_printed(data, device, model)
         printer = _queue(model, device, data['label_size'])
+        _on_sheet(printer, lambda key: _given(_requested(key), kept.get(key)), _settings_of(device))
 
         # Determine printing options (print_count, cutting, high_res)
-        print_count = _check_print_count(_whole(_option('print_count', data, 1)))
+        print_count = _check_print_count(_whole(_option('print_count', data, 1)), data['label_size'])
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
         high_res = _whole(_option('high_res', data, 0)) != 0
@@ -1230,8 +1245,8 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(queued),
-                   drawn=drawn, return_format=return_format)
+    return _queued(printer, run=_noting_sheet(printer, len(queued)), title=_job_title(data, drawn), source=_job_source('api'),
+                   labels=len(queued), drawn=drawn, return_format=return_format)
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -1299,13 +1314,80 @@ def _copies(images: list, count: int, collate: bool) -> list:
     return [image for image in images for _ in range(count)]
 
 
-def _check_print_count(print_count: int) -> int:
+def _max_count(label_size=None) -> int:
+    """The most labels of a job, PRINT_MAX_COUNT, but at least a whole sheet
+    of labels of label_size."""
+    size = label_of(label_size)
+    return max(current_app.config['PRINT_MAX_COUNT'], sheets.per_sheet(size) if sheets.is_paper(size) else 0)
+
+
+def _check_print_count(print_count: int, label_size=None) -> int:
     if print_count < 1:
         raise ValueError("print_count must be greater than 0")
-    max_count = current_app.config['PRINT_MAX_COUNT']
+    max_count = _max_count(label_size)
     if print_count > max_count:
         raise ValueError(f"print_count must not exceed {max_count}")
     return print_count
+
+
+def _sheet_start(value, label, settings: dict) -> int:
+    """The label of a sheet of labels a job starts at: 1 where the request
+    leaves it out, next where the last print on it ended, see
+    printer_settings.CONTINUE_AT."""
+    per = sheets.per_sheet(label)
+    value = _given(value, 1)
+    if isinstance(value, str) and value.strip().lower() == 'next':
+        return min(settings.get(printer_settings.CONTINUE_AT, {}).get(label.identifier, 1), per)
+    try:
+        start = _whole(value)
+    except (TypeError, ValueError):
+        start = 0
+    if not 1 <= start <= per:
+        raise ValueError(sheets.start_problem(per))
+    return start
+
+
+def _sheet_options(label_size: str, get, settings: dict) -> tuple[int, bool]:
+    """Where a job of label_size starts on a sheet of labels and whether
+    plain paper gets lines to cut along, see PrinterQueue.start, get(key) of
+    the request, the lines as set for the printer where it leaves them out."""
+    label = label_of(label_size)
+    if not sheets.is_paper(label):
+        return 1, False
+    return _sheet_start(get('sheet_start'), label, settings), _whole_or(_given(get('cut_lines'), settings.get('cut_lines')), 0) != 0
+
+
+def _on_sheet(printer: PrinterQueue, get, settings: dict):
+    """The job of printer on a sheet of labels as _sheet_options() tells."""
+    printer.start, printer.cut_lines = _sheet_options(printer.label_size, get, settings)
+
+
+def _noting_sheet(printer: PrinterQueue, labels: int):
+    """printer.process_queue(), which on a sheet of labels notes where the
+    next print on it goes on, once printed."""
+    label = label_of(printer.label_size)
+    if not sheets.is_paper(label) or sheets.per_sheet(label) == 1:
+        return printer.process_queue
+    at = (printer.start - 1 + labels) % sheets.per_sheet(label) + 1
+
+    def run():
+        message = printer.process_queue()
+        if not message:
+            _note_continue(printer.device_specifier, label.identifier, at)
+        return message
+    return run
+
+
+def _note_continue(device: str, label_size: str, at: int):
+    """Keep where the next print on the sheet goes on, see
+    printer_settings.continued(). The job printed whether it is kept or not."""
+    repo = _get_repo_dir()
+    try:
+        with _saving(repo):
+            data = printer_settings.continued(_kept_settings(changing=True), device, label_size, at)
+            _write_atomically(os.path.join(repo, printer_settings.FILE), json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+    except (LabelsBusy, printer_settings.Broken, OSError, ValueError) as e:
+        current_app.logger.warning('Cannot keep where the sheet of labels goes on: %s', e)
 
 
 def _code_kinds() -> list:
@@ -1345,10 +1427,10 @@ def font_family_sample():
 def preview_from_image():
     try:
         values = request.values.to_dict(flat=True)
-        model = None
+        model, settings = None, {}
         # Made as printed: the label size and the quality the request leaves
         # out as set for its printer, the label designer sends both
-        if any(values.get(key) in (None, '') for key in ('label_size', 'high_res')):
+        if any(values.get(key) in (None, '') for key in ('label_size', 'high_res')) or values.get('sheet_start') == 'next':
             device, model = _resolved_printer(values.get('printer'), values.get('model'))
             settings = _settings_of(device)
             # Without a label size it is made for the loaded tape, as printed
@@ -1367,16 +1449,22 @@ def preview_from_image():
         if too_long := _length_problem(values, im, model):
             label.warnings.append(f'{too_long}.')
         # On a roll with several labels to a page: how the copies fill the
-        # last page, and the first page with them, each with its counter
+        # last page, and the first page with them, each with its counter. Of
+        # a sheet of labels the label alone, the sheet where asked for.
         size, state = label_of(values.get('label_size', DEFAULT_LABEL_SIZE)), None
-        if sheets.per_sheet(size) > 1:
+        paper = sheets.is_paper(size)
+        if sheets.per_sheet(size) > 1 or paper:
             pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
             copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
-            state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
-            layouts = {}
-            more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
-                    for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
-            im = sheets.page_view(size, [im] + more)
+            start, cut_lines = _sheet_options(size.identifier, values.get, settings)
+            state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, _max_count(size.identifier), start)
+            if not paper or _whole_or(values.get('whole_sheet'), 0) != 0:
+                layouts = {}
+                more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn).generate()
+                        for i in range(1, min(sheets.per_sheet(size) - (start - 1), copies * per_copy))]
+                im = sheets.page_view(size, [im] + more, start - 1)
+                if cut_lines:
+                    im = sheets.with_cut_lines(size, im)
     except HTTPException:
         # e.g. 413 for a request larger than MAX_CONTENT_LENGTH
         raise
@@ -1548,6 +1636,10 @@ def get_printer_status():
         printed_on = _tape_of(printer, model, printer['settings'])
         printer['tape'] = tape.describe(printed_on)
         printer['takes'] = tape.takes(model)
+        # Labels of its sheet in the paper an office printer leaves blank
+        sheet = label_of(printed_on.id)
+        if printer.get('paper_margin') and sheets.is_paper(sheet) and sheets.edge(sheet) < printer['paper_margin']:
+            printer['blank_edge'] = max(1, round(printer['paper_margin']))
         # The label size of that tape, for API users
         printer['label_size'], printer['label_size_assumed'] = printed_on.id, printed_on.assumed
         if printer.get('path'):
@@ -1924,7 +2016,7 @@ def calibration_route():
         # Numbers read on the label are given on both sides, none left empty
         if any(name in values and values[name] in (None, '') for name in ('left', 'right')):
             raise ValueError(printer_settings.CALIBRATION_MESSAGE)
-        given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along')
+        given = {name: _millimeters(values[name]) for name in ('left', 'right', 'across', 'along', 'read_across', 'read_along')
                  if values.get(name) not in (None, '')}
         roll, shift = values.get('roll') or None, None
 
@@ -1936,6 +2028,9 @@ def calibration_route():
                     raise ValueError(printer_settings.CALIBRATION_MESSAGE)
                 shift = printer_settings.from_readings(given['left'], given['right'])
                 across = round((across - shift) * 4) / 4
+            elif 'read_across' in given or 'read_along' in given:
+                # Read on a test sheet: where the cut crosses each scale
+                across, along = printer_settings.from_test_sheet(across, along, given.get('read_across', 0), given.get('read_along', 0))
             elif not given and not roll:
                 raise ValueError(printer_settings.CALIBRATION_MESSAGE)
             return across, along, roll or kept['roll']
@@ -2105,7 +2200,8 @@ def print_label():
         values = printer_settings.for_printing(settings, model, _sized(request.values.to_dict(flat=True), loaded))
         values = tape.on_tape(values, loaded)
         printer = _queue(model, device, values['label_size'])
-        print_count = _check_print_count(_whole_or(values.get('print_count'), 1))
+        _on_sheet(printer, values.get, settings)
+        print_count = _check_print_count(_whole_or(values.get('print_count'), 1), values['label_size'])
         printer.cut, printer.half_cut, printer.chain = _cutting(values.get)
         check_cut(printer.cut, printer.model)
         high_res = _whole_or(values.get('high_res'), 0) != 0
@@ -2999,6 +3095,7 @@ def webhook_print():
         problem = label_size_problem(label_size, model) or resolution_problem(model, high_res)
         if problem:
             return _fail(problem, 400)
+        on_sheet = _sheet_options(label_size, _requested, settings)
 
         label_orientation = LabelOrientation.ROTATED if orientation == 'rotated' else LabelOrientation.STANDARD
 
@@ -3030,14 +3127,15 @@ def webhook_print():
     try:
         printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
+        printer.start, printer.cut_lines = on_sheet
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
         drawn = printer.check()
     except Exception as e:
         current_app.logger.exception(e)
         return _fail('Failed to print labels', 400)
-    return _queued(printer, run=printer.process_queue, title=_job_title({}, drawn), source=_job_source('webhook'), labels=len(labels),
-                   drawn=drawn, extra={'count': len(labels)})
+    return _queued(printer, run=_noting_sheet(printer, len(labels)), title=_job_title({}, drawn), source=_job_source('webhook'),
+                   labels=len(labels), drawn=drawn, extra={'count': len(labels)})
 
 
 # --- Homebox ------------------------------------------------------------------
@@ -3135,6 +3233,7 @@ def homebox(name: str | None = None):
         printer.cut, printer.half_cut, printer.chain = _cutting(_requested, data)
         check_cut(printer.cut, printer.model)
         printer.leaves_first = _leaves_first(_requested('leaves_first') or data.get('leaves_first'))
+        _on_sheet(printer, _requested, settings)
         if _label_type(label_of(label_size).form_factor) == LabelType.ENDLESS_LABEL:
             orientation = _along_endless_tape(img, label_size, high_res)
         else:
@@ -3146,5 +3245,5 @@ def homebox(name: str | None = None):
         drawn = printer.check()
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _queued(printer, run=printer.process_queue, title=_job_title({'name': name}, drawn), source=_job_source('homebox'),
+    return _queued(printer, run=_noting_sheet(printer, 1), title=_job_title({'name': name}, drawn), source=_job_source('homebox'),
                    labels=1, drawn=drawn)

@@ -1,6 +1,6 @@
 """The documents a printer on IPP gets the labels of a job in: PWG raster
 (PWG 5102.4) of gray or black dots, PNG or PDF, the first of them it takes.
-Each label is a page as large as the label."""
+Each label is a page as large as the label, each sheet of labels a page."""
 
 import io
 import struct
@@ -25,6 +25,9 @@ HEADER_SIZE = 1796
 # ColorSpace (Table 3): sGray, where 0 is black, and Black, where 1 is a
 # printed dot (4.3.2.10)
 SGRAY, BLACK = 18, 3
+# The pages of office printers by their size in hundredths of a millimeter,
+# named as PWG 5101.1 names them
+PAGES = {(21000, 29700): 'iso_a4_210x297mm', (21590, 27940): 'na_letter_8.5x11in'}
 
 
 class Format(NamedTuple):
@@ -45,25 +48,32 @@ def _same_dots(told: int, dpi: int) -> bool:
     return told == dpi or {told, dpi} <= set(diecut.EIGHT_PER_MM)
 
 
-def chosen(attributes: dict, dpi: int) -> Format | None:
+def chosen(attributes: dict, dpi: int, multiples: bool = False) -> Format | None:
     """The format a printer with the attributes gets labels made at dpi in:
-    PWG raster where it takes it at that resolution, else PNG, else PDF,
-    which it scales to its own. None where it takes none of them."""
+    PWG raster where it takes it at that resolution, with multiples also at
+    a multiple of it, e.g. 600 dpi for pages made at 300, else PNG, else
+    PDF, which it scales to its own. None where it takes none of them."""
     formats = _list(attributes.get('document-format-supported'))
     types = _list(attributes.get('pwg-raster-document-type-supported'))
     raster_type = next((kind for kind in RASTER_TYPES if kind in types), None)
     if PWG_RASTER in formats and raster_type:
-        for resolution in _list(attributes.get('pwg-raster-document-resolution-supported')):
-            if isinstance(resolution, tuple) and len(resolution) == 3:
-                across, along, units = resolution
-                if across == along and units == ipp.DOTS_PER_INCH and _same_dots(across, dpi):
-                    return Format(PWG_RASTER, across, raster_type)
+        square = [resolution[0] for resolution in _list(attributes.get('pwg-raster-document-resolution-supported'))
+                  if isinstance(resolution, tuple) and len(resolution) == 3 and resolution[0] == resolution[1]
+                  and resolution[2] == ipp.DOTS_PER_INCH and isinstance(resolution[0], int) and resolution[0] > 0]
+        for across in square:
+            if _same_dots(across, dpi):
+                return Format(PWG_RASTER, across, raster_type)
+        if multiples and (more := sorted(across for across in square if across > dpi and across % dpi == 0)):
+            return Format(PWG_RASTER, more[0], raster_type)
     return next((Format(kind, dpi) for kind in (PNG, PDF) if kind in formats), None)
 
 
 def size_name(media_size: tuple[int, int]) -> str:
     """The name of a size in hundredths of a millimeter as PWG 5101.1 makes
-    one, e.g. custom_101.6x152.4mm_101.6x152.4mm."""
+    one, e.g. custom_101.6x152.4mm_101.6x152.4mm, of a page of PAGES its
+    own, e.g. iso_a4_210x297mm."""
+    if tuple(media_size) in PAGES:
+        return PAGES[tuple(media_size)]
     size = 'x'.join(f'{hundredths / 100:g}' for hundredths in media_size) + 'mm'
     return f'custom_{size}_{size}'
 
@@ -81,8 +91,8 @@ def page_header(width: int, height: int, dpi: int, media_size: tuple[int, int], 
     header = bytearray(HEADER_SIZE)
     header[0:9] = b'PwgRaster'
     struct.pack_into('>II', header, 276, dpi, dpi)
-    # In points, as CUPS counts them
-    struct.pack_into('>II', header, 352, across * 72 // 2540, along * 72 // 2540)
+    # In points, as CUPS counts them, A4 595 x 842
+    struct.pack_into('>II', header, 352, round(across * 72 / 2540), round(along * 72 / 2540))
     struct.pack_into('>II', header, 372, width, height)
     # BitsPerColor, BitsPerPixel, BytesPerLine, ColorOrder chunky, ColorSpace
     struct.pack_into('>IIIII', header, 384, bits, bits, (width * bits + 7) // 8, 0, space)
@@ -133,17 +143,17 @@ def page_bitmap(rows: list[bytes]) -> bytes:
 
 
 def _rows(img: Image.Image, raster_type: str) -> list[bytes]:
-    """The rows of a 1 bit image as dots of raster_type: of 8 bit gray a
-    byte each, 0 black and 255 white, of black ones 8 to a byte, see
-    bitmap.packed_rows()."""
+    """The rows of an image of 1 bit or gray as dots of raster_type: of 8
+    bit gray a byte each, 0 black and 255 white, of black ones 8 to a byte,
+    see bitmap.packed_rows(), gray dithered."""
     if raster_type == BLACK_1:
-        return bitmap.packed_rows(img)[0]
+        return bitmap.packed_rows(img.convert('1'))[0]
     data = img.convert('L').tobytes()
     return [data[y * img.width:(y + 1) * img.width] for y in range(img.height)]
 
 
 def pwg_raster(images: list[Image.Image], dpi: int, media_size: tuple[int, int], raster_type: str = SGRAY_8) -> bytes:
-    """A PWG raster document of 1 bit images, a page each."""
+    """A PWG raster document of images of 1 bit or gray, a page each."""
     pages = [SYNC]
     for img in images:
         pages += [page_header(img.width, img.height, dpi, media_size, len(images), raster_type),
@@ -152,7 +162,7 @@ def pwg_raster(images: list[Image.Image], dpi: int, media_size: tuple[int, int],
 
 
 def png(img: Image.Image, dpi: int) -> bytes:
-    """A PNG of a 1 bit image in 8 bit gray, which LPrint 1.3 takes where it
+    """A PNG of an image in 8 bit gray, which LPrint 1.3 takes where it
     prints one of 1 bit all black, its resolution told, the size of the
     label when it is printed as large as it is."""
     buffer = io.BytesIO()
@@ -167,11 +177,15 @@ def pdf(images: list[Image.Image], dpi: int) -> bytes:
     return buffer.getvalue()
 
 
-def documents(chosen_format: Format, images: list[Image.Image], media_size: tuple[int, int]) -> list[bytes]:
+def documents(chosen_format: Format, images: list[Image.Image], media_size: tuple[int, int], made_at: int = 0) -> list[bytes]:
     """The documents of the images in the format, see chosen(): one with all
-    pages, of PNG one for each image."""
+    pages, of PNG one for each image. Images made_at another resolution
+    than the raster's are scaled to it dot by dot."""
     kind, dpi, raster_type = chosen_format
     if kind == PWG_RASTER:
+        if made_at and dpi != made_at and dpi % made_at == 0:
+            images = [img.resize((img.width * dpi // made_at, img.height * dpi // made_at), Image.Resampling.NEAREST)
+                      for img in images]
         return [pwg_raster(images, dpi, media_size, raster_type)]
     if kind == PDF:
         return [pdf(images, dpi)]

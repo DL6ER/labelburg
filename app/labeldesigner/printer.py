@@ -136,6 +136,10 @@ class PrinterQueue:
         self.sensing = None
         # The roll of a printer of two, left or right, None for its first
         self.side = None
+        # On a sheet of labels, the label the first copy goes on, from 1, and
+        # whether plain paper gets lines to cut along
+        self.start = 1
+        self.cut_lines = False
         self._print_queue = []
 
     def add_label_to_queue(self, label, high_res: bool = False, fast: bool = False):
@@ -174,15 +178,25 @@ class PrinterQueue:
             return WRONG_MODEL
         return ''
 
-    def _grouped(self, entries: list[dict]) -> list[dict]:
-        """The entries of the queue as printed: on a roll with several labels
-        to a page, the labels of each page as one, see sheets.Sheet."""
+    def _pages(self, count: int) -> list[tuple[int, int]]:
+        """Where the pages of count labels start in the queue and the labels
+        each leaves out at its start: the first page from self.start on."""
         label = label_of(self.label_size)
         per = sheets.per_sheet(label) if label else 1
-        if per == 1:
+        skip = min(max(self.start, 1), per) - 1
+        starts = [0] + list(range(per - skip, count, per))
+        return [(i, skip if i == 0 else 0) for i in starts]
+
+    def _grouped(self, entries: list[dict]) -> list[dict]:
+        """The entries of the queue as printed: on a roll with several labels
+        to a page or a sheet of labels, the labels of each page as one, see
+        sheets.Sheet."""
+        label = label_of(self.label_size)
+        if not label or (sheets.per_sheet(label) == 1 and not sheets.is_paper(label)):
             return entries
-        return [dict(entries[i], label=sheets.Sheet(label, [entry['label'] for entry in entries[i:i + per]]))
-                for i in range(0, len(entries), per)]
+        pages = self._pages(len(entries)) + [(len(entries), 0)]
+        return [dict(entries[i], label=sheets.Sheet(label, [entry['label'] for entry in entries[i:end]], skip))
+                for (i, skip), (end, _) in zip(pages, pages[1:])]
 
     def label_cuts(self) -> list[bool]:
         """Whether the printer cuts after each label of the queue, as
@@ -196,8 +210,8 @@ class PrinterQueue:
         drawn again when it prints."""
         if not self._print_queue:
             return None
-        size = label_of(self.label_size)
-        page = self._print_queue[:sheets.per_sheet(size) if size else 1]
+        pages = self._pages(len(self._print_queue))
+        page = self._print_queue[:pages[1][0] if len(pages) > 1 else len(self._print_queue)]
         made = [entry['label'] for entry in page]
         # A page (sheets.Sheet) takes over the turn of its labels, which keep
         # it for printing
@@ -222,7 +236,7 @@ class PrinterQueue:
         labels = len(self._print_queue)
         self._print_queue = self._grouped(self._print_queue)
         size = label_of(self.label_size)
-        unit = 'page' if size and sheets.per_sheet(size) > 1 else 'label'
+        unit = 'page' if size and (sheets.per_sheet(size) > 1 or sheets.is_paper(size)) else 'label'
         entries = [dict(entry, cut=cut) for entry, cut in zip(self._print_queue, self.label_cuts())]
         self._print_queue.clear()
 

@@ -14,12 +14,12 @@ from barcode.errors import BarcodeError, BarcodeNotFoundError, IllegalCharacterE
 from pdf2image.exceptions import PDFInfoNotInstalledError, PDFPageCountError, PDFPopplerTimeoutError, PDFSyntaxError
 from PIL import Image
 
-from . import adding, ipp
+from . import adding, ipp, sheets
 from .cable_flag import CABLE_DIAMETER_REFUSED, CABLE_FLAG_REFUSED
 from .codes import BARCODE_TOO_LONG, TYPES as BARCODE_TYPES, check_digit_problems, code_problems
 from .label import (MAX_BLANK_CHOICE_LENGTH, MAX_BLANK_CHOICES, MAX_COUNTER_START_LENGTH, MAX_COUNTER_STEP, MAX_IMAGE_SCALING_FACTOR, MAX_RANDOM_LENGTH,
                     PARTS_DIRECTION_REFUSED, PARTS_ORDER_REFUSED, PARTS_TWICE_REFUSED, TextTooLong)
-from .label_names import cut_problems, label_length_problems, label_size_problems
+from .label_names import LABELS, cut_problems, label_length_problems, label_size_problems
 from .drivers import DRIVERS, MODELS, devices, resolution_problem
 from .paperless import BUSY as ASN_BUSY, REFUSED as PAPERLESS_REFUSED, UNREACHABLE as PAPERLESS_UNREACHABLE
 from .print_queue import FAILED as NOT_PRINTED, NO_PREVIEW, NO_SUCH_JOB, NOT_WAITING, PRINTER_REQUIRED, PRINTING_ALREADY, REMOVED
@@ -114,6 +114,7 @@ MESSAGES = (
     PRINTER_REQUIRED,
     NOT_PRINTED,
     'print_count must be greater than 0',
+    *sorted({sheets.start_problem(sheets.per_sheet(label)) for label in LABELS if sheets.is_paper(label)}),
     *check_digit_problems(),
     *code_problems(),
     *(problem for model in MODELS if (problem := resolution_problem(model, True))),
@@ -187,7 +188,9 @@ def _limits() -> tuple:
     if not has_app_context():
         return (), ()
     max_count = current_app.config['PRINT_MAX_COUNT']
-    return ((f'print_count must not exceed {max_count}',),
+    # At least a whole sheet of labels
+    counts = sorted({max_count} | {sheets.per_sheet(label) for label in LABELS if sheets.is_paper(label) and sheets.per_sheet(label) > max_count})
+    return (tuple(f'print_count must not exceed {count}' for count in counts),
             ((re.compile(r'(?s)A print job must not have more than \d+ labels, .*'),
               f'A print job must not have more than {max_count} labels'),))
 

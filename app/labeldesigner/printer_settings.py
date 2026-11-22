@@ -25,7 +25,7 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing', 'side')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'sensing', 'side', 'cut_lines')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
 ENDS = ('top', 'bottom')
@@ -42,7 +42,7 @@ NAMED_BY = {'cut': ('cut', 'cut_once'), 'half_cut': ('cut', 'cut_once', 'half_cu
 DEMO_MODEL = 'demo_model'
 DEMO = 'simulation'
 
-SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1), '
+SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut, chain and cut_lines (0 or 1), '
                     'leaves_first (top or bottom), sensing (gap, mark or endless) and side (left or right) of a printer, demo_model (a supported '
                     'model) of the demo printer simulation, and quality (quality, high or fast), an empty value removes one')
 # Of a printer that is not told how it finds its labels, see Driver.capabilities()
@@ -50,6 +50,9 @@ NO_SENSING = 'This printer finds the start of each label by itself'
 # Of a printer of one roll
 NO_SIDES = 'This printer has one roll'
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
+# Where the next print on each sheet of labels goes on, by its label size, of
+# a sheet partly used
+CONTINUE_AT = 'continue_at'
 # The printers added in the Settings, each with its address, model and name
 ADDED = 'added'
 MAX_ADDED = 20
@@ -65,8 +68,8 @@ class Broken(Exception):
 CALIBRATION = 'calibration'
 MAX_OFFSET = 5
 MAX_READING = 3
-CALIBRATION_MESSAGE = ('across and along are millimeters in steps of 0.25 from -5 to 5, left and right in steps of '
-                       '0.25 from -3 to 3, roll is the serial number of a roll')
+CALIBRATION_MESSAGE = ('across and along are millimeters in steps of 0.25 from -5 to 5, left, right, read_across and read_along '
+                       'in steps of 0.25 from -3 to 3, roll is the serial number of a roll')
 READINGS_DISAGREE = ('Left and right do not fit together. Look at the label again; if they still do not fit, '
                      'put the roll in again and print a new calibration label.')
 NO_CALIBRATION = 'This printer offers no calibration'
@@ -185,7 +188,14 @@ def _settings(data: dict, printer: str, model: str | None) -> dict:
         settings.pop('sensing', None)
     if settings.get('side') not in SIDES or model is not None and not two_rolls(model):
         settings.pop('side', None)
+    kept = own.get(CONTINUE_AT) if isinstance(own, dict) else None
+    if isinstance(kept, dict) and (kept := {size: at for size, at in kept.items() if _label_number(at)}):
+        settings[CONTINUE_AT] = kept
     return settings
+
+
+def _label_number(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 1
 
 
 def checked(changes: dict, model: str, demo: bool = False) -> dict:
@@ -207,7 +217,7 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
             if value not in CUTS:
                 raise ValueError(SETTINGS_MESSAGE)
             check_cut(value, model)
-        elif name in ('half_cut', 'chain'):
+        elif name in ('half_cut', 'chain', 'cut_lines'):
             if value not in ('0', '1'):
                 raise ValueError(SETTINGS_MESSAGE)
         elif name == 'leaves_first':
@@ -251,6 +261,30 @@ def changed(data: dict, device: str, changes: dict) -> dict:
             target[name] = value
         else:
             target.pop(name, None)
+    if own:
+        data['printers'][printer] = own
+    else:
+        data['printers'].pop(printer, None)
+    if len(data['printers']) > MAX_PRINTERS:
+        raise ValueError(TOO_MANY_PRINTERS)
+    return data
+
+
+def continued(data: dict, device: str, label_size: str, at: int) -> dict:
+    """data with the label of the sheet of label_size the next print on the
+    printer goes on, at, forgotten at 1, a new sheet."""
+    printer = _keeping(data, device)
+    own = data['printers'].get(printer)
+    own = dict(own) if isinstance(own, dict) else {}
+    kept = own.get(CONTINUE_AT)
+    kept = {size: n for size, n in kept.items() if _label_number(n)} if isinstance(kept, dict) else {}
+    kept.pop(label_size, None)
+    if at > 1:
+        kept[label_size] = at
+    if kept:
+        own[CONTINUE_AT] = kept
+    else:
+        own.pop(CONTINUE_AT, None)
     if own:
         data['printers'][printer] = own
     else:
@@ -445,3 +479,12 @@ def from_readings(left: float, right: float) -> float:
     if abs(left + right) > 0.5:
         raise ValueError(READINGS_DISAGREE)
     return (right - left) / 2
+
+
+def from_test_sheet(across: float, along: float, read_across: float, read_along: float) -> tuple[float, float]:
+    """The offsets of a printer, from those its test sheet was printed with
+    and the numbers read where the cuts cross its scales: the labels are
+    moved by them."""
+    if not (_in_steps(read_across, MAX_READING) and _in_steps(read_along, MAX_READING)):
+        raise ValueError(CALIBRATION_MESSAGE)
+    return across + read_across, along + read_along
