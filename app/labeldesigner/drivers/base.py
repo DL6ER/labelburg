@@ -182,7 +182,9 @@ class Driver:
         """Maker and model a printer on USB names in its device ID, e.g.
         Xprinter XP-58IIH, which status() may tell as device_name where its
         model is one for printers of many makers; empty if it names none."""
-        return devices.device_name(devices.known_device_id(device), self.vendor)
+        # usb://<vendor>:<product>/<serial number>
+        serial = device.removeprefix('usb://').partition('/')[2] if device.startswith('usb://') else ''
+        return devices.device_name(devices.known_device_id(device), self.vendor, serial)
 
     def noted_status(self, device: str, query) -> dict:
         """The status query() tells, noted whether the printer answered, see

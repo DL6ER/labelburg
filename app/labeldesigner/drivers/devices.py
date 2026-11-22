@@ -227,19 +227,33 @@ NO_MAKER = ('printer', 'generic', 'unknown')
 # A resolution in the model, e.g. ZD611-300dpi or ZD611_300dpi, not digits
 # of the model before it
 _RESOLUTION = re.compile(r'[-_\s]*(?<![A-Za-z0-9])\d+\s*dpi(?![A-Za-z0-9])', re.IGNORECASE)
+# Words of a model that tell one printer from another: a serial number after
+# SN or S/N, a MAC address, also without separators, or an IPv4 address
+_ONE_PRINTER = re.compile(r'S/?N[-:#]?(?=\w*\d)\w+|([0-9A-F]{2}[:-]){5}[0-9A-F]{2}|[0-9A-F]{12}|\d{1,3}(\.\d{1,3}){3}',
+                          re.IGNORECASE)
+# As many digits in a word make a serial number rather than a model
+SERIAL_DIGITS = 6
 DEVICE_NAME_LENGTH = 40
 
 
-def device_name(device_id: str, vendor: str = '') -> str:
+def device_name(device_id: str, vendor: str = '', serial: str = '') -> str:
     """Maker and model as a device ID names them, e.g. Xprinter XP-58IIH, the
     maker as vendor spells it where it starts so (Epson for EPSON), without
-    a resolution or the command set in the model. Empty where it names no
-    model or the name is longer than DEVICE_NAME_LENGTH."""
+    a resolution or the command set in the model, nor what tells one printer
+    from another, e.g. its serial number, that of the device ID or serial.
+    Empty where it names no model or the name is longer than
+    DEVICE_NAME_LENGTH."""
     fields = device_id_fields(device_id)
     plain = {name: ' '.join(''.join(c for c in fields.get(name, '') if c.isprintable()).split())
              for name in ('MFG', 'MDL', 'CMD')}
     commands = {command.strip().upper() for command in plain['CMD'].split(',')}
-    model = ' '.join(word for word in _RESOLUTION.sub('', plain['MDL']).split() if word.upper() not in commands)
+    serials = {told.casefold().lstrip('0') for told in (fields.get('SN'), fields.get('SERN'), serial) if told} - {''}
+
+    def of_the_model(word: str) -> bool:
+        bare = word.strip('()[],')
+        return not (word.upper() in commands or bare.casefold().lstrip('0') in serials or _ONE_PRINTER.fullmatch(bare)
+                    or sum(c.isdigit() for c in bare) >= SERIAL_DIGITS)
+    model = ' '.join(word for word in _RESOLUTION.sub('', plain['MDL']).split() if of_the_model(word))
     maker = plain['MFG']
     if vendor and maker.casefold().startswith(vendor.casefold()):
         maker = vendor
