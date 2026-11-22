@@ -12,8 +12,8 @@ from urllib.parse import urlsplit
 
 from app import PRINTER_NAME
 
-from . import ipp
-from .drivers import DEVICE_PATTERNS, MODELS, devices, for_model, reach, told_model, usbip
+from . import ipp, snmp
+from .drivers import DEVICE_PATTERNS, MODELS, described_model, devices, for_model, reach, told_model, usbip
 from .drivers.brother import network
 from .drivers.vc500w import tapes
 
@@ -204,6 +204,18 @@ def _ipp_identity(host: str) -> dict:
         return {}
 
 
+def _described(host: str) -> str | None:
+    """The model the SNMP system description of a device names, e.g. of a
+    TSC printer."""
+    try:
+        description = snmp.get(host, snmp.SYSTEM_DESCRIPTION, port=network.SNMP_PORT, timeout=network.SNMP_TIMEOUT)
+    except reach.NotAllowed:
+        raise
+    except (OSError, snmp.SNMPError):
+        return None
+    return described_model(description.decode('utf-8', 'replace')) if isinstance(description, bytes) else None
+
+
 def _on_network(address: str, host: str) -> dict:
     where = urlsplit(address).netloc
     try:
@@ -219,7 +231,7 @@ def _on_network(address: str, host: str) -> dict:
         told = _ipp_identity(host)
         device_id = str(told.get('printer-device-id') or '')
         named = str(told.get('printer-make-and-model') or '').removeprefix('Brother ').strip()
-        model = told_model(device_id) or (named if named in MODELS else None)
+        model = told_model(device_id) or (named if named in MODELS else None) or _described(host)
         if model is None:
             raise ValueError(NO_PRINTER)
     else:

@@ -56,6 +56,8 @@ KNOWN_IDS = {
     ('', 'PM-241-BT', 'XPP,XL'): MODELS[0],
     ('VEVOR', 'Y428BT', ''): MODELS[1],
 }
+# A network printer of TSC by its SNMP system description
+MAKER = re.compile(r'\bTSC\b')
 
 
 def _plain(text: str) -> str:
@@ -135,6 +137,9 @@ class Tspl(Driver):
         if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
             return None
         return _of_resolution(fields.get('MDL', ''))
+
+    def described(self, description):
+        return _of_resolution(description) if MAKER.search(description) else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

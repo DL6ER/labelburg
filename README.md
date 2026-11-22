@@ -146,7 +146,7 @@ Address each printer in one way only (e.g. always `file:///dev/usb/lp0`). Two ad
 
 ### Network printers
 
-Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others in the Settings of the label designer, or with `tcp://<IP address>` in `PRINTER_PRINTER` or `PRINTERS`, and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing.
+Network printers are found when they announce themselves like for Bonjour, which in Docker needs `network_mode: host`, or by a known MAC address prefix in the ARP table. Add others in the Settings of the label designer, or with `tcp://<IP address>` in `PRINTER_PRINTER` or `PRINTERS`, and please open an issue. Network printers report their model, the loaded labels and errors over SNMP (UDP port 161) like to Brother's apps, with the same status as over USB, or else over IPP (port 631), which e.g. on the QL-810W names neither the cause of every error nor endless rolls. Jobs are not sent while a printer reports an error, and an error after a job is shown like for USB printers. Printers that answer neither only take print jobs on port 9100 and report nothing. A TSC printer added in the Settings is also known by its SNMP system description.
 
 ### Fonts
 

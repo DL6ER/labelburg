@@ -56,6 +56,12 @@ def told_model(device_id: str) -> str | None:
     return next((model for driver in DRIVERS if (model := driver.model_in(device_id))), None)
 
 
+def described_model(description: str) -> str | None:
+    """The model an SNMP system description names, None if it is no printer
+    of a driver."""
+    return next((model for driver in DRIVERS if (model := driver.described(description))), None)
+
+
 def resolve(device: str, model: str) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
     ID tells, else the configured or requested model."""

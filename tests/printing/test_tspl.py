@@ -14,9 +14,14 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from app.labeldesigner.drivers import backends, devices, diecut, progress, tspl, zpl
+from app.labeldesigner import adding, snmp
+from app.labeldesigner.drivers import backends, devices, diecut, progress, reach, tspl, zpl
+from app.labeldesigner.drivers.brother import network as brother_network
 from app.labeldesigner.drivers.tspl import protocol
 from tests.helpers import make_client, outcome, without_status
+from tests.printing.test_adding import connections, identity  # noqa: F401
+from tests.printing.test_ipp import fake_printer  # noqa: F401
+from tests.printing.test_snmp import agent  # noqa: F401
 
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '40'}])
 
@@ -299,6 +304,19 @@ def test_known_by_the_device_id_of_its_usb_device(monkeypatch):
     assert tspl.DRIVER.model_of(None) is None
 
 
+@pytest.mark.parametrize('description, model', [
+    ('TSC TE200', 'TSC/TSPL'),
+    ('TSC Auto ID Technology TX300 300 dpi', 'TSC/TSPL-300'),
+    ('TSC MH640 600 dpi', None),
+    ('Brother NC-18002w, Firmware Ver.1.10', None),
+    ('Linux printserver 6.1.0', None),
+    ('TSCHUESS', None)])
+def test_known_by_its_snmp_description(description, model):
+    from app.labeldesigner import drivers
+    assert tspl.DRIVER.described(description) == model
+    assert drivers.described_model(description) == model
+
+
 @pytest.mark.parametrize('saved, model, printed', [
     ('zpl102x152', 'TSC/TSPL', 'tspl102x152'),
     ('zpl102x152', 'TSC/TSPL-300', 'tspl300-102x152'),
@@ -543,7 +561,6 @@ def test_found_on_usb_by_its_device_id(monkeypatch, tmp_path):
     assert driver.status('usb://0x0483:0x5720', model)['device_name'] == 'Marklife X4'
 
 
-
 def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
     monkeypatch.setattr(protocol, 'ask', lambda device, name=False: (0, None))
     client = make_client(tmp_path, empty_repo=True, model='TSC/TSPL', printer='tcp://127.0.0.1')
@@ -561,3 +578,25 @@ def test_the_status_names_the_roll_as_set(tmp_path, monkeypatch):
     # The state kept stays as the printer told it
     assert devices.status_cache['tcp://127.0.0.1:9100']['media_type'] == 'Die-cut labels'
     assert tspl.DRIVER.status('tcp://127.0.0.1', 'TSC/TSPL') is not devices.status_cache['tcp://127.0.0.1:9100']
+
+
+def test_network_printer_known_by_its_snmp_description(fake_printer, agent, on_network, connections, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(reach, '_watched', {})
+    # Nothing over IPP names it
+    fake_printer['body'] = identity()
+    agent['answers'] = [{snmp.SYSTEM_DESCRIPTION: b'TSC TE200'}]
+    found = adding.identify('tcp://127.0.0.1', 'local')
+    assert (found['address'], found['model'], found['device_id']) == ('tcp://127.0.0.1', 'TSC/TSPL', {})
+    assert (found['state']['errors'], found['state']['device_name']) == ([], 'TE200')
+    # The print port only once it is known
+    assert connections.index(on_network.port) > connections.index(brother_network.IPP_PORT)
+
+
+def test_network_device_of_another_maker_gets_nothing(fake_printer, agent, on_network, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(reach, '_watched', {})
+    fake_printer['body'] = identity()
+    agent['answers'] = [{snmp.SYSTEM_DESCRIPTION: b'Linux printserver 6.1.0'}]
+    with pytest.raises(ValueError) as refused:
+        adding.identify('tcp://127.0.0.1', 'local')
+    assert str(refused.value) == adding.NO_PRINTER
+    assert on_network.connections == 0

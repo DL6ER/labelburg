@@ -1223,7 +1223,7 @@
     "/labeldesigner/api/printers/identify": {
       "post": {
         "summary": "Ask what answers at an address",
-        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP, e.g. a TSC printer by the maker its SNMP system description names. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "identifyPrinter",
         "requestBody": {
           "content": {

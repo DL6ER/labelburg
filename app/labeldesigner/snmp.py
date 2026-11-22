@@ -13,6 +13,8 @@ from .drivers import reach
 
 PORT = 161
 COMMUNITY = 'public'
+# sysDescr of RFC 1213, which names the maker and model of many devices
+SYSTEM_DESCRIPTION = '1.3.6.1.2.1.1.1.0'
 
 # Tags of the encoding (BER, X.690) and the PDUs of RFC 1157
 INTEGER = 0x02
