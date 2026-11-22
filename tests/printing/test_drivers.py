@@ -45,21 +45,34 @@ def test_driver_of_a_printer():
 
 
 @pytest.mark.parametrize('device_id, configured, model', [
-    # The other resolution of the same printer as configured, the device ID
-    # rarely tells it
-    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
-    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL', 'TSC/TSPL'),
+    # The other resolution of the same printer as configured, where the
+    # device ID names none
+    ('MFG:Printer;CMD:TSPL;MDL:LP-420;', 'TSC/TSPL-300', 'TSC/TSPL-300'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'Zebra/ZPL-300', 'Zebra/ZPL-300'),
-    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL', 'Zebra/ZPL'),
-    # Else the model the device ID tells
-    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'TSC/TSPL', 'TSC/TSPL'),
-    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'Zebra/ZPL-300', 'TSC/TSPL'),
-    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'QL-800', 'TSC/TSPL'),
-    ('MFG:TSC;CMD:TSPL2;MDL:TE300;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80;', 'Epson/ESC-POS-180', 'Epson/ESC-POS-180'),
+    # The resolution the device ID names, also by a known model
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T88V;', 'Epson/ESC-POS', 'Epson/ESC-POS-180'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;', 'Epson/ESC-POS-180', 'Epson/ESC-POS'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL', 'Zebra/ZPL-300'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra/ZPL', 'Zebra/ZPL-300'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE300 300 dpi;', 'TSC/TSPL', 'TSC/TSPL-300'),
+    # The driver of the model keeps a printer it takes, of another name too
+    ('MFG:TSC;CMD:EPL2,TSPL-EZ,ZPL2;MDL:TE310;', 'Zebra/ZPL-300', 'Zebra/ZPL-300'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'Zebra/ZPL', 'Zebra/ZPL'),
+    # Another driver takes it by its command set, by the order of the
+    # drivers without a model of one
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'QL-800', 'TSC/TSPL'),
+    ('MFG:Printer;CMD:ZPL,TSPL;MDL:LP-420;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:TSC;CMD:TSPL2;MDL:TE200;', 'Zebra/ZPL-300', 'TSC/TSPL'),
     ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420;', 'TSC/TSPL-300', 'Zebra/ZPL'),
-    # As for any models shown alike
-    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80;', 'Epson/ESC-POS-180', 'Epson/ESC-POS-180')])
-def test_a_configured_resolution_of_the_same_printer_wins(monkeypatch, device_id, configured, model):
+    # Not by a device ID of its table alone, which names no command set
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'Epson/ESC-POS', 'Epson/ESC-POS'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'QL-800', 'QL-800'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', 'Unknown', 'TSC/TSPL'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Epson/ESC-POS', 'Epson/ESC-POS'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Unknown', 'Zebra/ZPL-300')])
+def test_driver_and_model_of_a_configured_printer(monkeypatch, device_id, configured, model):
     monkeypatch.setattr(devices, 'usb_device_id', lambda device: device_id)
     driver, known = drivers.resolve('file:///dev/usb/lp0', configured)
     assert (driver, known) == (drivers.for_model(model), model)

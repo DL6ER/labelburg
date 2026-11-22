@@ -1,7 +1,7 @@
 """The printer drivers, see base.py, and which one drives a printer."""
 
 from . import devices
-from .base import Driver
+from .base import Driver, Told
 from .brother import DRIVER as BROTHER
 from .vc500w import DRIVER as VC500W
 from .puqu import DRIVER as PUQU
@@ -62,16 +62,33 @@ def described_model(description: str) -> str | None:
     return next((model for driver in DRIVERS if (model := driver.described(description))), None)
 
 
+def _claim(driver: Driver, device: str, device_id: str) -> Told | None:
+    """The model the address or device ID of a printer names for the driver,
+    see Driver.told()."""
+    known = driver.model_of(device, device_id)
+    if not known:
+        return None
+    told = driver.told(device_id)
+    return told if told and told.model == known else Told(known)
+
+
 def resolve(device: str, model: str) -> tuple[Driver, str]:
     """The driver and the model of a printer: the one its address or device
-    ID tells, else the configured or requested model. That one also where it
-    is the same printer of another resolution, shown alike, e.g.
-    TSC/TSPL-300 for TSC/TSPL: few device IDs tell the resolution."""
+    ID tells, else the configured or requested model. The driver of that
+    model keeps a printer it also takes, e.g. ZPL one that also names TSPL,
+    and the model where it is the same printer of another resolution, shown
+    alike, and the device ID names none, e.g. TSC/TSPL-300 for TSC/TSPL.
+    Another driver takes it from that model only by its command set, not by
+    a device ID of its table alone."""
     # Read once for all drivers, it may ask the printer
     device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
+    named = canonical(model)
+    chosen = _BY_MODEL.get(named)
+    if chosen and (told := _claim(chosen, device, device_id)):
+        alike = chosen.shown_as.get(named, named) == chosen.shown_as.get(told.model, told.model)
+        return chosen, named if alike and not told.resolution else told.model
     for driver in DRIVERS:
-        known = driver.model_of(device, device_id)
-        if known:
-            alike = model in driver.models and driver.shown_as.get(model, model) == driver.shown_as.get(known, known)
-            return driver, model if alike else known
+        told = _claim(driver, device, device_id)
+        if told and (told.command_set or chosen is None):
+            return driver, told.model
     return for_model(model), model

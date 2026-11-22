@@ -12,7 +12,7 @@ import time
 from PIL import Image
 
 from .. import bitmap, devices, diecut, progress
-from ..base import Driver, network_status, shown
+from ..base import Driver, Told, network_status, shown
 from ..diecut import SIZES
 from . import protocol
 
@@ -72,10 +72,14 @@ def _id_key(maker: str, model: str, commands: str) -> tuple[str, str, str]:
 _KNOWN = {_id_key(*fields): known for fields, known in KNOWN_IDS.items()}
 
 
-def _of_resolution(text: str) -> str | None:
-    """The model of the resolution text names, 203 dpi where it names none."""
+def _of_resolution(text: str) -> Told | None:
+    """The model of the resolution text names, 203 dpi where it names none.
+    None for another resolution, e.g. 600 dpi."""
     resolution = RESOLUTION.search(text)
-    return OF_RESOLUTION.get(int(resolution[1])) if resolution else MODELS[0]
+    if not resolution:
+        return Told(MODELS[0], resolution=False)
+    model = OF_RESOLUTION.get(int(resolution[1]))
+    return Told(model) if model else None
 
 
 def _answer_key(device: str) -> str:
@@ -130,16 +134,22 @@ class Tspl(Driver):
         return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
 
     def model_in(self, device_id):
+        told = self.told(device_id)
+        return told.model if told else None
+
+    def told(self, device_id):
         fields = devices.device_id_fields(device_id)
+        named = any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(','))
         known = _KNOWN.get(_id_key(fields.get('MFG', ''), fields.get('MDL', ''), fields.get('CMD', '')))
         if known:
-            return known
-        if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
+            return Told(known, command_set=named)
+        if not named:
             return None
         return _of_resolution(fields.get('MDL', ''))
 
     def described(self, description):
-        return _of_resolution(description) if MAKER.search(description) else None
+        told = _of_resolution(description) if MAKER.search(description) else None
+        return told.model if told else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
