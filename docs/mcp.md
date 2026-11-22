@@ -28,7 +28,7 @@ Printing makes paper, so both print tools:
 
 - need the number of labels and print at most `MCP_MAX_COUNT` (default 10) per call, counting each label, not the calls,
 - need the printer, and take the label size it has loaded, else the one set in its printer settings. Where neither tells or it may have several loaded, they print nothing and tell the assistant to ask the user. A label size given is refused if the printer has another one loaded or set,
-- check every label before the first is printed, and print none where one is refused or the label designer warns about it, e.g. text cut off, a blank the label does not have or a date blank without a date. A font that is not installed is the exception: the label prints with the fallback font, as in the label designer, and the result says so,
+- check every label before the first is printed, and print none where one is refused or the label designer warns about it, e.g. text cut off, a blank the label does not have or a date blank without a date. A font that is not installed and a code that may be too small to scan are the exceptions: the label prints with the fallback font or as designed, as in the label designer, and the result says so,
 - count each page of a saved PDF as a label,
 - return the image of what they added to the queue, and its address.
 

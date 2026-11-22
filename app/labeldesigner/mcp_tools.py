@@ -14,7 +14,7 @@ from werkzeug.wrappers import Response
 
 from . import tape
 from .drivers.backends import _same_serial
-from .label import DATE_OFFSET, _iso_date
+from .label import DATE_OFFSET, SMALL_BARCODE_NEXT_TO_IMAGE, SMALL_CODE, SMALL_SIZED_CODE, _iso_date
 from .label_names import LABELS
 from .refusals import BARCODE_TYPES
 
@@ -375,11 +375,12 @@ class Tools:
         """The headers of the preview spec, what the API tells about the
         label. Refused where the label designer warns about it, e.g. text
         cut off: nothing is printed then. A font that is not installed is
-        no refusal, the label prints with the fallback font as there."""
+        no refusal, the label prints with the fallback font as there, nor a
+        code that may be too small to scan, it prints as designed."""
         from mcp.server.mcpserver.exceptions import ToolError
         headers = {}
         self.preview(spec, headers)
-        warning = ' '.join(FONT_MISSING.sub('', headers.get('X-Label-Warning') or '').split())
+        warning = ' '.join(NOTES.sub('', headers.get('X-Label-Warning') or '').split())
         if warning:
             raise ToolError(f'Nothing printed: {warning}')
         return headers
@@ -429,19 +430,20 @@ class Tools:
         printer = found.get('name') or found['path']
         form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'])
         spec = {'path': '/preview', 'data': form}
-        self.checked(spec)
+        told = self.checked(spec)
         image = self._printed('/print', data=dict(form, print_count=count, source='mcp'))
-        return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
+        return _noted(f'Added {_labels(count)} to the queue of {printer}', [told]), [spec], [image]
 
 
-# The note of the label designer about a font that is not installed
-FONT_MISSING = re.compile(r'The font .+? is not installed, .+? is used instead\.')
+# The notes of the label designer that print nonetheless: about a font that
+# is not installed and a code that may be too small to scan
+NOTES = re.compile('|'.join([r'The font .+? is not installed, .+? is used instead\.', re.escape(SMALL_CODE),
+                             re.escape(SMALL_SIZED_CODE), re.escape(SMALL_BARCODE_NEXT_TO_IMAGE)]))
 
 
 def _noted(text: str, told: list[dict]) -> str:
-    """text with the notes of the previews told about fonts not installed,
-    each once."""
-    notes = dict.fromkeys(note for headers in told for note in FONT_MISSING.findall(headers.get('X-Label-Warning') or ''))
+    """text with the notes of the previews told, each once."""
+    notes = dict.fromkeys(note for headers in told for note in NOTES.findall(headers.get('X-Label-Warning') or ''))
     return '. '.join([text, ' '.join(notes)]) if notes else text
 
 
