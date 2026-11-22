@@ -157,18 +157,16 @@ LABELS = _labels()
 NAMES = {label.identifier: _name(label) for label in LABELS}
 
 
-def _other_model(model: str) -> str:
-    return f"This printer is a {model.replace('/', ' ')}, choose that model for it"
-
-
 def _bluetooth_name(model: models.Model) -> re.Pattern:
     """The name a model advertises on Bluetooth LE, B1-<serial> as a B1, the
     parts of a name like B21_PRO also apart."""
     return re.compile(r'[_ -]?'.join(map(re.escape, model.short.split('_'))) + '-.*', re.IGNORECASE | re.DOTALL)
 
 
-REFUSALS = (tuple(_other_model(model) for model in MODELS)
+REFUSALS = (tuple(models.other_model(model) for model in models.PRINTED)
             + tuple(models.cannot_print(model) for model in models.MODELS if model not in models.PRINTED))
+# The names of the models where they differ from their ids, e.g. B1 Pro
+SHOWN_AS = {model.name: f'Niimbot/{model.shown}' for model in models.PRINTED if model.shown != model.short}
 BLUETOOTH_NAMES = {_bluetooth_name(model): model.name for model in models.PRINTED if model.name in _LE}
 
 
@@ -225,6 +223,7 @@ class Niimbot(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
+    shown_as = SHOWN_AS
     # bt://<MAC>[/<RFCOMM channel>], a B1 also on USB: usblp on Linux, else
     # through PyUSB, e.g. usb://0x3513:0x0002
     device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),
@@ -297,12 +296,12 @@ class Niimbot(Driver):
         return dpi, dpi
 
     def resolution_problem(self, model, high_res):
-        return f'The {model} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
+        return f'The {self.shown_as.get(model, model)} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
 
     def capabilities(self, model):
         # The labels are torn off, their top leaves it first
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
-                    calibration=model == 'Niimbot/B1')
+                    calibration=model == 'Niimbot/B1', model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def calibration_kind(self, model, label_size):
         size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
@@ -458,7 +457,7 @@ class Niimbot(Driver):
             with protocol.connect(device, _over_le(model)) as c:
                 told = models.BY_ID.get(protocol.model_id(c))
                 if told is not None and told.name != model:
-                    return _other_model(told.name) if told in models.PRINTED else models.cannot_print(told)
+                    return models.other_model(told) if told in models.PRINTED else models.cannot_print(told)
                 # What the status keeps is updated, e.g. another roll
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
@@ -468,12 +467,10 @@ class Niimbot(Driver):
                     return state['errors'][0]
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
                 known = models.BY_NAME[model]
-                # niimbluelib's D110M_V4 ends a job with a heartbeat, as a
-                # B21_PRO drops the packet after it; the D110_M printed without one
-                beat_at_end = known.sequence == protocol.V4 and model != 'Niimbot/D110_M'
+                head = known.counted if known.exact else known.dots
                 progress.counting(device)
                 for i, rows in enumerate(job):
-                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], known.dots, beat_at_end)
+                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], head, known.exact)
                     progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:
