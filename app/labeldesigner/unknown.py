@@ -4,7 +4,9 @@ form on GitHub. A report tells the kind of printer only: the version, the
 connection, the USB IDs, the fields of the device ID that name the model,
 the Bluetooth name without its serial number and the services it
 advertises. Never serial numbers, addresses, host names, paths or names
-printers were given. Nothing is sent to a printer to find out more."""
+printers were given. Nothing is sent to a device to find out more: printers
+on USB are only asked for their device ID and serial number, as by the search
+for printers."""
 
 import re
 import uuid
