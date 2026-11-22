@@ -60,7 +60,7 @@ ROUND = {'080924002'}
 # On Bluetooth it beeps at each connection: it is asked only when the label
 # designer looks for printers and when printing, the other status queries are
 # answered from the last state. A B1 keeps its connection over Bluetooth LE
-# while used, see protocol.KEEP_LE, and is also asked by the label designer
+# while used, see transports.KEEP_LE, and is also asked by the label designer
 # that follows it, see followed_status(). When each was last asked:
 _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
