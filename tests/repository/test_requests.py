@@ -226,8 +226,24 @@ def test_a_saved_label_is_found_by_the_name_it_is_saved_under(tmp_path, title, f
         assert client.get('/labeldesigner/api/repository/load', query_string={'name': name}).get_json()['title'] == title
         assert client.get('/labeldesigner/api/repository/preview', query_string={'name': name}).status_code == 200
         assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': name})) == ('printed', '')
-    assert client.post('/labeldesigner/api/repository/delete', json={'name': title}).status_code == 200
+    assert client.post('/labeldesigner/api/repository/delete', json={'name': filename}).status_code == 200
     assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+
+
+@pytest.mark.parametrize('name', ['Box', 'Box_2', 'Box_2.json'])
+def test_a_delete_takes_the_exact_file_name_only(tmp_path, name):
+    # Several labels may have the same title
+    client = make_client(tmp_path, empty_repo=True)
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    for filename in ('Box_1.json', 'Box_2.json'):
+        assert client.post(SAVE_URL, json={'name': filename, 'title': 'Box', 'label_size': '62', 'text': TEXT}).status_code == 200
+    response = client.post('/labeldesigner/api/repository/delete', json={'name': name})
+    if name == 'Box_2.json':
+        assert response.status_code == 200
+        assert os.listdir(repo) == ['Box_1.json']
+    else:
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+        assert sorted(os.listdir(repo)) == ['Box_1.json', 'Box_2.json']
 
 
 def test_a_name_finds_the_file_of_that_name_before_a_title(tmp_path):
@@ -250,7 +266,7 @@ def test_a_name_finds_only_saved_labels(tmp_path, name):
     body = {'name': 'Shelf.json', 'title': '', 'label_size': '62', 'text': TEXT, 'print_type': 'image', 'image_data': _png_b64('red'),
             'image_mime': 'image/png'}
     assert client.post(SAVE_URL, json=body).status_code == 200
-    for method, url in (('get', 'load'), ('get', 'preview'), ('post', 'print'), ('post', 'delete')):
+    for method, url in (('get', 'load'), ('get', 'preview'), ('post', 'print')):
         response = getattr(client, method)(f'/labeldesigner/api/repository/{url}', query_string={'name': name})
         assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
     assert sorted(os.listdir(repo)) == ['.Hidden.json', 'Shelf.json', 'Shelf_image.png']

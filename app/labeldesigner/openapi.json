@@ -1929,7 +1929,7 @@
             "name": "name",
             "in": "query",
             "required": false,
-            "description": "The saved label: the name it is saved under in the label designer, e.g. `Frozen on`, or its file name, e.g. `Frozen_on.json`, also without `.json`. Also accepted as `name` in a JSON body.",
+            "description": "File name of the saved label, also accepted as `name` in a JSON body.",
             "schema": {
               "type": "string"
             }

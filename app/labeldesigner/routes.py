@@ -866,7 +866,11 @@ def repo_delete():
         return _fail('No name specified', 400)
     repo = _get_repo_dir()
     try:
-        path = _saved_path(repo, name)
+        # Only the exact file: a title may name several labels
+        filename = secure_filename(name)
+        if not filename:
+            raise FileNotFoundError(name)
+        path = os.path.join(repo, filename)
         with _saving(repo):
             os.remove(path)
             # Also remove the image file stored alongside the JSON
