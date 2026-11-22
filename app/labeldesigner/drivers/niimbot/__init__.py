@@ -10,7 +10,7 @@ from dataclasses import replace
 
 from PIL import Image
 
-from .. import bitmap, devices, progress
+from .. import backends, bitmap, devices, progress
 from ..base import Driver, network_status
 from ..labels import FormFactor, Label
 from . import calibration, models, protocol
@@ -64,10 +64,10 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
-# Models of printers on USB that tell no device ID, e.g. a serial port, by
-# the model ID they told, and when they were asked. One that told none is
-# asked again once the label designer looks for printers.
-_told_models: dict[str, tuple[str | None, float]] = {}
+# The models serial ports on USB told by their model ID, by device, and when
+# they were asked. One that told none is asked again once the label designer
+# looks for printers.
+_told_models: dict[str, tuple[models.Model | None, float]] = {}
 # Printers on Bluetooth LE, the others paired
 _LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
@@ -86,6 +86,18 @@ def _over_le(model: str) -> bool:
     """Whether a printer on bt:// is reached over Bluetooth LE, as niimbluelib
     reaches them; the D110_M over classic Bluetooth."""
     return model in _LE
+
+
+def _told(c, device: str) -> models.Model | None:
+    """The model the printer tells by its model ID, asked once per device,
+    None for none or one niimbluelib does not list."""
+    key = devices.lock_key(device)
+    known = _told_models.get(key)
+    if known and (known[0] or known[1] >= devices.looked):
+        return known[0]
+    told = models.BY_ID.get(protocol.model_id(c))
+    _told_models[key] = (told, time.monotonic())
+    return told
 
 
 def _beeps(device: str, model: str) -> bool:
@@ -241,7 +253,7 @@ class Niimbot(Driver):
     def model_of(self, device, device_id=None):
         if device_id is None:
             device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
-        return self.model_in(device_id) or self._model_told(device)
+        return self.model_in(device_id) or (None if device_id else self._model_told(device))
 
     def model_in(self, device_id):
         # MFG:NIIMBOT;CMD:ESC;MDL: B1; on USB, also shared over USB/IP. Other
@@ -252,29 +264,28 @@ class Niimbot(Driver):
         return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
 
     def _model_told(self, device) -> str | None:
-        """The model a printer on USB that tells no device ID tells by its
-        model ID, None for another one or a model Labelburg cannot print on."""
+        """The model a serial port on USB tells by its model ID, None for
+        another device or a model Labelburg cannot print on."""
         if not (isinstance(device, str) and device.lower().startswith('usb://0x3513:')):
             return None
-        key = devices.lock_key(device)
-        known = _told_models.get(key)
+        known = _told_models.get(devices.lock_key(device))
         if known and (known[0] or known[1] >= devices.looked):
-            return known[0]
+            return known[0].name if known[0] in models.PRINTED else None
+        # Not a printer on its printer interface, e.g. a B1 that usblp holds
+        if not backends.is_serial_port(device):
+            return None
         # Never in between the packets of a job or a status query
         with devices.device_lock(device, timeout=0) as acquired:
             if not acquired:
-                return known[0] if known else None
+                return None
             try:
                 with protocol.connect(device) as c:
-                    model_id = protocol.model_id(c)
+                    told = _told(c, device)
             except Exception:
                 # Also no PyUSB backend, e.g. no libusb
                 logger.debug('No model ID of %s', device, exc_info=True)
-                model_id = None
-        told = models.BY_ID.get(model_id)
-        model = told.name if told in models.PRINTED else None
-        _told_models[key] = (model, time.monotonic())
-        return model
+                return None
+        return told.name if told in models.PRINTED else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models

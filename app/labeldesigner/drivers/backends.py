@@ -6,6 +6,7 @@ and on classic Bluetooth (bt://<MAC>, see transports.RfcommPrinter)."""
 
 import ctypes.util
 import errno
+import glob
 import logging
 import os
 import re
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # The devices Linux shares over USB/IP, by their bus IDs
 USBIP_HOST = '/sys/bus/usb/drivers/usbip-host'
+# The USB devices and their interfaces as Linux lists them, and its device files
+USB_DEVICES = '/sys/bus/usb/devices'
+DEV = '/dev'
 # Reads of what came before a status request at most, one per late answer
 # over USB/IP: a printer that keeps sending must not hold the query and lock
 DISCARD_READS = 100
@@ -380,6 +384,51 @@ def _serial_listed(ids: tuple[int, int], printer_interface: bool) -> bool:
     from . import DRIVERS
     return any(ids in driver.usb_serial_ids or (not printer_interface and (ids[0], None) in driver.usb_serial_ids)
                for driver in DRIVERS)
+
+
+def _serial_device(usb, device_specifier: str):
+    """The device of usb://... that a driver reaches through its serial
+    interface, see Driver.usb_serial_ids, None for another one."""
+    try:
+        ids = _ids(device_specifier)
+        device = _find(usb, device_specifier, 0x0A)
+    except (ValueError, FileNotFoundError):
+        return None
+    return device if _serial_listed(ids, _has_interface(usb, device, 7)) else None
+
+
+def is_serial_port(device_specifier: str) -> bool:
+    """Whether a driver reaches the printer usb://... through its serial
+    interface, see Driver.usb_serial_ids."""
+    try:
+        import usb.core
+        import usb.util
+        return _serial_device(usb, device_specifier) is not None
+    except Exception:
+        # Also no PyUSB backend, e.g. no libusb
+        logger.debug('Not looked for %s', device_specifier, exc_info=True)
+        return False
+
+
+def serial_tty(device_specifier: str) -> str | None:
+    """The device file of the kernel's serial port of a printer usb://...
+    that a driver reaches through its serial interface, e.g. /dev/ttyACM0,
+    None where there is none, e.g. in a container without it."""
+    try:
+        import usb.core
+        import usb.util
+        device = _serial_device(usb, device_specifier)
+    except Exception:
+        logger.debug('Not looked for %s', device_specifier, exc_info=True)
+        return None
+    bus_id = _bus_id(device) if device is not None else ''
+    if not bus_id:
+        return None
+    for path in sorted(glob.glob(os.path.join(USB_DEVICES, glob.escape(bus_id) + ':*', 'tty', '*'))):
+        node = os.path.join(DEV, os.path.basename(path))
+        if os.path.exists(node):
+            return node
+    return None
 
 
 def open_printer(device_specifier: str) -> Printer:

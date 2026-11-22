@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.labeldesigner import drivers, refusals
-from app.labeldesigner.drivers import devices, niimbot
+from app.labeldesigner.drivers import backends, devices, niimbot
 from app.labeldesigner.drivers.niimbot import models, protocol
 from app.labeldesigner.label_names import label_dpi
 from app.labeldesigner.tape import same_paper
@@ -307,22 +307,28 @@ def test_device_id_names_a_model_as_niimbluelib_writes_it():
     assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:B21S;') is None
 
 
-def test_printer_on_usb_without_a_device_id_tells_its_model_id(fake, monkeypatch):
-    # e.g. one that is a serial port on USB
+@pytest.fixture
+def serial_port(monkeypatch):
+    """Devices on USB are serial ports a driver reaches."""
+    ports = []
+    monkeypatch.setattr(backends, 'is_serial_port', lambda device: ports.append(device) or True)
+    return ports
+
+
+def test_serial_port_on_usb_tells_its_model_id(fake, monkeypatch, serial_port):
     told(monkeypatch, 785)
     assert drivers.resolve('usb://0x3513:0x0003', 'Unknown') == (niimbot.DRIVER, 'Niimbot/B21_PRO')
     # Asked once
-    asked = fake.commands.count(0x40)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
-    assert fake.commands.count(0x40) == asked == 1
+    assert fake.commands.count(0x40) == 1
 
 
-def test_printer_on_usb_of_a_model_labelburg_cannot_print_on_is_none(fake, monkeypatch):
+def test_serial_port_on_usb_of_a_model_labelburg_cannot_print_on_is_none(fake, monkeypatch, serial_port):
     told(monkeypatch, 768)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
 
 
-def test_printer_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fake, monkeypatch):
+def test_serial_port_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fake, monkeypatch, serial_port):
     monkeypatch.delitem(REPLIES, 0x40)
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
@@ -333,8 +339,18 @@ def test_printer_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fake, 
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
 
 
-def test_other_makers_on_usb_are_not_asked(fake):
-    assert niimbot.DRIVER.model_of('usb://0x04f9:0x209b', '') is None
+@pytest.mark.parametrize('device, device_id', [
+    # Another maker; a device ID that names no model it prints on
+    ('usb://0x04f9:0x209b', ''), ('usb://0x3513:0x0002', 'MFG:NIIMBOT;CMD:ESC;MDL:K9;')])
+def test_printers_on_usb_that_tell_a_device_id_or_are_of_another_maker_are_not_asked(fake, serial_port, device, device_id):
+    assert niimbot.DRIVER.model_of(device, device_id) is None
+    assert fake.commands == [] and serial_port == []
+
+
+def test_printer_on_its_printer_interface_is_not_asked(fake, monkeypatch):
+    # e.g. a B1 that usblp holds, which tells no device ID through PyUSB
+    monkeypatch.setattr(backends, 'is_serial_port', lambda device: False)
+    assert niimbot.DRIVER.model_of('usb://0x3513:0x0002', '') is None
     assert fake.commands == []
 
 

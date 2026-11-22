@@ -158,6 +158,14 @@ class SerialLink:
         os.close(self.fd)
 
 
+def usb_link(device: str):
+    """A printer on USB or shared over USB/IP, read and written like a
+    socket: through the kernel's serial port where it is one, so that it is
+    not taken from the kernel's driver, else as UsbLink."""
+    tty = backends.serial_tty(device) if device.startswith('usb://') else None
+    return SerialLink(f'serial://{tty}') if tty else UsbLink(device)
+
+
 # Bluetooth LE: the attribute protocol on its own L2CAP channel. Packets are
 # written to a characteristic and answered with notifications, as
 # niimbluelib talks to a Niimbot B1. No pairing is needed.

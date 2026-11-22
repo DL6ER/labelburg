@@ -148,7 +148,7 @@ class Connection:
     def __init__(self, device: str, le: bool = False):
         self.received = b''
         if not device.startswith('bt://'):
-            self.s = transports.UsbLink(device)
+            self.s = transports.usb_link(device)
             return
         if le:
             self.s = transports.kept_le(device, NIIMBOT_CHARACTERISTIC, error=NiimbotError, no_answer=NoAnswer)

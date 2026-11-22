@@ -239,6 +239,54 @@ def test_niimbot_with_a_printer_interface_is_reached_through_it(pyusb):
     printer_.dispose()
 
 
+@pytest.fixture
+def sysfs(tmp_path, monkeypatch):
+    """Linux's list of USB devices and its device files, empty."""
+    monkeypatch.setattr(backends, 'USB_DEVICES', str(tmp_path / 'sys'))
+    monkeypatch.setattr(backends, 'DEV', str(tmp_path / 'dev'))
+    (tmp_path / 'dev').mkdir()
+    return tmp_path
+
+
+def _on_bus(device):
+    """The device at bus 1, port 4, its serial port ttyACM0 to Linux."""
+    device.bus, device.port_numbers = 1, [4]
+    return device
+
+
+def test_serial_port_on_usb_is_reached_through_the_kernels_tty(pyusb, sysfs, pty):
+    # Another program on the port is not cut off from it
+    port, printer_end = pty
+    device = _on_bus(SerialDevice(0x0003))
+    pyusb.append(device)
+    (sysfs / 'sys' / '1-4:1.0' / 'tty' / 'ttyACM0').mkdir(parents=True)
+    os.symlink(port.removeprefix('serial://'), sysfs / 'dev' / 'ttyACM0')
+    link = transports.usb_link('usb://0x3513:0x0003')
+    try:
+        assert isinstance(link, transports.SerialLink)
+        link.sendall(b'\x55\x55')
+        assert os.read(printer_end, 16) == b'\x55\x55'
+    finally:
+        link.close()
+    assert device.calls == [] and device.bound == {0, 1}
+
+
+def test_serial_port_on_usb_without_its_tty_is_taken_from_the_kernel(pyusb, sysfs):
+    # e.g. in a container given /dev/bus/usb only
+    device = _on_bus(SerialDevice(0x0003))
+    pyusb.append(device)
+    (sysfs / 'sys' / '1-4:1.0' / 'tty' / 'ttyACM0').mkdir(parents=True)
+    link = transports.usb_link('usb://0x3513:0x0003')
+    assert isinstance(link, transports.UsbLink) and isinstance(link.printer, backends.UsbSerialPrinter)
+    link.close()
+    assert device.calls[:2] == [('detach', 0), ('detach', 1)]
+
+
+def test_printer_on_its_printer_interface_has_no_tty(pyusb, sysfs):
+    pyusb.append(_on_bus(_with_printer_interface(SerialDevice(0x0002))))
+    assert backends.serial_tty('usb://0x3513:0x0002') is None and not backends.is_serial_port('usb://0x3513:0x0002')
+
+
 def test_niimbot_that_is_a_serial_port_on_usb_is_found(pyusb, monkeypatch):
     monkeypatch.setattr(backends, '_shared_bus_ids', set)
     # The kernel's serial driver holds it, it is taken from it to print
