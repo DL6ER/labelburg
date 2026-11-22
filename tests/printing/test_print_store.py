@@ -550,18 +550,56 @@ def photo(width, height) -> tuple:
     return io.BytesIO(out.getvalue()), 'photo.png'
 
 
-@pytest.mark.parametrize('fit, kept', [('1', None), ('0', (3000, 1500))])
-def test_a_photo_is_kept_no_larger_than_the_label_shows_it(server, monkeypatch, fit, kept):
+@pytest.mark.parametrize('values, kept', [
+    ({}, None), ({'image_fit': '0'}, (3000, 1500)), ({'image_crop': '1'}, (3000, 1500)), ({'image_rotation': '10'}, (3000, 1500))])
+def test_a_photo_fitted_to_the_label_is_kept_no_larger_than_the_label_shows_it(server, monkeypatch, values, kept):
+    drawn, create = [], routes.create_label_from_request
+
+    def recorded(d={}, files={}, counter=0, image=None, *args, **kwargs):
+        drawn.append(image.size)
+        return create(d, files, counter, image, *args, **kwargs)
+    monkeypatch.setattr(routes, 'create_label_from_request', recorded)
     print_queue.stop()
-    upload = dict(LABEL, print_type='image', image_fit=fit, image=photo(3000, 1500))
+    upload = dict(LABEL, print_type='image', image=photo(3000, 1500), **values)
     job = server.post(f'{API}/print', data=upload, content_type='multipart/form-data').get_json()['job']
     with Image.open(os.path.join(repo(server), print_store.QUEUE, f'{job}-0.png')) as image:
         size = image.size
-    # Its shorter side as long as the longest side of the label at 600 dpi
+    # Its shorter side as long as the longest side of the label at 600 dpi;
+    # cropped or turned it is kept as it is, the label shows a part of it
     longest = max(routes._canvas('62', True, routes.LabelOrientation.STANDARD))
     assert size == (kept or (2 * longest, longest))
+    # Printed now as it came
+    assert set(drawn) == {(3000, 1500)}
 
 
+def logo() -> tuple:
+    """A picture with a white border around lines, which crop takes off."""
+    from PIL import ImageDraw
+    image = Image.new('RGB', (4000, 3000), 'white')
+    draw = ImageDraw.Draw(image)
+    for x in range(1700, 2300, 6):
+        draw.line([(x, 1275), (x, 1725)], fill='black', width=2)
+    out = io.BytesIO()
+    image.save(out, 'PNG')
+    return io.BytesIO(out.getvalue()), 'logo.png'
+
+
+@pytest.mark.parametrize('crop', ['0', '1'])
+def test_a_photo_printed_again_prints_as_it_did(server, crop):
+    def shown(path, **kwargs) -> Image.Image:
+        answer = server.post(f'{API}/{path}?return_format=png', **kwargs).get_json()
+        return answer['job'], Image.open(io.BytesIO(base64.b64decode(answer['image']))).convert('L')
+    job, first = shown('print', data=dict(LABEL, print_type='image', image_crop=crop, image=logo()), content_type='multipart/form-data')
+    assert ended(job).state == 'printed'
+    _, again = shown(f'history/{job}/print', data={'printer': 'simulation'})
+    assert again.size == first.size
+    differences = [abs(a - b) for a, b in zip(first.tobytes(), again.tobytes())]
+    if crop == '1':
+        # Kept as it came
+        assert max(differences) == 0
+    else:
+        # Kept smaller, printed again at the size it had
+        assert sum(differences) / len(differences) < 2
 def test_the_images_are_written_while_the_label_is_drawn(server, monkeypatch):
     order, stage, check = [], print_store.stage, printer.PrinterQueue.check
     monkeypatch.setattr(print_store, 'stage', lambda *args: (order.append('stage'), stage(*args))[1])

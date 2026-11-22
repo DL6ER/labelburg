@@ -1087,8 +1087,8 @@ def _rebuilt(record: dict, device: str, model: str) -> PrinterQueue:
         for shape in record['shapes']:
             printer.add_label_to_queue(_image_label_of(shape, images[shape['image']]), high_res=record['high_res'], fast=record['fast'])
     else:
-        _queue_labels(printer, record['data'], images, record['order'], record['high_res'], record['fast'], [record['asn']],
-                      record.get('printed_for'))
+        _queue_labels(printer, record['data'], _as_printed(images, record.get('sizes')), record['order'], record['high_res'],
+                      record['fast'], [record['asn']], record.get('printed_for'))
     return printer
 
 
@@ -1363,11 +1363,12 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
         images, _ = load_label_images(data, files, copies=print_count, **stored)
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
             return _line_full(printer, full)
-        images = [_kept_size(image, data) for image in images if image is not None]
+        images = [image for image in images if image is not None]
         order = _copies(list(range(len(images))) or [None], print_count, collate)
-        # Written while the label is drawn, as copies loaded here: two
-        # threads must not read one picture from its file at once
-        staged = print_store.stage(job_id, [image.copy() for image in images])
+        # Written while the label is drawn, as copies made here: two threads
+        # must not read one picture from its file at once
+        kept = [_kept_copy(image, data) for image in images]
+        staged = print_store.stage(job_id, [copy for copy, _ in kept])
         # Taken before printing: labels of a job that fails may have come out
         asn = paperless.next_asn(current_app.config, _get_repo_dir(), len(order)) if paperless.uses_asn(data) else None
         _queue_labels(printer, data, images, order, high_res, fast, [asn])
@@ -1377,25 +1378,34 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
         return _refused('Print job', e, refusals.PRINT_FAILED)
     return _queued(printer, run=printer.process_queue, title=_job_title(data, drawn), source=_job_source('api'), labels=len(order),
                    recipe={'kind': 'request', 'data': data, 'order': order, 'asn': asn, 'high_res': high_res, 'fast': fast,
-                           'copies': print_count, 'collate': collate},
-                   images=images, drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
+                           'copies': print_count, 'collate': collate, 'sizes': [size for _, size in kept]},
+                   images=[copy for copy, _ in kept], drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
 
 
-def _kept_size(image: Image.Image, data: dict) -> Image.Image:
-    """An image fitted to the label as small as the label can show it, also
-    at 600 dpi, turned, cropped or on a label of a set length: its shorter
-    side as long as the longest side of the label. One scaled by hand keeps
-    its size, its pixels set it."""
+def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None]:
+    """A copy of a picture to keep with its job, and the size it was printed
+    at where the copy is smaller, see _as_printed(). A picture fitted to the
+    label is kept as small as the label shows it, also at 600 dpi or on a
+    label of a set length: its shorter side as long as the longest side of
+    the label. Cropped or turned the label shows a part of it, scaled by
+    hand its pixels set its size: kept as it is."""
     label_size = data.get('label_size', DEFAULT_LABEL_SIZE)
     size = label_of(label_size)
-    if size is None or _whole_or(data.get('image_fit'), 1) <= 0:
-        return image
+    if (size is None or _whole_or(data.get('image_fit'), 1) <= 0 or _whole_or(data.get('image_crop'), 0) > 0
+            or float(data.get('image_rotation') or 0) % 360):
+        return image.copy(), None
     length = _printed_length(_label_length(data.get('label_length')), size, _cable_flag(data, size.form_factor), True)
     longest = max(*_canvas(label_size, True, LabelOrientation.STANDARD), length or 0)
     if min(image.size) <= longest:
-        return image
+        return image.copy(), None
     scale = longest / min(image.size)
-    return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS)
+    return image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.Resampling.LANCZOS), list(image.size)
+
+
+def _as_printed(images: list, sizes: list | None) -> list:
+    """The pictures kept with a job at the size it printed them, so that it
+    prints again as it did, see _kept_copy()."""
+    return [image.resize(tuple(size), Image.Resampling.LANCZOS) if size else image for image, size in zip(images, sizes or [None] * len(images))]
 
 
 # --- Demo labels --------------------------------------------------------------------------
@@ -2400,11 +2410,12 @@ def history_print(job_id):
     try:
         as_before = _whole_or(_requested('as_before'), 1) != 0
         copies = _check_print_count(_whole_or(_requested('print_count'), entry.get('copies') or 1))
-        images = [_read_image(print_store.image_path(job_id, number)) for number in range(entry.get('images', 0))]
+        kept = [_read_image(print_store.image_path(job_id, number)) for number in range(entry.get('images', 0))]
         if entry['kind'] == 'image':
-            printer, recipe, images = _image_job_again(entry, images, copies)
-            data, title = {}, entry.get('title')
+            printer, recipe, kept = _image_job_again(entry, kept, copies)
+            images, data, title = kept, {}, entry.get('title')
         else:
+            images = _as_printed(kept, entry.get('sizes'))
             data = {key: value for key, value in entry['data'].items() if key not in PRINTER_PARAMETERS}
             # Values of the request for its blanks, the others as printed
             given = _blank_values(_requested('blanks'))
@@ -2420,7 +2431,7 @@ def history_print(job_id):
             # Kept apart from the label: printed again, it asks again
             printed_for = _dates_of(entry) if as_before and _timestamp(data) <= 0 else None
             recipe = {'kind': 'request', 'data': data, 'order': order, 'high_res': high_res, 'fast': fast, 'printed_for': printed_for,
-                      'copies': copies, 'collate': collate}
+                      'copies': copies, 'collate': collate, 'sizes': entry.get('sizes')}
             title = None if given else entry.get('title')
         # Refused before archive serial numbers are taken for it
         if full := print_queue.full(printer.device_specifier, print_queue.image_bytes(images)):
@@ -2437,7 +2448,7 @@ def history_print(job_id):
     # Named as before, unless the request names it or gives values of its own
     title = _job_title(data, drawn) if _requested('title') is not None or not title else title
     return _queued(printer, run=printer.process_queue, title=title, source=_job_source('api'), labels=len(printer.images()),
-                   recipe=recipe, images=images, drawn=drawn, return_format=_requested('return_format'))
+                   recipe=recipe, images=kept, drawn=drawn, return_format=_requested('return_format'))
 
 
 def _image_job_again(entry: dict, images: list, copies: int) -> tuple[PrinterQueue, dict, list]:
