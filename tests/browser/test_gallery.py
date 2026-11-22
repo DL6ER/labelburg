@@ -440,7 +440,9 @@ def test_labels_printed_here_are_a_group_of_templates(editor):  # noqa: F811
 def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noqa: F811
     type_label(editor, 'Jar [What] [Where]')
     editor.fill('#fill [data-blank="What"]', 'Beans')
-    editor.fill('#fill [data-blank="Where"]', 'Pantry')
+    # Saved labels come first in the search, those of other tests must not
+    # match it
+    editor.fill('#fill [data-blank="Where"]', 'Larder')
     for _ in range(2):
         editor.click('.printbtn [data-step="1"]')
     with editor.expect_request('**/api/print'):
@@ -451,14 +453,14 @@ def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noq
     editor.keyboard.press('Control+k')
     editor.wait_for_selector('.palette #palQ:focus')
     # Found by a value printed besides the one it is named by
-    editor.keyboard.type('pantry')
-    row = editor.locator('#palRes .res:has-text("Beans")')
-    assert 'Pantry' in row.inner_text() and '3 x' in row.inner_text()
+    editor.keyboard.type('larder')
+    row = editor.locator('#palRes .res.on:has-text("Beans")')
+    assert 'Larder' in row.inner_text() and '3 x' in row.inner_text()
     assert 'Enter print again' in editor.inner_text('.pal-foot')
     with editor.expect_request('**/api/print') as request:
         editor.keyboard.press('Enter')
     fields = sent(request.value)
-    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Pantry'} and fields['print_count'] == '3'
+    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Larder'} and fields['print_count'] == '3'
     editor.wait_for_selector('#toast:has-text("Printed 3 labels: Beans")')
     # The editor keeps the label it had
     assert editor.evaluate('() => labelEditor.S.edit.design.text[0].text') == ''
