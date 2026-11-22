@@ -960,7 +960,7 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
                               explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
     except print_queue.Full as full:
         return _line_full(printer, str(full))
-    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
+    result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, 'labels': labels, **(extra or {})}
     if image is not None:
         result['image'] = image
     return jsonify(result)
@@ -1362,7 +1362,9 @@ def preview_from_image():
         marks, asn = _whole_or(values.get('mark_blanks'), 0) != 0, _next_asn(values)
         # As many labels as printed: the copies of the files and pages the request tells, else of the file sent
         copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), _pages(values, page_count))
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=copies * per_copy)
+        # A job printed before tells its number of labels, a page of it shows the first label only
+        total = _count(values.get('total'), copies * per_copy)
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=total)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im, model):
@@ -1374,7 +1376,7 @@ def preview_from_image():
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
             layouts = {}
             more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn,
-                                              total=copies * per_copy).generate()
+                                              total=total).generate()
                     for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
             im = sheets.page_view(size, [im] + more)
     except HTTPException:

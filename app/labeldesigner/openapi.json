@@ -63,6 +63,11 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
                       }
                     }
                   }
@@ -108,6 +113,11 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels each copy prints, e.g. of several files or the pages of PDFs, for `X-Label-Sheet` and `{{total}}`. Left out, the pages `pdf_pages` selects of the file sent, else 1."
+                      },
+                      "total": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
                       }
                     }
                   }
@@ -3321,6 +3331,10 @@
           "start": {
             "type": "string",
             "description": "Changes when the server restarts."
+          },
+          "labels": {
+            "type": "integer",
+            "description": "Number of labels of the job, which `{{total}}` shows, not its pages on a roll of several labels to a page."
           },
           "image": {
             "type": "string",

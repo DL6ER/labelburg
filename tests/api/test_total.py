@@ -50,13 +50,16 @@ def previewed(client, drawn, **values) -> list:
     return [lines for _, lines in drawn]
 
 
-def _print(client, **values):
+def _print(client, **values) -> int:
+    """The number of labels the answer tells."""
     response = client.post(f'{API}/print', data={**EXAMPLE_FORMDATA, 'printer': 'simulation', 'text': _lines(BOX), **values})
     assert outcome(client, response) == ('printed', ''), response.get_json()
+    return response.get_json()['labels']
 
 
 def test_copies(client, drawn):
-    _print(client, print_count='3')
+    # The answer tells as many, e.g. for the list of labels printed
+    assert _print(client, print_count='3') == 3
     assert printed(drawn) == [['Box 1 of 3'], ['Box 2 of 3'], ['Box 3 of 3']]
 
 
@@ -89,14 +92,15 @@ def test_copies_of_several_files_and_pages(client, drawn, collate):
     # as sets or grouped
     files = [(io.BytesIO(_pdf((300, 200), (200, 300))), 'two.pdf', 'application/pdf'),
              (io.BytesIO(_upload(Image.new('L', (400, 100), 'black'), 'wide.png').stream.read()), 'wide.png', 'image/png')]
-    _print(client, print_type='image', image_fit='1', print_count='2', pdf_pages='all', collate=collate, image=files)
+    assert _print(client, print_type='image', image_fit='1', print_count='2', pdf_pages='all', collate=collate, image=files) == 6
     assert printed(drawn) == [[f'Box {n} of 6'] for n in range(1, 7)]
 
 
 def test_roll_with_several_labels_to_a_page(client, drawn):
     response = client.post(f'{API}/print', data={'label_size': 'niimbot15x8-2x3', 'text': _lines('{{counter}}/{{total}}', size='20'),
                                                  'print_count': '8', **B1})
-    assert outcome(client, response) == ('printed', '')
+    # Labels, not pages
+    assert outcome(client, response) == ('printed', '') and response.get_json()['labels'] == 8
     assert printed(drawn) == [[f'{n}/8'] for n in range(1, 9)]
 
 
@@ -119,6 +123,19 @@ def test_preview(client, drawn, values, shown):
     assert previewed(client, drawn, **values) == [[shown]]
 
 
+def test_preview_of_a_job_printed_before(client, drawn):
+    # It tells its number of labels itself, the copies on a page roll stay as asked
+    assert previewed(client, drawn, total='6') == [['Box 1 of 6']]
+    assert previewed(client, drawn, total='6', print_count='2', labels_per_copy='2') == [['Box 1 of 6']]
+    assert previewed(client, drawn, total='abc', print_count='2') == [['Box 1 of 2']]
+    values = {'label_size': 'niimbot15x8-2x3', 'text': _lines('{{counter}}/{{total}}', size='20'), **B1}
+    response = client.post(f'{API}/preview', data={**values, 'total': '6'})
+    assert response.status_code == 200 and json.loads(response.headers['X-Label-Sheet'])['filled'] == 1
+    drawn.clear()
+    assert client.post(f'{API}/preview', data={**values, 'total': '6', 'print_count': '2'}).status_code == 200
+    assert [lines for _, lines in drawn] == [['1/6'], ['2/6']]
+
+
 @pytest.mark.parametrize('print_type, pages, shown', [
     ('image', 'all', 'Box 1 of 6'),
     ('image', '2-3', 'Box 1 of 4'),
@@ -134,7 +151,7 @@ def test_saved_label(client, drawn):
     text = [{'font': 'DejaVu Sans,Book', 'size': '40', 'text': BOX}]
     assert client.post(f'{API}/repository/save', json={'name': 'Box.json', 'label_size': '62', 'text': text}).status_code == 200
     response = client.post(f'{API}/repository/print', json={'name': 'Box.json', 'print_count': 2})
-    assert outcome(client, response) == ('printed', '')
+    assert outcome(client, response) == ('printed', '') and response.get_json()['labels'] == 2
     assert printed(drawn) == [['Box 1 of 2'], ['Box 2 of 2']]
     # Its preview as it prints with as many copies
     for query, shown in (({}, 'Box 1 of 1'), ({'print_count': '4'}, 'Box 1 of 4')):
