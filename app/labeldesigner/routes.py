@@ -1441,10 +1441,13 @@ def _print_job(printer: PrinterQueue, data: dict, files, print_count: int, colla
                    images=[copy for copy, _ in kept], drawn=drawn, return_format=return_format, job_id=job_id, staged=staged)
 
 
+DATE_SETTINGS = ('date_format', 'date_language')
+
+
 def _dates_set() -> dict:
     """The label settings dates are written with, kept with a job: printed
     again with the same date it is written as it was."""
-    return {name: _label_settings()[name] for name in ('date_format', 'date_language')}
+    return {name: _label_settings()[name] for name in DATE_SETTINGS}
 
 
 def _kept_copy(image: Image.Image, data: dict) -> tuple[Image.Image, list | None]:
@@ -1603,7 +1606,10 @@ def preview_from_image():
         per_copy = _count(values.get('labels_per_copy'), _labels_per_copy(values, page_count, request.files.getlist('image')))
         # A job printed before tells its number of labels, a page of it shows the first label only
         total = _count(values.get('total'), copies * per_copy)
-        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=total)
+        # Dates written as a label printed before wrote them, else as set
+        asked = {name: values[name] for name in DATE_SETTINGS if name in values}
+        dates = printer_settings.checked_label_settings(asked, ()) if asked else None
+        label = create_label_from_request(values, files, image=images[0], mark_blanks=marks, asn=asn, total=total, dates=dates)
         im = label.generate()
         # The printer would refuse it, the label designer says so before
         if too_long := _length_problem(values, im, model):
@@ -1615,7 +1621,7 @@ def preview_from_image():
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, current_app.config['PRINT_MAX_COUNT'])
             layouts = {}
             more = [create_label_from_request(values, files, i, image=images[0], mark_blanks=marks, layouts=layouts, asn=asn,
-                                              total=total).generate()
+                                              total=total, dates=dates).generate()
                     for i in range(1, min(sheets.per_sheet(size), copies * per_copy))]
             im = sheets.page_view(size, [im] + more)
     except HTTPException:
@@ -2538,6 +2544,7 @@ def history_label(job_id):
     # Shown as it printed: the time of its dates and the days of its date blanks that followed it
     printed = entry.get('data') or {}
     label['printed_for'] = _timestamp(printed) or int(_dates_of(entry))
+    label['dates'] = {name: value for name, value in (entry.get('dates') or {}).items() if name in DATE_SETTINGS}
     try:
         then = create_label_from_request(dict(printed, timestamp=label['printed_for']), {}, 0, None, dates=entry.get('dates'))
         label['printed_dates'] = {name: then.blank_date(name).isoformat() for name in _date_blanks(printed) if then.blank_date(name)}

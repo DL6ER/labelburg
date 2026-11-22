@@ -68,6 +68,14 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
+                      },
+                      "date_format": {
+                        "type": "string",
+                        "description": "How dates are written, a `date_format` of the label settings, e.g., as a label printed before wrote them (`dates` of `/labeldesigner/api/history/{job_id}/label`). Left out, as the label settings write them."
+                      },
+                      "date_language": {
+                        "type": "string",
+                        "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
                       }
                     }
                   }
@@ -118,6 +126,14 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
+                      },
+                      "date_format": {
+                        "type": "string",
+                        "description": "How dates are written, a `date_format` of the label settings, e.g., as a label printed before wrote them (`dates` of `/labeldesigner/api/history/{job_id}/label`). Left out, as the label settings write them."
+                      },
+                      "date_language": {
+                        "type": "string",
+                        "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
                       }
                     }
                   }
@@ -1216,7 +1232,40 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SavedLabel"
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SavedLabel"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "printed_for": {
+                          "type": "integer",
+                          "description": "The time its dates showed as it printed, as a Unix timestamp: `timestamp` of a preview that shows it as it printed."
+                        },
+                        "printed_dates": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "description": "The days its date blanks that follow the day showed as it printed, by the name of the blank."
+                        },
+                        "dates": {
+                          "type": "object",
+                          "properties": {
+                            "date_format": {
+                              "type": "string"
+                            },
+                            "date_language": {
+                              "type": "string"
+                            }
+                          },
+                          "description": "The label settings its dates were written with, for a preview that shows it as it printed."
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }

@@ -275,8 +275,9 @@ async function showDetail(item, values = null) {
     $('[data-unsel]', box).onclick = hideDetail;
     // Only the answer to the last preview asked is shown, earlier ones may come later
     let asked = 0;
-    // A label printed is shown as "Same date" prints it, at the time it printed
-    const shown = () => before ? Object.assign({}, work.design, { timestamp: String(item.opened.printedFor) }) : work.design;
+    // A label printed is shown as "Same date" prints it, at the time it
+    // printed, its dates written as they were
+    const shown = () => before ? Object.assign({}, work.design, { timestamp: String(item.opened.printedFor) }, item.opened.dates) : work.design;
     const shot = () => {
         const mine = ++asked;
         return perCopyOf(work.design).then(n => preview(shown(), work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });

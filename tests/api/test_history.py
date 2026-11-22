@@ -519,3 +519,24 @@ def test_a_code_that_holds_more_than_a_name_never_names_a_label(client, code, ti
     told = [answer.data, client.get(f'{API}/queue/{job}').data, client.get(f'{API}/queue').data, client.get(f'{API}/history').data]
     assert not any(b'secret123' in body for body in told)
     assert answer.get_json()['title'] == entry(client, job)['title'] == title
+
+
+def test_a_label_printed_is_shown_with_the_dates_it_was_written_with(client, monkeypatch):
+    made, label = [], routes.SimpleLabel
+
+    def recorded(*args, **kwargs):
+        made.append((kwargs['date_format'], kwargs['date_language']))
+        return label(*args, **kwargs)
+    assert client.post(f'{API}/settings/labels', data={'date_format': '%d.%m.%Y', 'date_language': 'de'}).status_code == 200
+    job = printed(client, data=dict(LABEL, text=lines('{{datetime:%d. %B %Y}}')))
+    assert client.post(f'{API}/settings/labels', data={'date_format': '', 'date_language': ''}).status_code == 200
+    opened = client.get(f'{API}/history/{job}/label').get_json()
+    assert opened['dates'] == {'date_format': '%d.%m.%Y', 'date_language': 'de'}
+    monkeypatch.setattr(routes, 'SimpleLabel', recorded)
+    # The preview of it as printed: with them, else with the label settings
+    for dates, shown in ((opened['dates'], ('%d.%m.%Y', 'de')), ({}, ('%Y-%m-%d', ''))):
+        del made[:]
+        assert client.post(f'{API}/preview', data=dict(LABEL, **dates)).status_code == 200
+        assert set(made) == {shown}
+    refused = client.post(f'{API}/preview', data=dict(LABEL, date_language='xx'))
+    assert refused.status_code == 400 and 'date_language' in refused.get_json()['message']

@@ -385,3 +385,18 @@ def test_a_label_printed_before_is_told_without_the_values_its_name_shows(page, 
     row = page.locator('#palRes .res:has-text("Jar Beans Larder")')
     assert row.locator('small').inner_text().startswith('1 x, ')
     assert 'Beans' not in row.locator('small').inner_text() and 'Larder' not in row.locator('small').inner_text()
+
+
+def test_a_label_printed_shows_its_dates_as_they_were_written_in_templates(page, server):
+    def dates_in(language):
+        with urlopen(f'{server}/labeldesigner/api/settings/labels', urlencode({'date_language': language}).encode()) as r:
+            assert json.load(r)['success']
+    dates_in('de')
+    print_over_the_api(server, 'Made in {{datetime:%B}}', source='designer')
+    dates_in('')
+    page.click('#templates')
+    page.click('.tpl-nav [data-cat="printed"]')
+    with page.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST') as request:
+        page.click('.tpl-grid .thumb >> nth=0')
+    # As "Same date" prints it
+    assert sent(request.value)['date_language'] == 'de'

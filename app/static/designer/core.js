@@ -1297,13 +1297,13 @@ export async function keptLabel(h) {
     const raw = await r.json(), design = normalize(raw);
     const own = S.history.find(x => x.job === h.id), saved = typeof raw.name === 'string' && S.saved.find(x => x.name === raw.name);
     const origin = own && own.source && own.source.kind === 'saved' ? own.source : saved ? originOf('saved', saved.name, saved.mtime) : null;
-    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin, printedFor: raw.printed_for, printedDates: raw.printed_dates || {} };
+    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin, printedFor: raw.printed_for, printedDates: raw.printed_dates || {}, dates: raw.dates || {} };
 }
 
-// What a label printed before is listed with: its copies, the values
-// printed, when
 // Whether name shows value as words of their own
 const shows = (name, value) => new RegExp(`(^|[^\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(name);
+// What a label printed before is listed with: its copies, the values
+// printed, when
 export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && !shows(entryName(h), String(v).trim())), fmtTime(h.time)].join(', ');
 
 // --- Overlays ----------------------------------------------------------------
