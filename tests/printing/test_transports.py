@@ -13,10 +13,10 @@ import types
 
 import pytest
 
-from app.labeldesigner import bluetooth, drivers, printer
+from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import backends, devices, niimbot, transports
 from app.labeldesigner.drivers.base import Driver
-from tests.helpers import make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client
 from tests.printing.test_bluetooth import Management, found
 from tests.printing.test_niimbot import FakePrinter
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
@@ -24,6 +24,7 @@ from tests.printing.test_usb_backends import Endpoint, USBError, USBTimeoutError
 
 MAC = '00:00:5E:00:53:01'
 DEVICE = f'bt://{MAC}'
+STATUS = '/labeldesigner/api/printer_status'
 
 
 @pytest.fixture
@@ -250,25 +251,48 @@ def test_printer_on_classic_bluetooth_on_the_channel_it_names(rfcomm):
     assert peer.addresses == [(MAC, 3)]
 
 
-def test_printer_on_classic_bluetooth_that_is_off(monkeypatch):
-    closed = []
+class Off:
+    """A printer on classic Bluetooth that is switched off, in place of the
+    RFCOMM socket: paging it fails."""
 
-    class Off:
-        def __init__(self, *args):
-            pass
+    def __init__(self):
+        self.tries, self.closed = 0, 0
 
-        def settimeout(self, timeout):
-            pass
+    def __call__(self, *args):
+        return self
 
-        def connect(self, address):
-            raise OSError(errno.EHOSTDOWN, 'Host is down')
+    def settimeout(self, timeout):
+        pass
 
-        def close(self):
-            closed.append(True)
-    monkeypatch.setattr(transports.socket, 'socket', Off)
+    def connect(self, address):
+        self.tries += 1
+        raise OSError(errno.EHOSTDOWN, 'Host is down')
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def off(monkeypatch):
+    printer_ = Off()
+    monkeypatch.setattr(transports.socket, 'socket', printer_)
+    monkeypatch.setattr(devices, '_unanswered', {})
+    return printer_
+
+
+def test_printer_on_classic_bluetooth_that_is_off(off):
     with pytest.raises(OSError) as raised:
         backends.open_printer(DEVICE)
-    assert raised.value.errno == errno.EHOSTDOWN and closed == [True]
+    assert raised.value.errno == errno.EHOSTDOWN and off.closed == 1
+
+
+def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
+    # No driver of a printer on Bluetooth would be asked, Brother's commands
+    # would go to whatever printer it is
+    client = make_client(tmp_path)
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer=DEVICE, model='Unknown'))
+    assert (response.status_code, response.get_json()['message']) == (400, refusals.UNKNOWN_MODEL)
+    assert off.tries == 0
 
 
 class Refused(Exception):
