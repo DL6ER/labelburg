@@ -255,7 +255,7 @@ def _usblp(tmp_path, monkeypatch, vendor, product):
     (interface.parent / 'idProduct').write_text(f'{product}\n')
     (tmp_path / 'usbmisc' / 'lp0').mkdir(parents=True)
     os.symlink(interface, tmp_path / 'usbmisc' / 'lp0' / 'device')
-    monkeypatch.setattr(devices, 'USB_INTERFACE', str(tmp_path / 'usbmisc' / '{name}' / 'device'))
+    monkeypatch.setattr(devices, 'USB_DESCRIPTOR', str(tmp_path / 'usbmisc' / '{name}' / 'device' / '..' / '{field}'))
     monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'usbmisc' / '{name}' / 'device' / 'ieee1284_id'))
 
 

@@ -142,6 +142,8 @@ def tcp_address(device_specifier: str, port: int) -> tuple[str, int]:
 # The IEEE 1284 device ID of a printer on USB, which usblp read when it was
 # plugged in
 USB_DEVICE_ID = '/sys/class/usbmisc/{name}/device/ieee1284_id'
+# Its vendor and product ID, of the USB device its interface belongs to
+USB_DESCRIPTOR = '/sys/class/usbmisc/{name}/device/../{field}'
 
 
 # The device IDs of printers on usb://, which do not change, asked once
@@ -190,14 +192,40 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
                 return ''
             _usb_device_ids[key] = told
         return _usb_device_ids[key]
-    path = os.path.normpath(device_specifier[len('file://'):] if device_specifier.startswith('file://') else device_specifier)
-    if not path.startswith('/dev/usb/lp'):
+    name = _usblp_name(device_specifier)
+    if name is None:
         return ''
     try:
-        with open(USB_DEVICE_ID.format(name=os.path.basename(path))) as file:
+        with open(USB_DEVICE_ID.format(name=name)) as file:
             return file.read()
     except OSError:
         return ''
+
+
+def _usblp_name(device_specifier: str) -> str | None:
+    """The name usblp gives the device, lp<N>, None for other devices."""
+    path = os.path.normpath(device_specifier.removeprefix('file://'))
+    return os.path.basename(path) if path.startswith('/dev/usb/lp') else None
+
+
+def usb_ids(device_specifier: str) -> tuple[int, int] | None:
+    """Vendor and product ID of a printer on USB, /dev/usb/lp<N> as Linux
+    read them when it was plugged in, or usb://<vendor>:<product>[/<serial>];
+    None for other printers or where they are unknown."""
+    try:
+        if device_specifier.startswith('usb://'):
+            vendor, _, product = device_specifier.removeprefix('usb://').partition('/')[0].partition(':')
+            return int(vendor, 16), int(product, 16)
+        name = _usblp_name(device_specifier)
+        if name is None:
+            return None
+        told = []
+        for field in ('idVendor', 'idProduct'):
+            with open(USB_DESCRIPTOR.format(name=name, field=field)) as file:
+                told.append(int(file.read().strip(), 16))
+        return told[0], told[1]
+    except (OSError, ValueError):
+        return None
 
 
 def known_device_id(device_specifier: str) -> str:
@@ -209,34 +237,6 @@ def known_device_id(device_specifier: str) -> str:
     if device_specifier.startswith('usb://'):
         return _usb_device_ids.get(_usb_key(device_specifier), '')
     return usb_device_id(device_specifier)
-
-
-# The USB interface of a printer through usblp, in the folder of its USB
-# device, which tells its vendor and product ID
-USB_INTERFACE = '/sys/class/usbmisc/{name}/device'
-_USB_ADDRESS = re.compile(r'usb://0x([0-9a-fA-F]{4}):0x([0-9a-fA-F]{4})(/.*)?')
-
-
-def _usb_id(folder: str, name: str) -> int | None:
-    try:
-        with open(os.path.join(folder, name)) as file:
-            return int(file.read().strip(), 16)
-    except (OSError, ValueError):
-        return None
-
-
-def usb_ids(device_specifier: str) -> tuple[int, int] | None:
-    """The USB vendor and product ID of a printer on usb://<vendor>:<product>,
-    or on /dev/usb/lp<N> as Linux tells them, None for other printers or
-    where Linux does not tell."""
-    if match := _USB_ADDRESS.fullmatch(device_specifier):
-        return int(match[1], 16), int(match[2], 16)
-    path = os.path.normpath(device_specifier.removeprefix('file://'))
-    if not path.startswith('/dev/usb/lp'):
-        return None
-    folder = os.path.dirname(os.path.realpath(USB_INTERFACE.format(name=os.path.basename(path))))
-    vendor, product = _usb_id(folder, 'idVendor'), _usb_id(folder, 'idProduct')
-    return None if vendor is None or product is None else (vendor, product)
 
 
 def device_id_fields(device_id: str) -> dict:
