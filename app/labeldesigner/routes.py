@@ -977,6 +977,11 @@ def _queued(printer: PrinterQueue, *, run, title: str, source: str, labels: int,
                               explain=_as_in_this_request(lambda e: refusals.message(e, refusals.PRINT_FAILED)))
     except print_queue.Full as full:
         return _line_full(printer, str(full))
+    # Where the jobs on sheets of labels end, see _going_on()
+    for job_id in [job_id for job_id in _SHEET_JOBS if (kept := print_queue.get(job_id)) is None or kept.state not in ('waiting', 'printing')]:
+        del _SHEET_JOBS[job_id]
+    if getattr(run, 'sheet', None):
+        _SHEET_JOBS[job.id] = run.sheet
     result = {'success': True, 'queued': True, 'job': job.id, 'state': job.state, 'start': print_queue.START, **(extra or {})}
     if image is not None:
         result['image'] = image
@@ -1347,35 +1352,65 @@ def _sheet_start(value, label, settings: dict) -> int:
     return start
 
 
-def _sheet_options(label_size: str, get, settings: dict) -> tuple[int, bool]:
-    """Where a job of label_size starts on a sheet of labels and whether
-    plain paper gets lines to cut along, see PrinterQueue.start, get(key) of
-    the request, the lines as set for the printer where it leaves them out."""
+def _sheet_options(label_size: str, get, settings: dict) -> tuple[int, bool, bool]:
+    """Where a job of label_size starts on a sheet of labels, whether plain
+    paper gets lines to cut along, and whether it goes on where the last
+    print ended (next), see PrinterQueue.start; get(key) of the request,
+    the lines as set for the printer where it leaves them out."""
     label = label_of(label_size)
     if not sheets.is_paper(label):
-        return 1, False
-    return _sheet_start(get('sheet_start'), label, settings), _whole_or(_given(get('cut_lines'), settings.get('cut_lines')), 0) != 0
+        return 1, False, False
+    start = get('sheet_start')
+    goes_on = isinstance(start, str) and start.strip().lower() == 'next'
+    return (_sheet_start(start, label, settings), _whole_or(_given(get('cut_lines'), settings.get('cut_lines')), 0) != 0, goes_on)
 
 
 def _on_sheet(printer: PrinterQueue, get, settings: dict):
     """The job of printer on a sheet of labels as _sheet_options() tells."""
-    printer.start, printer.cut_lines = _sheet_options(printer.label_size, get, settings)
+    printer.start, printer.cut_lines, printer.goes_on = _sheet_options(printer.label_size, get, settings)
+
+
+# The jobs on sheets of labels in the queues, by their id: the sheet, the
+# label they start at, None for where the job before ends, how many labels
+# they take, and whether they ended
+_SHEET_JOBS: dict[str, dict] = {}
 
 
 def _noting_sheet(printer: PrinterQueue, labels: int):
-    """printer.process_queue(), which on a sheet of labels notes where the
-    next print on it goes on, once printed."""
+    """printer.process_queue(), which on a sheet of labels starts where the
+    last print on it ended where asked to, worked out once the jobs before
+    it printed, and notes where the next print goes on, once printed."""
     label = label_of(printer.label_size)
     if not sheets.is_paper(label) or sheets.per_sheet(label) == 1:
         return printer.process_queue
-    at = (printer.start - 1 + labels) % sheets.per_sheet(label) + 1
+    per = sheets.per_sheet(label)
 
     def run():
-        message = printer.process_queue()
-        if not message:
-            _note_continue(printer.device_specifier, label.identifier, at)
-        return message
+        if printer.goes_on:
+            printer.start = _sheet_start('next', label, _settings_of(printer.device_specifier))
+        try:
+            message = printer.process_queue()
+            if not message:
+                _note_continue(printer.device_specifier, label.identifier, (printer.start - 1 + labels) % per + 1)
+            return message
+        finally:
+            run.sheet['ended'] = True
+    run.sheet = {'label_size': label.identifier, 'start': None if printer.goes_on else printer.start, 'labels': labels, 'ended': False}
     return run
+
+
+def _going_on(device: str, kept: dict) -> dict:
+    """Where the next print on each sheet of labels goes on, as kept for the
+    printer, after the jobs on sheets waiting in its queue and printing."""
+    told = print_queue.line(device)
+    at = dict(kept)
+    for job in ([told['printing']] if told['printing'] else []) + told['waiting']:
+        sheet = _SHEET_JOBS.get(job['id'])
+        if sheet is None or sheet['ended']:
+            continue
+        start = sheet['start'] or at.get(sheet['label_size'], 1)
+        at[sheet['label_size']] = (start - 1 + sheet['labels']) % sheets.per_sheet(label_of(sheet['label_size'])) + 1
+    return {size: label for size, label in at.items() if label > 1}
 
 
 def _note_continue(device: str, label_size: str, at: int):
@@ -1456,7 +1491,7 @@ def preview_from_image():
         if sheets.per_sheet(size) > 1 or paper:
             pages = len(selected_pdf_pages(str(values.get('pdf_pages') or ''), page_count)) if page_count else 1
             copies, per_copy = _count(values.get('print_count')), _count(values.get('labels_per_copy'), pages)
-            start, cut_lines = _sheet_options(size.identifier, values.get, settings)
+            start, cut_lines, _ = _sheet_options(size.identifier, values.get, settings)
             state = sheets.fill_state(size, sheets.lying(size, im), copies, per_copy, _max_count(size.identifier), start)
             if not paper or _whole_or(values.get('whole_sheet'), 0) != 0:
                 layouts = {}
@@ -1628,6 +1663,11 @@ def get_printer_status():
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''), model)
+        # Where sheets of labels go on once the jobs in the queue printed
+        if printer.get('path') and (going_on := _going_on(printer['path'], printer['settings'].get(printer_settings.CONTINUE_AT, {}))):
+            printer['settings'][printer_settings.CONTINUE_AT] = going_on
+        else:
+            printer['settings'].pop(printer_settings.CONTINUE_AT, None)
         drivers.for_model(model).note_settings(printer.get('path', ''), printer['settings'])
         printer.update(_as_set(printer, model, printer['settings']))
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
@@ -3127,7 +3167,7 @@ def webhook_print():
     try:
         printer = _queue(model, device, label_size)
         printer.leaves_first = leaves_first
-        printer.start, printer.cut_lines = on_sheet
+        printer.start, printer.cut_lines, printer.goes_on = on_sheet
         for label in labels:
             printer.add_label_to_queue(label, high_res=high_res, fast=fast)
         drawn = printer.check()

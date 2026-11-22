@@ -1055,7 +1055,9 @@ const sending = new Map();
 // this browser, Settings list it under Printed labels. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
 // took it, onDone(entry) with its outcome.
-export const printHooks = { start: null };
+// Of sheets of labels, see sheet.js: where a print starts, and what follows
+// a job the server took
+export const printHooks = { start: null, taken: null };
 export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
     // Where on a sheet of labels it starts, null where that question was
@@ -1094,6 +1096,7 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
             // waiting also for one about to print, so behind says which waits.
             Object.assign(entry, { job: data.job, start: data.start, seen: data.state, seenAt: Date.now() });
             saveHistory();
+            if (start && printHooks.taken) printHooks.taken();
             if (onAccepted) onAccepted(entry);
             if (behind && data.state === 'waiting') toast(`Added ${entryName(entry)} to the queue`);
             else if (shown()) QUEUE.read().then(() => hideToast(printing));

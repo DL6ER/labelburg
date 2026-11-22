@@ -414,7 +414,7 @@ class Tools:
         told = [self.checked(spec) for spec in specs]
         labels = count * sum(int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told)
         self._cap(labels)
-        starts = _starts(found, label_size, sheet_start, [count * int(headers.get('X-PDF-Selected-Pages') or 1) for headers in told])
+        starts = _starts(label_size, sheet_start, len(specs))
         images = []
         for done, spec in enumerate(specs):
             try:
@@ -435,28 +435,18 @@ class Tools:
         form = dict(self._text_label(lines, label_size, font_size, code, code_type), printer=found['path'])
         spec = {'path': '/preview', 'data': form}
         self.checked(spec)
-        image = self._printed('/print', data=dict(form, print_count=count, source='mcp', **_starts(found, label_size, sheet_start, [count])[0]))
+        image = self._printed('/print', data=dict(form, print_count=count, source='mcp', **_starts(label_size, sheet_start, 1)[0]))
         return f'Added {_labels(count)} to the queue of {printer}', [spec], [image]
 
 
-def _starts(found: dict, label_size: str, sheet_start, labels: list[int]) -> list[dict]:
-    """The sheet_start of each job of a call of labels jobs on the printer
-    found: sheet_start, next where the last print ended as its settings
-    keep it, for the first, each further one on after the one before; they
-    are queued before the first one prints."""
-    if sheet_start in (None, ''):
-        return [{} for _ in labels]
-    size = label_of(label_size)
-    start = str(sheet_start).strip().lower()
-    if start == 'next':
-        start = ((found.get('settings') or {}).get('continue_at') or {}).get(label_size, 1)
-    if not sheets.is_paper(size) or not str(start).isdigit():
-        return [{'sheet_start': str(sheet_start)} for _ in labels]
-    starts, at = [], int(start)
-    for count in labels:
-        starts.append({'sheet_start': str(at)})
-        at = (at - 1 + count) % sheets.per_sheet(size) + 1
-    return starts
+def _starts(label_size: str, sheet_start, jobs: int) -> list[dict]:
+    """The sheet_start of each of the jobs of a call on a sheet of labels:
+    as given for the first, each further one goes on where the one before
+    ends, worked out as it prints."""
+    if not sheets.is_paper(label_of(label_size)):
+        return [{} for _ in range(jobs)]
+    first = {} if sheet_start in (None, '') else {'sheet_start': str(sheet_start)}
+    return [first] + [{'sheet_start': 'next'} for _ in range(jobs - 1)]
 
 
 # The note of the label designer about a font that is not installed

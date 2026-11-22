@@ -6,6 +6,8 @@ import io
 import json
 import re
 import struct
+import threading
+import time
 
 import pytest
 from PIL import Image
@@ -491,3 +493,53 @@ def test_collated_files_fill_the_sheets_in_order(tmp_path, monkeypatch):
                                                  'image': [(png(), 'a.png'), (png(), 'b.png')]}, content_type='multipart/form-data')
     assert response.status_code == 200, response.get_json()
     assert [labels_of(page) for page in shots] == [[20, 21], [1, 2]]
+
+
+def ended(client, job) -> str:
+    for _ in range(400):
+        state = client.get(f'{API}/queue/{job}').get_json()['state']
+        if state not in ('waiting', 'printing'):
+            return state
+        time.sleep(0.05)
+    return state
+
+
+def going_on(client) -> dict | None:
+    [demo] = [p for p in client.get(f'{API}/printer_status').get_json()['printers'] if p['path'] == 'simulation']
+    return demo['settings'].get('continue_at')
+
+
+def test_next_goes_on_after_the_jobs_before_it(tmp_path, monkeypatch, queued):
+    shots, gate = [], threading.Event()
+    client = demo_office(tmp_path, monkeypatch, shots, gate)
+    first = on_demo(client, print_count=3, sheet_start=1)
+    second = on_demo(client, print_count=2, sheet_start='next')
+    # The status counts the jobs in the queue, where they are printed
+    assert going_on(client) == {'sheet-l7160': 6}
+    gate.set()
+    assert (ended(client, first), ended(client, second)) == ('printed', 'printed')
+    assert [labels_of(page) for page in shots] == [[1, 2, 3], [4, 5]]
+    assert going_on(client) == {'sheet-l7160': 6}
+
+
+def test_a_job_removed_from_the_queue_takes_no_labels(tmp_path, monkeypatch, queued):
+    shots, gate = [], threading.Event()
+    client = demo_office(tmp_path, monkeypatch, shots, gate)
+    first = on_demo(client, print_count=3, sheet_start=1)
+    second = on_demo(client, print_count=2, sheet_start='next')
+    third = on_demo(client, print_count=1, sheet_start='next')
+    assert client.post(f'{API}/queue/{second}/remove').status_code == 200
+    assert going_on(client) == {'sheet-l7160': 5}
+    gate.set()
+    assert (ended(client, first), ended(client, third)) == ('printed', 'printed')
+    assert [labels_of(page) for page in shots] == [[1, 2, 3], [4]]
+    assert client.get(f'{API}/settings', query_string={'printer': 'simulation'}).get_json()['continue_at'] == {'sheet-l7160': 5}
+
+
+def test_a_job_that_fails_leaves_the_sheet_where_it_was(tmp_path, monkeypatch, queued):
+    shots = []
+    client = demo_office(tmp_path, monkeypatch, shots)
+    assert ended(client, on_demo(client, print_count=2)) == 'printed'
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: 'The printer is offline')
+    assert ended(client, on_demo(client, print_count=4, sheet_start='next')) == 'failed'
+    assert going_on(client) == {'sheet-l7160': 3}

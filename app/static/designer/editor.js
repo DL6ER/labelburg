@@ -11,7 +11,7 @@ import {
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
     loadSaved, roomFrom, isSheet, sheetNote, untold, isPaper, maxCopies, takesSheets, refreshPrinters
 } from './core.js';
-import { paperLine, openSheet, sheetShown, chosenSheet } from './sheet.js';
+import { paperLine, openSheet, sheetShown, chosenSheet, sheetHooks } from './sheet.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
 import { swatchHTML, openColors, closeColors } from './colors.js';
@@ -1297,3 +1297,4 @@ export function printerChanged() {
 }
 
 mountMedia({ hooks, ui, apply, pick, changed, markBusy, renderToolbar, redraw: () => drawPreview() });
+sheetHooks.changed = () => { if (S.edit && $('#stage')) drawPreview(); };

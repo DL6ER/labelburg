@@ -167,6 +167,31 @@ def test_a_new_sheet_and_closing_the_question(designer, server, app):  # noqa: F
     assert [ask['sheet_start'] for ask in asked] == ['1']
 
 
+def test_going_on_leaves_the_label_to_the_server(designer, server, app):  # noqa: F811
+    # Worked out once the jobs queued before it printed
+    office(designer, server, app, continue_at=7, label_size='sheet-l7160')
+    asked = prints(designer)
+    designer.click('#print')
+    designer.click('.sheet-dialog .btn.primary')
+    printed(designer)
+    assert [ask['sheet_start'] for ask in asked] == ['next']
+
+
+def test_two_prints_in_a_row_go_on_on_the_sheet(designer, server, app):  # noqa: F811
+    office(designer, server, app, label_size='sheet-l7160')
+    set_copies(designer, 3)
+    designer.click('#print')
+    printed(designer)
+    designer.wait_for_function("() => document.querySelector('#sheetNote').innerText.includes('labels 4 to 6 of 21')")
+    asked = prints(designer)
+    designer.click('#print')
+    designer.wait_for_selector('.sheet-dialog[aria-label="Where to continue?"]')
+    assert designer.inner_text('.sheet-dialog .btn.primary') == 'Continue at label 4'
+    designer.click('.sheet-dialog .btn.primary')
+    designer.wait_for_function("() => labelEditor.S.history.length === 2 && labelEditor.S.history[0].state === 'printed'")
+    assert [ask['sheet_start'] for ask in asked] == ['next']
+
+
 def test_no_question_without_a_sheet_partly_used(designer, server, app):  # noqa: F811
     office(designer, server, app, label_size='sheet-l7160')
     asked = prints(designer)

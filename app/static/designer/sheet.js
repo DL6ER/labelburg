@@ -3,10 +3,11 @@
 // server lays out the labels and tells how a print fills them; nothing of
 // this shows for other printers.
 
-import { $, $$, esc, icon, S, SIZES, kept, isDemo, isPaper, perSheet, takesSheets, keptStart, sheetStartOf, printHooks } from './core.js';
+import { $, $$, esc, icon, S, SIZES, kept, isDemo, isPaper, perSheet, takesSheets, keptStart, sheetStartOf, printHooks, refreshPrinters } from './core.js';
 
-// Set by settings.js: keeps printer settings on the server, see saveSettings()
-export const sheetHooks = { save: null };
+// Set by settings.js: keeps printer settings on the server, see
+// saveSettings(); by the editor: shows where the sheet goes on now
+export const sheetHooks = { save: null, changed: null };
 
 const plainPaper = p => kept(p).cut_lines === '1';
 export const chosenSheet = p => !!p && !!p.tape && (!!p.tape.manual || isDemo(p));
@@ -125,7 +126,9 @@ export function openSheet(p, { state = () => null, fill = null, changed = () => 
 }
 
 // Asked before a print on a sheet partly used: where it goes on, the label
-// after the last print preselected. Resolves the label, null when closed.
+// after the last print preselected. Resolves the label, next for that one,
+// which the server works out once the jobs before it printed, null when
+// closed.
 function askStart(id, at) {
     return new Promise(resolve => {
         const box = layer();
@@ -138,7 +141,7 @@ function askStart(id, at) {
                 <div class="acts"><button class="btn" type="button" data-go="1">New sheet</button>
                     <button class="btn primary" type="button" data-go="${n}">${n === at ? 'Continue' : 'Start'} at label ${n}</button></div></div>`;
             $$('[data-at]', box).forEach(b => b.onclick = () => { n = +b.dataset.at; draw(); });
-            $$('[data-go]', box).forEach(b => b.onclick = () => answer(+b.dataset.go));
+            $$('[data-go]', box).forEach(b => b.onclick = () => answer(+b.dataset.go === at && at > 1 ? 'next' : +b.dataset.go));
             $$('[data-shut]', box).forEach(b => b.onclick = close);
             box.onclick = e => { if (e.target === box) close(); };
             $('.btn.primary', box).focus();
@@ -149,7 +152,9 @@ function askStart(id, at) {
 }
 
 // Before each print on a sheet of labels: the label chosen for it, else
-// asked where a sheet is partly used, else the first
+// asked where a sheet is partly used, else the first. Where it goes on
+// counts the jobs taken before, as the status tells once read again.
+let reading = null;
 printHooks.start = (p, id) => {
     if (!isPaper(id) || !takesSheets(p)) return undefined;
     const chosen = S.sheetStart;
@@ -157,6 +162,15 @@ printHooks.start = (p, id) => {
         S.sheetStart = null;
         return chosen.at;
     }
-    const at = keptStart(p, id);
-    return at > 1 ? askStart(id, at) : 1;
+    const ask = () => {
+        const now = [S.printer, ...S.printers].find(o => o && o.path === p.path) || p, at = keptStart(now, id);
+        return at > 1 ? askStart(id, at) : 1;
+    };
+    return reading ? reading.then(ask) : ask();
+};
+printHooks.taken = () => {
+    const read = reading = refreshPrinters().finally(() => {
+        if (reading === read) reading = null;
+        if (sheetHooks.changed) sheetHooks.changed();
+    });
 };

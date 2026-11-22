@@ -136,9 +136,11 @@ class PrinterQueue:
         self.sensing = None
         # The roll of a printer of two, left or right, None for its first
         self.side = None
-        # On a sheet of labels, the label the first copy goes on, from 1, and
+        # On a sheet of labels, the label the first copy goes on, from 1,
+        # whether it is where the last print ended once it prints, and
         # whether plain paper gets lines to cut along
         self.start = 1
+        self.goes_on = False
         self.cut_lines = False
         self._print_queue = []
 

@@ -3528,7 +3528,7 @@
               "type": "integer"
             },
             "readOnly": true,
-            "description": "Of an office printer, by sheet of labels, e.g. `{\"sheet-l7160\": 7}`: the label where the last print on a sheet partly used ended, which `sheet_start=next` goes on at. Kept once a print is printed, left out for a sheet used to its end."
+            "description": "Of an office printer, by sheet of labels, e.g. `{\"sheet-l7160\": 7}`: the label where the last print on a sheet partly used ended, which `sheet_start=next` goes on at. Kept once a print is printed, left out for a sheet used to its end. The printer status tells it after the jobs on sheets waiting in its queue."
           },
           "label_size": {
             "type": "string",
@@ -4582,7 +4582,7 @@
         "properties": {
           "sheet_start": {
             "type": "string",
-            "description": "The label of the sheet the first copy goes on, from 1, counted row by row from the top left, or `next`: where the last print on this printer and sheet ended, see `continue_at` of the printer settings. The copies fill the sheets one after the other. Default 1, a new sheet."
+            "description": "The label of the sheet the first copy goes on, from 1, counted row by row from the top left, or `next`: where the last print on this printer and sheet ended, see `continue_at` of the printer settings, worked out when the job prints, after the jobs queued before it. The copies fill the sheets one after the other. Default 1, a new sheet."
           },
           "cut_lines": {
             "type": "integer",
