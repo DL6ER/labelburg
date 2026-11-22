@@ -403,6 +403,15 @@ def test_bluetooth_le_connects_a_printer_not_found_with_its_public_address(le, m
     assert le.addresses == [(MAC, 0, 4, socket.BDADDR_LE_PUBLIC)]
 
 
+def test_a_kept_bluetooth_le_link_keeps_what_the_driver_keeps_with_it(le):
+    s = transports.kept_le(DEVICE, NIIMBOT, error=Refused, no_answer=Gone)
+    s.kept['paused'] = True
+    transports.release_le(DEVICE, s)
+    assert transports.kept_le(DEVICE, NIIMBOT, error=Refused, no_answer=Gone).kept == {'paused': True}
+    # Not a new one
+    assert le_link().kept == {}
+
+
 def test_bluetooth_le_raises_the_errors_of_the_driver(le, monkeypatch):
     with pytest.raises(Refused, match='no characteristic'):
         le_link(characteristic=bytes(16))

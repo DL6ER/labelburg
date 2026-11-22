@@ -194,6 +194,9 @@ class LeLink:
         # Dropped, e.g. by a printer switched off; in use; last used; when
         # it is closed unused
         self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
+        # What a driver keeps with the connection, e.g. whether the printer
+        # asked to pause; a new connection starts without
+        self.kept = {}
         try:
             self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:

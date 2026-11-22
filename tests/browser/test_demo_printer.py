@@ -77,10 +77,10 @@ def test_a_cat_printer_brings_its_paper_and_prints_as_it(designer):
     with designer.expect_response('**/api/settings') as answer:
         designer.select_option(MODEL, 'Cat/GB01')
     assert answer.value.ok
-    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Cat/GB01' && labelEditor.S.tape === 'cat58'")
+    designer.wait_for_function("() => labelEditor.S.printers[0].model === 'Cat/GB01' && labelEditor.S.tape === 'cat48'")
     assert 'Cat printer GB01' in designer.inner_text('[data-card="0"]')
     offered = designer.eval_on_selector_all('[data-card="0"] select[data-k="label_size"] option', 'os => os.map(o => [o.value, o.textContent])')
-    assert offered[1:] == [['cat58', '58 mm endless']] and [value for value, _ in offered] == [''] + tape.takes('Cat/GB01')
+    assert offered[1:] == [['cat48', '48 mm endless']] and [value for value, _ in offered] == [''] + tape.takes('Cat/GB01')
     # Torn off, there is no cutter to set
     assert 'Torn off' in designer.inner_text('[data-card="0"]')
     back_to_the_editor(designer)
@@ -89,7 +89,7 @@ def test_a_cat_printer_brings_its_paper_and_prints_as_it(designer):
     with designer.expect_request('**/api/print') as request:
         designer.click('#print')
     fields = sent(request.value)
-    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'Cat/GB01', 'cat58')
+    assert (fields['printer'], fields['model'], fields['label_size']) == ('simulation', 'Cat/GB01', 'cat48')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 

@@ -45,15 +45,16 @@ WRITE_WAIT = 10
 # the same with 00 goes on (commander.py:75-76, TiMini-Print
 # timiniprint/printing/runtime/tiny.py:26-31)
 FLOW = 0xae
-# The bits of the state it answers a state query with (kitty-printer
-# common/cat-protocol.ts:89-96 and 122, the byte after the length), the same in
-# TiMini-Print timiniprint/protocol/families/v5g.py:36-41
-NO_PAPER, COVER_OPEN, OVERHEATED, LOW_POWER = 0x01, 0x02, 0x04, 0x08
+# The bits of the state the printer notifies, the byte after the length
+# (kitty-printer common/cat-protocol.ts:89-96, 122); 10 pauses as flow control
+# does (:94, 128, 154-156). TiMini-Print timiniprint/protocol/families/v5g.py:36-41
+# reads 01 and 09 as no paper, 04 too hot, 08 a low battery: 09 is no paper
+# with a low battery in both. A low battery is only told, as by kitty-printer.
+NO_PAPER, COVER_OPEN, OVERHEATED, LOW_POWER, PAUSED = 0x01, 0x02, 0x04, 0x08, 0x10
 ERRORS = {
     NO_PAPER: 'The printer has no paper',
     COVER_OPEN: 'The cover of the printer is open',
     OVERHEATED: 'The printer is too hot, let it cool down',
-    LOW_POWER: 'The battery of the printer is low, charge it',
 }
 
 
@@ -149,16 +150,27 @@ def errors(state: int) -> list[str]:
     return [message for bit, message in ERRORS.items() if state & bit]
 
 
+def battery_low(state: int) -> bool:
+    return bool(state & LOW_POWER)
+
+
+class Notified:
+    """What a printer notified on a link: the start of a packet, whether it
+    asks to pause, the state queries it answered and its last state."""
+
+    def __init__(self):
+        self.received, self.paused, self.answers, self.state = b'', False, 0, 0
+
+
 class Connection:
     """The kept connection to a printer over Bluetooth LE, see
-    transports.kept_le(), and what it notified."""
+    transports.kept_le(), and what it notified, kept with it: a pause the
+    printer asked for after a job holds for the next one."""
 
     def __init__(self, device: str):
         self.device = device
         self.s = transports.kept_le(device, WRITE, NOTIFY, error=CatError, no_answer=NoAnswer)
-        self.received, self.paused = b'', False
-        # The state queries answered and the last state
-        self.answers, self.state = 0, 0
+        self.n = self.s.kept.setdefault('cat', Notified())
 
     def __enter__(self):
         return self
@@ -170,7 +182,7 @@ class Connection:
         """Read what the printer notifies within wait seconds, at least
         once: its flow control and its state. The first error its state
         tells, else an empty string."""
-        error, deadline = '', time.monotonic() + wait
+        error, n, deadline = '', self.n, time.monotonic() + wait
         while True:
             # Never 0, a socket without a timeout would not wait at all
             self.s.settimeout(max(deadline - time.monotonic(), 0.001))
@@ -182,26 +194,42 @@ class Connection:
                 self.s.settimeout(WRITE_WAIT)
             if data == b'':
                 raise NoAnswer('the printer closed the connection')
-            found, self.received = parse(self.received + (data or b''))
+            found, n.received = parse(n.received + (data or b''))
             for command, content in found:
                 if command == FLOW and content in (b'\x10', b'\x00'):
-                    self.paused = content == b'\x10'
+                    n.paused = content == b'\x10'
                 elif command == STATE[2] and content:
-                    self.answers, self.state = self.answers + 1, content[0]
-                    error = error or next(iter(errors(self.state)), '')
+                    n.answers, n.state, n.paused = n.answers + 1, content[0], bool(content[0] & PAUSED)
+                    error = error or next(iter(errors(n.state)), '')
             if error or time.monotonic() >= deadline:
                 return error
 
+    def _send(self, data: bytes) -> str:
+        """Write data once the printer does not ask to pause, waited for at
+        most RESUME_WAIT s. The first error its state tells meanwhile, else
+        an empty string; data is then not written."""
+        deadline = time.monotonic() + RESUME_WAIT
+        while self.n.paused:
+            if time.monotonic() >= deadline:
+                # Given up: the next link starts without the pause
+                self.s.broken = True
+                raise NoAnswer('the printer did not go on')
+            if error := self._read(PAUSED_POLL):
+                return error
+        self.s.sendall(data)
+        return ''
+
     def ask_state(self) -> int:
         """The state the printer answers, see errors()."""
-        asked = self.answers
-        self.s.sendall(STATE)
+        asked = self.n.answers
+        if self._send(STATE):
+            return self.n.state
         deadline = time.monotonic() + ANSWER_WAIT
-        while self.answers == asked:
+        while self.n.answers == asked:
             if time.monotonic() >= deadline:
                 raise NoAnswer('no answer to the state query')
             self._read(min(deadline - time.monotonic(), PAUSED_POLL))
-        return self.state
+        return self.n.state
 
     def write(self, data: bytes) -> str:
         """Write data in pieces, each once the printer lets it, PIECE_PAUSE
@@ -209,14 +237,7 @@ class Connection:
         string; the rest is then not written."""
         size = min(PIECE, self.s.mtu - 3)
         for i in range(0, len(data), size):
-            deadline = time.monotonic() + RESUME_WAIT
-            while self.paused:
-                if time.monotonic() >= deadline:
-                    raise NoAnswer('the printer did not go on')
-                if error := self._read(PAUSED_POLL):
-                    return error
-            self.s.sendall(data[i:i + size])
-            if error := self._read(PIECE_PAUSE):
+            if error := self._send(data[i:i + size]) or self._read(PIECE_PAUSE):
                 return error
         return ''
 
@@ -228,9 +249,9 @@ class Connection:
         error = next(iter(errors(self.ask_state())), '')
         if error:
             return error
-        asked = self.answers + sum(p in (STATE, START_NEW) for p in packets[1:])
+        asked = self.n.answers + sum(p in (STATE, START_NEW) for p in packets[1:])
         error = self.write(b''.join(packets[1:]))
         deadline = time.monotonic() + ANSWER_WAIT
-        while not error and self.answers < asked and time.monotonic() < deadline:
+        while not error and self.n.answers < asked and time.monotonic() < deadline:
             error = self._read(min(deadline - time.monotonic(), PAUSED_POLL))
         return error

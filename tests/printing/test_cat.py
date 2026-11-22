@@ -7,6 +7,7 @@ import errno
 import json
 import socket
 import struct
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -84,14 +85,15 @@ def test_an_mx06_gets_the_paper_after_a_label_as_empty_rows():
     (0x01, ['The printer has no paper']),
     (0x02, ['The cover of the printer is open']),
     (0x04, ['The printer is too hot, let it cool down']),
-    (0x08, ['The battery of the printer is low, charge it']),
-    # Out of paper with a low battery, as TiMini-Print v5g.py:38 names 09
-    (0x09, ['The printer has no paper', 'The battery of the printer is low, charge it']),
+    # A low battery is only told, also with no paper, as TiMini-Print v5g.py:38
+    # names 09 and kitty-printer reads its bits
+    (0x08, []), (0x09, ['The printer has no paper']),
     # Paused and busy keep it from nothing
     (0x10, []), (0x80, []),
 ])
 def test_state_bits_as_kitty_printer_reads_them(state, told):
     assert protocol.errors(state) == told
+    assert protocol.battery_low(state) is bool(state & 0x08)
 
 
 def test_packets_are_read_split_and_joined_and_damaged_ones_left_out():
@@ -162,14 +164,15 @@ class CatPeer:
     """A cat printer as a raw ATT socket reaches it: it lists AE01 and AE02
     among other characteristics, takes packets written to AE01 and answers
     each state query with its state, notified on AE02 once notifications are
-    on. pause_after: bytes after which it asks to pause, for paused_reads
-    reads."""
+    on. pause_after: bytes after which it asks to pause, for paused_for
+    seconds, as flow control or, by_state, as a state; a state answered with
+    the pause bit pauses it so too."""
 
     WRITE, NOTIFY = 0x000e, 0x0010
 
-    def __init__(self, states=(0,), mtu=240, pause_after=None, paused_reads=3):
+    def __init__(self, states=(0,), mtu=240, pause_after=None, paused_for=0.02, by_state=False):
         self.states, self.mtu = list(states), mtu
-        self.pause_after, self.paused_reads = pause_after, paused_reads
+        self.pause_after, self.paused_for, self.by_state = pause_after, paused_for, by_state
         self.declarations = [(0x0002, 0x02, 0x0003, uuid16(0x2a00)), (0x000d, 0x0c, self.WRITE, uuid16(0xae01)),
                              (0x000f, 0x10, self.NOTIFY, uuid16(0xae02)), (0x0012, 0x02, 0x0013, uuid16(0xae10))]
         self.addresses, self.writes, self.stream = [], [], b''
@@ -184,7 +187,7 @@ class CatPeer:
 
     def connect(self, address):
         self.addresses.append(address)
-        self.incoming = [bytes([0x02]) + struct.pack('<H', self.mtu)]
+        self.incoming, self.stream = [bytes([0x02]) + struct.pack('<H', self.mtu)], b''
 
     def settimeout(self, timeout):
         pass
@@ -228,18 +231,25 @@ class CatPeer:
             for command, data in found:
                 self.packets.append(protocol.packet(command, data))
                 if command == 0xa3 and not self.silent:
-                    self.notify(answer(self.states.pop(0) if len(self.states) > 1 else self.states[0]))
+                    state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+                    self.notify(answer(state))
+                    if state & protocol.PAUSED:
+                        self.pause(by_state=True, told=True)
             if self.pause_after is not None and sum(map(len, self.writes)) >= self.pause_after:
-                self.pause_after, self.paused, self.left = None, True, self.paused_reads
-                self.notify(protocol.packet(0xae, b'\x10', 1))
+                self.pause_after = None
+                self.pause(self.by_state)
         return len(pdu)
 
+    def pause(self, by_state, told=False):
+        self.paused, self.until = True, time.monotonic() + self.paused_for
+        self.resume = answer(0) if by_state else protocol.packet(0xae, b'\x00', 1)
+        if not told:
+            self.notify(answer(protocol.PAUSED) if by_state else protocol.packet(0xae, b'\x10', 1))
+
     def recv(self, size):
-        if self.paused:
-            self.left -= 1
-            if not self.left:
-                self.paused = False
-                self.notify(protocol.packet(0xae, b'\x00', 1))
+        if self.paused and time.monotonic() >= self.until:
+            self.paused = False
+            self.notify(self.resume)
         if not self.incoming:
             raise socket.timeout('timed out')
         return self.incoming.pop(0)
@@ -299,16 +309,47 @@ def test_a_label_is_written_in_pieces_of_200_bytes_the_mtu_takes(peer, mtu, piec
     assert fake.sent() == b''.join(protocol.label_packets([BLACK] * 40))
 
 
-def test_nothing_is_written_while_the_printer_asks_to_pause(peer):
-    fake = peer(pause_after=600, paused_reads=5)
+@pytest.mark.parametrize('by_state', [False, True])
+def test_nothing_is_written_while_the_printer_asks_to_pause(peer, by_state):
+    # By flow control as Cat-Printer reads it, or by its state as kitty-printer
+    fake = peer(pause_after=600, by_state=by_state)
     assert send('Cat/GB01', [[BLACK] * 40]) == ''
     assert fake.written_paused == 0 and fake.sent() == b''.join(protocol.label_packets([BLACK] * 40))
 
 
+def test_a_state_answered_with_the_pause_bit_holds_the_label_until_one_without(peer):
+    fake = peer(states=[0, protocol.PAUSED, 0])
+    assert send('Cat/GB01', [[BLACK] * 40]) == ''
+    assert fake.written_paused == 0 and fake.sent() == b''.join(protocol.label_packets([BLACK] * 40))
+
+
+@pytest.mark.parametrize('by_state', [False, True])
+def test_a_pause_after_a_job_holds_for_the_next_one(peer, monkeypatch, by_state):
+    # It comes with the answer to the last state query, the kept link keeps it
+    monkeypatch.setattr(protocol, 'PAUSED_POLL', 0.05)
+    one = b''.join(protocol.label_packets([BLACK]))
+    fake = peer(pause_after=len(one), paused_for=0.2, by_state=by_state)
+    assert send('Cat/GB01', [[BLACK]]) == ''
+    assert fake.paused
+    assert send('Cat/GB01', [[BLACK] * 40]) == ''
+    assert fake.written_paused == 0 and fake.sent() == one + b''.join(protocol.label_packets([BLACK] * 40))
+    assert len(fake.addresses) == 1
+
+
 def test_a_printer_that_does_not_go_on_is_given_up(peer, monkeypatch):
     monkeypatch.setattr(protocol, 'RESUME_WAIT', 0.05)
-    peer(pause_after=600, paused_reads=10 ** 9)
+    fake = peer(pause_after=600, paused_for=3600)
     assert send('Cat/GB01', [[BLACK] * 40]) == 'The printer does not answer'
+    # The next job opens a new link, without the pause
+    fake.paused = False
+    assert send('Cat/GB01', [[BLACK]]) == ''
+    assert len(fake.addresses) == 2
+
+
+def test_a_low_battery_stops_no_label(peer):
+    fake = peer(states=[protocol.LOW_POWER])
+    assert send('Cat/GB01', [[BLACK] * 40]) == ''
+    assert fake.sent() == b''.join(protocol.label_packets([BLACK] * 40))
 
 
 def test_a_printer_without_paper_is_sent_nothing_more(peer):
@@ -347,7 +388,7 @@ def test_a_printer_that_is_off(monkeypatch):
 
 def test_printed_through_the_label_designer(client, peer):
     fake = peer()
-    response = client.post('/labeldesigner/api/print', data={'label_size': 'cat58', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'cat48', 'print_type': 'text', 'text': TEXT, 'print_count': '2'})
     assert outcome(client, response) == ('printed', '')
     labels = [i for i, p in enumerate(fake.packets) if p == protocol.LATTICE_START]
     assert len(labels) == 2
@@ -367,7 +408,13 @@ def test_status_through_the_label_designer(client, peer):
 def test_ready_through_the_label_designer(client, peer):
     peer()
     printer_ = client.get(STATUS).get_json()['printers'][0]
-    assert (printer_['errors'], printer_['status_type']) == ([], 'Reply to status request')
+    assert (printer_['errors'], printer_['status_type'], printer_['battery_low']) == ([], 'Reply to status request', False)
+
+
+def test_a_low_battery_is_told_as_a_hint(client, peer):
+    peer(states=[protocol.LOW_POWER | protocol.NO_PAPER])
+    printer_ = client.get(STATUS).get_json()['printers'][0]
+    assert (printer_['errors'], printer_['battery_low']) == (['The printer has no paper'], True)
 
 
 def queries(fake):
@@ -383,7 +430,7 @@ def test_a_ready_printer_is_asked_again_only_when_looking_for_printers(client, p
     client.get(STATUS + '?look=1')
     assert queries(fake) == 2
     # And after a print
-    response = client.post('/labeldesigner/api/print', data={'label_size': 'cat58', 'print_type': 'text', 'text': TEXT})
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'cat48', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', '')
     asked = queries(fake)
     client.get(STATUS)
@@ -401,7 +448,7 @@ def test_a_printer_that_cannot_print_is_asked_every_time(client, peer):
 
 def test_600_dpi_is_refused(client):
     response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'cat58', 'print_type': 'text', 'text': TEXT, 'high_res': '1'})
+        'label_size': 'cat48', 'print_type': 'text', 'text': TEXT, 'high_res': '1'})
     assert response.get_json() == {'success': False, 'message': 'The Cat printer GB01 cannot print at 600 dpi, turn off 600 dpi printing'}
 
 
