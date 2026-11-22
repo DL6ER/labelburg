@@ -95,7 +95,8 @@ class FakeUsblp(FakeTspl):
         tty.setraw(self._slave)
         self.path = os.ttyname(self._slave)
         self._closed = False
-        threading.Thread(target=self._serve, daemon=True).start()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
 
     def _serve(self):
         while not self._closed:
@@ -109,7 +110,9 @@ class FakeUsblp(FakeTspl):
                 os.write(self.master, answer)
 
     def close(self):
+        # Stopped first: the number of a closed terminal is soon another one's
         self._closed = True
+        self._thread.join(5)
         os.close(self._slave)
         os.close(self.master)
 
