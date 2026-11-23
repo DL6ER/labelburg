@@ -587,7 +587,7 @@ def test_shared_receipt_printer(tmp_path):
         tm.replies[escpos.PAPER] = 0x12
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
         assert outcome(client, response) == ('printed', '')
-        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')
+        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + escpos.CENTER + b'\x1dv0')
         assert (device.imports, device.resets) == (1, 0)
     finally:
         host.close()
