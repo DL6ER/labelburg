@@ -90,12 +90,15 @@ class Sheet:
         return self.labels[0].in_color
 
     def generate(self) -> Image.Image:
-        image = compose(self.label, [made.generate() for made in self.labels])
+        images = [made.generate() for made in self.labels]
+        image = compose(self.label, images)
         if self.turned:
             image = image.rotate(180)
-        # The print routes return the image of the first label, as printed
+        # The print routes return the image of the first label, as printed,
+        # the queue shows the page as the label designer does
         if getattr(self.labels[0], 'keep_generated', False):
             self.labels[0].generated = image
+            self.labels[0].shown = page_view(self.label, images)
         return image
 
 

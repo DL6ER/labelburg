@@ -15,7 +15,7 @@ Grocy sends every label to the same address, so one saved label serves products,
 
 A name with dots takes a value inside one of the objects Grocy sends, e.g., `[details.location.name]` for the location of the product. Values that are given in `blanks` go first, and the parameters of the request (`name`, `printer`, `model`, `print_count`, `cut`, `cut_once`, `half_cut`, `chain`, `high_res`, `fast_printing`, `collate`, `leaves_first`, `mirror`, `blanks`) are never taken for blanks.
 
-The label is printed on the tape in the printer, as in the label designer: one saved for another tape is placed on it.
+The label is printed on the tape in the printer, as in the label designer: one saved for another tape is placed on it. Grocy's answer means the label was accepted into the queue of the printer, not that it is printed yet; the outcome can be read at `GET /labeldesigner/api/queue/<id>`, see the [API](../README.md#api). A label the printer does not print holds the labels behind it until someone presses Continue in the label designer or sends `POST /labeldesigner/api/queue/continue` with `printer`.
 
 ## Grocy's settings
 

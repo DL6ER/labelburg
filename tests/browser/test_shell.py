@@ -194,25 +194,6 @@ def test_only_a_printer_the_server_says_to_follow_is_asked_on_its_own(designer, 
     assert bool(asked) is follow
 
 
-@pytest.mark.parametrize('hidden', [False, True])
-def test_progress_is_asked_once_at_a_time_and_not_from_a_tab_in_the_background(designer, hidden):
-    type_label(designer, 'Shelf')
-    designer.evaluate("() => { const S = labelEditor.S; S.printer = Object.assign({}, S.printer, { path: 'file:///dev/usb/lp9' }); S.printers = [S.printer]; }")
-    held, asked = [], []
-    designer.route('**/api/print', lambda route: held.append(route))
-    designer.route('**/api/printer_status', lambda route: asked.append(route))
-    if hidden:
-        designer.evaluate("() => Object.defineProperty(document, 'hidden', { value: true, configurable: true })")
-    designer.click('#print')
-    # Asked every 1.5 s, the first answer does not come
-    designer.wait_for_timeout(3500)
-    assert len(held) == 1 and len(asked) == (0 if hidden else 1)
-    held[0].fulfill(json={'success': True})
-    designer.wait_for_selector('#toast:has-text("Printed 1 label")')
-    for route in asked:
-        route.abort()
-
-
 def test_the_saved_toast_opens_the_label_in_templates(designer, server):
     type_label(designer, 'Pantry shelf')
     designer.click('#save')

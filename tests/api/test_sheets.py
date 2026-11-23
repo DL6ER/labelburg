@@ -11,7 +11,7 @@ from PIL import Image
 from app.labeldesigner import paperless, printer, routes
 from app.labeldesigner.drivers import niimbot
 from app.labeldesigner.sheets import Sheet
-from tests.helpers import _pdf, make_client
+from tests.helpers import _pdf, make_client, outcome, printing
 
 API = '/labeldesigner/api'
 B1 = {'printer': 'simulation', 'model': 'Niimbot/B1'}
@@ -34,7 +34,7 @@ def printed(monkeypatch):
 
 def _print(client, label_size='niimbot15x8-2x3', text=COUNTER, **values):
     response = client.post(f'{API}/print', data={'label_size': label_size, 'text': text, **B1, **values})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     return response
 
 
@@ -119,7 +119,8 @@ def test_counters_go_on_across_sheets(client, monkeypatch):
     render = niimbot.Niimbot.render
 
     def keep(self, queue, entries, keep=None):
-        rendered.extend(entry['label'] for entry in entries)
+        if printing():
+            rendered.extend(entry['label'] for entry in entries)
         return render(self, queue, entries, keep)
     monkeypatch.setattr(niimbot.Niimbot, 'render', keep)
     _print(client, print_count=8)
@@ -175,7 +176,7 @@ def test_webhook_images_fill_one_label(tmp_path, printed):
     image = _png(Image.new('L', (300, 160), 0))
     response = client.post(f'{API}/webhook/print', data={
         'password': 'secret', 'label_size': 'niimbot15x8-2x3', **B1, 'images': (io.BytesIO(image), 'black.png')})
-    assert response.get_json()['success'] is True, response.get_json()
+    assert outcome(client, response) == ('printed', ''), response.get_json()
     [sheet] = printed
     assert sheet.size == (240, 192)
     assert [_inked(cell) for cell in _cells(sheet)] == [True, False, False, False, False, False]
@@ -185,7 +186,7 @@ def test_homebox_fills_one_label(client, printed, monkeypatch):
     _b1_with_tape(client, monkeypatch)
     image = _png(Image.new('L', (120, 64), 0))
     response = client.post(f'{API}/homebox', data=image, headers={'Content-Type': 'image/png'})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     [sheet] = printed
     assert sheet.size == (240, 192)
     assert [_inked(cell) for cell in _cells(sheet)] == [True, False, False, False, False, False]
@@ -237,6 +238,12 @@ def test_pdf_pages_count_per_copy(client):
     state = sheet_header(client, 'niimbot15x8-2x3', print_type='image', pdf_pages='all',
                          image=(io.BytesIO(_pdf((100, 50), (100, 50), (100, 50))), 'pages.pdf'))
     assert (state['filled'], state['fill']) == (3, 2)
+
+
+def test_pdf_pages_count_only_on_image_labels(client):
+    # A text label prints once for each copy, whatever file comes with it
+    state = sheet_header(client, 'niimbot15x8-2x3', pdf_pages='all', image=(io.BytesIO(_pdf((100, 50), (100, 50), (100, 50))), 'pages.pdf'))
+    assert (state['filled'], state['fill']) == (1, 6)
 
 
 def test_copies_below_one_count_as_one(client):

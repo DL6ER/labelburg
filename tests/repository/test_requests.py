@@ -6,8 +6,8 @@ import os
 
 import pytest
 
-from tests.helpers import make_client
-from tests.repository.helpers import BLANK_LABEL, SAVE_URL, TEXT
+from tests.helpers import make_client, outcome
+from tests.repository.helpers import BLANK_LABEL, SAVE_URL, TEXT, _png_b64
 
 
 def test_repository_save_requires_json_and_name(tmp_path):
@@ -83,7 +83,7 @@ def test_parameters_of_the_address_go_before_those_of_a_json_body(tmp_path, monk
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'label_size': '62', 'text': TEXT}).status_code == 200
-    assert client.post('/labeldesigner/api/repository/print?print_count=2', json={'name': 'Shelf.json', 'print_count': 3}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print?print_count=2', json={'name': 'Shelf.json', 'print_count': 3})) == ('printed', '')
     assert len(queued) == 2
     monkeypatch.setattr(Request, 'get_json', lambda self, *args, **kwargs: pytest.fail('a parser of its own'))
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'
@@ -98,7 +98,7 @@ def test_json_sent_as_a_form_is_read(tmp_path, monkeypatch):
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'label_size': '62', 'text': TEXT}).status_code == 200
     response = client.post('/labeldesigner/api/repository/print', data='{"name": "Shelf.json"}', content_type='application/x-www-form-urlencoded')
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_blanks_and_their_settings_sent_as_json_text_are_saved_as_objects(tmp_path):
@@ -147,7 +147,7 @@ def test_replace_and_options_of_the_address_are_taken_as_text(tmp_path, monkeypa
     assert client.post(SAVE_URL + '?replace=false', json={'name': 'Shelf.json', 'label_size': '62', 'text': TEXT}).status_code == 409
     assert client.post(SAVE_URL + '?replace=maybe', json={'name': 'Other.json', 'label_size': '62', 'text': TEXT}).status_code == 400
     response = client.post('/labeldesigner/api/repository/print?name=Shelf.json&print_count=2&cut_once=true&high_res=false')
-    assert response.get_json() == {'success': True} and queued == [(False, False), (True, False)]
+    assert outcome(client, response) == ('printed', '') and queued == [(False, False), (True, False)]
 
 
 def test_texts_of_a_json_body_sent_as_a_form_are_no_parameters(tmp_path):
@@ -190,7 +190,7 @@ def test_numbers_of_a_saved_label_are_numbers(tmp_path, monkeypatch):
             'print_type': 'qrcode_text', 'code_text': 'https://example.com', 'text': TEXT}
     assert client.post(SAVE_URL, json=body).status_code == 200
     assert client.get('/labeldesigner/api/repository/preview', query_string={'name': 'Shelf.json'}).status_code == 200
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'})) == ('printed', '')
     assert len(queued) == 1
     loaded = client.get('/labeldesigner/api/repository/load', query_string={'name': 'Shelf.json'}).get_json()
     assert loaded['margin_top'] == 10.0
@@ -216,6 +216,62 @@ def test_a_name_that_names_no_file_is_not_found(tmp_path, name):
     assert os.path.isdir(client.application.config['LABEL_REPOSITORY_DIR'])
 
 
+@pytest.mark.parametrize('title, filename', [('Frozen on', 'Frozen_on.json'), ('Eggs & milk', 'Eggs_milk.json')])
+def test_a_saved_label_is_found_by_the_name_it_is_saved_under(tmp_path, title, filename):
+    # As the label designer saves it: a file name without spaces and "&",
+    # the title as typed, e.g. in Home Assistant
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.post(SAVE_URL, json={'name': filename, 'title': title, 'label_size': '62', 'text': TEXT}).status_code == 200
+    for name in (title, filename.removesuffix('.json'), filename):
+        assert client.get('/labeldesigner/api/repository/load', query_string={'name': name}).get_json()['title'] == title
+        assert client.get('/labeldesigner/api/repository/preview', query_string={'name': name}).status_code == 200
+        assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': name})) == ('printed', '')
+    assert client.post('/labeldesigner/api/repository/delete', json={'name': filename}).status_code == 200
+    assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+
+
+@pytest.mark.parametrize('name', ['Box', 'Box_2', 'Box_2.json'])
+def test_a_delete_takes_the_exact_file_name_only(tmp_path, name):
+    # Several labels may have the same title
+    client = make_client(tmp_path, empty_repo=True)
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    for filename in ('Box_1.json', 'Box_2.json'):
+        assert client.post(SAVE_URL, json={'name': filename, 'title': 'Box', 'label_size': '62', 'text': TEXT}).status_code == 200
+    response = client.post('/labeldesigner/api/repository/delete', json={'name': name})
+    if name == 'Box_2.json':
+        assert response.status_code == 200
+        assert os.listdir(repo) == ['Box_1.json']
+    else:
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+        assert sorted(os.listdir(repo)) == ['Box_1.json', 'Box_2.json']
+
+
+def test_a_name_finds_the_file_of_that_name_before_a_title(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.post(SAVE_URL, json={'name': 'Jam.json', 'title': 'Jam', 'label_size': '62', 'text': TEXT}).status_code == 200
+    assert client.post(SAVE_URL, json={'name': 'Another.json', 'title': 'Jam.json', 'label_size': '62', 'text': TEXT}).status_code == 200
+    assert client.get('/labeldesigner/api/repository/load', query_string={'name': 'Jam.json'}).get_json()['name'] == 'Jam.json'
+
+
+@pytest.mark.parametrize('name', ['../Outside', 'Outside', 'Shelf_image.png', 'Shelf_image', '.Hidden', 'Hidden', ' '])
+def test_a_name_finds_only_saved_labels(tmp_path, name):
+    # Neither files outside the folder of the labels, their images nor hidden
+    # files, e.g. the printer settings
+    client = make_client(tmp_path, empty_repo=True)
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    with open(tmp_path / 'Outside.json', 'w', encoding='utf-8') as f:
+        json.dump({'title': 'Outside', 'label_size': '62', 'text': TEXT}, f)
+    with open(os.path.join(repo, '.Hidden.json'), 'w', encoding='utf-8') as f:
+        json.dump({'title': 'Hidden', 'label_size': '62', 'text': TEXT}, f)
+    body = {'name': 'Shelf.json', 'title': '', 'label_size': '62', 'text': TEXT, 'print_type': 'image', 'image_data': _png_b64('red'),
+            'image_mime': 'image/png'}
+    assert client.post(SAVE_URL, json=body).status_code == 200
+    for method, url in (('get', 'load'), ('get', 'preview'), ('post', 'print')):
+        response = getattr(client, method)(f'/labeldesigner/api/repository/{url}', query_string={'name': name})
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+    assert sorted(os.listdir(repo)) == ['.Hidden.json', 'Shelf.json', 'Shelf_image.png']
+
+
 @pytest.mark.parametrize('body', [{'name': ['Shelf.json']}, {'name': {'a': 1}}])
 def test_a_name_that_is_no_text_is_refused(tmp_path, body):
     client = make_client(tmp_path)
@@ -235,7 +291,7 @@ def test_a_saved_label_is_cut_as_saved_unless_the_request_names_a_cut(tmp_path, 
     assert client.post(SAVE_URL, json=dict(label, name='Never.json', cut='none')).status_code == 200
 
     def printed(**request):
-        assert client.post('/labeldesigner/api/repository/print', json=request).get_json() == {'success': True}
+        assert outcome(client, client.post('/labeldesigner/api/repository/print', json=request)) == ('printed', '')
         return cuts.pop()
     assert printed(name='Own.json') == ('last', False, True)
     # Of the request, also the half cuts and chain printing

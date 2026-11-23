@@ -151,10 +151,10 @@ HOLD_THREE = """() => {
 
 def test_templates_show_the_note_of_the_copies_asked_last(editor):  # noqa: F811
     status_is(editor, with_tape(B1))
-    save_new(editor, 'Spice tin', 'Paprika')
+    save_new(editor, 'Spice jar', 'Paprika')
     # The preview of 3 copies is held back until it is let go
     editor.evaluate(HOLD_THREE)
-    open_saved(editor, 'Spice tin')
+    open_saved(editor, 'Spice jar')
     editor.fill('#tplCopies', '3')
     editor.dispatch_event('#tplCopies', 'input')
     editor.wait_for_function('() => !!window.letGo')

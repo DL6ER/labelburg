@@ -66,18 +66,29 @@ export function forgetGoneKeys() {
     try { if (window.indexedDB) indexedDB.deleteDatabase('brother_ql_images'); } catch (e) { }
 }
 
-let toastTimer;
+// A message at the bottom, gone after ms. The queue of the printer shown
+// there gives way to it and comes back after it, see queue.js.
+let toastTimer, toastId = 0;
+export function queueBack() {
+    const q = $('#queue');
+    if (q) q.hidden = !q.childElementCount || !$('#toast').hidden;
+}
 export function toast(text, action, ms = 0) {
     const el = $('#toast');
     el.innerHTML = `<span>${esc(text)}</span>` + (action ? `<button class="tbtn" type="button">${esc(action.label)}</button>` : '');
     el.hidden = false;
-    if (action) el.querySelector('button').onclick = () => { el.hidden = true; action.run(); };
+    queueBack();
+    if (action) el.querySelector('button').onclick = () => { el.hidden = true; queueBack(); action.run(); };
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, ms || (action ? 6000 : 3500));
+    toastTimer = setTimeout(() => { el.hidden = true; queueBack(); }, ms || (action ? 6000 : 3500));
+    return ++toastId;
 }
-export function hideToast() {
+// Given an id, a message shown after that one stays
+export function hideToast(id = toastId) {
+    if (id !== toastId) return;
     clearTimeout(toastTimer);
     $('#toast').hidden = true;
+    queueBack();
 }
 
 export function fmtTime(ts) {
@@ -115,6 +126,8 @@ export function sizeName(id) {
 }
 // A roll with several labels to a page, of which one is designed
 export const isSheet = id => !!SIZES[id] && (SIZES[id].pieces || [1, 1])[0] * (SIZES[id].pieces || [1, 1])[1] > 1;
+// A label that shows the number of labels printed ({{total}}) is drawn for the copies
+export const withTotal = design => (design.text || []).map(l => l.text).concat(design.code_text).some(t => String(t || '').includes('{{total}}'));
 // The short name in the printer chip, e.g. "62 mm" or "29 x 90 mm"
 export function sizeShort(id) {
     const s = SIZES[id];
@@ -267,6 +280,12 @@ export function browserDateFormat() {
     } catch (e) { return '%Y-%m-%d'; }
 }
 export const dateFormat = () => S.settings.date_format || browserDateFormat();
+// The examples of the date and time codes, those of names in the language of
+// dates, as the server wrote them
+export function dateCodeExamples() {
+    const dc = C.datetime_codes || { codes: [] };
+    return Object.assign(Object.fromEntries(dc.codes.map(([code, , example]) => [code, example])), (dc.languages || {})[S.settings.date_language] || {});
+}
 
 // [today], [today+5d], [now+2h], dates typed between brackets
 export const TODAY_RE = /^(?:today|now)(?:\s*([+-])\s*(\d+)\s*(d|days?|w|weeks?|m|months?|y|years?|h|hours?|min|minutes?))?$/i;
@@ -437,7 +456,8 @@ export function formFor(design, copies = 1, forPrint = false, values = null, mar
     fd.append('text', JSON.stringify(design.text.map(l => ({
         text: l.text, size: String(l.size), font: l.font, align: l.align, inverted: !!l.inverted,
         checkbox: !!l.checkbox, color: l.color || 'black', line_spacing: String(l.line_spacing || '100'),
-        ...(l.underline ? { underline: true } : {})
+        ...(l.underline ? { underline: true } : {}), ...(l.caps ? { caps: true } : {}),
+        ...(+l.letter_spacing ? { letter_spacing: +l.letter_spacing } : {})
     }))));
     if (design.image && withImage(design)) {
         for (const im of [design.image].concat(forPrint ? design.more_images || [] : [])) fd.append('image', b64ToBlob(im.data, im.mime), im.name);
@@ -521,10 +541,11 @@ export function sheetNote(sheet, max = 100) {
         + (sheet.fill && sheet.fill <= max ? `<button type="button" class="pill" data-fill="${esc(sheet.fill)}">Fill it</button>` : '');
 }
 
-export async function preview(design, values, copies = 1, perCopy = 0) {
+// total: the number of labels of a job printed before, for {{total}} only
+export async function preview(design, values, copies = 1, perCopy = 0, total = 0) {
     const asked = Object.assign({}, onTape(design), { high_res: highRes() ? '1' : '0' });
     // On a roll with several labels to a page the server tells how the copies fill the last one
-    const sheet = isSheet(asked.label_size);
+    const sheet = isSheet(asked.label_size), counted = sheet || withTotal(asked);
     const blanks = blankRequest(asked, values || {});
     for (const [name, f] of Object.entries(blanks.fields)) {
         if (f.type === 'choice' && !(f.choices || []).length) { blanks.fields[name] = { type: 'text' }; delete blanks.blanks[name]; }
@@ -533,8 +554,8 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
     const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
     // Several printers can share a path, e.g. simulators of other models
-    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format,
-        sheet ? [copies, perCopy] : 0]);
+    const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format, S.settings.date_language,
+        counted ? [copies, perCopy, total] : 0]);
     if (previewCache.has(key)) {
         const p = previewCache.get(key);
         previewCache.delete(key);
@@ -544,9 +565,10 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
     const p = (async () => {
         let r;
         try {
-            const fd = formFor(asked, sheet ? copies : 1, false, values, true, blanks);
+            const fd = formFor(asked, counted ? copies : 1, false, values, true, blanks);
             // Each copy prints all files and PDF pages, the preview shows one
-            if (sheet && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (counted && perCopy > 0) fd.append('labels_per_copy', String(perCopy));
+            if (counted && total > 0) fd.append('total', String(total));
             r = await post('/preview', fd, AbortSignal.timeout ? AbortSignal.timeout(60000) : undefined);
         } catch (e) {
             throw new Error(['TimeoutError', 'AbortError'].includes(e.name) ? 'The preview took too long' : 'The preview could not be made');
@@ -562,7 +584,8 @@ export async function preview(design, values, copies = 1, perCopy = 0) {
             auto: r.headers.get('X-Label-Orientation') === 'auto', gap: +(r.headers.get('X-Label-Image-Text-Gap') || 0),
             order: r.headers.get('X-Label-Parts-Order') || '', direction: r.headers.get('X-Label-Parts-Direction') || '', faint: r.headers.get('X-Image-Faint') === '1',
             pages: +(r.headers.get('X-PDF-Selected-Pages') || 1), pageCount: +(r.headers.get('X-PDF-Pages') || 0), parts: partsOf(r.headers.get('X-Label-Parts')),
-            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet'))
+            printedAs: colorsOf(r.headers.get('X-Label-Colors')), labelSize: asked.label_size, sheet: sheetOf(r.headers.get('X-Label-Sheet')),
+            along: runsAlong(asked)
         };
     })();
     previewCache.set(key, p);
@@ -591,8 +614,8 @@ export const S = {
     demos: [], demoList: [], saved: [], codes: C.codes,
     history: load(own('designer_history'), []),
     lang: load('designer_lang', (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en'),
-    // Of labels, kept on the server for every browser: date_format, collate
-    // and font_family, see /api/settings/labels
+    // Of labels, kept on the server for every browser: date_format,
+    // date_language, collate and font_family, see /api/settings/labels
     settings: Object.assign({}, C.label_settings),
     edit: null,
     // The colors of the label in the editor its tape prints otherwise, as its
@@ -929,7 +952,7 @@ export function drawThumb(img, item, make = (design, values) => ({ design, value
         try {
             if (img.isConnected) {
                 const design = await itemDesign(item), shown = make(design, defaults({ design }));
-                const p = await preview(shown.design, shown.values);
+                const p = await preview(shown.design, shown.values, 1, 0, shown.total || 0);
                 if (img.isConnected) img.src = p.url;
             }
         } catch (e) { img.classList.add('failed'); }
@@ -989,50 +1012,186 @@ export function entryName(e) {
     return line || e.title || 'Label';
 }
 
+// The queue of the printer chosen as queue.js last read it, shared with the
+// prints here; jobs removed here are told by its list, not by a message
+export const QUEUE = { path: '', line: null, status: null, removed: new Set(), read: () => Promise.resolve(), follow: () => { } };
+const pendingOn = path => S.history.some(h => h.state === 'printing' && h.path === path);
+// Whether a print on printer p waits behind others: its line as last read
+// has a job or a hold, its status says so where it was not read since, or a
+// print of this browser on it has no outcome yet
+export function lineBusy(p = S.printer) {
+    if (!p || !p.path) return false;
+    const read = QUEUE.path === p.path && QUEUE.line, told = QUEUE.status !== p && p.queue;
+    return !!(read && (read.printing || read.waiting.length || read.held)) || !!(told && (told.printing || told.waiting || told.held)) || pendingOn(p.path);
+}
+// Whether the outcome of a print of this browser goes without a message of
+// its own: printed while others of this browser on its printer have none
+// yet, taken out of the queue here, or told by the held queue of the printer
+// chosen
+export function untold(entry) {
+    if (entry.state === 'printed') return S.history.some(h => h !== entry && h.state === 'printing' && h.path === entry.path);
+    if (entry.job && QUEUE.removed.has(entry.job)) return true;
+    return !!S.printer && entry.path === S.printer.path && QUEUE.path === entry.path && !!(QUEUE.line && QUEUE.line.held);
+}
+
+// Sent one after the other per printer, so that its queue gets them in the
+// order they were printed; a slow printer holds back no other
+const sending = new Map();
 // job: { title, design, values, copies, source }. Kept in the history of
 // this browser, Settings list it under Printed labels. Printed on printer,
-// the one chosen unless another is given.
-export async function printJob(job, onDone, printer = S.printer) {
+// the one chosen unless another is given. onAccepted(entry) once the server
+// took it, onDone(entry) with its outcome.
+export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
+    const behind = lineBusy(printer), path = (printer && printer.path) || '';
     const entry = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
         design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', state: 'printing', message: ''
+        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
     };
     S.history.unshift(entry);
     saveHistory();
-    toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
-    // How far the job is, asked once at a time and not from a tab in the background
-    const followed = printer && printer.path !== 'simulation' ? printer.path : '';
-    let asking = false;
-    const follow = followed && setInterval(async () => {
-        if (asking || document.hidden) return;
-        asking = true;
-        try {
-            const p = printersIn(await (await fetch(API + '/printer_status')).json()).find(x => x.path === followed);
-            const text = p && p.job ? jobText(p.job) : '';
-            if (text && entry.state === 'printing') toast(text, null, 10000);
-        } catch (e) {
-            // The next one shows it
-        } finally {
-            asking = false;
-        }
-    }, 1500);
+    const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
+    const shown = () => !!S.printer && S.printer.path === path;
+    QUEUE.follow();
     try {
         const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
-        const r = await post('/print', formFor(placedOn, entry.copies, true, job.values, false, undefined, printer));
+        const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
+        form.set('title', entryName(entry));
+        form.set('source', 'designer');
+        const sent = (sending.get(path) || Promise.resolve()).then(() => post('/print', form));
+        const settled = sent.catch(() => { }).then(() => { if (sending.get(path) === settled) sending.delete(path); });
+        sending.set(path, settled);
+        const r = await sent;
         let data = {};
         try { data = await r.json(); } catch (e) { }
-        if (r.ok && data.success !== false) entry.state = 'printed';
-        else { entry.state = 'failed'; entry.message = data.message || ('The printer answered ' + r.status); }
+        // The labels the server counted, {{total}} in the previews of the entry
+        if (r.ok && data.labels > 0) entry.labels = data.labels;
+        if (!r.ok || data.success === false) {
+            entry.state = 'failed';
+            entry.message = data.message || ('The printer answered ' + r.status);
+        } else if (data.job && data.state !== 'printed') {
+            // Queued: followed until its outcome is known. The server answers
+            // waiting also for one about to print, so behind says which waits.
+            Object.assign(entry, { job: data.job, start: data.start, seen: data.state, seenAt: Date.now() });
+            saveHistory();
+            if (onAccepted) onAccepted(entry);
+            if (behind && data.state === 'waiting') toast(`Added ${entryName(entry)} to the queue`);
+            else if (shown()) QUEUE.read().then(() => hideToast(printing));
+            await followJob(entry);
+        } else {
+            entry.state = 'printed';
+            if (onAccepted) onAccepted(entry);
+        }
     } catch (e) {
         entry.state = 'failed';
         entry.message = UNREACHABLE;
     }
-    if (follow) clearInterval(follow);
+    hideToast(printing);
     saveHistory();
+    // Read before it is told: a job that did not print may hold the queue shown
+    if (!shown()) QUEUE.follow();
+    else if (entry.state === 'printed') QUEUE.read();
+    else await QUEUE.read();
     if (onDone) onDone(entry);
     return entry;
+}
+
+// The jobs of this browser without an outcome, with what to call as each
+// moves on and ends; followJobs() reads them all
+const followed = new Map();
+let followTimer = 0, followReading = false;
+// A job read longer ago may have printed since, e.g. while the tab was hidden
+const SEEN_FRESH = 5000;
+export const followsLine = path => [...followed.keys()].some(e => e.path === path);
+
+// Follows the job of entry ({ job, start, seen, seenAt, path }) until it is
+// printed, failed or lost, calling changed when its state moves on. Sets
+// entry.state and entry.message.
+export function followJob(entry, changed = () => { }) {
+    return new Promise(resolve => {
+        followed.set(entry, { changed, resolve });
+        if (!followTimer) {
+            followTimer = setInterval(followJobs, 1500);
+            document.addEventListener('visibilitychange', followJobs);
+        }
+        // A job the answer already calls failed is read at once for its message
+        if (entry.seen === 'failed') followJobs();
+    });
+}
+function endJob(entry, state, message = '') {
+    const f = followed.get(entry);
+    followed.delete(entry);
+    if (!followed.size) {
+        clearInterval(followTimer);
+        followTimer = 0;
+        document.removeEventListener('visibilitychange', followJobs);
+    }
+    Object.assign(entry, { state, message });
+    f.resolve();
+}
+function sawJob(entry, state) {
+    entry.seenAt = Date.now();
+    if (state === entry.seen) return;
+    entry.seen = state;
+    saveHistory();
+    followed.get(entry).changed();
+}
+// A job its line does not list (anymore)
+async function askJob(entry) {
+    try {
+        const r = await fetch(API + '/queue/' + encodeURIComponent(entry.job));
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 404) {
+            const stale = !(Date.now() - (entry.seenAt || 0) < SEEN_FRESH);
+            if (!data.start || data.start === entry.start) endJob(entry, 'unknown', 'Its outcome is no longer known');
+            else if (entry.seen === 'printing' || stale) endJob(entry, 'unknown', 'The label designer was restarted while it printed');
+            else endJob(entry, 'failed', 'The label designer was restarted before it printed');
+        } else if (data.state === 'printed') endJob(entry, 'printed');
+        else if (data.state === 'failed' || data.state === 'removed') endJob(entry, 'failed', data.message || 'It was not printed');
+        else if (data.state) sawJob(entry, data.state);
+        else if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
+    } catch (e) {
+        // The next one asks again, unless the answer told the outcome already
+        if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
+    }
+}
+// The line of the printer at path, that of the one chosen as its panel reads it
+async function readLine(path) {
+    if (S.printer && S.printer.path === path) return QUEUE.read();
+    try {
+        const r = await fetch(`${API}/queue?printer=${encodeURIComponent(path)}`);
+        return r.ok ? await r.json() : null;
+    } catch (e) {
+        return null;
+    }
+}
+// Every 1.5 s, one request at a time and not from a tab in the background:
+// the line of each printer the jobs are on, a job itself only where its line
+// does not list it
+async function followJobs() {
+    if (followReading || document.hidden || !followed.size) return;
+    followReading = true;
+    try {
+        const entries = [...followed.keys()];
+        for (const path of new Set(entries.map(e => e.path || ''))) {
+            const line = path ? await readLine(path) : null;
+            const listed = line ? [line.printing, ...(line.waiting || [])].filter(Boolean) : [];
+            for (const entry of entries.filter(e => (e.path || '') === path)) {
+                if (!followed.has(entry)) continue;
+                const job = listed.find(j => j.id === entry.job);
+                if (job) sawJob(entry, job.state);
+                else await askJob(entry);
+            }
+        }
+    } finally {
+        followReading = false;
+    }
+}
+
+// Jobs left printing when the page was closed are followed on
+export function resolvePending() {
+    S.history.filter(h => h.state === 'printing' && h.job).forEach(h => followJob(h).then(saveHistory));
 }
 
 // A label printed before, printed again as it was on the printer chosen, the
@@ -1044,13 +1203,15 @@ export function printAgain(h, onDone = announcePrint) {
     return printJob({ title: h.title, design: h.design, values: h.values, copies: h.copies, source: h.source }, onDone);
 }
 export function announcePrint(entry, again = () => printAgain(entry)) {
+    if (untold(entry)) return;
     hideToast();
     if (entry.state === 'printed') toast(`Printed ${entry.copies === 1 ? '1 label' : `${entry.copies} labels`}: ${entryName(entry)}`, { label: 'Print again', run: again });
+    else if (entry.state === 'unknown') toast(`Maybe not printed: ${entry.message}`, { label: 'Print again', run: again }, 10000);
     else toast(`Not printed: ${entry.message}`, { label: 'Try again', run: again }, 10000);
 }
 // What a label printed before is listed with: its copies, the values
 // printed, when
-export const printedSub = h => [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
+export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
 
 // --- Overlays ----------------------------------------------------------------
 

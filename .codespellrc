@@ -3,8 +3,9 @@
 # Typos, and British spellings: the project uses American English
 builtin = clear,rare,en-GB_to_en-US
 check-hidden = true
-# Vendored libraries and fonts, and the German demo labels (tools/spelling_de.py)
-skip = ./.git,*.min.js,*-min.js,*.min.css,*.map,./app/labeldesigner/demos/*/*-de.json,./app/static/designer/vendor/*/*.js,./app/static/designer/vendor/*/reader
+# Vendored libraries and fonts, the German demo labels (tools/spelling_de.py)
+# and the names of months and weekdays in other languages
+skip = ./.git,*.min.js,*-min.js,*.min.css,*.map,./app/labeldesigner/demos/*/*-de.json,./app/labeldesigner/cldr/date_names.json,./app/static/designer/vendor/*/*.js,./app/static/designer/vendor/*/reader
 # ZINK (zero ink), the paper of the VC-500W, and Adresse, a German name of a
 # blank in docs/scan.md
 ignore-words-list = zink,adresse

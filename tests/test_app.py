@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from io import BytesIO
@@ -304,3 +305,24 @@ def test_names_of_the_receipt_printer_before(monkeypatch, name):
     assert app.config['PRINTER_MODEL'] == 'Epson/ESC-POS'
     parse_args(app, ['--model', name])
     assert app.config['PRINTER_MODEL'] == 'Epson/ESC-POS'
+
+
+def test_run_py_leaves_on_sigterm_so_that_the_exit_handlers_run():
+    import signal
+    import run
+    before = signal.getsignal(signal.SIGTERM)
+    # Only serving installs it, importing run, as gunicorn's wsgi does not
+    assert before is signal.SIG_DFL
+    try:
+        run.exit_on_sigterm()
+        with pytest.raises(SystemExit):
+            os.kill(os.getpid(), signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, before)
+
+
+def test_compose_waits_for_the_print_queue_on_stop():
+    from app.labeldesigner.print_queue import STOP_WAIT
+    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docker-compose.yml')) as fh:
+        grace = int(re.search(r'^\s+stop_grace_period: (\d+)s', fh.read(), re.M).group(1))
+    assert grace > STOP_WAIT

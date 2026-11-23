@@ -4,13 +4,16 @@ import io
 import json
 import os
 import re
+from collections import Counter
+from datetime import date, datetime
 
 import pytest
 from PIL import Image
 
-from app.labeldesigner import demos
+from app.labeldesigner import demos, icons
 from app.labeldesigner.drivers import LABELS
-from tests.helpers import make_client
+from app.labeldesigner.routes import create_label_from_request
+from tests.helpers import make_client, outcome
 
 LABEL_SIZES = {label.identifier for label in LABELS}
 DEMO_IDS = [label_id for category in demos.categories() for label_id, _ in demos.labels(category['id'])]
@@ -74,10 +77,30 @@ def test_a_blank_without_a_default_shows_its_name(client, monkeypatch):
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
-    assert client.post('/labeldesigner/api/demos/print', json={'id': label_id}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/demos/print', json={'id': label_id})) == ('printed', '')
     label, = queued
     label.process_templates()
     assert [line['text'] for line in label.text] == ['', '']
+
+
+@pytest.mark.parametrize('label_id, room, rooms, box', [
+    ('storage/014-moving-box-of-62x100.json', 'Room', ('Kitchen', 'Bathroom'), 'Box {} of 3'),
+    ('storage/014-moving-box-of-62x100-de.json', 'Raum', ('Küche', 'Bad'), 'Karton {} von 3'),
+])
+def test_moving_boxes_with_the_number_of_boxes(client, monkeypatch, label_id, room, rooms, box):
+    # The room chosen, the first one unless told, on every box of the job
+    from app.labeldesigner import printer
+    queued = []
+    monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
+    assert demos.load(label_id)['fields'][room]['choices'][0] == rooms[0]
+    for chosen, blanks in ((rooms[0], {}), (rooms[1], {room: rooms[1]})):
+        queued.clear()
+        response = client.post('/labeldesigner/api/demos/print', json={'id': label_id, 'print_count': 3, 'blanks': blanks})
+        assert outcome(client, response) == ('printed', '')
+        for label in queued:
+            label.process_templates()
+        assert [[line['text'] for line in label.text][:2] for label in queued] == [[chosen, box.format(n)] for n in (1, 2, 3)]
 
 
 @pytest.mark.parametrize('old, new', sorted(demos.REPLACED.items()))
@@ -177,7 +200,7 @@ def test_print(client, monkeypatch, label_id):
                         lambda self, label, cut=True, high_res=False, fast=False: queued.append((self.label_size, label)))
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     response = client.post('/labeldesigner/api/demos/print', json={'id': label_id})
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
     (label_size, label), = queued
     assert label_size == demos.load(label_id)['label_size']
     # With the pictogram from the demo images, red on black/red labels
@@ -222,6 +245,70 @@ def test_sticker_of_this_project(client, label_id, tagline):
     # The address in red, the tagline in gray
     colors = {color for _, color in preview.getcolors(1 << 20)}
     assert {(0xc8, 0x10, 0x2e), (0x3d, 0x44, 0x4b)} <= colors
+
+
+def _printed_lines(client, label_id, when, blanks=None):
+    """The lines of the demo label as printed at the time when, with blanks."""
+    form = {key: json.dumps(value) if isinstance(value, (list, dict)) else str(value) for key, value in demos.load(label_id).items()}
+    with client.application.test_request_context():
+        label = create_label_from_request(dict(form, timestamp=str(int(when.timestamp())), blanks=blanks or {}))
+        label.process_templates()
+    return [line['text'] for line in label.text]
+
+
+# Best by this day when frozen on January 31, 2024: frozen food stays safe
+# but loses quality. Leftovers in the fridge are used by then.
+FOOD_KEPT = {'bread-and-cake': date(2024, 4, 30), 'soups-and-meals': date(2024, 4, 30), 'ground-meat': date(2024, 4, 30),
+             'poultry': date(2024, 10, 31), 'fatty-fish': date(2024, 3, 31), 'lean-fish': date(2024, 6, 30), 'vegetables': date(2024, 11, 30),
+             'fruit': date(2024, 11, 30), 'leftovers': date(2024, 2, 3)}
+FOOD_IDS = [label_id for label_id in DEMO_IDS if re.fullmatch(r'kitchen/\d{3}-(%s)-\w+(-de)?\.json' % '|'.join(FOOD_KEPT), label_id)]
+
+
+def test_food_labels_in_each_size_and_language():
+    sizes = Counter(demos.load(label_id)['label_size'] for label_id in FOOD_IDS)
+    assert sizes == {size: len(FOOD_KEPT) * 2 for size in ('62x29', '62', '29x90', 'niimbot40x30', 'niimbot50x30')}
+
+
+@pytest.mark.parametrize('label_id', FOOD_IDS)
+def test_food_is_best_by_its_keep_time(client, label_id):
+    kind = next(kind for kind in FOOD_KEPT if f'-{kind}-' in label_id)
+    field, = demos.load(label_id)['fields'].values()
+    food = field['choices'][0] if field['type'] == 'choice' else field['default']
+    made, kept = date(2024, 1, 31), FOOD_KEPT[kind]
+    if label_id.endswith('-de.json'):
+        words = ('Gekocht am', 'Zu verbrauchen bis') if kind == 'leftovers' else ('Eingefroren am', 'Am besten bis')
+        dates = made.strftime('%d.%m.%Y'), kept.strftime('%d.%m.%Y')
+    else:
+        words = ('Cooked on', 'Use by') if kind == 'leftovers' else ('Frozen on', 'Best by')
+        dates = made.isoformat(), kept.isoformat()
+    lines = _printed_lines(client, label_id, datetime(2024, 1, 31, 12))
+    # The small labels have the words and the dates on lines of their own
+    assert ' '.join(lines) == f'{food} {words[0]} {dates[0]} {words[1]} {dates[1]}'
+    assert lines[0] == food and len(lines) in (3, 5)
+
+
+SPOOL_IDS = [label_id for label_id in DEMO_IDS if label_id.startswith('3d-printing/')]
+
+
+def test_filament_spools_in_each_size_and_language():
+    sizes = Counter(demos.load(label_id)['label_size'] for label_id in SPOOL_IDS)
+    assert sizes == {size: 2 for size in ('niimbot40x30', 'niimbot50x30', '29x90', '62x29', '62', 'pt24', 'pt12')}
+
+
+@pytest.mark.parametrize('label_id', SPOOL_IDS)
+def test_filament_spools(client, label_id):
+    # The material and whether the spool was opened or dried are chosen, the
+    # temperatures typed in, in degrees Celsius
+    fields = demos.load(label_id)['fields']
+    material, when = (name for name, field in fields.items() if field['type'] == 'choice')
+    nozzle, bed = (name for name, field in fields.items() if field['type'] == 'number')
+    assert fields[material]['choices'] == ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PA/Nylon', 'PC']
+    assert (fields[nozzle]['default'], fields[bed]['default']) == ('210', '60')
+    blanks = {material: 'PETG', when: fields[when]['choices'][1], nozzle: '240', bed: '80'}
+    text = ' '.join(_printed_lines(client, label_id, datetime(2024, 1, 31, 12), blanks))
+    dried = 'Getrocknet am 31.01.2024' if label_id.endswith('-de.json') else 'Dried on 2024-01-31'
+    celsius = icons.icon('temperature-celsius')
+    assert text.startswith('PETG ') and f' 240{celsius}' in text and f' 80{celsius}' in text and dried in text
 
 
 def test_a_model_that_is_no_text_is_refused(client):

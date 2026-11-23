@@ -8,7 +8,7 @@ import os
 import pytest
 from PIL import Image
 
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 from tests.repository.helpers import BLANK_LABEL, SAVE_URL, TEXT
 
 
@@ -74,7 +74,7 @@ def test_printing_a_saved_label_takes_false_and_whole_numbers_of_a_json_body(tmp
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'label_size': '62', 'text': TEXT, 'high_res': 1, 'cut_once': 1}).status_code == 200
     body = {'name': 'Shelf.json', 'print_count': 2.0, 'high_res': False, 'cut_once': False}
-    assert client.post('/labeldesigner/api/repository/print', json=body).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json=body)) == ('printed', '')
     assert queued == [(True, False), (True, False)]
     assert client.post('/labeldesigner/api/repository/print', json=dict(body, print_count=2.5)).status_code == 400
 
@@ -88,11 +88,11 @@ def test_marks_of_blanks_are_not_printed_or_saved(tmp_path, monkeypatch):
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     client = make_client(tmp_path, empty_repo=True)
     text = [{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf {{blank:Name}}'}]
-    assert client.post('/labeldesigner/api/print', data={'label_size': '62', 'text': json.dumps(text), 'mark_blanks': '1'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data={'label_size': '62', 'text': json.dumps(text), 'mark_blanks': '1'})) == ('printed', '')
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'label_size': '62', 'text': text, 'mark_blanks': 1}).status_code == 200
     with open(os.path.join(client.application.config['LABEL_REPOSITORY_DIR'], 'Shelf.json'), encoding='utf-8') as f:
         assert 'mark_blanks' not in json.load(f)
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json'})) == ('printed', '')
     for label in queued:
         label.process_templates()
         assert label.text[0]['text'] == 'Shelf '
@@ -144,7 +144,7 @@ def test_the_copies_of_a_print_share_the_text_measured(tmp_path, monkeypatch):
     counts = []
     for copies in (1, 3):
         measured.clear()
-        assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'print_count': copies}).get_json() == {'success': True}
+        assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'print_count': copies})) == ('printed', '')
         counts.append(len(measured))
     assert counts[0] == counts[1]
 
@@ -164,7 +164,7 @@ def test_repository_print_uses_requested_resolution(tmp_path, monkeypatch):
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     client = make_client(tmp_path)
     resp = client.post('/labeldesigner/api/repository/print', data={'name': 'QR-Example.json', 'high_res': '1'})
-    assert resp.get_json() == {'success': True}
+    assert outcome(client, resp) == ('printed', '')
     # The labels are generated with the 600 dpi width they are printed with
     assert queued and all(entry == (1392, True) for entry in queued)
 
@@ -183,7 +183,7 @@ def test_repository_label_with_a_font_that_is_not_installed(tmp_path):
     assert response.headers['X-Label-Warning'].startswith('The font Not Installed (Regular) is not installed')
     response = client.post('/labeldesigner/api/repository/print', json={'name': 'other_fonts.json'})
     assert response.status_code == 200
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_repository_pdf_pages_are_printed(tmp_path):
@@ -242,7 +242,7 @@ def test_saved_label_is_printed_with_its_blanks_filled_in(tmp_path, monkeypatch,
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json=BLANK_LABEL).status_code == 200
     resp = client.post('/labeldesigner/api/repository/print', **request_kwargs)
-    assert resp.get_json() == {'success': True}
+    assert outcome(client, resp) == ('printed', '')
     label = queued[0]
     label.process_templates()
     assert [line['text'] for line in label.text] == ['Chili', 'Box 2, 2026-11-01']
@@ -311,7 +311,7 @@ def test_printing_a_saved_label_takes_its_settings_from_a_json_body(tmp_path, mo
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: queued.extend(self.label_cuts()) or '')
     client = make_client(tmp_path, empty_repo=True)
     assert client.post(SAVE_URL, json={'name': 'Shelf.json', 'label_size': '62', 'text': TEXT}).status_code == 200
-    assert client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'print_count': 3, 'cut_once': 1}).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': 'Shelf.json', 'print_count': 3, 'cut_once': 1})) == ('printed', '')
     assert queued == [False, False, True]
 
 

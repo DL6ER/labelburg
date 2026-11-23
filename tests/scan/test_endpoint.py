@@ -22,9 +22,12 @@ def printed(tmp_path, monkeypatch):
     """A client with BOX saved, and the labels the printer got."""
     from app.labeldesigner import printer
     queued = []
-    def add(self, label, cut=True, high_res=False, fast=False):
-        label.generate()
+    add_label = printer.PrinterQueue.add_label_to_queue
+
+    # Kept in the queue as well, which draws the image of the answer from it
+    def add(self, label, *args, **kwargs):
         queued.append(label)
+        return add_label(self, label, *args, **kwargs)
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', add)
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: '')
     client = make_client(tmp_path, empty_repo=True)
@@ -52,6 +55,8 @@ def test_scan_prints_the_label_with_the_code(printed):
     result = response.get_json()
     assert result['success'] is True and result['printed'] is True
     assert result['label'] == 'Box.json' and result['filled'] == {'code': 'A-17'}
+    # Queued as any print, the station follows the job to its outcome
+    assert result['queued'] is True and result['job'] and result['start']
     assert len(printed.queued) == 1
     printed.queued[0].process_templates()
     assert printed.queued[0].code_text == 'A-17'

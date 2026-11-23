@@ -9,6 +9,7 @@ import pytest
 from app import create_app
 from app.labeldesigner import snmp
 from app.labeldesigner.drivers.brother import network
+from tests.helpers import outcome
 from tests.printing.test_ipp import fake_printer, fixture as ipp_fixture, network_job  # noqa: F401
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fixtures', 'snmp')
@@ -209,31 +210,29 @@ def test_ipp_for_a_device_without_the_status(fake_printer, agent):
 
 
 def test_job_waits_until_the_printer_finished(network_job, agent):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     agent['answers'] = [printer_state(ENDLESS_62, status) for status in (IDLE, PRINTING, PRINTING, OTHER, IDLE)]
-    assert print_label().get_json() == {'success': True}
+    assert outcome(client, print_label()) == ('printed', '')
     assert sent == ['tcp://127.0.0.1']
     # Checked before, then asked until it was idle again, without IPP
     assert (agent['requests'], answer['requests']) == (5, 0)
 
 
 def test_job_with_labels_that_cannot_be_fed(network_job, agent):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     agent['answers'] = [printer_state(ENDLESS_62), printer_state(ENDLESS_62, PRINTING),
                         printer_state(endless_62(CANNOT_FEED), OTHER)]
     response = print_label()
-    assert response.status_code == 503
     # The printer prints the label once the labels are fed
-    assert response.get_json()['message'] == 'The printer reports: ' + network.FEED_ERROR
-    assert 'Do not print it again' in response.get_json()['message']
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: ' + network.FEED_ERROR))
+    assert 'Do not print it again' in outcome(client, response)[1]
 
 
 def test_job_is_not_sent_with_the_cover_open(network_job, agent):
-    answer, sent, print_label = network_job
+    answer, sent, print_label, client = network_job
     agent['answers'] = [printer_state(endless_62(COVER_OPEN), OTHER)]
     response = print_label()
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer reports: The cover is open'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: The cover is open'))
     assert sent == []
 
 

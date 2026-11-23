@@ -8,11 +8,12 @@ import json
 import os
 
 import pytest
+from flask import has_app_context, has_request_context
 
 from app.labeldesigner import adding, printer, printer_settings, routes
 from app.labeldesigner.drivers import BROTHER, reach
 from tests.api.test_mcp import tool
-from tests.helpers import _red_square, make_client
+from tests.helpers import _red_square, make_client, outcome
 from tests.printing.test_reach import names  # noqa: F401
 
 API = '/labeldesigner/api'
@@ -75,13 +76,13 @@ def test_addresses_in_the_local_network_are_taken(client, sent, names, mode):  #
     names['printer.test'] = ['192.168.1.60', 'fd00::60']
     devices = ['tcp://192.168.1.60', 'tcp://printer.test', 'tcp://[fd00::60]', 'tcp://10.0.0.5:9100', 'tcp://100.64.1.2']
     for device in devices:
-        assert print_on(client, device).get_json() == {'success': True}, device
+        assert outcome(client, print_on(client, device)) == ('printed', ''), device
     assert sent == devices
 
 
 def test_any_takes_addresses_outside(client, sent):
     client.application.config['ADD_PRINTERS'] = 'any'
-    assert print_on(client, 'tcp://8.8.8.8').get_json() == {'success': True}
+    assert outcome(client, print_on(client, 'tcp://8.8.8.8')) == ('printed', '')
     assert sent == ['tcp://8.8.8.8']
 
 
@@ -108,16 +109,16 @@ def test_off_takes_configured_and_found_printers_only(client, sent, monkeypatch)
     for device in ('tcp://192.168.1.60', 'vc500w://192.168.1.60', 'tcp://127.0.0.1'):
         answer = print_on(client, device)
         assert (answer.status_code, message(answer)) == (400, adding.NAMED_OFF), device
-    assert print_on(client, found).get_json() == {'success': True}
+    assert outcome(client, print_on(client, found)) == ('printed', '')
     # Another spelling of the printer found is a printer of its own
     for device in ('tcp://192.168.1.61:9100', 'tcp://192.168.1.61.'):
         assert message(print_on(client, device)) == adding.NAMED_OFF, device
     # Printers on USB, on Bluetooth and the simulator as before
     for device in ('simulation', '/dev/usb/lp0', 'usb://0x04f9:0x2042', 'bt://00:11:22:33:44:55'):
-        assert print_on(client, device).get_json() == {'success': True}, device
+        assert outcome(client, print_on(client, device)) == ('printed', ''), device
     client.application.config['PRINTERS'] = [('QL-800', 'tcp://192.168.1.62', 'Office')]
-    assert print_on(client, 'Office').get_json() == {'success': True}
-    assert print_on(client, 'tcp://192.168.1.62').get_json() == {'success': True}
+    assert outcome(client, print_on(client, 'Office')) == ('printed', '')
+    assert outcome(client, print_on(client, 'tcp://192.168.1.62')) == ('printed', '')
     assert sent == [found, 'simulation', '/dev/usb/lp0', 'usb://0x04f9:0x2042', 'bt://00:11:22:33:44:55',
                     'tcp://192.168.1.62', 'tcp://192.168.1.62']
 
@@ -125,10 +126,10 @@ def test_off_takes_configured_and_found_printers_only(client, sent, monkeypatch)
 def test_configured_printers_are_not_limited(client, sent):
     client.application.config['PRINTERS'] = [('QL-800', 'tcp://8.8.8.8', 'Far'), ('QL-800', 'tcp://169.254.1.9', 'Near')]
     for device in ('Far', 'tcp://8.8.8.8', 'Near', 'tcp://169.254.1.9'):
-        assert print_on(client, device).get_json() == {'success': True}, device
+        assert outcome(client, print_on(client, device)) == ('printed', ''), device
     client.application.config.update(PRINTERS=[], PRINTER_PRINTER='tcp://8.8.8.8', ADD_PRINTERS='off')
-    assert print_on(client, 'tcp://8.8.8.8').get_json() == {'success': True}
-    assert client.post(f'{API}/print', data=JOB).get_json() == {'success': True}
+    assert outcome(client, print_on(client, 'tcp://8.8.8.8')) == ('printed', '')
+    assert outcome(client, client.post(f'{API}/print', data=JOB)) == ('printed', '')
     assert sent == ['tcp://8.8.8.8', 'tcp://8.8.8.8', 'tcp://169.254.1.9', 'tcp://169.254.1.9', 'tcp://8.8.8.8', 'tcp://8.8.8.8']
 
 
@@ -137,7 +138,7 @@ def test_other_spellings_of_an_added_printer_are_checked(client, sent, names):  
     names['printer.test.'] = ['8.8.8.8']
     with open(os.path.join(client.application.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE), 'w') as fh:
         json.dump({'printers': {}, 'added': [{'address': 'tcp://printer.test', 'model': 'QL-800', 'name': 'Shed'}]}, fh)
-    assert print_on(client, 'Shed').get_json() == {'success': True}
+    assert outcome(client, print_on(client, 'Shed')) == ('printed', '')
     assert message(print_on(client, 'tcp://printer.test.')) == adding.NAMED_OUTSIDE
     assert sent == ['tcp://printer.test']
 
@@ -149,15 +150,28 @@ def test_each_connection_to_a_named_printer_is_checked(tmp_path, names, monkeypa
     client = make_client(tmp_path, empty_repo=True)
     monkeypatch.setattr(routes, 'device_state', lambda device, model: state(device, model))
     answer = print_on(client, 'tcp://printer.test')
-    assert message(answer).endswith(reach.NOT_ALLOWED)
+    # Also once the request is answered, when its job prints
+    told_state, told = outcome(client, answer)
+    assert answer.status_code == 200 and told_state == 'failed' and told.endswith(reach.NOT_ALLOWED)
     # Only in that request
     assert reach._checking.get() is None
+
+
+def test_a_job_prints_with_the_app_and_the_checks_of_its_request_only(client, monkeypatch):
+    client.application.config['ADD_PRINTERS'] = 'local'
+    seen = []
+    monkeypatch.setattr(printer.PrinterQueue, 'process_queue',
+                        lambda self: seen.append((reach.checking_mode(), has_request_context(), has_app_context())) or '')
+    assert outcome(client, print_on(client, 'tcp://192.168.1.60')) == ('printed', '')
+    assert outcome(client, print_on(client, 'simulation')) == ('printed', '')
+    # The request is not kept for it
+    assert seen == [('local', False, True), (None, False, True)]
 
 
 def test_saved_and_ready_made_labels_name_printers_alike(client, sent):
     answer = client.post(f'{API}/demos/print', json={'id': 'storage/013-homebox-62.json', 'printer': 'tcp://8.8.8.8'})
     assert (answer.status_code, message(answer)) == (400, adding.NAMED_OUTSIDE)
-    assert client.post(f'{API}/demos/print', json={'id': 'storage/013-homebox-62.json', 'printer': 'tcp://192.168.1.60'}).get_json() == {'success': True}
+    assert outcome(client, client.post(f'{API}/demos/print', json={'id': 'storage/013-homebox-62.json', 'printer': 'tcp://192.168.1.60'})) == ('printed', '')
     assert sent == ['tcp://192.168.1.60']
 
 
@@ -167,7 +181,7 @@ def test_homebox_prints_on_the_printer_of_the_status_also_when_off(client, sent,
     monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**shown, 'printers': [shown], 'selected': shown['path']})
     image = client.get(f'{API}/homebox').data
     answer = client.post(f'{API}/homebox', data=image, headers={'Content-Type': 'image/png'})
-    assert answer.get_json() == {'success': True}
+    assert outcome(client, answer) == ('printed', '')
     assert sent == ['tcp://192.168.1.61']
 
 
@@ -182,7 +196,7 @@ def test_mcp_prints_on_a_printer_found_also_when_off(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, 'get_ptr_status', lambda config, added=(): {**found, 'printers': [found], 'selected': found['path']})
     monkeypatch.setattr(routes, 'device_state', lambda device, model: state(device, model))
     result = tool(client, 'print_text', printer='QL-810W', label_size='62', count=1, lines=['x'])
-    assert result['content'][0]['text'].splitlines()[0].startswith('Printed 1 label')
+    assert result['content'][0]['text'].splitlines()[0].startswith('Added 1 label')
     assert sent == ['tcp://192.168.1.61']
 
 

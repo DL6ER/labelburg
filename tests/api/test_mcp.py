@@ -10,7 +10,8 @@ import re
 import pytest
 from PIL import Image
 
-from app.labeldesigner import mcp_tools, printer_settings, tape
+from app.labeldesigner import mcp_tools, print_queue, printer, printer_settings, tape
+from app.labeldesigner.label import SMALL_CODE, SMALL_SIZED_CODE
 from tests.helpers import make_client
 
 HEADERS = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'}
@@ -61,10 +62,37 @@ def test_print_text_with_a_code_returns_the_image(client, tmp_path):
     result = tool(client, 'print_text', printer='Kitchen', label_size='62', count=2, lines=['Wi-Fi'],
                   code='WIFI:T:WPA;S:home;P:secret;;')
     assert not result.get('isError')
-    assert result['content'][0]['text'].splitlines()[0] == 'Printed 2 labels on Kitchen'
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 2 labels to the queue of Kitchen'
     image = Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data'])))
     assert image.width > 0
     assert printed(tmp_path) == 2
+
+
+def test_mcp_adds_to_the_queue(client, tmp_path, monkeypatch):
+    sources = []
+    add = print_queue.add
+
+    def noted(*args, **kwargs):
+        sources.append(kwargs['source'])
+        return add(*args, **kwargs)
+    monkeypatch.setattr(print_queue, 'add', noted)
+    result = tool(client, 'print_label', name='QR-Example.json', printer='Kitchen', label_size='62', count=2)
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 2 labels of QR-Example.json to the queue of Kitchen'
+    assert Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data']))).width > 0
+    result = tool(client, 'print_text', printer='Kitchen', label_size='62', count=1, lines=['Jar'])
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
+    assert sources == ['mcp', 'mcp'] and printed(tmp_path) == 3
+    tools = {t['name']: t for t in call(client, 'tools/list')[1]['result']['tools']}
+    assert all('added to the queue of the printer' in tools[name]['description'] for name in ('print_label', 'print_text'))
+
+    # A filling refused when it is added tells how many were added before it
+    def full_after_one(*args, **kwargs):
+        if len(sources) == 3:
+            raise print_queue.Full()
+        return noted(*args, **kwargs)
+    monkeypatch.setattr(print_queue, 'add', full_after_one)
+    result = tool(client, 'print_label', name='QR-Example.json', printer='Kitchen', label_size='62', count=1, fillings=[{}, {}])
+    assert result['isError'] and result['content'][0]['text'].endswith(f': {printer.BUSY} (1 of 2 labels added to the queue)')
 
 
 def test_at_most_mcp_max_count_labels_per_call(client, tmp_path):
@@ -212,7 +240,7 @@ def test_a_name_of_several_printers_is_refused():
 
 def test_print_by_alias_prints_on_its_device(client, tmp_path):
     result = tool(client, 'print_text', printer='kitchen', label_size='62', count=1, lines=['x'])
-    assert result['content'][0]['text'].splitlines()[0] == 'Printed 1 label on Kitchen'
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
     assert printed(tmp_path) == 1
 
 
@@ -416,11 +444,27 @@ def test_the_logging_of_the_app_is_kept(tmp_path, monkeypatch):
 
 
 def test_the_image_returned_is_the_one_printed(client, tmp_path):
-    result = tool(client, 'print_text', printer='Kitchen', label_size='62', count=1, lines=['ID {{short-uuid}}'])
+    # Drawn when the job is added and again when it prints
+    result = tool(client, 'print_text', printer='Kitchen', label_size='62', count=1, lines=['Jar {{counter:7}}'])
     returned = Image.open(io.BytesIO(base64.b64decode(result['content'][1]['data'])))
     folder = tmp_path / 'simulated_labels'
     label = Image.open(folder / os.listdir(folder)[0])
     assert returned.convert('L').tobytes() == label.convert('L').tobytes()
+
+
+def test_labels_are_checked_with_the_number_of_labels(client, tmp_path, monkeypatch):
+    # As printed, e.g. Box 1 of 3, also in the preview the assistant gets
+    from app.labeldesigner.label import SimpleLabel
+    drawn = set()
+    process = SimpleLabel.process_templates
+    monkeypatch.setattr(SimpleLabel, 'process_templates', lambda self: process(self) or drawn.update(line['text'] for line in self.text))
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'text': [{'text': 'Box {{counter}} of {{total}}', 'size': '60'}]}).status_code == 200
+    assert not tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=3).get('isError')
+    assert not tool(client, 'print_text', printer='Kitchen', label_size='62', count=2, lines=['Jar {{counter}}/{{total}}']).get('isError')
+    assert printed(tmp_path) == 5
+    assert drawn == {'Box 1 of 3', 'Box 2 of 3', 'Box 3 of 3', 'Jar 1/2', 'Jar 2/2'}
 
 
 def test_home_assistant_gets_the_addresses_without_the_image_data(client):
@@ -473,7 +517,7 @@ def test_print_calls_are_logged_without_what_the_label_says(client, caplog):
     assert logged == ['MCP print_text on Kitchen, count 1', 'MCP print_label QR-Example.json on Kitchen, count 2, fillings 1']
 
 
-def test_a_print_job_keeps_the_image_of_its_first_label_only(client, monkeypatch):
+def test_a_print_job_keeps_no_image_of_its_labels(client, monkeypatch):
     from app.labeldesigner.label import SimpleLabel
     labels = []
     generate = SimpleLabel.generate
@@ -482,7 +526,9 @@ def test_a_print_job_keeps_the_image_of_its_first_label_only(client, monkeypatch
         'label_size': '62', 'print_type': 'text', 'printer': 'Kitchen', 'print_count': '3',
         'text': '[{"text": "Jar", "size": "60"}]'})
     assert response.status_code == 200 and response.get_json()['image']
-    assert [getattr(label, 'generated', None) is not None for label in labels] == [True, False, False]
+    # The first one is drawn for the answer and again when it prints
+    assert len(labels) == 4 and labels[0] is labels[1]
+    assert [getattr(label, 'generated', None) for label in labels] == [None] * 4
 
 
 def test_a_preview_refuses_a_label_size_the_printer_has_not_loaded(client, monkeypatch):
@@ -500,7 +546,7 @@ def test_a_font_not_installed_prints_with_the_fallback_font(client, tmp_path):
     result = tool(client, 'print_label', name='Jar.json', printer='Kitchen', label_size='62', count=1)
     assert not result.get('isError') and printed(tmp_path) == 1
     assert result['content'][0]['text'].startswith(
-        'Printed 1 label of Jar.json on Kitchen. The font Not Installed (Regular) is not installed, ')
+        'Added 1 label of Jar.json to the queue of Kitchen. The font Not Installed (Regular) is not installed, ')
     # Text cut off still prints nothing
     assert client.post('/labeldesigner/api/repository/save', json={
         'name': 'Badge.json', 'label_size': '62x29', 'text_fit': 'none',
@@ -508,6 +554,49 @@ def test_a_font_not_installed_prints_with_the_fallback_font(client, tmp_path):
     result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1,
                   fillings=[{'Name': 'Maximilian-Alexander von Hohenzollern'}])
     assert result['isError'] and 'part of it is cut off' in result['content'][0]['text'] and printed(tmp_path) == 1
+
+
+LINK = 'https://www.example.com/inventory/garage/shelf-3/box-17?item=cordless-drill-and-charger'
+
+
+def test_a_code_that_may_be_too_small_to_scan_prints_only_when_the_user_wants_it(client, tmp_path):
+    # As the label designer shows it before Print
+    result = tool(client, 'preview_label', printer='Kitchen', label_size='12', code=LINK)
+    assert result['content'][0]['text'].startswith(f'Preview. {SMALL_CODE}')
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK)
+    assert result['isError'] and printed(tmp_path) == 0
+    text = result['content'][0]['text']
+    assert f'Nothing printed: {SMALL_CODE} Tell the user: a larger code' in text and 'small_code_ok' in text
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 1
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
+    # A saved code with dots of a size set too small
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text': [{'text': 'Box 17', 'size': '60'}]}).status_code == 200
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1)
+    assert result['isError'] and f'Nothing printed: {SMALL_SIZED_CODE} Tell the user' in result['content'][0]['text']
+    assert printed(tmp_path) == 1
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 2
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label of Box.json to the queue of Kitchen'
+
+
+def test_small_code_ok_prints_no_label_cut_off(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Badge.json', 'label_size': '62x29', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text_fit': 'none', 'text': [{'text': '{{blank:Name}}', 'size': '80'}]}).status_code == 200
+    name = {'Name': 'Maximilian-Alexander von Hohenzollern'}
+    for small_code_ok in (False, True):
+        result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1, fillings=[name],
+                      small_code_ok=small_code_ok)
+        assert result['isError'] and 'cut off' in result['content'][0]['text'] and printed(tmp_path) == 0
+        assert (SMALL_SIZED_CODE in result['content'][0]['text']) != small_code_ok
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, lines=['A' * 200], font_size=200,
+                  small_code_ok=True)
+    assert result['isError'] and 'small_code_ok' not in result['content'][0]['text'] and printed(tmp_path) == 0
 
 
 def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monkeypatch):

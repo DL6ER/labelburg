@@ -14,7 +14,7 @@ from app.labeldesigner.drivers import backends
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import raster
 from app.labeldesigner.drivers.brother import usb
-from tests.helpers import EXAMPLE_FORMDATA, make_client
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 
 DEVICE = 'file:///dev/usb/lp0'
 
@@ -72,7 +72,7 @@ def test_status_query_during_print(client):
     result = {}
 
     def print_label():
-        result['print'] = client.application.test_client().post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA).get_json()
+        result['print'] = client.application.test_client().post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
 
     thread = threading.Thread(target=print_label)
     thread.start()
@@ -80,7 +80,7 @@ def test_status_query_during_print(client):
     status = client.get('/labeldesigner/api/printer_status').get_json()
     thread.join()
     assert status['errors'] == []
-    assert result['print'] == {'success': True}
+    assert outcome(client, result['print']) == ('printed', '')
 
 
 def test_print_during_status_query(client, monkeypatch):
@@ -91,7 +91,7 @@ def test_print_during_status_query(client, monkeypatch):
     time.sleep(0.1)
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
     thread.join()
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_device_lock_is_exclusive():
@@ -135,8 +135,7 @@ def test_print_gives_up_when_printer_stays_busy(client, monkeypatch):
     monkeypatch.setattr(devices, 'DEVICE_LOCK_TIMEOUT', 0.2)
     with devices.device_lock(DEVICE):
         response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'Printer is busy with another print job, please try again'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'Printer is busy with another print job, please try again'))
 
 
 def test_failed_status_query_releases_device(client, monkeypatch):
@@ -307,8 +306,7 @@ def test_print_error_of_the_printer_is_reported(client, monkeypatch):
         self.responses.append(bytes(packet))
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', replace_media)
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert response.status_code == 503
-    assert response.get_json()['message'] == 'The printer reports: Replace media error'
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: Replace media error'))
 
 
 def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monkeypatch):
@@ -323,12 +321,12 @@ def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monke
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', refused)
     monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert response.get_json()['message'] == 'The printer reports: Replace media error'
+    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
     status = client.get('/labeldesigner/api/printer_status').get_json()
     assert (status['errors'], status['media_width']) == (['Replace media error, clear it at the printer'], 62)
     # The next job too, asked for its tape the printer answers with the error it holds
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert response.get_json()['message'] == 'The printer reports: Replace media error'
+    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
     # Cleared, asked again once the request it held counts as lost
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
     monkeypatch.setattr(usb, 'ASK_AGAIN', 0)
@@ -416,7 +414,7 @@ def test_printer_of_unknown_model_is_asked_before_printing(client, monkeypatch):
     real_queue = routes.PrinterQueue
     monkeypatch.setattr(routes, 'PrinterQueue', lambda **kwargs: queues.append(real_queue(**kwargs)) or queues[-1])
     data = dict(EXAMPLE_FORMDATA, printer=DEVICE, model='Unknown')
-    assert client.post('/labeldesigner/api/print', data=data).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     assert queues[0].model == 'QL-700'
     # One that tells no model this server knows
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
@@ -459,7 +457,7 @@ def test_detected_pt_e550w_prints(client, monkeypatch):
     assert (lp0['model'], lp0['media_width']) == ('PT-E550W', 12)
     data = dict(EXAMPLE_FORMDATA, printer=DEVICE, model=lp0['model'], label_size='pt12')
     response = client.post('/labeldesigner/api/print', data=data)
-    assert response.get_json() == {'success': True}
+    assert outcome(client, response) == ('printed', '')
 
 
 def test_unknown_model_is_refused_with_a_message(client):
@@ -565,7 +563,7 @@ def test_send_errors_are_told_without_their_text(client, monkeypatch, caplog):
         monkeypatch.setattr(usb, 'send_job', fail)
         caplog.clear()
         response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-        assert (response.status_code, response.get_json()['message']) == (503, message)
+        assert (response.status_code, outcome(client, response)) == (200, ('failed', message))
         assert any(str(error) in record.getMessage() for record in caplog.records)
 
 
@@ -630,14 +628,14 @@ def test_copies_on_ql_printers_are_sent_at_once(client, monkeypatch):
     sent = []
     monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths: sent.append(len(page_lengths)) or {'did_print': True, 'ready_for_next_job': True})
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='12', cut_once='1'))
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
     assert sent == [12]
 
 
 def test_simulated_labels_are_saved_in_their_order(tmp_path):
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, printer='simulation', print_count='12')
-    assert client.post('/labeldesigner/api/print', data=data).get_json()['success'] is True
+    assert outcome(client, client.post('/labeldesigner/api/print', data=data)) == ('printed', '')
     names = sorted(os.listdir(printer.SIMULATED_LABELS_DIR))
     assert [name[-7:] for name in names] == [f'{i:03d}.png' for i in range(12)]
 
@@ -659,5 +657,5 @@ def test_configured_printers_with_names(client, monkeypatch):
     # Printed on the printer of that name
     data = dict(EXAMPLE_FORMDATA, printer='Office desk')
     response = client.post('/labeldesigner/api/print', data=data)
-    assert response.get_json()['success'] is True
+    assert outcome(client, response) == ('printed', '')
     assert len(os.listdir(printer.SIMULATED_LABELS_DIR)) == 1

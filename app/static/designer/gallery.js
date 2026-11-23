@@ -4,10 +4,10 @@
 // used from anywhere by its link, tagged or removed.
 
 import {
-    $, $$, esc, icon, clone, debounce, toast, hideToast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
+    $, $$, esc, icon, clone, debounce, toast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
     savedItem, demoItem, itemDesign, thumbUrl, drawThumb, preview, defaults, blanksOf, fieldType, blankChoices, valuesNow,
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
-    printedSub, NO_IMAGE, sheetNote
+    printedSub, NO_IMAGE, sheetNote, untold
 } from './core.js';
 import { perCopyOf } from './media.js';
 
@@ -83,10 +83,8 @@ async function printFirstLook() {
     if (!look) return;
     if (blanksOf(look.design).length) { showDetail(look, defaults({ design: look.design })); return; }
     const title = G.typed.split('\n').map(t => t.trim()).find(Boolean);
-    toast('Printing 1 label...', null, 120000);
     const entry = await printJob({ title, design: look.design, values: {}, copies: 1, source: { kind: 'look', id: look.id } });
-    hideToast();
-    toast(entry.state === 'printed' ? `${RESULT.printed} 1 label: ${entryName(entry)}` : `${RESULT.failed}: ${entry.message}`, null, 6000);
+    if (!untold(entry)) toast(entry.state === 'printed' ? `${RESULT.printed} 1 label: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
 }
 
 // Templates whose name, group, tags or blanks share words with the text typed
@@ -176,7 +174,7 @@ const printedItems = () => S.history.filter(h => h.state !== 'printing').slice(0
 // Saved labels and those with the text typed are drawn here, ready-made
 // ones as typed come from the server, printed ones with their values
 const typedThumb = item => (design, values) => applyTyped(item, clone(design), values);
-const printedThumb = item => design => ({ design, values: item.values });
+const printedThumb = item => design => ({ design, values: item.values, total: item.entry.labels });
 let shownItems = [];
 function drawGrid() {
     const grid = $('#tplGrid');
@@ -193,7 +191,7 @@ function drawGrid() {
 
 // --- A label of the gallery ---------------------------------------------------------
 
-const RESULT = { printed: 'Printed', failed: 'Not printed' };
+const RESULT = { printed: 'Printed', failed: 'Not printed', unknown: 'Maybe not printed' };
 async function showDetail(item, values = null) {
     const box = $('#tplDetail');
     if (!box) return;
@@ -240,23 +238,27 @@ async function showDetail(item, values = null) {
     };
     shot();
     const later = debounce(shot, 250);
-    // One print at a time: a key held down or a second click waits for it
+    // One print at a time until the server took it: a key held down or a
+    // second click waits for that, the next name may follow while it waits
     let printing = false;
     const print = async () => {
         if (printing) return;
         printing = true;
-        try { await printOnce(); } finally { printing = false; }
+        let taken = false;
+        const free = () => { if (!taken) { taken = true; printing = false; } };
+        try { await printOnce(free); } finally { free(); }
     };
-    const printOnce = async () => {
+    const printOnce = async accepted => {
         const copies = copiesNow();
         const now = valuesNow(work.values, starts, { design: work.design });
-        toast(`Printing ${copies} ${copies === 1 ? 'label' : 'labels'}...`, null, 120000);
-        const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } });
-        hideToast();
-        toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT.failed}: ${entry.message}`, null, 6000);
-        // Ready for the next one: the first text blank is emptied
         const first = $$('#tplFields [data-blank]').find(inp => fieldType({ design: work.design }, inp.dataset.blank) === 'text');
-        if (entry.state === 'printed' && saved && first) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
+        const typed = first && first.value;
+        const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } }, null, undefined, () => {
+            accepted();
+            // Ready for the next one: the first text blank is emptied, unless typed into meanwhile
+            if (saved && first && first.isConnected && first.value === typed) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
+        });
+        if (!untold(entry)) toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
         if (G.cat === 'printed') drawTemplates();
     };
     $$('#tplFields [data-blank]').forEach(inp => {
@@ -339,7 +341,7 @@ function linksPanel(item, design) {
     };
     $('#tplPrintSticker').onclick = async () => {
         const entry = await printJob({ title: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
-        toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT.failed}: ${entry.message}`);
+        if (!untold(entry)) toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT[entry.state]}: ${entry.message}`);
     };
     $('#tplScan').onclick = () => { location.hash = 'scan/' + encodeURIComponent(item.id); };
 }

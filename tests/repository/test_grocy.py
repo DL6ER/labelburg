@@ -6,7 +6,7 @@ import os
 import pytest
 
 from app.labeldesigner import demos
-from tests.helpers import make_client
+from tests.helpers import make_client, outcome
 from tests.repository.helpers import SAVE_URL
 
 PRINT_URL = '/labeldesigner/api/repository/print'
@@ -49,7 +49,7 @@ def printed(tmp_path, monkeypatch):
     def post(**kwargs):
         queued.clear()
         response = client.post(PRINT_URL, **kwargs)
-        assert response.get_json() == {'success': True}
+        assert outcome(client, response) == ('printed', '')
         label = queued[0]
         label.process_templates()
         return [line['text'] for line in label.text], label.code_text
@@ -124,7 +124,7 @@ def test_a_mirrored_label_stays_mirrored(printed, monkeypatch):
     queued = []
     monkeypatch.setattr(printer.PrinterQueue, 'add_label_to_queue', lambda self, label, cut=True, high_res=False, fast=False: queued.append(label))
     assert printed.client.post(SAVE_URL, json=dict(GROCY_LABEL, mirror='1')).status_code == 200
-    assert printed.client.post(PRINT_URL, json=GROCY_REQUEST).get_json() == {'success': True}
+    assert outcome(printed.client, printed.client.post(PRINT_URL, json=GROCY_REQUEST)) == ('printed', '')
     assert queued[0]._mirror
 
 

@@ -12,7 +12,7 @@ from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
 from app.labeldesigner import refusals
-from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, pixels, TEXT, verify_image
+from tests.helpers import _red_square, _upload, EXAMPLE_FORMDATA, make_client, outcome, pixels, TEXT, verify_image
 
 
 class TestLabelDesignerAPI:
@@ -284,7 +284,7 @@ def test_flags_are_read_alike_by_all_that_take_them(tmp_path, monkeypatch):
                         lambda self: queued.extend(zip(self.label_cuts(), (e['high_res'] for e in self._print_queue))) or '')
     client = make_client(tmp_path)
     data = dict(EXAMPLE_FORMDATA, text=json.dumps([{'font': 'DejaVu Sans,Book', 'size': '40', 'text': 'Shelf {{blank:Room}}'}]))
-    assert client.post('/labeldesigner/api/print', data=dict(data, print_count='2', cut_once='true')).get_json() == {'success': True}
+    assert outcome(client, client.post('/labeldesigner/api/print', data=dict(data, print_count='2', cut_once='true'))) == ('printed', '')
     assert queued == [(False, False), (True, False)]
     response = client.post('/labeldesigner/api/preview', data=dict(data, mark_blanks='true'))
     assert response.status_code == 200

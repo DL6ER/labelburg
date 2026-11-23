@@ -5,7 +5,7 @@ import socket
 
 import pytest
 
-from app.labeldesigner import printer, printer_settings
+from app.labeldesigner import print_queue, printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers.escpos import protocol as escpos
@@ -89,3 +89,25 @@ def shared_printers(monkeypatch):
     yield
     for shared in printers.values():
         shared.close()
+
+
+@pytest.fixture(autouse=True)
+def jobs_end_before_the_answer(request, monkeypatch):
+    """A print request is answered once its job ended, so that a test reads
+    what was printed right after it. Tests of the queue itself use queued."""
+    print_queue.reset()
+    if 'queued' not in request.fixturenames:
+        add = print_queue.add
+
+        def ended(*args, **kwargs):
+            job = add(*args, **kwargs)
+            job.done.wait(60)
+            return job
+        monkeypatch.setattr(print_queue, 'add', ended)
+    yield
+    print_queue.reset()
+
+
+@pytest.fixture
+def queued():
+    """Print requests are answered once their job is in the queue."""
