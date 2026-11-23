@@ -1453,7 +1453,7 @@ class SimpleLabel:
                         return 0.03 * random.randint(5, 10) * self._line_size(line)
                     for x_shift in [-get_shift_amount(), get_shift_amount()]:
                         for y_shift in [-get_shift_amount(), get_shift_amount()]:
-                            new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
+                            new_random_text = ''.join(random.choices(PRINTABLE, k=len(line['text'])))
                             self._draw_line(draw, (x + x_shift, y + y_shift), new_random_text, font, anchor, fill=color, align=align,
                                             spacing=spacing, letter_spacing=letter_spacing)
 
