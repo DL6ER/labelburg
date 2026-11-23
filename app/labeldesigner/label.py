@@ -1395,11 +1395,9 @@ class SimpleLabel:
                     text_y = y - top
                     bbox = (bbox[0], y, bbox[2], y + bottom - top)
                 elif not IS_LAST_LINE:
-                    # Some characters may need special height
+                    # As wide as its text, as high as PRINTABLE in its font
                     top, bottom = _printable_extent(font)
-                    Ag = (0, y + top, 0, y + bottom)
-                    # Get bbox with width of text and dummy height
-                    bbox = (bbox[0], Ag[1], bbox[2], Ag[3])
+                    bbox = (bbox[0], y + top, bbox[2], y + bottom)
                 # The box is drawn from the top of the line, its lower edge
                 # included, also where the text is lower or there is none
                 if checkbox:
