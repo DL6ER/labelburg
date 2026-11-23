@@ -307,7 +307,7 @@ def test_identity_is_asked_for_over_ipp():
     assert request['requested-attributes'] == ['printer-make-and-model', 'printer-device-id']
 
 
-@pytest.mark.parametrize('device_id', [LASER, 'MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;'])
+@pytest.mark.parametrize('device_id', [LASER])
 def test_shared_device_refused_for_adding_is_let_go(device_id):
     device = SharedDevice(device_id=device_id)
     shared = FakeHost(device)

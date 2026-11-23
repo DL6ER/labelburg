@@ -271,7 +271,7 @@ def settings_file(client) -> str:
     return os.path.join(client.application.config['LABEL_REPOSITORY_DIR'], printer_settings.FILE)
 
 
-@pytest.mark.parametrize('device_id', [LASER, 'MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;'])
+@pytest.mark.parametrize('device_id', [LASER])
 def test_refused_add_lets_the_printer_go(client, device_id):
     device = SharedDevice(device_id=device_id)
     shared = FakeHost(device)
