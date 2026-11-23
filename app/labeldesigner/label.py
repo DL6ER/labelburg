@@ -928,7 +928,8 @@ class SimpleLabel:
             code, self._code_scale = self._sized(code, width, height, parts, own_look=False, between=between)
         self._code_size = code.size if code is not None else None
 
-        if self.want_text(img):
+        with_text = self.want_text(img)
+        if with_text:
             self._text_scale = 1.0
             self._layouts = self._shared_layouts if self._shared_layouts is not None else {}
             # The text is part of the key: copies differ e.g. by a counter
@@ -1090,7 +1091,7 @@ class SimpleLabel:
             imgResult.paste(code, code_offset)
 
         self._line_boxes = {}
-        if self.want_text(img):
+        if with_text:
             self._draw_text(imgResult, bboxes, text_offset)
 
         # Draw border if thickness > 0
