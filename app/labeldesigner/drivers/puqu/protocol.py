@@ -1,6 +1,7 @@
 """The protocol of the PUQU Q00, also sold as the Reekon P1 Tagger (P1L), over
-Bluetooth SPP (RFCOMM), as https://github.com/MatinxHT/puquprintJS
-(src/protocol.ts) sends it. A label is a header and its rows, run-length
+Bluetooth LE, as https://github.com/MatinxHT/puquprintJS (src/protocol.ts)
+sends it: written to characteristic ae01, answered with the notifications of
+ae02. No pairing is needed. A label is a header and its rows, run-length
 compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
 
 import socket
@@ -11,8 +12,12 @@ from .. import bitmap, progress, transports
 # 8 dots per mm, the printhead is 48 mm wide
 DPI = 203
 HEAD = 384
-# The printers seen so far listen on RFCOMM channel 2
-CHANNEL = 2
+# 16-bit UUIDs of the characteristics, as the printer tells them
+WRITE = bytes.fromhex('ae01')[::-1]
+NOTIFY = bytes.fromhex('ae02')[::-1]
+# What is written at once, and the pause after it, as puquprintJS writes
+CHUNK = 180
+CHUNK_PAUSE = 0.01
 STATE_QUERY = bytes([0x3a, 0x5a, 0, 0, 0, 0, 0, 0x0a])
 
 # Flags of a state reply, the ones that keep it from printing
@@ -42,10 +47,6 @@ QUIET = 0.8
 class PuquError(Exception):
     pass
 
-
-def address(device: str) -> tuple[str, int]:
-    """MAC address and RFCOMM channel of bt://<MAC>[/<channel>]."""
-    return transports.bt_address(device, CHANNEL)
 
 
 def compress(rows: list[bytes]) -> bytes:
@@ -97,10 +98,35 @@ def errors(reply: bytes) -> list[str]:
     return [message for flag, message in ERRORS.items() if flags(reply) & flag]
 
 
-def connect(device: str) -> socket.socket:
-    s = transports.rfcomm(device, CHANNEL)
-    s.settimeout(ANSWER_WAIT)
-    return s
+class Connection:
+    """The kept connection to a printer on Bluetooth LE, bt://<MAC>, read and
+    written like a socket, in pieces of CHUNK bytes."""
+
+    def __init__(self, device: str):
+        self.device = device
+        self.s = transports.kept_le(device, WRITE, NOTIFY, error=PuquError, no_answer=PuquError)
+        self.s.settimeout(ANSWER_WAIT)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        transports.release_le(self.device, self.s)
+
+    def settimeout(self, timeout: float):
+        self.s.settimeout(timeout)
+
+    def sendall(self, data: bytes):
+        for i in range(0, len(data), CHUNK):
+            self.s.sendall(data[i:i + CHUNK])
+            time.sleep(CHUNK_PAUSE)
+
+    def recv(self, size: int) -> bytes:
+        return self.s.recv(size)
+
+
+def connect(device: str) -> Connection:
+    return Connection(device)
 
 
 def _read(s: socket.socket) -> bytes:

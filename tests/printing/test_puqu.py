@@ -1,5 +1,5 @@
 """The PUQU Q00 (also the Reekon P1 Tagger): its protocol against a fake printer in
-place of the RFCOMM socket, and printing and status through the label
+place of the Bluetooth LE connection, and printing and status through the label
 designer."""
 import json
 
@@ -10,7 +10,7 @@ from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
 from tests.helpers import make_client, outcome
 
-DEVICE = 'bt://CD:AC:BB:E0:46:4C/2'
+DEVICE = 'bt://CD:AC:BB:0F:CB:36'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '60'}])
 
 
@@ -105,11 +105,6 @@ def test_state_replies_and_their_errors():
         'The printer has no labels', 'The cover of the printer is open']
     # A low battery still prints
     assert protocol.errors(reply(protocol.LOW_BATTERY)) == []
-
-
-def test_address_and_channel():
-    assert protocol.address('bt://cd:ac:bb:e0:46:4c') == ('CD:AC:BB:E0:46:4C', 2)
-    assert protocol.address('bt://CD:AC:BB:E0:46:4C/1') == ('CD:AC:BB:E0:46:4C', 1)
 
 
 class _Label:

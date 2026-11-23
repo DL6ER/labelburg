@@ -530,7 +530,6 @@ def test_bluetooth_connections_are_set_up_one_at_a_time(monkeypatch):
     # the others give up waiting
     import threading
     import time
-    from app.labeldesigner.drivers.puqu import protocol as puqu
     paging, most = [], []
 
     class Socket:
@@ -550,7 +549,7 @@ def test_bluetooth_connections_are_set_up_one_at_a_time(monkeypatch):
             pass
     monkeypatch.setattr(protocol.socket, 'socket', Socket)
     threads = [threading.Thread(target=protocol.Connection, args=(DEVICE,)),
-               threading.Thread(target=puqu.connect, args=('bt://CD:AC:BB:E0:46:4C/2',))]
+               threading.Thread(target=protocol.Connection, args=('bt://00:00:5E:00:53:02',))]
     for thread in threads:
         thread.start()
     for thread in threads:

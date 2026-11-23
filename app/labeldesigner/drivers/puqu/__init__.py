@@ -60,8 +60,10 @@ class Puqu(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
-    # bt://<MAC>[/<RFCOMM channel>]
-    device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),)
+    # bt://<MAC> on Bluetooth LE
+    device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}'),)
+    # Found by the name it advertises, e.g. P1L-243561(BLE)
+    bluetooth_names = {re.compile(r'(Q00|P1L)-.*', re.DOTALL): 'PUQU/Q00'}
     errors = (OSError, protocol.PuquError)
     reports_tape = False
 
