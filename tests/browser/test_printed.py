@@ -396,7 +396,8 @@ def test_a_label_printed_shows_its_dates_as_they_were_written_in_templates(page,
     dates_in('')
     page.click('#templates')
     page.click('.tpl-nav [data-cat="printed"]')
-    with page.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST') as request:
+    # The preview of the panel, made at the time printed; the editor may ask for its own meanwhile
+    with page.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST' and 'timestamp' in sent(r)) as request:
         page.click('.tpl-grid .thumb >> nth=0')
     # As "Same date" prints it
     assert sent(request.value)['date_language'] == 'de'
