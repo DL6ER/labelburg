@@ -501,7 +501,7 @@ def test_a_label_printed_with_new_dates_or_numbers_is_named_as_it_prints(client,
 
 @pytest.mark.parametrize('code, title', [
     ('WIFI:T:WPA;S:Home;P:secret123;;', 'Home'),
-    (r'WIFI:P:secret123;T:WPA;S:Caf\;e \"Nord\";H:false;;', 'Caf;e "Nord"'),
+    (r'WIFI:P:secret123;T:WPA;S:Home\;Office \"Nord\";H:false;;', 'Home;Office "Nord"'),
     ('WIFI:T:nopass;P:secret123;;', 'Label'),
     ('BEGIN:VCARD\nVERSION:3.0\nFN:Ann\nTEL:secret123\nEND:VCARD', 'Label'),
     ('BEGIN:VEVENT\nSUMMARY:secret123\nEND:VEVENT', 'Label'),
