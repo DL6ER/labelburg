@@ -1597,7 +1597,7 @@ class SimpleLabel:
     def _baseline(draw, text, font) -> int:
         """How far below xy _draw_line puts the baseline of text: Pillow's
         top anchor is the top of the letters, with icons that of an "H"."""
-        if any(icons.is_icon(char) for char in text):
+        if icons.has_icon(text):
             text = 'H'
         return -draw.textbbox((0, 0), text, font=font, anchor='ls')[1]
 
