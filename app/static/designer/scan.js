@@ -2,7 +2,7 @@
 // (it types like a keyboard) is sent to the server, which fills the blanks
 // of the label with it and prints it.
 
-import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, UNREACHABLE, SOURCE } from './core.js';
+import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, followJob, UNREACHABLE, SOURCE } from './core.js';
 import { camera, cameraBlocked } from './camera.js';
 
 // ms: a scanner types faster than FAST between characters; after Enter or
@@ -271,9 +271,23 @@ function drawResult() {
     else if (shown.message) state = `<p class="scan-state warn">${icon('warn')}<span>${esc(shown.message)}</span></p>
         ${shown.hint ? `<p class="scan-hint">${esc(shown.hint)}</p>` : ''}`;
     else state = `${shown.image ? `<div class="scan-shot"><img alt="The label" src="data:image/png;base64,${esc(shown.image)}"></div>` : ''}
-        <p class="scan-state ok">${icon('check')}<span>${esc(shown.printed ? `Printed: ${titleOf(shown.name)}` : 'Shown, not printed')}</span></p>
+        ${shown.pending ? `<p class="scan-state">${esc(`Printing: ${titleOf(shown.name)}`)}</p>`
+            : `<p class="scan-state ok">${icon('check')}<span>${esc(shown.printed ? `Printed: ${titleOf(shown.name)}` : 'Shown, not printed')}</span></p>`}
         ${shown.filled.length ? `<p class="scan-filled muted">${esc(`Filled: ${shown.filled.join(', ')}`)}</p>` : ''}`;
     box.innerHTML = `<p class="scan-code">${esc(code)}</p>${state}`;
+}
+
+// A queued scan says printing until its job has printed or failed, the next
+// scans are sent meanwhile
+function follow(scan, data) {
+    const job = { job: data.job, start: data.start, seen: data.state, seenAt: Date.now(), path: (S.printer && S.printer.path) || '' };
+    scan.pending = true;
+    followJob(job).then(() => {
+        scan.pending = false;
+        if (job.state === 'unknown') scan.message = `Maybe not printed: ${job.message}`;
+        else if (job.state !== 'printed') scan.message = `Not printed: ${job.message}`;
+        drawResult();
+    });
 }
 
 async function send() {
@@ -286,6 +300,7 @@ async function send() {
         fd.append('code', scan.code);
         if (S.printer && S.printer.path) fd.append('printer', S.printer.path);
         if (S.printer && S.printer.model) fd.append('model', S.printer.model);
+        fd.append('source', 'designer');
         if (scan.previewOnly) fd.append('preview_only', '1');
         try {
             const r = await post('/scan', fd);
@@ -297,7 +312,10 @@ async function send() {
                 scan.message = data.message || (r.ok ? UNREACHABLE : 'The printer answered ' + r.status);
                 scan.hint = typeof data.hint === 'string' ? data.hint : '';
             }
-            else Object.assign(scan, { printed: !!data.printed, image: data.image || '', filled: Object.keys(data.filled || {}) });
+            else {
+                Object.assign(scan, { printed: !!data.printed, image: data.image || '', filled: Object.keys(data.filled || {}) });
+                if (data.printed && data.job && data.state !== 'printed') follow(scan, data);
+            }
         } catch (e) {
             scan.message = e.message;
         }

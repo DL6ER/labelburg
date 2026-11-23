@@ -146,6 +146,32 @@ def test_tab_ends_a_scan(station):
     assert station.page.evaluate('() => document.activeElement.id') == 'scanField'
 
 
+def queued(station, state, message=''):
+    """The next scan is queued as job-1, which the queue tells as state['state']."""
+    station.answer = (200, {'success': True, 'printed': True, 'label': 'Box', 'filled': {'code': 'A-17'}, 'queued': True,
+                            'job': 'job-1', 'state': 'waiting', 'start': 's1'})
+    station.page.route('**/api/queue/job-1', lambda route: route.fulfill(
+        status=200, content_type='application/json', body=json.dumps({'id': 'job-1', 'state': state['state'], 'message': message, 'start': 's1'})))
+
+
+def test_a_queued_scan_says_printing_until_its_job_has_printed(station):
+    page = station.page
+    state = {'state': 'waiting'}
+    queued(station, state)
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult:has-text("Printing: Box")')
+    assert 'Printed' not in card(page)
+    state['state'] = 'printed'
+    page.wait_for_selector('#scanResult:has-text("Printed: Box")', timeout=6000)
+    assert station.requests[0]['source'] == 'designer'
+
+
+def test_a_queued_scan_that_did_not_print_says_why(station):
+    queued(station, {'state': 'failed'}, 'The printer is out of labels')
+    station.scan('A-17')
+    station.page.wait_for_selector('#scanResult:has-text("Not printed: The printer is out of labels")', timeout=6000)
+
+
 def test_card_names_the_blanks_the_server_filled(station):
     page = station.page
     station.answer = (200, {'success': True, 'printed': True, 'label': 'Box', 'filled': {'Name': 'Erika', '<b>Room</b>': 'x'}, 'image': IMAGE})
