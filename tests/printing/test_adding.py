@@ -145,6 +145,23 @@ def test_shared_printer_is_known_by_its_device_id(host):
     assert usbip.key(host.address()) not in usbip._printers
 
 
+def test_shared_zpl_printer_is_known_by_its_device_id():
+    from app.labeldesigner.drivers.zpl import protocol as zpl
+    from tests.printing.test_zpl import DATAMAX_HS
+    device = SharedDevice(product=0x106E, device_id='MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;')
+    shared = FakeHost(device)
+    try:
+        def answer():
+            while data := device.printer.recv(65536):
+                if data == zpl.HOST_STATUS:
+                    device.printer.sendall(DATAMAX_HS)
+        threading.Thread(target=answer, daemon=True).start()
+        found = adding.identify(shared.address(), 'local')
+        assert (found['kind'], found['model'], found['state']['errors']) == ('usbip', 'Zebra/ZPL', [])
+    finally:
+        shared.close()
+
+
 def test_shared_printer_to_be_added_is_kept(host):
     FakeQL(host.devices[0])
     adding.identify(host.address(), 'local', keep=True)
