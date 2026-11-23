@@ -173,6 +173,87 @@ def test_enter_inside_a_fast_scan_is_a_line_break(station):
     assert station.codes() == ['BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD']
 
 
+def test_a_scanner_that_stops_briefly_around_shift_is_fast(station):
+    # A scanner set to German leaves up to 36 ms between some characters
+    station.page.evaluate("""() => {
+        let now = performance.now();
+        performance.now = () => now;
+        const field = document.querySelector('#scanField');
+        for (const ch of 'https://x.org') {
+            now += 36;
+            field.value += ch;
+            field.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ch, bubbles: true }));
+        }
+    }""")
+    station.wait_for(1)
+    assert station.codes() == ['https://x.org']
+
+
+def alt_code(page, key, digits):
+    page.keyboard.down('Alt')
+    for digit in digits:
+        page.keyboard.press(key + digit)
+    page.keyboard.up('Alt')
+
+
+def test_a_character_typed_as_alt_and_its_code_is_read(station):
+    # A scanner set to US English types the umlauts as Alt 0252 and Alt 0223
+    page = station.page
+    page.evaluate("""() => {
+        window.prevented = [];
+        addEventListener('keydown', e => { if (e.altKey && /^Digit|^Numpad/.test(e.code)) window.prevented.push(e.defaultPrevented); });
+    }""")
+    page.keyboard.type('Gr')
+    alt_code(page, 'Digit', '0252')
+    alt_code(page, 'Digit', '0223')
+    page.keyboard.type('e 5')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['Grüße 5']
+    assert page.evaluate('window.prevented') == [True] * 8
+
+
+def test_alt_codes_of_the_bytes_of_a_character_in_utf8_are_read(station):
+    # Another scanner types ü as Alt 0195 and Alt 0188, its two bytes in UTF-8
+    page = station.page
+    page.keyboard.type('Gr')
+    for code in ('0195', '0188', '0195', '0159'):
+        alt_code(page, 'Digit', code)
+    page.keyboard.type('e 5')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['Grüße 5']
+
+
+def test_alt_codes_that_are_no_utf8_are_windows_characters(station):
+    page = station.page
+    alt_code(page, 'Digit', '0195')
+    page.keyboard.type('x')
+    alt_code(page, 'Digit', '0195')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['ÃxÃ']
+
+
+def test_an_alt_code_last_in_a_scan_without_enter_is_kept(station):
+    page = station.page
+    page.evaluate('() => { const now = performance.now(); performance.now = () => now; }')
+    page.keyboard.type('Gru')
+    alt_code(page, 'Digit', '0223')
+    station.wait_for(1)
+    assert station.codes() == ['Gruß']
+
+
+def test_alt_codes_without_a_leading_zero_are_the_old_dos_characters(station):
+    page = station.page
+    alt_code(page, 'Numpad', '129')
+    alt_code(page, 'Numpad', '0128')
+    alt_code(page, 'Numpad', '65')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['ü€A']
+
+
 def test_lines_a_scanner_sends_after_a_short_stop_belong_to_the_code(station):
     # e.g. a Bluetooth scanner that sends a contact in bursts
     station.page.evaluate("""async () => {

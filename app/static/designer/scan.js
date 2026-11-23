@@ -8,8 +8,27 @@ import { camera, cameraBlocked } from './camera.js';
 // ms: a scanner types faster than FAST between characters; after Enter or
 // Tab it may go on within END_WAIT, a scanner without Enter stops for PAUSE.
 // Typing that starts after IDLE is a run of its own.
-export const END_WAIT = 200, PAUSE = 200, FAST = 35, IDLE = 2000;
-const TEXT_ENTRY = 'textarea, select, input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=image], [type=file], [type=range], [type=color])';
+export const END_WAIT = 200, PAUSE = 200, FAST = 50, IDLE = 2000;
+const TEXT_ENTRY ='textarea, select, input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=image], [type=file], [type=range], [type=color])';
+
+const DOS = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ ';
+
+// The character of Alt and the digits of code without a leading 0, as
+// Windows reads it: from code page 437
+function altChar(code) {
+    const n = Number(code) % 256;
+    if (n === 10 || n === 13) return '\n';
+    if (n < 32 && n !== 9) return '';
+    return n < 128 ? String.fromCharCode(n) : DOS[n - 128];
+}
+
+// The bytes of the UTF-8 character that begins with byte b
+const utf8Length = b => b >= 0xC2 && b <= 0xDF ? 2 : b >= 0xE0 && b <= 0xEF ? 3 : b >= 0xF0 && b <= 0xF4 ? 4 : 1;
+// bytes as UTF-8, else each a character of Windows-1252
+function decodeBytes(bytes) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bytes)); }
+    catch (e) { return new TextDecoder('windows-1252').decode(Uint8Array.from(bytes)); }
+}
 
 // Reads what is typed into target, a textarea, and calls onScan(text) at the
 // end of each scan: Enter or Tab, else a pause after a fast one
@@ -25,6 +44,7 @@ export function scanInput(target, onScan, clock = performance) {
     const screenKeys = on => { if (touch) target.inputMode = on ? 'text' : 'none'; };
     const reset = () => { times = []; before = typed = ''; pasted = false; };
     const end = () => {
+        flush();
         clearTimeout(timer);
         // A fast run is the scan, without what was left in the field before it
         const text = (fast() ? run() : target.value).replace(/\n+$/, '');
@@ -60,6 +80,44 @@ export function scanInput(target, onScan, clock = performance) {
         changed();
         later(end, END_WAIT);
     };
+    // A scanner types a character its layout lacks as Alt and its code on
+    // the digits, which the browser would take for a shortcut, e.g. a tab.
+    // Codes with a leading 0 are bytes, some scanners send the UTF-8 ones.
+    let alt = '', bytes = [];
+    const insert = text => {
+        target.setRangeText(text, target.selectionStart, target.selectionEnd, 'end');
+        changed();
+    };
+    const flush = () => {
+        if (!bytes.length) return;
+        const text = decodeBytes(bytes);
+        bytes = [];
+        insert(text);
+    };
+    // Before the key it comes with, so the characters stay in order
+    const onAltDigit = e => {
+        const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+        if (digit && e.altKey && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            alt += digit[1];
+        } else if (e.key !== 'Alt') flush();
+    };
+    const onAltUp = e => {
+        if (e.key !== 'Alt' || !alt) return;
+        e.preventDefault();
+        const code = alt, n = Number(code) % 256;
+        alt = '';
+        if (!code.startsWith('0') || n < 32) {
+            flush();
+            const ch = altChar(code);
+            if (ch) insert(ch);
+            return;
+        }
+        // A byte that does not go on with the character begun starts anew
+        if (bytes.length && (n & 0xC0) !== 0x80) flush();
+        bytes.push(n);
+        if (bytes.length >= utf8Length(bytes[0])) flush();
+    };
     // The field keeps the focus: the scanner types where it is. A layer
     // open, e.g. the search, keeps its own, so does text selected with the mouse.
     let pressed = false;
@@ -86,7 +144,8 @@ export function scanInput(target, onScan, clock = performance) {
     };
     const layer = new MutationObserver(refocus);
     // The pointer and stray keys are seen before anything else
-    const on = [[target, 'input', onInput], [target, 'keydown', onKey], [target, 'focusout', onBlur], [target, 'pointerdown', onTap],
+    const on = [[target, 'input', onInput], [target, 'keydown', onAltDigit], [target, 'keydown', onKey], [target, 'keyup', onAltUp],
+        [target, 'focusout', onBlur], [target, 'pointerdown', onTap],
         [document, 'click', refocus], [document, 'visibilitychange', onShown], [window, 'focus', refocus], [window, 'blur', onPress], [document, 'keydown', onStray, true],
         ...['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].map(type => [document, type, onPress, true])];
     on.forEach(([el, type, fn, capture]) => el.addEventListener(type, fn, !!capture));
