@@ -339,12 +339,8 @@ def get_status(printer, timeout: float = 2.0, key: str | None = None):
 
 def _release(printer):
     """Close the printer handle right away, also when the status query failed
-    and a traceback still references the printer. The backend closes the
-    handle again when the object is garbage collected, which would close an
-    unrelated file if the descriptor number was reused in the meantime, so
-    that second close is turned into a no-op."""
+    and a traceback still references the printer."""
     printer.dispose()
-    printer.dispose = lambda: None
 
 
 def _held_error(key: str) -> dict | None:
