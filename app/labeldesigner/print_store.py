@@ -546,8 +546,12 @@ def history_folder() -> str:
 def _kept_file(name: str, job_id: str) -> str | None:
     """The file name of the history, None where it is not kept. job_id may
     come from an address, it names no other file."""
-    path = _history_path(name) if _base is not None and re.fullmatch(r'\w{1,64}', job_id) else None
-    return path if path and os.path.exists(path) else None
+    if _base is None or not re.fullmatch(r'\w{1,64}', job_id):
+        return None
+    # Normalized and checked to stay in the folder, as CodeQL knows it
+    folder = os.path.normpath(_history_path(''))
+    path = os.path.normpath(_history_path(name))
+    return path if path.startswith(folder + os.sep) and os.path.exists(path) else None
 
 
 def image_path(job_id: str, number: int) -> str | None:
