@@ -60,7 +60,12 @@ def advice(problem: str, title: str, names: list[str]) -> str | None:
             text += f' Contact codes, e.g., from a business card, fill {_listed(contact)} as {"it is" if len(contact) == 1 else "they are"}.'
         return text
     if problem == NO_CONTACT_MATCH:
-        steps = ', '.join(f'click the blank "{name}" and change its name to {new}' for name, new in zip(names, ('Name', 'Address')))
+        # Blanks a contact fills already are right, the contact lacks those details
+        missing = [new for new in ('Name', 'Address') if not any(blank_key(name) == blank_key(new) for name in names)]
+        pairs = list(zip((name for name in names if not _contact_blank(name)), missing))
+        if not pairs:
+            return None
+        steps = ', '.join(f'click the blank "{name}" and change its name to {new}' for name, new in pairs)
         return edit + steps + ', and save the label. Contacts fill the blanks Name, Address, Company, Phone and Email.'
     return None
 
@@ -117,8 +122,19 @@ def _quoted_printable(charset: str):
     return decode
 
 
+# Where a line of a vCard begins whose line breaks a scanner left out: at a
+# property in capitals, with its group and parameters, before its colon
+_LINE_START = re.compile(
+    r'(?:item\d+\.)?(?:BEGIN|VERSION|N|FN|ORG|TITLE|ROLE|TEL|EMAIL|ADR|LABEL|URL|NOTE|BDAY|NICKNAME|PHOTO|LOGO'
+    r'|REV|UID|CATEGORIES|GEO|TZ|KIND|IMPP|X-[A-Z0-9-]+|END)'
+    r'(?:;(?:[A-Za-z-]+=[^;:]*|HOME|WORK|CELL|VOICE|FAX|PREF|INTERNET|MSG|PAGER|POSTAL|PARCEL|DOM|INTL|CAR|VIDEO))*:')
+
+
 def _vcard_lines(text: str) -> list[tuple[str, str, object]]:
     """(property, value, decoder of its parts) of each line, unfolded."""
+    if not re.search(r'[\r\n]', text.strip()):
+        # The match takes the whole name, so no shorter one is found within it
+        text = _LINE_START.sub(lambda m: ('\n' if m.start() else '') + m.group(), text)
     lines = re.split(r'\r\n|\n|\r', re.sub(r'\r?\n[ \t]', '', text))
     result, i = [], 0
     while i < len(lines):

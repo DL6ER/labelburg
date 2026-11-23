@@ -78,6 +78,25 @@ def test_advice_names_the_label_and_its_blanks():
         assert scan.advice(problem, 'Box', ['code']) is None
 
 
+def test_advice_for_a_contact_renames_only_blanks_a_contact_does_not_fill():
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Envelope', ['Name', 'Address']) is None
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Envelope', ['Name', 'Room']) == (
+        'Open "Envelope" in the editor, click the blank "Room" and change its name to Address, and save the label. '
+        'Contacts fill the blanks Name, Address, Company, Phone and Email.')
+
+
+def test_a_vcard_without_its_line_breaks_is_read():
+    # As a scanner types it that leaves out the line breaks within a code
+    text = ('BEGIN:VCARDVERSION:3.0N:Muster;ErikaFN:Erika MusterTEL:+49 30 1234567EMAIL:erika@example.com'
+            'ADR:;;Hauptstr. 1;Köln;;50667;GermanyEND:VCARD')
+    assert scan.fill_blanks(['Name', 'Address', 'Phone', 'Email'], {}, text) == {
+        'Name': 'Erika Muster', 'Address': 'Hauptstr. 1\n50667 Köln\nGermany', 'Phone': '+49 30 1234567', 'Email': 'erika@example.com'}
+    text = ('BEGIN:VCARDVERSION:2.1N:MUSTER;ERIKATEL;CELL;VOICE:+49 228 1234item1.ADR;TYPE=home:;;HAUPTSTR. 5;BERLIN;;10115;GERMANY'
+            'EMAIL;INTERNET:erika@example.orgX-ABC:xEND:VCARD')
+    assert scan.fill_blanks(['First name', 'Phone', 'City', 'Country', 'Email'], {}, text) == {
+        'First name': 'ERIKA', 'Phone': '+49 228 1234', 'City': 'BERLIN', 'Country': 'GERMANY', 'Email': 'erika@example.org'}
+
+
 def test_a_vcard_cut_in_parts_is_refused():
     # A pause of the scanner within the card splits it into scans of their own
     head, tail = VCARD[:60], VCARD[60:]
