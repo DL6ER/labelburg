@@ -8,6 +8,7 @@ import pytest
 from app.labeldesigner import print_queue, printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
+from app.labeldesigner.drivers import escpos as escpos_driver
 from app.labeldesigner.drivers.escpos import protocol as escpos
 
 
@@ -77,6 +78,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
+    monkeypatch.setattr(escpos_driver, '_told', {})
 
 
 @pytest.fixture(autouse=True)

@@ -79,11 +79,12 @@ class HoldingQL(FakeQL):
 
 class FakeTM:
     """An Epson receipt printer behind a shared device: answers the status
-    requests with the bytes in 'replies', keeps the job."""
+    requests with the bytes in 'replies' and its model name as a TM-T20II
+    does, keeps the job."""
 
     def __init__(self, device):
         self.received = b''
-        self.replies = {escpos.OFFLINE: 0x12, escpos.PAPER: 0x12}
+        self.replies = {escpos.OFFLINE: bytes([0x12]), escpos.PAPER: bytes([0x12]), escpos.MODEL_NAME: b'\x5fTM-T20II\x00'}
         self._printer = device.printer
         threading.Thread(target=self._answer, daemon=True).start()
 
@@ -94,7 +95,7 @@ class FakeTM:
                 if not data:
                     return
                 if data in self.replies:
-                    self._printer.sendall(bytes([self.replies[data]]))
+                    self._printer.sendall(self.replies[data])
                 else:
                     self.received += data
             except OSError:
@@ -581,10 +582,10 @@ def test_shared_receipt_printer(tmp_path):
         tm = FakeTM(device)
         client = make_client(tmp_path)
         client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/ESC-POS')
-        tm.replies[escpos.PAPER] = 0x12 | 0x60
+        tm.replies[escpos.PAPER] = bytes([0x12 | 0x60])
         shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
         assert (shown['model'], shown['errors']) == ('Epson/ESC-POS', ['The printer has no paper'])
-        tm.replies[escpos.PAPER] = 0x12
+        tm.replies[escpos.PAPER] = bytes([0x12])
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
         assert outcome(client, response) == ('printed', '')
         assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')

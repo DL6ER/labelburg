@@ -4429,8 +4429,16 @@
           },
           "feed": {
             "type": "string",
-            "enum": ["cut", "cut_paper", "cut_label", "label"],
-            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
+            "enum": ["cut", "cut_paper", "cut_label", "label", "paper"],
+            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label, `paper` feeds the paper to the tear bar of a printer without a cutter. Missing where the printer offers none."
+          },
+          "caps": {
+            "type": "object",
+            "description": "What the printer told of itself that differs from its model, e.g. an Epson receipt printer by the model name it tells: `cutter` false where it has no cutter, `lead_mm` the blank paper before each label that is cut. Missing where it told nothing.",
+            "properties": {
+              "cutter": {"type": "boolean"},
+              "lead_mm": {"type": "number"}
+            }
           },
           "queue": {
             "type": "object",

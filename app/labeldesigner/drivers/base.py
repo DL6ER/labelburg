@@ -140,6 +140,12 @@ class Driver:
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False}
 
+    def device_capabilities(self, device: str, model: str) -> dict:
+        """What the printer at device told of itself that differs from the
+        capabilities() of its model, e.g. that it has no cutter, empty where
+        it told nothing."""
+        return {}
+
     def calibration_kind(self, model: str, label_size: str) -> str:
         """The calibration label of the model for the label size: narrow,
         where the printhead reaches past both edges, or wide, empty without

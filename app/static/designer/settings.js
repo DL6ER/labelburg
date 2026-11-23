@@ -152,6 +152,7 @@ const FEEDS = {
     cut_paper: ['Feed and cut', '', 'Feeding and cutting...'],
     cut_label: ['Feed one label', 'Cuts off the last label, uses one empty label.', 'Feeding one label...'],
     label: ['Feed one label', 'Feeds one empty label.', 'Feeding one label...'],
+    paper: ['Feed paper', 'Feeds the last label to the tear bar.', 'Feeding the paper...'],
 };
 // Printers feeding their paper, by path: one at a time, a second click would feed again
 const feeding = new Set();
@@ -159,7 +160,7 @@ function feedHTML(p) {
     if (!Object.hasOwn(FEEDS, p.feed || '')) return '';
     const [name, hint] = FEEDS[p.feed];
     const off = unreachable(p) ? ' disabled title="The printer cannot be reached"' : feeding.has(p.path) ? ' disabled' : '';
-    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(p.feed === 'label' ? 'down' : 'scissors')}${esc(name)}</button>
+    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(['label', 'paper'].includes(p.feed) ? 'down' : 'scissors')}${esc(name)}</button>
         ${hint ? `<small class="muted">${esc(hint)}</small>` : ''}`;
 }
 
@@ -193,7 +194,7 @@ async function feed(p) {
 }
 
 function cuttingHTML(p) {
-    const caps = capsOf(p.model), c = printerCut(p);
+    const caps = printerCaps(p), c = printerCut(p);
     if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';

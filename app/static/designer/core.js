@@ -104,7 +104,8 @@ export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
 const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
-export const printerCaps = (p = S.printer) => capsOf(p && p.model);
+// With what the printer told of itself, e.g. a receipt printer without a cutter
+export const printerCaps = (p = S.printer) => p && p.caps ? Object.assign({}, capsOf(p.model), p.caps) : capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 export const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 export const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
@@ -375,12 +376,13 @@ export const CUTS = [['each', 'After each label'], ['last', 'After the last labe
 export const CUT_KEYS = ['cut', 'half_cut', 'chain'];
 export const sizeCaps = (id, p = S.printer) => {
     const models = SIZES[id] ? SIZES[id].models : [], model = p && p.model;
-    return capsOf(models.includes(model) ? model : models.find(m => !noCutter(capsOf(m))) || models[0]);
+    return models.includes(model) ? printerCaps(p) : capsOf(models.find(m => !noCutter(capsOf(m))) || models[0]);
 };
 export const neverWhy = k => k.never_cut || '';
 export const noCutter = k => k.cutter === false;
 export const noCutterWhy = k => k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
-const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
+// Without a cutter, one that must not keep the last label inside feeds it to the tear bar
+const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: neverWhy(k) ? 'last' : 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 export const kept = (p = S.printer) => (p && p.settings) || {};
 export const printerCut = (p = S.printer) => { const k = kept(p); return usableCut({ cut: k.cut || 'each', half_cut: k.half_cut || '1', chain: k.chain || '0' }, printerCaps(p)); };
