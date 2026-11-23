@@ -650,6 +650,28 @@ def test_printer_that_tells_nothing(monkeypatch):
     ours.close(), printer.close()
 
 
+
+@pytest.mark.parametrize('ask, late', [(protocol.model_name, b'\x5fTM-T20II\x00'), (protocol.has_autocutter, b'\x02')])
+def test_answer_after_its_time_is_not_taken_for_the_status(monkeypatch, ask, late):
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    ours, printer = socket.socketpair()
+    c = protocol.Connection.__new__(protocol.Connection)
+    c.dev = ours.fileno()
+    assert ask(c) is None
+    printer.sendall(late)
+
+    def answer():
+        asked = b''
+        while not asked.endswith(protocol.PAPER):
+            asked += printer.recv(64)
+        printer.sendall(bytes([QUIET]))
+    thread = threading.Thread(target=answer)
+    thread.start()
+    assert c.ask(protocol.PAPER) == QUIET
+    thread.join()
+    ours.close(), printer.close()
+
+
 @pytest.mark.parametrize('answers, caps, feed', [
     # The distance from head to cutter after Epson, 1.5 mm more as on a TM-T20II
     (named(b'TM-T20II'), {'lead_mm': 12}, 'cut_paper'),
