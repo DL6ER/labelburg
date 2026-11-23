@@ -1340,20 +1340,19 @@ class SimpleLabel:
             extents = []
             if do_draw:
                 # What the line draws is what changes around its room
-                region = self._line_region(img, bboxes, i, text_offset)
+                region = self._line_region(img, bboxes, i, text_offset, left, right)
                 before = img.crop(region)
             if do_draw and INVERT_LINE:
                 # Draw a filled rectangle
-                center_x = 0
                 if anchor == "lt":
-                    min_bbox_x = text_offset[0] + min(bbox[0][0] for bbox in bboxes)
-                    max_bbox_x = text_offset[0] + bboxes[i][0][2] # max(bbox[0][2] for bbox in bboxes)
+                    min_bbox_x = text_offset[0] + left
+                    max_bbox_x = text_offset[0] + bboxes[i][0][2]
                 elif anchor == "mt":
                     center_x = (left + right) // 2
                     min_bbox_x = text_offset[0] + center_x - (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                     max_bbox_x = text_offset[0] + center_x + (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                 elif anchor == "rt":
-                    max_bbox_x = text_offset[0] + max(bbox[0][2] for bbox in bboxes)
+                    max_bbox_x = text_offset[0] + right
                     min_bbox_x = max_bbox_x - (bboxes[i][0][2] - bboxes[i][0][0])
                 # As high as the line was measured, see below
                 y_min = bboxes[i][0][1] + text_offset[1]
@@ -1484,14 +1483,14 @@ class SimpleLabel:
             known = self._line_boxes.get(line['line_index'], box)
             self._line_boxes[line['line_index']] = (min(known[0], box[0]), min(known[1], box[1]), max(known[2], box[2]), max(known[3], box[3]))
 
-    def _line_region(self, img, bboxes, i, text_offset) -> tuple:
+    def _line_region(self, img, bboxes, i, text_offset, left, right) -> tuple:
         """Where line i of the text placed at text_offset draws on img: its
-        room and the width of the text, a size around them for letters
-        reaching out and shifted text."""
+        room and the width of the text, from left to right, a size around
+        them for letters reaching out and shifted text."""
         size = self._line_size(bboxes[i][2])
         room = bboxes[i][0]
-        x0 = text_offset[0] + min(bbox[0][0] for bbox in bboxes) - size
-        x1 = text_offset[0] + max(bbox[0][2] for bbox in bboxes) + size
+        x0 = text_offset[0] + left - size
+        x1 = text_offset[0] + right + size
         y0, y1 = room[1] + text_offset[1] - size, room[3] + text_offset[1] + size
         x0, y0 = min(max(0, math.floor(x0)), img.width), min(max(0, math.floor(y0)), img.height)
         return x0, y0, max(x0, min(img.width, math.ceil(x1))), max(y0, min(img.height, math.ceil(y1)))
