@@ -31,6 +31,9 @@ def network_status(device: str, model: str, red_support: bool = False) -> dict:
         'status_type': 'Network Printer',
         'tape_color': '',
         'text_color': '',
+        # The colors of the tape and its print as the label designer shows
+        # them, see brother/status.py
+        'colors': {},
         'red_support': red_support,
         'red_roll': None,
     }

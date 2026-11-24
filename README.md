@@ -26,7 +26,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 
 **Not sure which printer to buy?** Try it first: the demo printer can be any printer in this list. Choose its model and roll in the Settings, design your labels and see how they fit on that printer's labels before you buy it. It needs no printer at all.
 
-Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
+Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, on the QL-800 series it knows whether the roll is black and red, and on P-touch printers the preview shows the colors of the tape, e.g., white on black. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
 
 ## Features
 

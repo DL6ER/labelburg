@@ -574,7 +574,7 @@ const nextPreview = latest(async () => {
     const values = previewValues(E);
     let p;
     try {
-        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0);
+        p = await preview(shown, values, copies(), hooks.perCopy ? hooks.perCopy() : 0, 0, true);
     } catch (e) {
         if (me < shownSeq) return;
         shownSeq = me;
@@ -603,6 +603,7 @@ const nextPreview = latest(async () => {
     if (colorsTold) { renderToolbar(); if (ui.adv) renderAdvanced(); }
     const el = $('#labelImg');
     el.src = p.url;
+    paintTape(p.tapeColors);
     $('#labelbox').classList.toggle('empty', empty);
     $('#labelbox').classList.remove('failed');
     if (!S.edit || upTo !== asked) $('#labelbox').classList.add('busy'); else $('#labelbox').classList.remove('busy');
@@ -627,6 +628,18 @@ const nextPreview = latest(async () => {
     updateActions();
     if (!empty && hooks.previewed) hooks.previewed(ui.last, shown);
 });
+
+// The tape around the label in the colors the server showed it in. Clear
+// tape lets the stage show through, the theme puts a backdrop behind print
+// that would vanish on it, e.g. white print on clear tape on a light stage.
+const lightInk = hex => { const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)); return .299 * r + .587 * g + .114 * b > 140; };
+function paintTape([tape, ink] = []) {
+    const lb = $('#labelbox');
+    if (tape) lb.style.setProperty('--tape', tape); else lb.style.removeProperty('--tape');
+    lb.classList.toggle('taped', !!tape);
+    lb.classList.toggle('clear', /^#[0-9a-f]{6}00$/i.test(tape || ''));
+    lb.classList.toggle('light-ink', !!ink && lightInk(ink));
+}
 
 // Where a page of several labels is cut into them and the gap between lanes,
 // over the page as the server tells it: shown, never printed

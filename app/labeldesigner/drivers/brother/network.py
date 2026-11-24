@@ -201,6 +201,7 @@ def _snmp_network_status(device_specifier: str, host: str, default_model: str) -
         status['media_length'] = state['media_length']
         status['media_type'] = state['media_type']
         status['red_roll'] = state['red_roll']
+        status['colors'] = state['colors']
     elif not errors:
         errors = [NO_LABELS]
     status['errors'] = errors

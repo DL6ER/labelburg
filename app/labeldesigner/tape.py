@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from PIL import Image, ImageColor
+
 from . import drivers, sheets
 from .drivers.labels import FormFactor
 from .label_names import LABELS, SIZES, label_printers, label_size_problem
@@ -250,3 +252,26 @@ def describe(tape: Tape) -> dict:
         'unknown': tape.unknown, 'red_unknown': tape.red_unknown, 'candidates': list(tape.candidates),
         'fits': [s for s in SIZES if fits(s, tape)], 'moves': moving, 'place': place,
     }
+
+
+RED = (255, 0, 0)
+
+
+def in_colors(im: Image.Image, tape_color: str, ink_color: str) -> Image.Image:
+    """A preview im shown on tape of tape_color printed in ink_color, both
+    #rrggbb, the tape also #rrggbbaa: white is the tape, black the ink, red
+    stays red, the shades between them in between. Clear tape is see-through."""
+    *tape, opaque = ImageColor.getcolor(tape_color, 'RGBA')
+    ink = ImageColor.getrgb(ink_color)[:3]
+    im = im.convert('RGB')
+    # Of a pixel (r, g, b) of white, black and red, g is the white, r - g the
+    # red and 255 - r the black: each channel shown is linear in r and g,
+    # premultiplied by the alpha of the tape
+    matrix = []
+    for c in range(3):
+        matrix += [(RED[c] - ink[c]) / 255, (tape[c] * opaque / 255 - RED[c]) / 255, 0, ink[c]]
+    shown = im.convert('RGB', tuple(matrix))
+    if opaque == 255:
+        return shown
+    alpha = im.getchannel('G').point(lambda g: round(255 - g * (255 - opaque) / 255))
+    return Image.merge('RGBa', (*shown.split(), alpha)).convert('RGBA')
