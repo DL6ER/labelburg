@@ -8,6 +8,7 @@ import re
 import aztec_code_generator
 import barcode
 import segno
+from barcode.codex import Code39
 from barcode.ean import EuropeanArticleNumber13
 from barcode.writer import ImageWriter
 from pdf417gen import encode as pdf417_encode
@@ -199,7 +200,15 @@ class _Issn(EuropeanArticleNumber13):
         super().__init__('977' + issn.replace('-', '')[:7] + '00', writer)
 
 
-_OWN_CLASSES = {'isbn10': _Isbn10, 'issn': _Issn}
+class _Code39(Code39):
+    """Code 39 without its optional check character, which scanners pass on
+    as part of the code unless set to check it."""
+
+    def __init__(self, code: str, writer=None):
+        super().__init__(code, writer, add_checksum=False)
+
+
+_OWN_CLASSES = {'isbn10': _Isbn10, 'issn': _Issn, 'code39': _Code39}
 
 
 def barcode_class(barcode_type: str):

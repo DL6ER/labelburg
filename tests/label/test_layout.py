@@ -176,7 +176,7 @@ def test_a_code_fitted_next_to_text_leaves_the_text_room(tmp_path, label_size, o
     # Fitted to the die-cut label it took the whole label, the text was not
     # there: a code with text, as the label designer starts it
     client = make_client(tmp_path)
-    data = {'label_size': label_size, 'orientation': orientation, 'print_type': 'qrcode_text', 'code_text': 'https://example.com',
+    data = {'label_size': label_size, 'orientation': orientation, 'print_type': 'qrcode_text', 'code_text': 'https://example.org/inventory/12345',
             'image_fit': '1', 'text_fit': 'shrink', 'text': json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Chili', 'size': '60'}])}
     response = client.post('/labeldesigner/api/preview', data=data)
     assert response.status_code == 200

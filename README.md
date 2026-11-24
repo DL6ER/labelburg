@@ -26,11 +26,11 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 
 **Not sure which printer to buy?** Try it first: the demo printer can be any printer in this list. Choose its model and roll in the Settings, design your labels and see how they fit on that printer's labels before you buy it. It needs no printer at all.
 
-Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, and on the QL-800 series it knows whether the roll is black and red. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
+Labelburg finds printers plugged in with USB by itself, most network printers too. Printers the search does not find can be added in the Settings of the label designer. It sees which labels are loaded and offers only the sizes that fit, on the QL-800 series it knows whether the roll is black and red, and on P-touch printers the preview shows the colors of the tape, e.g., white on black. A USB printer can also stand somewhere else, plugged into a small board on your network, see [USB printer on another device](docs/usbip.md).
 
 ## Features
 
-- **Text:** font, size, alignment, line and letter spacing for each line, capitals, inverted text, checkboxes for to-do lists, red text on black/red labels and any color on the VC-500W. Long lines wrap, and the text can shrink to fit the label or grow as large as fits, at the top, in the middle or at the bottom of die-cut labels.
+- **Text:** font, size, alignment, line and letter spacing for each line, capitals, inverted text, checkboxes for to-do lists, red text on black/red labels and any color on the VC-500W. Long lines wrap, and the text can shrink to fit the label or grow as large as fits, at the top, in the middle or at the bottom of die-cut labels. Emoji and symbols, e.g., check marks, stars and arrows, can be typed right into the text.
 - **Codes:** QR, DataMatrix, Micro QR, Aztec and PDF417 codes, a long, flat QR code for narrow tape, and barcodes like EAN, UPC, Code 128, Code 39, ITF, GS1-128 and ISBN, alone or with text. Labelburg tells you when a code may be too small to scan.
 - **Pictures:** photos, drawings and PDFs, dropped, chosen or pasted, several at once, alone or with text and a code. Labelburg fits, crops and turns them and makes them black and white (or black and red) for the printer, and on the VC-500W it can make faint drawings stronger.
 - **Filled in when printing:** blanks Labelburg asks for when you print, e.g., a name or a choice from a list, numbers that count up from label to label, e.g., "Box 1 of 6", and today's date or a date some days ahead, e.g., "best before", with months and weekdays [in your language](docs/languages.md).
@@ -154,7 +154,7 @@ Network printers are found when they announce themselves like for Bonjour, which
 
 ### Fonts
 
-The label designer offers all `.ttf` and `.otf` fonts it finds in the system font folders when it starts. The image comes with DejaVu, Droid, FreeFont, Liberation, Noto and Inconsolata. To add fonts, mount a folder with them, e.g. `./fonts:/usr/local/share/fonts/custom:ro`, and restart the container. A saved label whose font is not installed is shown and printed with the default font, and the preview says so. To offer only a few fonts, put them (or links to them) into a folder, set `FONT_FOLDER` to it and `SYSTEM_FONTS=false`, and set the default font in `instance/application.py` to one of them.
+The label designer offers all `.ttf` and `.otf` fonts it finds in the system font folders when it starts. The image comes with DejaVu, Droid, FreeFont, Liberation, Noto and Inconsolata. To add fonts, mount a folder with them, e.g. `./fonts:/usr/local/share/fonts/custom:ro`, and restart the container. A saved label whose font is not installed is shown and printed with the default font, and the preview says so. Characters a font has no glyph for, e.g. emoji, are drawn with the first of DejaVu Sans, Noto Sans Symbols 2, Noto Sans Symbols, Noto Sans Math, FreeSerif and the black and white Noto Emoji of Labelburg that has them. To offer only a few fonts, put them (or links to them) into a folder, set `FONT_FOLDER` to it and `SYSTEM_FONTS=false`, and set the default font in `instance/application.py` to one of them.
 
 ### Label designer
 
@@ -245,6 +245,7 @@ It is published under the terms of the GPLv3, see [LICENSE](./LICENSE). It inclu
 
 - [Archivo](https://github.com/Omnibus-Type/Archivo), the typeface of the label designer, [SIL Open Font License 1.1](app/static/designer/OFL.txt)
 - [Material Design Icons](https://github.com/Templarian/MaterialDesign-Webfont) 7.4.47 by Pictogrammers, the font under the Apache 2.0 License, see [LICENSE](app/static/mdi/LICENSE)
+- [Noto Emoji](https://github.com/googlefonts/emoji-bw) by Google, the emoji on the labels, [SIL Open Font License 1.1](app/static/emoji/OFL.txt)
 - The fasteners drawn as in [gflabel](https://github.com/ndevenish/gflabel) by Nicholas Devenish under the BSD 3-Clause License, and the [electronic symbols](https://github.com/chris-pikul/electronic-symbols) by Chris Pikul under the MIT License, built into one font by `tools/symbols_font.py`, see [LICENSE](app/static/symbols/LICENSE)
 - The pictograms and the photo silhouette of the demo labels from [Wikimedia Commons](app/labeldesigner/demos/images/SOURCES.md), public domain and CC0
 - The names of months and weekdays from the [Unicode CLDR](https://cldr.unicode.org/), written by `tools/date_names.py` with [Babel](https://babel.pocoo.org/), under the Unicode License V3, see [LICENSE](app/labeldesigner/cldr/LICENSE)

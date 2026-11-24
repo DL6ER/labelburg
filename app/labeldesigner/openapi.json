@@ -76,6 +76,12 @@
                       "date_language": {
                         "type": "string",
                         "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
+                      },
+                      "tape_colors": {
+                        "type": "string",
+                        "enum": ["0", "1"],
+                        "default": "0",
+                        "description": "1 shows the label in the colors of the tape in its printer (`printer`, `model`, else the configured one) as the label designer does, where the last status of the printer tells them (`colors` of `/labeldesigner/api/printer_status`) and the label is on that tape: white in the color of the tape, black in that of the print, red stays red. Clear tape is transparent. The printer is not asked. Only the preview changes, not the print. See `X-Label-Tape-Colors`."
                       }
                     }
                   }
@@ -134,6 +140,12 @@
                       "date_language": {
                         "type": "string",
                         "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
+                      },
+                      "tape_colors": {
+                        "type": "string",
+                        "enum": ["0", "1"],
+                        "default": "0",
+                        "description": "1 shows the label in the colors of the tape in its printer (`printer`, `model`, else the configured one) as the label designer does, where the last status of the printer tells them (`colors` of `/labeldesigner/api/printer_status`) and the label is on that tape: white in the color of the tape, black in that of the print, red stays red. Clear tape is transparent. The printer is not asked. Only the preview changes, not the print. See `X-Label-Tape-Colors`."
                       }
                     }
                   }
@@ -168,6 +180,12 @@
                 "description": "Number of the pages of an uploaded PDF `pdf_pages` selects, each printed as a label of its own.",
                 "schema": {
                   "type": "integer"
+                }
+              },
+              "X-Label-Tape-Colors": {
+                "description": "The colors of the tape and of its print the preview is shown in with `tape_colors`, e.g. `#ffd400,#000000` for black on yellow, `#ffffff00` for clear tape. Not set where it is shown as printed on white.",
+                "schema": {
+                  "type": "string"
                 }
               },
               "X-Image-Faint": {
@@ -4552,20 +4570,16 @@
           },
           "margin_top": {
             "type": "integer",
-            "default": 24,
-            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm."
+            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm. Left out, 24 dots at the top and bottom and 35 at the sides of 62 mm wide labels, other labels get them in proportion to their width, e.g., 4 and 6 dots on the 9 mm tape of the VC-500W."
           },
           "margin_bottom": {
-            "type": "integer",
-            "default": 24
+            "type": "integer"
           },
           "margin_left": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "margin_right": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "border_thickness": {
             "type": "integer",
@@ -4782,6 +4796,31 @@
           }
         }
       },
+      "TapeColors": {
+        "type": "object",
+        "description": "Colors of the loaded tape (`tape`) and of its print (`ink`) as the printer reports them, Brother P-touch printers for TZe tape, e.g. `yellow` and `black` for black on yellow tape. Both or neither: `{}` where the printer does not tell them, e.g. for the rolls of QL printers, and for tape it names no colors of, e.g. cleaning or stencil tape.",
+        "properties": {
+          "tape": {
+            "$ref": "#/components/schemas/TapeColor"
+          },
+          "ink": {
+            "$ref": "#/components/schemas/TapeColor"
+          }
+        }
+      },
+      "TapeColor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "In plain words, e.g. `yellow`, `clear`, `satin gold`."
+          },
+          "hex": {
+            "type": "string",
+            "description": "As it is shown, `#rrggbb`, `#ffffff00` (transparent) for clear tape."
+          }
+        }
+      },
       "PrinterState": {
         "type": "object",
         "properties": {
@@ -4839,6 +4878,9 @@
           "red_roll": {
             "type": ["boolean", "null"],
             "description": "Whether the loaded roll is a black and red one, as the QL-800 series reports it. `null` where the printer does not tell."
+          },
+          "colors": {
+            "$ref": "#/components/schemas/TapeColors"
           },
           "color_support": {
             "type": "boolean",
@@ -5043,6 +5085,9 @@
           },
           "tape": {
             "$ref": "#/components/schemas/Tape"
+          },
+          "colors": {
+            "$ref": "#/components/schemas/TapeColors"
           },
           "listed": {
             "type": ["string", "null"],

@@ -11,6 +11,7 @@ from app.labeldesigner import snmp
 from app.labeldesigner.drivers.brother import network
 from tests.helpers import outcome
 from tests.printing.test_ipp import fake_printer, fixture as ipp_fixture, network_job  # noqa: F401
+from tests.printing.test_tape_colors import colors, ptouch_status
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fixtures', 'snmp')
 STATUS, PRINTER_STATUS = network.SNMP_STATUS_OID, network.SNMP_PRINTER_STATUS_OID
@@ -171,6 +172,13 @@ def test_color_of_the_roll(agent):
     assert query(agent, READY_29x90)['red_roll'] is False
     assert query(agent, ENDLESS_62[:25] + b'\x81' + ENDLESS_62[26:])['red_roll'] is True
     assert query(agent, ENDLESS_62[:25] + b'\x00' + ENDLESS_62[26:])['red_roll'] is None
+
+
+def test_colors_of_the_tape(agent):
+    # A PT-P750W with black on yellow TZe tape, a roll of a QL printer has none
+    state = query(agent, ptouch_status(0x06, 0x08), model='PT-P750W')
+    assert (state['media_width'], state['colors']) == (24, colors('yellow', '#ffd400', 'black', '#000000'))
+    assert query(agent, READY_29x90)['colors'] == {}
 
 
 def test_no_roll(agent):
