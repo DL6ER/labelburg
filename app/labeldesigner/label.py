@@ -19,7 +19,6 @@ import random
 import string
 import struct
 import threading
-import unicodedata
 import copy
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -76,7 +75,7 @@ TEXT_ANCHORS = {'left': 'lt', 'center': 'mt', 'right': 'rt'}
 # they are left out: some fonts draw them, e.g. Liberation Sans a bar, and a
 # font without them its missing glyph.
 RAQM = features.check('raqm')
-INVISIBLE = re.compile('[\u200d\ufe00-\ufe0f\U000e0020-\U000e007f\U000e0100-\U000e01ef]')
+INVISIBLE = frozenset(map(chr, (0x200D, *range(0xFE00, 0xFE10), *range(0xE0020, 0xE0080), *range(0xE0100, 0xE01F0))))
 # Paragraph separators, which Raqm refuses to lay out
 PARAGRAPH_SEPARATORS = re.compile('[\n\r\x1c-\x1e\x85\u2029]')
 
@@ -2120,14 +2119,14 @@ def _font_runs(text: str, path: str, fallbacks: tuple[str, ...]) -> tuple:
     its font: icons and symbols with theirs, characters the font at path has
     no glyph for with the first of fallbacks that has them all, the rest
     with the font at path."""
-    if not icons.has_icon(text) and has_glyphs(path, text) and (RAQM or not INVISIBLE.search(text)):
+    if not icons.has_icon(text) and has_glyphs(path, text) and (RAQM or INVISIBLE.isdisjoint(text)):
         return ((text, path),)
     runs = []
     for cluster in _clusters(text):
-        visible = INVISIBLE.sub('', cluster)
+        visible = ''.join(char for char in cluster if char not in INVISIBLE)
         candidates = (path,) if PARAGRAPH_SEPARATORS.search(cluster) else (path, *fallbacks)
         font = icons.font_of(cluster[0]) or next((font for font in candidates if has_glyphs(font, visible)), path)
-        cluster = ''.join(char for char in cluster if not INVISIBLE.match(char) or RAQM and has_glyphs(font, char))
+        cluster = ''.join(char for char in cluster if char not in INVISIBLE or RAQM and has_glyphs(font, char))
         if runs and runs[-1][1] == font:
             runs[-1] = (runs[-1][0] + cluster, font)
         elif cluster:

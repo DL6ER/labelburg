@@ -59,6 +59,10 @@ def test_the_characters_go_to_the_first_font_that_has_them(fonts):
     # Sequences stay together with the font that has all of them, without
     # Raqm their joiners are left out
     assert label._font_runs(f'{FAMILY}{FLAG}', dejavu, fonts.fallbacks()) == ((FAMILY.replace('\u200d', '') + FLAG, EMOJI_FONT_PATH),)
+    # So are the tags of a flag like that of England and the variation
+    # selectors of the supplement
+    england = '\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F'
+    assert label._font_runs(f'{england}\U000E0101', dejavu, fonts.fallbacks()) == (('\U0001F3F4', EMOJI_FONT_PATH),)
 
 
 def test_a_font_with_the_character_keeps_its_own(client, fonts):
