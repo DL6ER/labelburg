@@ -703,7 +703,7 @@ def test_printer_without_a_cutter_feeds_its_paper_to_the_tear_bar(client, fake):
     client.get('/labeldesigner/api/printer_status')
     response = client.post('/labeldesigner/api/feed')
     assert outcome(client, response) == ('printed', '')
-    assert printer.sent.endswith(protocol.INIT + protocol.CUT)
+    assert printer.sent.endswith(protocol.INIT + protocol.CENTER + protocol.CUT)
     assert client.get(f"/labeldesigner/api/queue/{response.get_json()['job']}").get_json()['title'] == 'Feed paper'
     # As the label designer sends it: the last label fed to the tear bar
     response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT, 'cut': 'last'})
