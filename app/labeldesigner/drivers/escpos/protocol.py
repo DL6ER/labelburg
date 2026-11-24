@@ -31,6 +31,9 @@ ASK_AGAIN = 20
 _asked: dict[str, float] = {}
 
 INIT = b'\x1b@'
+# Images centered, e.g. a 384-dot one of 58 mm paper on the 420 dots a
+# TM-T20II prints there
+CENTER = b'\x1ba\x01'
 # Feed to the cutter and cut. A TM-T20II leaves one corner uncut, as its
 # memory switches say, whatever the command.
 CUT = b'\x1dVA\x00'
@@ -57,7 +60,7 @@ def raster(rows: list[bytes], width: int) -> bytes:
 
 def job(labels: list[tuple]) -> bytes:
     """(cut after it, rows, bytes per row, ...) of each label as one job."""
-    return INIT + b''.join(raster(rows, width) + (CUT if cut else b'') for cut, rows, width, *_ in labels)
+    return INIT + CENTER + b''.join(raster(rows, width) + (CUT if cut else b'') for cut, rows, width, *_ in labels)
 
 
 def errors(offline: int, paper: int) -> list[str]:

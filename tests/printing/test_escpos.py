@@ -73,7 +73,7 @@ def test_raster_in_bands():
 
 def test_job_cuts_where_asked():
     rows = [b'\x80']
-    assert protocol.job([(False, rows, 1), (True, rows, 1)]) == b'\x1b@' + protocol.raster(rows, 1) * 2 + b'\x1dVA\x00'
+    assert protocol.job([(False, rows, 1), (True, rows, 1)]) == b'\x1b@\x1ba\x01' + protocol.raster(rows, 1) * 2 + b'\x1dVA\x00'
 
 
 def test_answer_kept_from_before_is_not_taken_for_the_status(monkeypatch):
