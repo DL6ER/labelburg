@@ -9,7 +9,7 @@ import {
     fieldType, blankChoices, startOf,
     valuesNow, choicesMissing, printJob, entryName, openLayer, closeLayer, cutOf, printerCut, sizeCaps, noCutter, noCutterWhy, neverWhy,
     cutShort, cutStrip, CUTS, halfOf, chainOf, imageKey, printerCaps, saveLabel, savedAs, leavesFirst, printerState, printerLabel, printerName, designSig,
-    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold
+    loadSaved, roomFrom, isSheet, withTotal, sheetNote, untold, marginPreset, setMargins
 } from './core.js';
 import { mountField, renderField, markLine, focusLine, closePop } from './field.js';
 import { mountMedia } from './media.js';
@@ -1090,12 +1090,7 @@ function lineMenu(btn, i) {
 //   Long lines Wrap     text_wrap 1, text_fit as it is
 //   Long lines Keep     text_wrap 0, text_fit none: the lines keep their
 //   size                size where they do not fit
-const MARGINS = { none: 0, tight: .5, normal: 1, roomy: 2 };
 const SIDES = ['top', 'bottom', 'left', 'right'];
-function marginPreset(d) {
-    const def = C.defaults;
-    return Object.keys(MARGINS).find(k => SIDES.every(s => +d['margin_' + s] === Math.round(def['margin_' + s] * MARGINS[k]))) || 'custom';
-}
 function setFrame(d, kind) {
     const base = baseDesign(d.label_size);
     if (kind === 'none') {
@@ -1161,7 +1156,7 @@ export function renderAdvanced() {
             <span class="k">Frame</span><span class="row wrap">${seg('frame', [['none', 'None'], ['square', 'Square'], ['rounded', 'Rounded']], frame)}${frame !== 'none' ? swatchHTML('data-fcolor', d.border_color, onTape(d), 'the frame') : ''}<button type="button" class="custom${frameMore ? ' on' : ''}" data-fcustom aria-expanded="${!!frameMore}">Custom</button></span>
             ${frameMore ? `<span class="k"></span><span class="mm4 frame4">${FRAME_KEYS.map(([k, n]) => `<label${k === 'border_roundness' && frame !== 'rounded' ? ' class="off" title="Only for rounded frames"' : ''}><small>${esc(n)}</small><input class="in num" type="number" min="${k === 'border_thickness' ? '0.1' : '0'}" max="${k === 'border_thickness' ? '5' : '20'}" step="${k === 'border_thickness' ? '0.1' : '0.5'}" data-fk="${esc(k)}" value="${esc(dotsToMm(d[k], dpi))}"${k === 'border_roundness' && frame !== 'rounded' ? ' disabled' : ''} aria-label="${esc(n)} of the frame in mm"></label>`).join('')}<small class="unit">mm</small></span>
             <span class="k"></span><small class="muted fnote">Sides, top and bottom: the distance from the edge of the label. The margins grow so that the text stays inside.</small>` : ''}
-            <span class="k">Margins</span><span class="row wrap">${seg('margins', [['none', 'None'], ['tight', 'Tight'], ['normal', 'Normal'], ['roomy', 'Roomy']], custom ? '' : preset)}<button type="button" class="custom${custom ? ' on' : ''}" data-custom>Custom</button></span>
+            <span class="k">Margins</span><span class="row wrap">${seg('margins', [['none', 'None'], ['tight', 'Tight'], ['normal', 'Normal'], ['large', 'Large']], custom ? '' : preset)}<button type="button" class="custom${custom ? ' on' : ''}" data-custom>Custom</button></span>
             ${custom ? `<span class="k"></span><span class="mm4">${SIDES.map(side => `<label><small>${esc(side[0].toUpperCase() + side.slice(1))}</small><input class="in num" type="number" min="0" max="20" step="0.5" data-margin="${esc(side)}" value="${esc(dotsToMm(d['margin_' + side], dpi))}"></label>`).join('')}<small class="unit">mm</small></span>` : ''}
             <span class="k${hasLength(d) ? '' : ' off'}">Length</span><span class="row">${hasLength(d)
                 ? `${seg('len', [['auto', 'Auto'], ['fixed', 'Fixed']], hasFixedLength(d) || ui.fixedLength ? 'fixed' : 'auto')}${hasFixedLength(d) || ui.fixedLength ? `<input class="in num" type="number" min="${esc(s.length[0])}" max="${esc(s.length[1])}" step="0.5" data-length value="${esc(d.label_length)}" placeholder="mm" aria-label="Length in mm"><small>mm</small>` : ''}`
@@ -1217,7 +1212,7 @@ export function renderAdvanced() {
     if (fcolor) fcolor.onclick = () => openColors(fcolor, { color: d.border_color, d: onTape(d), what: 'the frame', pick: c => apply(x => { x.border_color = c; }), box });
     $$('[data-margins]', box).forEach(b => b.onclick = () => {
         ui.customMargins = false;
-        apply(x => SIDES.forEach(side => { x['margin_' + side] = String(Math.round(C.defaults['margin_' + side] * MARGINS[b.dataset.margins])); }));
+        apply(x => setMargins(x, b.dataset.margins));
     });
     $('[data-custom]', box).onclick = () => { ui.customMargins = !custom; renderAdvanced(); };
     $$('[data-margin]', box).forEach(inp => inp.addEventListener('input', () => {

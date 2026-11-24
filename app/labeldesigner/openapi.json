@@ -4100,20 +4100,16 @@
           },
           "margin_top": {
             "type": "integer",
-            "default": 24,
-            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm."
+            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm. Left out, 24 dots at the top and bottom and 35 at the sides of 62 mm wide labels, other labels get them in proportion to their width, e.g., 4 and 6 dots on the 9 mm tape of the VC-500W."
           },
           "margin_bottom": {
-            "type": "integer",
-            "default": 24
+            "type": "integer"
           },
           "margin_left": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "margin_right": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "border_thickness": {
             "type": "integer",
