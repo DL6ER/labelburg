@@ -1,6 +1,7 @@
-# Checks that the icon fonts in app/static are the versions in tools/fonts, and adds the files of a new
-# version to Dependabot's pull requests with a GitHub App's token, as a push with GITHUB_TOKEN starts no
-# tests or CodeQL. The App's client ID and key are the Dependabot secrets FONTS_APP_CLIENT_ID and FONTS_APP_KEY.
+# Checks that the icon fonts in app/static are the versions in tools/fonts and the emoji font the one
+# tools/update_fonts.py names, and adds the files of a new version to Dependabot's pull requests with a
+# GitHub App's token, as a push with GITHUB_TOKEN starts no tests or CodeQL. The App's client ID and key
+# are the Dependabot secrets FONTS_APP_CLIENT_ID and FONTS_APP_KEY.
 # Checks too that the font of the symbols is the one tools/symbols_font.py builds with the tools of
 # requirements-symbols.txt: on a pull request that raises one of them, it is built again by hand.
 name: Icon fonts
@@ -12,6 +13,7 @@ on:
       - tools/fonts/**
       - tools/update_fonts.py
       - app/static/mdi/**
+      - app/static/emoji/**
       - tools/symbols/**
       - tools/fastener_svgs.py
       - tools/symbols_font.py
@@ -23,6 +25,7 @@ on:
       - tools/fonts/**
       - tools/update_fonts.py
       - app/static/mdi/**
+      - app/static/emoji/**
       - tools/symbols/**
       - tools/fastener_svgs.py
       - tools/symbols_font.py
