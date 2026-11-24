@@ -1,22 +1,23 @@
 from .enums import LabelContent, LabelOrientation, LabelType
 from . import codes, icons
 from .cable_flag import flag_box, flag_strip
+from app.fonts import EMOJI_FONT_PATH, font_info, has_glyphs
 from .dates import LANGUAGES as DATE_LANGUAGES, format_date
 import os
 import uuid
-from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageChops, ImageOps, features
 import logging
 from barcode.errors import BarcodeError
 import calendar
 import collections
 import datetime
 import functools
-import itertools
 import json
 import math
 import re
 import random
 import string
+import struct
 import threading
 import copy
 import unicodedata
@@ -69,6 +70,15 @@ MAX_BLANK_CHOICE_LENGTH = 200
 PRINTABLE = string.ascii_letters + string.digits + string.punctuation
 # A line of text is drawn from the top of its start, middle or end
 TEXT_ANCHORS = {'left': 'lt', 'center': 'mt', 'right': 'rt'}
+# The zero width joiner, variation selectors and tags of emoji sequences.
+# Where Pillow has Raqm, it shapes the sequences and hides them. Without it
+# they are left out: some fonts draw them, e.g. Liberation Sans a bar, and a
+# font without them its missing glyph.
+RAQM = features.check('raqm')
+INVISIBLE = frozenset(map(chr, (0x200D, *range(0xFE00, 0xFE10), *range(0xE0020, 0xE0080), *range(0xE0100, 0xE01F0))))
+# Paragraph separators, which Raqm refuses to lay out
+PARAGRAPH_SEPARATORS = re.compile('[\n\r\x1c-\x1e\x85\u2029]')
+
 # Room added between the characters of a line, in parts of its size
 MIN_LETTER_SPACING, MAX_LETTER_SPACING = -0.2, 1.0
 LETTER_SPACING_REFUSED = f'letter_spacing must be a number from {MIN_LETTER_SPACING:g} to {MAX_LETTER_SPACING:g}'
@@ -404,6 +414,7 @@ class SimpleLabel:
         vertical_align: str = 'center',
         mirror: bool = False,
         date_format: str = '%Y-%m-%d',
+        fallback_fonts: tuple[str, ...] = (),
         date_language: str = '',
     ):
         """Initialize a SimpleLabel object. warnings are problems found
@@ -422,7 +433,8 @@ class SimpleLabel:
         height. dpi tells the length of the label in mm, which warnings
         name. date_format writes the dates of blanks without a format of
         their own, date_language names months and weekdays in its language
-        (see dates.py), English if empty."""
+        (see dates.py), English if empty. fallback_fonts draw what the font
+        of a line has no glyph for, the first that has it."""
         # Input validation
         if width < 0 or height < 0:
             raise ValueError("Width and height must be non-negative.")
@@ -539,6 +551,7 @@ class SimpleLabel:
         # Printed mirror-inverted, to be read through clear tape stuck behind
         # glass
         self._mirror = mirror
+        self._fallback_fonts = tuple(fallback_fonts)
         # The pieces of lines measured, see _measured_piece()
         self._pieces: dict[tuple, tuple] = {}
 
@@ -1541,40 +1554,45 @@ class SimpleLabel:
     @staticmethod
     def _broken(piece: str, fits) -> list:
         """piece in parts that fit, each the longest start of what is left, at
-        least one character."""
+        least one character. Characters drawn as one, e.g. an emoji and its
+        skin tone, stay together, see _clusters()."""
         parts = []
-        while len(piece) > 1 and not fits(piece):
-            low, high = 1, len(piece) - 1
+        clusters = _clusters(piece)
+        while len(clusters) > 1 and not fits(''.join(clusters)):
+            low, high = 1, len(clusters) - 1
             while low < high:
                 middle = (low + high + 1) // 2
-                if fits(piece[:middle]):
+                if fits(''.join(clusters[:middle])):
                     low = middle
                 else:
                     high = middle - 1
-            parts.append(piece[:low])
-            piece = piece[low:]
-        return parts + [piece]
+            parts.append(''.join(clusters[:low]))
+            clusters = clusters[low:]
+        return parts + [''.join(clusters)]
 
     def _draw_line(self, draw, xy, text, font, anchor, fill=None, measuring=False, letter_spacing=0.0, **kwargs):
         """The bounding box of a line of text at xy, also drawn in fill if
         given. Icons ({{mdi:<name>}}) and symbols are drawn with their fonts,
-        on the same baseline as the text around them. With letter_spacing,
-        in dots, each character is drawn on its own with that much room
-        between them; letters kerned in a word lose that."""
+        characters the font has no glyph for, e.g. emoji, with the first
+        fallback font that has them, all on the same baseline. With
+        letter_spacing, in dots, each character is drawn on its own with that
+        much room between them; letters kerned in a word lose that."""
+        runs = self._runs(text, font)
+        if len(runs) == 1 and runs[0][1] is None:
+            text = runs[0][0]
         spaced = letter_spacing and len(text) > 1
-        if not spaced and not icons.has_icon(text):
+        if not spaced and len(runs) == 1 and runs[0][1] is None:
             if fill is not None:
                 draw.text(xy, text, fill, font=font, anchor=anchor, **kwargs)
             return draw.textbbox(xy, text, font=font, anchor=anchor, align=kwargs.get('align', 'left'))
-        pieces = _graphemes(text) if spaced else [''.join(chars) for _, chars in itertools.groupby(text, icons.font_of)]
-        runs = [(piece, self._get_font(path, font.size, measuring=measuring) if (path := icons.font_of(piece[0])) else font)
-                for piece in pieces]
+        pieces = [(piece, path) for run, path in runs for piece in _graphemes(run)] if spaced else runs
+        runs = [(piece, self._run_font(path, font, measuring) if path else font) for piece, path in pieces]
         measured = [self._measured_piece(run, run_font) for run, run_font in runs]
         width = sum(length for length, _ in measured) + letter_spacing * (len(runs) - 1)
         # Anchors are "lt", "mt" or "rt": left, middle or right, top of the text font
         x = xy[0] - {'l': 0, 'm': width / 2, 'r': width}[anchor[0]]
         # The runs share the baseline below the top of the letters, with
-        # icons of an "H"
+        # icons or characters of other fonts of an "H"
         baseline = xy[1] + self._baseline(draw, text, font)
         boxes = []
         for (run, run_font), (length, box) in zip(runs, measured):
@@ -1593,13 +1611,28 @@ class SimpleLabel:
             self._pieces[key] = font.getlength(piece), font.getbbox(piece, anchor='ls')
         return self._pieces[key]
 
-    @staticmethod
-    def _baseline(draw, text, font) -> int:
+    def _baseline(self, draw, text, font) -> int:
         """How far below xy _draw_line puts the baseline of text: Pillow's
-        top anchor is the top of the letters, with icons that of an "H"."""
-        if icons.has_icon(text):
-            text = 'H'
+        top anchor is the top of the letters, with icons or characters of
+        other fonts that of an "H"."""
+        runs = self._runs(text, font)
+        text = runs[0][0] if len(runs) == 1 and runs[0][1] is None else 'H'
         return -draw.textbbox((0, 0), text, font=font, anchor='ls')[1]
+
+    def _runs(self, text, font) -> tuple:
+        """text in runs of the characters each font draws, with the path of
+        their font, None for font, see _font_runs()."""
+        path = getattr(font, 'path', None)
+        if not isinstance(path, str):
+            return ((text, None),)
+        return tuple((run, None if font_path == path else font_path) for run, font_path in _font_runs(text, path, self._fallback_fonts))
+
+    def _run_font(self, path, font, measuring) -> ImageFont.FreeTypeFont:
+        """The font of a run of a line in font: the icon and symbol fonts
+        like the fonts of lines, fallback fonts with the weight of font."""
+        if path not in self._fallback_fonts:
+            return self._get_font(path, font.size, measuring=measuring)
+        return self._get_font(path, font.size, measuring=measuring, weight=_weight(font.path) if path == EMOJI_FONT_PATH else 400)
 
     def _underline(self, draw, line, font, y) -> tuple | None:
         """From where to where an underlined line's bar is drawn below its
@@ -1955,10 +1988,13 @@ class SimpleLabel:
         max_width = max(bbox[0][2] for bbox in bboxes)
         return (min(bbox[0][0] for bbox in bboxes), bboxes[0][0][1], max_width, bboxes[-1][0][3])
 
-    def _get_font(self, font_path: str, size: int, measuring: bool = False) -> ImageFont.FreeTypeFont:
+    def _get_font(self, font_path: str, size: int, measuring: bool = False, weight: int | None = None) -> ImageFont.FreeTypeFont:
         """Get a font object, using cache for performance. Sizes measured to
-        fit the text have a cache of their own."""
+        fit the text have a cache of their own. With a weight a fallback
+        font, see _open_fallback_font()."""
         try:
+            if weight is not None:
+                return (_load_measured_fallback_font if measuring else _load_fallback_font)(font_path, int(size), weight)
             return (_load_measured_font if measuring else _load_font)(font_path, int(size))
         except Exception as e:
             logger.error(f"Failed to load font '{font_path}' with size {size}: {e}")
@@ -2027,6 +2063,73 @@ def _open_font(font_path: str, size: int) -> ImageFont.FreeTypeFont:
 # The sizes tried while text is fitted to the label, so that they do not
 # push out those of the labels drawn
 _load_measured_font = functools.lru_cache(maxsize=128)(_open_font)
+
+
+def _open_fallback_font(font_path: str, size: int, weight: int) -> ImageFont.FreeTypeFont:
+    """A fallback font, shaped with Raqm where Pillow has it, which draws
+    emoji sequences and flags as one glyph. The emoji font takes weight,
+    that of the line, within the weights it has."""
+    font = ImageFont.truetype(font_path, size)
+    if font_path == EMOJI_FONT_PATH and weight != 400:
+        axis = font.get_variation_axes()[0]
+        font.set_variation_by_axes([min(max(weight, axis['minimum']), axis['maximum'])])
+    return font
+
+
+_load_fallback_font = functools.lru_cache(maxsize=64)(_open_fallback_font)
+_load_measured_fallback_font = functools.lru_cache(maxsize=64)(_open_fallback_font)
+
+
+@functools.lru_cache(maxsize=256)
+def _weight(font_path: str) -> int:
+    """The weight of a font as its OS/2 table tells it, else 400."""
+    try:
+        face = font_info(font_path)[2]
+    except (OSError, ValueError, struct.error):
+        face = None
+    return face['weight'] if face else 400
+
+
+def _clusters(text: str) -> list[str]:
+    """text in the characters drawn as one: a character with the combining
+    marks, variation selectors, skin tones and tags after it, characters
+    joined by a zero width joiner and pairs of regional indicators (flags)."""
+    clusters: list[str] = []
+    joined = False
+    for char in text:
+        code = ord(char)
+        # The second regional indicator of a pair
+        flag = 0x1F1E6 <= code <= 0x1F1FF and bool(clusters) and len(clusters[-1]) == 1 and 0x1F1E6 <= ord(clusters[-1]) <= 0x1F1FF
+        if clusters and (joined or flag or code == 0x200D or 0x1F3FB <= code <= 0x1F3FF or 0xE0020 <= code <= 0xE007F
+                         or unicodedata.category(char) in ('Mn', 'Mc', 'Me')):
+            clusters[-1] += char
+        else:
+            clusters.append(char)
+        joined = code == 0x200D
+    return clusters
+
+
+# Bounded, the texts come from the requests. While text is fitted to the
+# label, the same lines are measured many times.
+@functools.lru_cache(maxsize=256)
+def _font_runs(text: str, path: str, fallbacks: tuple[str, ...]) -> tuple:
+    """text in runs of the characters each font draws, each with the path of
+    its font: icons and symbols with theirs, characters the font at path has
+    no glyph for with the first of fallbacks that has them all, the rest
+    with the font at path."""
+    if not icons.has_icon(text) and has_glyphs(path, text) and (RAQM or INVISIBLE.isdisjoint(text)):
+        return ((text, path),)
+    runs = []
+    for cluster in _clusters(text):
+        visible = ''.join(char for char in cluster if char not in INVISIBLE)
+        candidates = (path,) if PARAGRAPH_SEPARATORS.search(cluster) else (path, *fallbacks)
+        font = icons.font_of(cluster[0]) or next((font for font in candidates if has_glyphs(font, visible)), path)
+        cluster = ''.join(char for char in cluster if char not in INVISIBLE or RAQM and has_glyphs(font, char))
+        if runs and runs[-1][1] == font:
+            runs[-1] = (runs[-1][0] + cluster, font)
+        elif cluster:
+            runs.append((cluster, font))
+    return tuple(runs) or (('', path),)
 
 
 # By font object, as many as there are fonts measured

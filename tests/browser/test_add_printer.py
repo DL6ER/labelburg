@@ -3,6 +3,7 @@ designer: asked what it is first, then listed by its name and printed on,
 and removed again. Where it may be is up to ADD_PRINTERS of the server."""
 import json
 import os
+import re
 
 import pytest
 
@@ -62,7 +63,9 @@ def test_a_shared_printer_is_added_printed_on_and_removed(designer, app, shared)
         designer.click('#print')
     assert (sent(request.value)['printer'], sent(request.value)['model']) == (shared.address(), 'QL-1100')
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
-    assert shared.ql.received.endswith(b'\x1a')
+    # The job ends with "print with feed", status requests of the label
+    # designer following the printer may come after it
+    assert re.fullmatch(rb'.*\x1a(\x1biS)*', shared.ql.received, re.S)
 
     open_settings(designer)
     designer.locator('[data-card]', has_text='Garage').locator('[data-remove]').click()

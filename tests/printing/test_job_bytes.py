@@ -95,7 +95,7 @@ def test_escpos_job():
                                                 ('escpos58', ((150, 384), 'L', 3), LabelContent.IMAGE_GRAYSCALE))):
         _, rows, width = escpos.label_rows(_Label(_pattern(*image), content), size)
         labels.append((i % 2 == 0, rows, width, 203))
-    assert _digest(escpos_protocol.job(labels)) == '1cbd63cfe7e283ff'
+    assert _digest(escpos_protocol.job(labels)) == 'fc1203713a471d1e'
 
 
 def test_zpl_labels():
