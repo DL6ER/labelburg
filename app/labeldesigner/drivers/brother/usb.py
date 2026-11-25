@@ -7,7 +7,7 @@ import time
 
 from .. import devices, progress
 from ..backends import open_printer
-from .status import HEADER, LENGTH, StatusError, parse_status, plain_errors
+from .status import HEADER, LENGTH, SAY_WHAT_TO_DO, StatusError, parse_status, plain_errors
 
 logger = logging.getLogger(__name__)
 
@@ -353,7 +353,9 @@ def _held_error(key: str) -> dict | None:
     known = devices.status_cache.get(key, {})
     if known.get('status_type') != 'Error occurred' or not known.get('errors'):
         return None
-    return dict(known, errors=[f"{', '.join(plain_errors(known['errors']))}. {CLEAR_AT_PRINTER}"])
+    plain = plain_errors(known['errors'])
+    hint = [] if SAY_WHAT_TO_DO.issuperset(plain) else [CLEAR_AT_PRINTER]
+    return dict(known, errors=['. '.join([', '.join(plain), *hint])])
 
 
 def _shown(state: dict) -> dict:

@@ -227,6 +227,19 @@ def test_error_told_unasked_is_held(held, told):
     assert usb.query_status('file:///dev/usb/lp0')['errors'] == ['The loaded labels do not fit the job. Clear the error at the printer']
 
 
+@pytest.mark.parametrize('bits, shown', [
+    (0x10, 'The cover is open'),
+    (0x11, 'The loaded labels do not fit the job, The cover is open. Clear the error at the printer'),
+])
+def test_held_error_tells_to_clear_it_only_where_needed(held, bits, shown):
+    # The cover error goes away once the cover is closed
+    from app.labeldesigner.drivers.brother import usb
+    error = bytearray(make_status_packet(62, kind=0x02))
+    error[9] = bits
+    held.gaps, held.unread = False, bytes(error)
+    assert usb.query_status('file:///dev/usb/lp0')['errors'] == [shown]
+
+
 @pytest.mark.parametrize('cleared', ['before', 'while the request waits'])
 def test_a_query_reads_owed_replies_for_a_while_only(held, monkeypatch, cleared):
     # After an error held for hours, so as not to keep the printer locked;
@@ -499,7 +512,7 @@ def test_every_error_of_a_usb_printer_is_told_in_plain_words(monkeypatch, byte, 
     plain = status.ERROR_MESSAGES[(status.ERRORS_1 if byte == 8 else status.ERRORS_2)[bit]]
     assert told == [plain]
     assert failure == f'The printer reports: {plain}'
-    assert held_told == [f'{plain}. {usb.CLEAR_AT_PRINTER}']
+    assert held_told == [plain if plain in status.SAY_WHAT_TO_DO else f'{plain}. {usb.CLEAR_AT_PRINTER}']
     assert not any(name in text for name in _raw_names() for text in (*told, failure, *held_told))
 
 
