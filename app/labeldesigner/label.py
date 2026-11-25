@@ -941,7 +941,8 @@ class SimpleLabel:
             code, self._code_scale = self._sized(code, width, height, parts, own_look=False, between=between)
         self._code_size = code.size if code is not None else None
 
-        if self.want_text(img):
+        with_text = self.want_text(img)
+        if with_text:
             self._text_scale = 1.0
             self._layouts = self._shared_layouts if self._shared_layouts is not None else {}
             # The text is part of the key: copies differ e.g. by a counter
@@ -1103,7 +1104,7 @@ class SimpleLabel:
             imgResult.paste(code, code_offset)
 
         self._line_boxes = {}
-        if self.want_text(img):
+        if with_text:
             self._draw_text(imgResult, bboxes, text_offset)
 
         # Draw border if thickness > 0
@@ -1353,20 +1354,19 @@ class SimpleLabel:
             extents = []
             if do_draw:
                 # What the line draws is what changes around its room
-                region = self._line_region(img, bboxes, i, text_offset)
+                region = self._line_region(img, bboxes, i, text_offset, left, right)
                 before = img.crop(region)
             if do_draw and INVERT_LINE:
                 # Draw a filled rectangle
-                center_x = 0
                 if anchor == "lt":
-                    min_bbox_x = text_offset[0] + min(bbox[0][0] for bbox in bboxes)
-                    max_bbox_x = text_offset[0] + bboxes[i][0][2] # max(bbox[0][2] for bbox in bboxes)
+                    min_bbox_x = text_offset[0] + left
+                    max_bbox_x = text_offset[0] + bboxes[i][0][2]
                 elif anchor == "mt":
                     center_x = (left + right) // 2
                     min_bbox_x = text_offset[0] + center_x - (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                     max_bbox_x = text_offset[0] + center_x + (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                 elif anchor == "rt":
-                    max_bbox_x = text_offset[0] + max(bbox[0][2] for bbox in bboxes)
+                    max_bbox_x = text_offset[0] + right
                     min_bbox_x = max_bbox_x - (bboxes[i][0][2] - bboxes[i][0][0])
                 # As high as the line was measured, see below
                 y_min = bboxes[i][0][1] + text_offset[1]
@@ -1408,11 +1408,9 @@ class SimpleLabel:
                     text_y = y - top
                     bbox = (bbox[0], y, bbox[2], y + bottom - top)
                 elif not IS_LAST_LINE:
-                    # Some characters may need special height
+                    # As wide as its text, as high as PRINTABLE in its font
                     top, bottom = _printable_extent(font)
-                    Ag = (0, y + top, 0, y + bottom)
-                    # Get bbox with width of text and dummy height
-                    bbox = (bbox[0], Ag[1], bbox[2], Ag[3])
+                    bbox = (bbox[0], y + top, bbox[2], y + bottom)
                 # The box is drawn from the top of the line, its lower edge
                 # included, also where the text is lower or there is none
                 if checkbox:
@@ -1468,7 +1466,7 @@ class SimpleLabel:
                         return 0.03 * random.randint(5, 10) * self._line_size(line)
                     for x_shift in [-get_shift_amount(), get_shift_amount()]:
                         for y_shift in [-get_shift_amount(), get_shift_amount()]:
-                            new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
+                            new_random_text = ''.join(random.choices(PRINTABLE, k=len(line['text'])))
                             self._draw_line(draw, (x + x_shift, y + y_shift), new_random_text, font, anchor, fill=color, align=align,
                                             spacing=spacing, letter_spacing=letter_spacing)
 
@@ -1499,14 +1497,14 @@ class SimpleLabel:
             known = self._line_boxes.get(line['line_index'], box)
             self._line_boxes[line['line_index']] = (min(known[0], box[0]), min(known[1], box[1]), max(known[2], box[2]), max(known[3], box[3]))
 
-    def _line_region(self, img, bboxes, i, text_offset) -> tuple:
+    def _line_region(self, img, bboxes, i, text_offset, left, right) -> tuple:
         """Where line i of the text placed at text_offset draws on img: its
-        room and the width of the text, a size around them for letters
-        reaching out and shifted text."""
+        room and the width of the text, from left to right, a size around
+        them for letters reaching out and shifted text."""
         size = self._line_size(bboxes[i][2])
         room = bboxes[i][0]
-        x0 = text_offset[0] + min(bbox[0][0] for bbox in bboxes) - size
-        x1 = text_offset[0] + max(bbox[0][2] for bbox in bboxes) + size
+        x0 = text_offset[0] + left - size
+        x1 = text_offset[0] + right + size
         y0, y1 = room[1] + text_offset[1] - size, room[3] + text_offset[1] + size
         x0, y0 = min(max(0, math.floor(x0)), img.width), min(max(0, math.floor(y0)), img.height)
         return x0, y0, max(x0, min(img.width, math.ceil(x1))), max(y0, min(img.height, math.ceil(y1)))
