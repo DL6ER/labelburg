@@ -1,6 +1,7 @@
 """ESC/POS of Epson receipt printers, as in the ESC/POS command reference
 of Epson: the label as a raster image (GS v 0), a cut after it (GS V 65),
-and the status the printer tells at once (DLE EOT)."""
+the status the printer tells at once (DLE EOT), and its model name and
+whether it has an autocutter (GS I)."""
 
 import os
 import select
@@ -39,6 +40,10 @@ CUT = b'\x1dVA\x00'
 # Offline cause, and the roll paper sensor
 OFFLINE = b'\x10\x04\x02'
 PAPER = b'\x10\x04\x04'
+# The model name, answered as 5Fh, the name and NUL, and the type ID, one
+# byte with bits 4 and 7 off, bit 1 on for an autocutter
+MODEL_NAME = b'\x1dIC'
+TYPE_ID = b'\x1dI\x02'
 
 
 class EscposError(Exception):
@@ -91,15 +96,21 @@ class Connection:
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
+        return self.answer(request, bool)[-1]
+
+    def answer(self, request: bytes, done) -> bytes:
+        """What the printer answers request with, read until done(answer)."""
         # A TM-T20II kept an answer from before, which was taken for this one
         _discard(lambda: select.select([self.dev], [], [], 0)[0] and os.read(self.dev, 64))
         self.write(request)
         # usblp also tells empty USB packets, read until an answer comes
-        deadline = time.monotonic() + ANSWER_WAIT
-        while (left := deadline - time.monotonic()) > 0:
-            if select.select([self.dev], [], [], left)[0] and (reply := os.read(self.dev, 64)):
-                return reply[-1]
-        raise EscposError('no answer to the status request')
+        reply, deadline = b'', time.monotonic() + ANSWER_WAIT
+        while not done(reply) and (left := deadline - time.monotonic()) > 0:
+            if select.select([self.dev], [], [], left)[0]:
+                reply += os.read(self.dev, 64)
+        if not done(reply):
+            raise EscposError('no answer to the request')
+        return reply
 
 
 class UsbConnection(Connection):
@@ -121,13 +132,17 @@ class UsbConnection(Connection):
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
+        return self.answer(request, bool)[-1]
+
+    def answer(self, request: bytes, done) -> bytes:
         _discard(lambda: self.printer.read(64))
         self.write(request)
-        deadline = time.monotonic() + ANSWER_WAIT
-        while time.monotonic() < deadline:
-            if reply := self.printer.read(64):
-                return reply[-1]
-        raise EscposError('no answer to the status request')
+        reply, deadline = b'', time.monotonic() + ANSWER_WAIT
+        while not done(reply) and time.monotonic() < deadline:
+            reply += self.printer.read(64)
+        if not done(reply):
+            raise EscposError('no answer to the request')
+        return reply
 
 
 class TcpConnection(Connection):
@@ -152,20 +167,28 @@ class TcpConnection(Connection):
 
     def ask(self, request: bytes) -> int:
         """The status byte the printer answers a DLE EOT request with."""
+        return self.answer(request, bool)[-1]
+
+    def answer(self, request: bytes, done) -> bytes:
         self.socket.setblocking(False)
         try:
             _discard(lambda: self.socket.recv(64))
         except BlockingIOError:
             pass
         self.write(request)
-        self.socket.settimeout(ANSWER_WAIT)
-        try:
-            reply = self.socket.recv(64)
-        except TimeoutError:
-            reply = b''
-        if not reply:
-            raise EscposError('no answer to the status request')
-        return reply[-1]
+        reply, deadline = b'', time.monotonic() + ANSWER_WAIT
+        while not done(reply) and (left := deadline - time.monotonic()) > 0:
+            self.socket.settimeout(left)
+            try:
+                got = self.socket.recv(64)
+            except TimeoutError:
+                break
+            if not got:
+                break
+            reply += got
+        if not done(reply):
+            raise EscposError('no answer to the request')
+        return reply
 
 
 def connect(device: str) -> Connection:
@@ -191,3 +214,28 @@ def get_errors(c: Connection, key: str | None = None) -> list[str]:
         raise
     _asked.pop(key, None)
     return found
+
+
+def model_name(c: Connection) -> str | None:
+    """The model name the printer tells, e.g. TM-P20, None if it tells none."""
+    def named(data):
+        start = data.find(b'\x5f')
+        return start >= 0 and b'\x00' in data[start + 1:]
+    try:
+        reply = c.answer(MODEL_NAME, named)
+    except EscposError:
+        return None
+    name = reply[reply.find(b'\x5f') + 1:].split(b'\x00', 1)[0]
+    return name.decode('ascii', 'replace').strip() or None
+
+
+def has_autocutter(c: Connection) -> bool | None:
+    """Whether the printer tells it has an autocutter in its type ID, None
+    if it tells nothing."""
+    def type_id(data):
+        return next((byte for byte in data if not byte & 0x90), None)
+    try:
+        reply = c.answer(TYPE_ID, lambda data: type_id(data) is not None)
+    except EscposError:
+        return None
+    return bool(type_id(reply) & 0x02)

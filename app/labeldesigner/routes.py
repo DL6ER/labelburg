@@ -1818,6 +1818,9 @@ def _described(told: list[dict]):
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
+        # What the printer told of itself beyond its model, e.g. no cutter
+        if model in drivers.MODELS and (own := drivers.for_model(model).device_capabilities(printer.get('path') or '', model)):
+            printer['caps'] = own
         if model in drivers.MODELS and drivers.for_model(model).capabilities(model)['calibration']:
             printer['calibration'] = printer_settings.calibration_of(kept, printer.get('path', ''))
         # Labels are shown and printed on the tape in the printer
@@ -1825,7 +1828,7 @@ def _described(told: list[dict]):
         printer['tape'] = tape.describe(printed_on)
         printer['takes'] = tape.takes(model)
         # What /api/feed does with that tape, where the model offers it
-        feed = drivers.for_model(model).feed_kind(model, printed_on.id) if model in drivers.MODELS else ''
+        feed = _feed_kind(printer.get('path') or '', model, printed_on.id) if model in drivers.MODELS else ''
         if feed:
             printer['feed'] = feed
         # The label size of that tape, for API users
@@ -2276,7 +2279,18 @@ def print_calibration():
 
 
 # The title of the job of /api/feed in the queue, as the label designer names its button
-FEED_TITLES = {'cut': 'Feed and cut', 'cut_paper': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label'}
+FEED_TITLES = {'cut': 'Feed and cut', 'cut_paper': 'Feed and cut', 'cut_label': 'Feed one label', 'label': 'Feed one label',
+               'paper': 'Feed paper'}
+
+
+def _feed_kind(device: str, model: str, label_size: str) -> str:
+    """What /api/feed does on the printer, see Driver.feed_kind(): one that
+    told it has no cutter only feeds its paper."""
+    driver = drivers.for_model(model)
+    kind = driver.feed_kind(model, label_size)
+    if kind in ('cut', 'cut_paper') and driver.device_capabilities(device, model).get('cutter') is False:
+        return 'paper'
+    return kind
 
 
 @bp.route('/api/feed', methods=['POST'])
@@ -2289,7 +2303,7 @@ def feed_paper():
         device, model = _resolved_printer(values.get('printer'), values.get('model'), ask=True)
         label_size = values.get('label_size') or _loaded_tape(device, model, _settings_of(device)).id
         queue = PrinterQueue(model=model, device_specifier=device, label_size=label_size, resolved=True)
-        kind = queue.driver.feed_kind(model, label_size)
+        kind = _feed_kind(device, model, label_size)
         if not kind:
             raise ValueError(NO_FEED)
     except Exception as e:
