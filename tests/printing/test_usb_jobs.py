@@ -159,7 +159,7 @@ def test_error_while_printing(clock, monkeypatch):
     fake = FakePrinter(clock, [(0, status(PHASE_CHANGE, PRINTING)), (5, status(ERROR, error=0x10)), (0, status(COMPLETED))])
     info = send(monkeypatch, fake, [100])
     assert not info['did_print']
-    assert usb.print_failure(info).startswith('The printer reports: Cover opened while printing')
+    assert usb.print_failure(info) == 'The printer reports: The cover is open'
 
 
 def test_every_label_of_a_job_is_confirmed(clock, monkeypatch):

@@ -7,7 +7,7 @@ import time
 
 from .. import devices, progress
 from ..backends import open_printer
-from .status import HEADER, LENGTH, StatusError, parse_status
+from .status import HEADER, LENGTH, StatusError, parse_status, plain_errors
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,9 @@ _asked: dict[str, float] = {}
 # The printers whose outstanding request was answered only by the retry
 # after it, e.g. a QL-560: that answer is their status meanwhile
 _retry_answered: set[str] = set()
+# After an error a printer holds, e.g. a QL-1100, which answers no status
+# request until it is cleared
+CLEAR_AT_PRINTER = 'Clear the error at the printer'
 
 
 def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
@@ -240,7 +243,7 @@ def print_failure(info: dict) -> str:
     printer while printing."""
     state = info.get('printer_state') or {}
     if state.get('errors'):
-        return 'The printer reports: ' + ', '.join(state['errors'])
+        return 'The printer reports: ' + ', '.join(plain_errors(state['errors']))
     if 0 < info.get('confirmed', 0) < info.get('pages', 0):
         return f"The printer confirmed {info['confirmed']} of {info['pages']} labels, check whether the others were printed"
     if info.get('did_print'):
@@ -350,7 +353,12 @@ def _held_error(key: str) -> dict | None:
     known = devices.status_cache.get(key, {})
     if known.get('status_type') != 'Error occurred' or not known.get('errors'):
         return None
-    return dict(known, errors=[f"{', '.join(known['errors'])}, clear it at the printer"])
+    return dict(known, errors=[f"{', '.join(plain_errors(known['errors']))}. {CLEAR_AT_PRINTER}"])
+
+
+def _shown(state: dict) -> dict:
+    """A copy of a status with its errors in plain words, see plain_errors()."""
+    return dict(state, errors=plain_errors(state.get('errors', [])))
 
 
 def _outstanding(key: str | None) -> bool:
@@ -382,7 +390,7 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
                 if held is not None:
                     return held
                 if key in _retry_answered and _outstanding(key) and key in devices.status_cache:
-                    return dict(devices.status_cache[key])
+                    return _shown(devices.status_cache[key])
                 raise
             except OSError:
                 _switched_off(key)
@@ -391,7 +399,7 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
                 # Release the device before giving up the lock
                 _release(printer)
             devices.status_cache[key] = state
-            return dict(state)
+            return _shown(state)
     logger.debug('Printer %s is busy, returning last known status', device_specifier)
     # Model and media from the last query, but the state of a running job:
     # errors or the idle state from before the job no longer apply

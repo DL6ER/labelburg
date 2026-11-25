@@ -29,6 +29,37 @@ ERRORS_2 = {
     7: 'System error',
 }
 
+COVER_OPEN = 'The cover is open'
+NO_LABELS = 'There are no labels in the printer'
+# The printer keeps the job and prints it once the labels are fed
+FEED_ERROR = ('The labels cannot be fed. Feed them into the slot (or insert a new roll) and close the cover, '
+              'then the printer prints the waiting label by itself. Do not print it again')
+# The errors of ERRORS_1 and ERRORS_2 as the label designer shows them
+ERROR_MESSAGES = {
+    'No media when printing': NO_LABELS,
+    'End of media (die-cut size only)': 'The labels are used up',
+    'Tape cutter jam': 'The cutter is jammed',
+    'Weak batteries': 'The battery is low',
+    'Main unit in use (QL-560/650TD/1050)': 'The printer is in use',
+    'Printer turned off': 'The printer is switched off',
+    'High-voltage adapter (not used)': 'The power adapter does not fit the printer',
+    "Fan doesn't work (QL-1050/1060N)": 'The fan of the printer does not work',
+    'Replace media error': 'The loaded labels do not fit the job',
+    'Expansion buffer full error': 'The memory of the printer is full',
+    'Transmission / Communication error': 'The label did not reach the printer completely',
+    'Communication buffer full error (not used)': 'The memory of the printer is full',
+    'Cover opened while printing (Except QL-500)': COVER_OPEN,
+    'Cancel key (not used) or Overheating error (PT-E550W/P750W/P710BT)': 'The printer is too hot, let it cool down',
+    'Media cannot be fed (also when the media end is detected)': FEED_ERROR,
+    'System error': 'The printer has a fault, switch it off and on again',
+}
+UNKNOWN_ERROR = 'The printer reports an error'
+
+
+def plain_errors(errors: list) -> list:
+    """The errors of a status in plain words, each once."""
+    return list(dict.fromkeys(ERROR_MESSAGES.get(error, UNKNOWN_ERROR) for error in errors))
+
 MEDIA_TYPES = {
     0x00: ('No media', 'No media'),
     0x01: ('Laminated tape', 'TZe'),
