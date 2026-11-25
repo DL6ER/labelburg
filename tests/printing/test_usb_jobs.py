@@ -186,7 +186,7 @@ def test_job_waits_while_the_cover_is_open(clock, monkeypatch):
     info = send(monkeypatch, fake, [50])
     assert (info['did_print'], info['ready_for_next_job']) == (True, True)
     assert clock.now - start == pytest.approx(300, abs=0.1)
-    assert {'labels': 1, 'label': 1, 'stage': 'The cover is open'} in seen
+    assert {'labels': 1, 'label': 1, 'stage': 'The cover is open', 'waiting': True} in seen
     assert devices.status_cache['/dev/usb/lp0']['errors'] == []
 
 

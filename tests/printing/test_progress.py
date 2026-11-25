@@ -88,9 +88,13 @@ def test_job_waiting_for_the_printer_tells_why(clock):
     progress.start(DEVICE, [100, 100], (50, 1))
     progress.counting(DEVICE)
     progress.waiting(DEVICE, 'The cover is open')
-    assert progress.state(DEVICE) == {'labels': 2, 'label': 1, 'stage': 'The cover is open'}
+    assert progress.state(DEVICE) == {'labels': 2, 'label': 1, 'stage': 'The cover is open', 'waiting': True}
     clock.now += 300
     progress.printed(DEVICE, 1)
+    assert progress.state(DEVICE) == {'labels': 2, 'label': 2}
+    # Closed while the next label waits
+    progress.waiting(DEVICE, 'The cover is open')
+    progress.waiting(DEVICE, None)
     assert progress.state(DEVICE) == {'labels': 2, 'label': 2}
     progress.finish(DEVICE, True)
     # The wait teaches nothing about the printer

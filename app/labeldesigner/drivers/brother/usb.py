@@ -106,7 +106,9 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
                         give_up = time.monotonic() + KEPT_WAIT + job_wait
                         progress.waiting(device_specifier, ', '.join(plain_errors(state['errors'])))
                     continue
-                held = False
+                if held:
+                    held = False
+                    progress.waiting(device_specifier, None)
                 if state['status_type'] == 'Printing completed':
                     info['confirmed'] += 1
                     printing = False
