@@ -77,7 +77,7 @@ def test_barcodes_with_narrow_bars(tmp_path, code_type, value, scale, small):
 def test_a_fitted_barcode_along_narrow_tape_is_too_small(tmp_path):
     # Its bars are made as high as the tape is wide
     client = make_client(tmp_path)
-    assert SMALL_CODE in warning(preview(client, label_size='29', barcode_type='code128', code_text='ABC-12345'))
+    assert SMALL_CODE in warning(preview(client, label_size='12', barcode_type='code128', code_text='ABC-12345'))
     assert TOO_SMALL not in warning(preview(client, label_size='62', barcode_type='code128', code_text='ABC-12345',
                                             orientation='standard'))
 

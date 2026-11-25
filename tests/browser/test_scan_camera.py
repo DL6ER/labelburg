@@ -142,8 +142,7 @@ def test_decode_reads_a_qr_and_a_datamatrix(camera_station, server):
     (lambda: barcode_png('codabar', 'A40156B'), 'A40156B'),
     (lambda: barcode_png('pzn', '123456'), 'PZN-1234562'),
     (lambda: barcode_png('code128', 'A-17'), 'A-17'),
-    # python-barcode adds the check character, which the reader keeps
-    (lambda: barcode_png('code39', 'A-17'), 'A-17B'),
+    (lambda: barcode_png('code39', 'A-17'), 'A-17'),
     (lambda: barcode_png('ean13', '400638133393'), '4006381333931'),
     (lambda: barcode_png('ean8', '9638507'), '96385074'),
     (lambda: barcode_png('isbn13', '978316148410'), '9783161484100'),

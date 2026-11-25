@@ -6,7 +6,7 @@ import os
 import select
 import time
 
-from .. import backends, devices, reach
+from .. import backends, devices, reach, usbip
 
 DPI = 203
 # Port of raw printing on the network, and how long connecting may take
@@ -39,9 +39,10 @@ def _usb_write(printer, data: bytes):
 
 def write(device: str, data: bytes):
     """Send to tcp://<host>[:<port>], to usb://<vendor>:<product>[/<serial>]
-    through PyUSB or to a device file, e.g. usblp's."""
-    if device.startswith('usb://'):
-        printer = backends.UsbPrinter(device)
+    through PyUSB, to usbip://<host> shared by another device or to a device
+    file, e.g. usblp's."""
+    if device.startswith('usb://') or usbip.is_address(device):
+        printer = backends.open_printer(device)
         try:
             _usb_write(printer, data)
         finally:
@@ -79,8 +80,8 @@ def host_status(device: str) -> bytes:
                 s.settimeout(left)
                 return s.recv(256) or None
             return _read_answer(read)
-    if device.startswith('usb://'):
-        printer = backends.UsbPrinter(device)
+    if device.startswith('usb://') or usbip.is_address(device):
+        printer = backends.open_printer(device)
         try:
             backends.discard(lambda: printer.read(256))
             printer.write(HOST_STATUS)

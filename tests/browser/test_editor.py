@@ -219,7 +219,7 @@ def test_advanced_changes_reach_the_preview(editor):
     assert editor.is_disabled('#adv [data-long="wrap"]')
     request = changed_preview(editor, lambda: editor.click('#adv [data-long="shrink"]'))
     assert (request['text_wrap'], request['text_fit']) == ('0', 'fill')
-    request = changed_preview(editor, lambda: editor.click('#adv [data-margins="roomy"]'))
+    request = changed_preview(editor, lambda: editor.click('#adv [data-margins="large"]'))
     assert int(request['margin_left']) > 35
     # Each frame is named in words
     assert [editor.inner_text(f'#adv [data-frame="{frame}"]') for frame in ('none', 'square', 'rounded')] == ['None', 'Square', 'Rounded']

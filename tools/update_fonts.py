@@ -1,7 +1,8 @@
 """Copy the Material Design Icons in app/static from the npm package of the
-version in tools/fonts/package-lock.json, which Dependabot raises, and write
+version in tools/fonts/package-lock.json, which Dependabot raises, write
 the names of the icons used for {{mdi:<name>}} in label texts to
-app/static/mdi/icons.json:
+app/static/mdi/icons.json, and copy the emoji font from the commit of
+google/fonts in DOWNLOADS:
 
     python3 tools/update_fonts.py           # writes the files
     python3 tools/update_fonts.py --check   # fails while they differ
@@ -30,6 +31,13 @@ FILES = {
         'LICENSE': 'mdi/LICENSE',
     },
 }
+# Files in app/static from a fixed commit, by their path there, with their
+# address and SHA-256
+GOOGLE_FONTS = 'https://raw.githubusercontent.com/google/fonts/b979dba422e445492b0eb9951ac52ee0b4d648c3/ofl/notoemoji/'
+DOWNLOADS = {
+    'emoji/NotoEmoji.ttf': (GOOGLE_FONTS + 'NotoEmoji%5Bwght%5D.ttf', 'de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551'),
+    'emoji/OFL.txt': (GOOGLE_FONTS + 'OFL.txt', '500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b'),
+}
 
 
 def locked(lock_path: str = LOCK) -> dict:
@@ -50,6 +58,15 @@ def fetch(package: dict) -> bytes:
     algorithm, _, digest = package['integrity'].partition('-')
     if algorithm != 'sha512' or base64.b64decode(digest) != hashlib.sha512(data).digest():
         raise ValueError(f'{url} does not match its integrity in the lock file')
+    return data
+
+
+def download(url: str, sha256: str) -> bytes:
+    """A file of DOWNLOADS, refused unless it matches its SHA-256."""
+    with urllib.request.urlopen(url, timeout=60) as response:
+        data = response.read()
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise ValueError(f'{url} does not match its SHA-256')
     return data
 
 
@@ -76,6 +93,8 @@ def wanted(lock_path: str = LOCK) -> dict:
                 files[target] = read(source)
             if name == '@mdi/font':
                 files['mdi/icons.json'] = mdi_icons(read('css/materialdesignicons.css').decode(), package['version'])
+    for path, (url, sha256) in DOWNLOADS.items():
+        files[path] = download(url, sha256)
     return files
 
 
@@ -96,7 +115,7 @@ def main(argv: list, static: str = STATIC, lock_path: str = LOCK) -> int:
             with open(target, 'wb') as f:
                 f.write(data)
     if check and differing:
-        print(f"Not the versions in tools/fonts/package-lock.json: {', '.join(differing)}\n"
+        print(f"Not the versions in tools/fonts/package-lock.json and DOWNLOADS: {', '.join(differing)}\n"
               'Run python3 tools/update_fonts.py', file=sys.stderr)
         return 1
     print(f"{'Written' if differing and not check else 'Up to date'}: {', '.join(differing) or 'all files'}")

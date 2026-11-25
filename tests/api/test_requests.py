@@ -178,18 +178,21 @@ def test_trusted_hosts(tmp_path):
     assert client.get('/labeldesigner/', base_url='http://labels.local:8013').status_code == 200
 
 
-def test_api_defaults_match_label_designer(tmp_path):
+@pytest.mark.parametrize('label_size', ['62', '29', 'vc9'])
+def test_api_defaults_match_label_designer(tmp_path, label_size):
     client = make_client(tmp_path)
-    config = client.application.config
-    implicit = client.post('/labeldesigner/api/preview', data={'label_size': '62', 'text': TEXT})
+    html = client.get('/labeldesigner/').get_data(as_text=True)
+    sizes = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))['label_sizes']
+    top, bottom, left, right = next(size for size in sizes if size['id'] == label_size)['margins']['normal']
+    implicit = client.post('/labeldesigner/api/preview', data={'label_size': label_size, 'text': TEXT})
     explicit = client.post('/labeldesigner/api/preview', data={
-        'label_size': '62',
+        'label_size': label_size,
         'text': TEXT,
         'border_thickness': '0',
-        'margin_top': config['LABEL_DEFAULT_MARGIN_TOP'],
-        'margin_bottom': config['LABEL_DEFAULT_MARGIN_BOTTOM'],
-        'margin_left': config['LABEL_DEFAULT_MARGIN_LEFT'],
-        'margin_right': config['LABEL_DEFAULT_MARGIN_RIGHT'],
+        'margin_top': top,
+        'margin_bottom': bottom,
+        'margin_left': left,
+        'margin_right': right,
     })
     assert implicit.status_code == explicit.status_code == 200
     assert implicit.data == explicit.data
@@ -316,6 +319,10 @@ def test_label_designer_gets_the_configured_defaults(tmp_path):
     client.application.config.update({'LABEL_DEFAULT_MARGIN_LEFT': 0, 'LABEL_DEFAULT_FONT_SIZE': 55, 'LABEL_DEFAULT_ORIENTATION': 'rotated',
                                       'IMAGE_DEFAULT_MODE': 'black_and_white'})
     html = client.get('/labeldesigner/').get_data(as_text=True)
-    defaults = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))['defaults']
-    assert (defaults['margin_left'], defaults['font_size'], defaults['orientation']) == (0, 55, 'rotated')
+    config = json.loads(re.search(r'DESIGNER_CONFIG = (.*);</script>', html).group(1))
+    defaults = config['defaults']
+    assert (defaults['font_size'], defaults['orientation']) == (55, 'rotated')
     assert defaults['image_mode'] == 'black_and_white'
+    # The margins of each label size in proportion to its width
+    margins = {size['id']: size['margins'] for size in config['label_sizes']}
+    assert margins['62']['normal'] == [24, 24, 0, 35] and margins['29']['large'] == [21, 21, 0, 31]
