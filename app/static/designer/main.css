@@ -574,6 +574,11 @@ textarea.in { width: 100%; resize: vertical; }
 .tpl-print { display: flex; gap: 8px; align-items: center; }
 .tpl-print .btn.primary { flex: 1; justify-content: center; }
 .tpl-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.tpl-ask { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+/* Side by side where they fit, else each a line of its own */
+.tpl-ask .btn { flex: 1 1 auto; justify-content: center; }
+.tpl-ask .ghost { flex-basis: 100%; }
+.tpl-ask[hidden] { display: none; }
 .tpl-panel { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .tpl-panel .row { flex-wrap: nowrap; }
 .tpl-panel .row .in { flex: 1; min-width: 0; }

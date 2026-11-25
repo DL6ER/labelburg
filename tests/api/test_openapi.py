@@ -83,9 +83,10 @@ def test_spec_is_served(tmp_path):
 
 
 def test_the_answer_of_a_print_request_tells_every_state_of_a_job():
-    # A job may print, fail or be removed before its request is answered
+    # A job may print, fail or be removed before its request is answered,
+    # only one read later may have printed as the server stopped
     schemas = json.load(open(SPEC))['components']['schemas']
-    assert schemas['QueuedAnswer']['properties']['state']['enum'] == schemas['QueueJob']['properties']['state']['enum']
+    assert [*schemas['QueuedAnswer']['properties']['state']['enum'], 'unknown'] == schemas['QueueJob']['properties']['state']['enum']
 
 
 def test_a_job_tells_where_it_comes_from():

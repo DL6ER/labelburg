@@ -92,6 +92,8 @@ _REFUSED_ENV_VARS: set = set()
 _MAX_REFUSED_ENV_VARS = 100
 # A blank, filled in when the label is printed, as the label designer stores it
 BLANK_TEMPLATE = re.compile(r"\{\{blank:([^}]+)\}\}")
+# {{datetime:<format>}}, {{datetime+5d:<format>}} moved from now, see shift_date
+DATETIME_TEMPLATE = re.compile(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}")
 
 
 class TextTooLong(ValueError):
@@ -413,6 +415,7 @@ class SimpleLabel:
         fixed_length: bool = False,
         vertical_align: str = 'center',
         mirror: bool = False,
+        image_size: tuple | None = None,
         date_format: str = '%Y-%m-%d',
         fallback_fonts: tuple[str, ...] = (),
         date_language: str = '',
@@ -551,6 +554,9 @@ class SimpleLabel:
         # Printed mirror-inverted, to be read through clear tape stuck behind
         # glass
         self._mirror = mirror
+        # Of the picture a smaller copy in image was made of, which it is
+        # fitted as, so that the label comes out as it did with the picture
+        self._image_size = tuple(image_size) if image_size else None
         self._fallback_fonts = tuple(fallback_fonts)
         # The pieces of lines measured, see _measured_piece()
         self._pieces: dict[tuple, tuple] = {}
@@ -708,7 +714,7 @@ class SimpleLabel:
         def datetime_replacer(match):
             when = self._now()
             return format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language)
-        substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
+        substitute(DATETIME_TEMPLATE, datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
         if any("{{uuid}}" in piece for piece in pieces):
@@ -798,6 +804,19 @@ class SimpleLabel:
         blanks."""
         return line.get('unmarked', line.get('text', ''))
 
+    def dates_shown(self) -> list[str]:
+        """The dates and times the label shows, made for its time: of
+        {{datetime}} and of its date blanks, e.g. to tell whether it shows
+        others on another day."""
+        shown = []
+        for text in [line.get('text', '') for line in self.input_text or [] if isinstance(line, dict)] + [self._code_text or '']:
+            for match in DATETIME_TEMPLATE.finditer(str(text)):
+                when = self._now()
+                shown.append(format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language))
+            shown += [self._fill_blank(name) for name in BLANK_TEMPLATE.findall(str(text))
+                      if (self._blank_fields.get(name) or {}).get('type') == 'date']
+        return shown
+
     def has_text(self) -> bool:
         """Whether the label has text. A line of blanks left empty has none."""
         return any(self._has_content(line.get('text', '')) for line in self.input_text or [])
@@ -854,13 +873,7 @@ class SimpleLabel:
             return value
         if value == '' and given:
             return ''
-        # Without a value the same date as the other templates
-        if value == '':
-            date = self._now().date()
-        elif DATE_OFFSET.fullmatch(value.strip()):
-            date = shift_date(self._now().date(), value.strip())
-        else:
-            date = _iso_date(value)
+        date = self.blank_date(name)
         if date is None:
             return value
         date_format = str(field.get('format') or self._date_format)
@@ -870,6 +883,23 @@ class SimpleLabel:
             return format_date(date, date_format, self._date_language)
         except ValueError:
             return date.isoformat()
+
+    def blank_date(self, name: str) -> datetime.date | None:
+        """The date the date blank name shows: its value, else its default,
+        else the date of the label, also moved from it, e.g. +5d. None for
+        one left empty, not a date or no date blank."""
+        field = self._blank_fields.get(name)
+        field = field if isinstance(field, dict) else {}
+        given = name in self._blanks
+        value = str(self._blanks[name]) if given else '' if field.get('default') is None else str(field['default'])
+        if field.get('type') != 'date' or (value == '' and given):
+            return None
+        # Without a value the same date as the other templates
+        if value == '':
+            return self._now().date()
+        if DATE_OFFSET.fullmatch(value.strip()):
+            return shift_date(self._now().date(), value.strip())
+        return _iso_date(value)
 
     # Turned by 180 degrees for printing, set by the queue
     turned = False
@@ -1192,7 +1222,7 @@ class SimpleLabel:
                     max_height = max((max_height - between) // parts, 1)
 
             # Get image dimensions
-            img_width, img_height = img.size
+            img_width, img_height = self._image_size if own_look and self._image_size else img.size
 
             # Print the original image size
             logger.debug(f"Maximal allowed dimensions: {max_width}x{max_height} mm")
@@ -1212,7 +1242,8 @@ class SimpleLabel:
             # Use image_scaling_factor if provided
             scale = self._image_scaling_factor / 100.0 if own_look else 1.0
             logger.debug(f"Manual image scaling factor: {scale}")
-        new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+        width_of, height_of = self._image_size if self._image_fit and own_look and self._image_size else img.size
+        new_size = (max(1, int(width_of * scale)), max(1, int(height_of * scale)))
         logger.debug(f"Resized image size: {new_size} px")
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale

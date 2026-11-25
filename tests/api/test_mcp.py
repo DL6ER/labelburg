@@ -609,7 +609,9 @@ def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monke
 def test_the_mcp_package_is_loaded_with_the_first_call_only():
     import subprocess
     import sys
-    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)'
+    # Without the print queue of the labels of the working tree
+    code = ('import sys; from app.labeldesigner import print_store; print_store.ENABLED = False; from app import create_app; '
+            'create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)')
     output = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout
     assert output.split()[-2:] == ['False', 'False']
 
