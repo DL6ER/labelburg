@@ -12,7 +12,7 @@ Then choose the label under "Templates", "Your labels" and press "Use from anywh
 
 Most USB and Bluetooth barcode scanners type what they read, like a keyboard. Nothing needs to be installed: open the station, hold a code under the scanner and the label prints. Typing anywhere else in the label designer never prints.
 
-The scanner has to type with the keyboard layout of the computer or phone, e.g., German. Most scanners come set to US English; the setup codes in their manual switch the layout. With another layout, characters like `:` and `/` come out wrong. For links and contacts the station notices that and says so instead of printing.
+The scanner has to type with the keyboard layout of the computer or phone, e.g., German. Most scanners come set to US English; the setup codes in their manual switch the layout, [Setting up a barcode scanner](scanners.md) has them for some scanners. With another layout, characters like `:` and `/` come out wrong. For links and contacts the station notices that and says so instead of printing.
 
 Use one scanner per station. Codes of several lines, e.g., contacts, come in line by line, so two scanners reading at the same moment can end up in one code. A contact that comes in incomplete is not printed, the station asks to scan it again.
 
