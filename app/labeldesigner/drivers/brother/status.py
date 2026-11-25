@@ -59,6 +59,9 @@ ERROR_MESSAGES = {
 UNKNOWN_ERROR = 'The printer reports an error'
 # Errors that say what to do, or go away once fixed, e.g. the cover closed
 SAY_WHAT_TO_DO = {COVER_OPEN, SWITCHED_OFF, TOO_HOT, FEED_ERROR, FAULT}
+# Errors after which the printer keeps the job and prints it once they are
+# fixed, with what to tell when the job is given up
+KEEPS_JOB = {'Cover opened while printing (Except QL-500)': 'The label prints once the cover is closed, do not print it again'}
 
 
 def plain_errors(errors: list) -> list:

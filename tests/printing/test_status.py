@@ -511,7 +511,8 @@ def test_every_error_of_a_usb_printer_is_told_in_plain_words(monkeypatch, byte, 
     held_told = usb._held_error('/dev/usb/lp0')['errors']
     plain = status.ERROR_MESSAGES[(status.ERRORS_1 if byte == 8 else status.ERRORS_2)[bit]]
     assert told == [plain]
-    assert failure == f'The printer reports: {plain}'
+    kept = status.KEEPS_JOB.get((status.ERRORS_1 if byte == 8 else status.ERRORS_2)[bit])
+    assert failure == f'The printer reports: {plain}' + (f'. {kept}' if kept else '')
     assert held_told == [plain if plain in status.SAY_WHAT_TO_DO else f'{plain}. {usb.CLEAR_AT_PRINTER}']
     assert not any(name in text for name in _raw_names() for text in (*told, failure, *held_told))
 

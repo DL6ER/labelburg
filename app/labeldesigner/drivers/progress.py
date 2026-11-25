@@ -75,6 +75,15 @@ def stage(device: str, name: str, percent: int | None = None):
             job.stage, job.percent = name, percent
 
 
+def waiting(device: str, reason: str):
+    """The printer waits for reason to be fixed, e.g. the cover to be closed,
+    and prints the job then. How long the job takes is no longer estimated."""
+    with _guard:
+        job = _jobs.get(devices.lock_key(device))
+        if job:
+            job.stage, job.percent, job.estimated = reason, None, False
+
+
 def finish(device: str, success: bool):
     """The job ended. One that printed all its labels tells how fast the
     printer prints in its mode."""

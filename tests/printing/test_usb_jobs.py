@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from app.labeldesigner.drivers import backends, devices
+from app.labeldesigner.drivers import backends, devices, progress
 from app.labeldesigner.drivers.brother import usb
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome, without_status
 
@@ -155,11 +155,52 @@ def test_printer_that_does_not_answer(clock, monkeypatch):
 
 
 def test_error_while_printing(clock, monkeypatch):
-    # Error information 2, bit 4: "Cover opened while printing"
-    fake = FakePrinter(clock, [(0, status(PHASE_CHANGE, PRINTING)), (5, status(ERROR, error=0x10)), (0, status(COMPLETED))])
+    # Error information 2, bit 0: "Replace media error"
+    fake = FakePrinter(clock, [(0, status(PHASE_CHANGE, PRINTING)), (5, status(ERROR, error=0x01)), (0, status(COMPLETED))])
     info = send(monkeypatch, fake, [100])
     assert not info['did_print']
-    assert usb.print_failure(info) == 'The printer reports: The cover is open'
+    assert usb.print_failure(info) == 'The printer reports: The loaded labels do not fit the job'
+
+
+def cover_opened(closed_after):
+    """The messages of a QL-1100 that got a job with the cover open, as
+    recorded: the error, printing with it, and the label once the cover is
+    closed after closed_after seconds."""
+    return [(0, status(ERROR, error=0x10)), (0, status(PHASE_CHANGE, PRINTING, error=0x10)),
+            (closed_after, status(COMPLETED)), (0, status(PHASE_CHANGE, WAITING))]
+
+
+def test_job_waits_while_the_cover_is_open(clock, monkeypatch):
+    # The printer keeps the job and prints it once the cover is closed
+    monkeypatch.setattr(devices, 'status_cache', {})
+    monkeypatch.setattr(progress, '_jobs', {})
+    progress.start('file:///dev/usb/lp0', [50], (50, 1))
+    fake = FakePrinter(clock, cover_opened(closed_after=300))
+    seen, read = [], fake.read
+
+    def reading(length=32):
+        seen.append(progress.state('file:///dev/usb/lp0'))
+        return read(length)
+    fake.read = reading
+    start = clock.now
+    info = send(monkeypatch, fake, [50])
+    assert (info['did_print'], info['ready_for_next_job']) == (True, True)
+    assert clock.now - start == pytest.approx(300, abs=0.1)
+    assert {'labels': 1, 'label': 1, 'stage': 'The cover is open'} in seen
+    assert devices.status_cache['/dev/usb/lp0']['errors'] == []
+
+
+def test_cover_left_open_is_given_up(clock, monkeypatch):
+    monkeypatch.setattr(devices, 'status_cache', {})
+    fake = FakePrinter(clock, cover_opened(closed_after=3600))
+    start = clock.now
+    info = send(monkeypatch, fake, [50])
+    assert not info['did_print']
+    assert clock.now - start == pytest.approx(usb.KEPT_WAIT + usb.STATUS_WAIT + 50 / usb.SLOWEST_PRINT_SPEED, abs=0.1)
+    assert usb.print_failure(info) == ('The printer reports: The cover is open. '
+                                       'The label prints once the cover is closed, do not print it again')
+    # Held until the cover is closed, also as told while printing
+    assert usb._held_error('/dev/usb/lp0')['errors'] == ['The cover is open']
 
 
 def test_every_label_of_a_job_is_confirmed(clock, monkeypatch):
