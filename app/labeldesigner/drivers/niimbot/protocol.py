@@ -165,6 +165,8 @@ class LeSocket:
 
     def __init__(self, device: str):
         mac, _ = address(device)
+        if not hasattr(socket, 'BDADDR_LE_PUBLIC'):
+            raise devices.NoBluetoothLe('Python before 3.14 opens no L2CAP connection of Bluetooth LE')
         self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
         self.s.settimeout(CONNECT_WAIT)
         self.mtu, self.unread = 23, b''
