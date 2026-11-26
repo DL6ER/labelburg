@@ -340,12 +340,26 @@ def test_label_settings_this_browser_kept_are_carried_over_once(designer, server
     assert label_settings(server) == {'date_format': '', 'date_language': '', 'collate': '1', 'font_family': '', 'history': ''}
 
 
+def test_connections_name_the_header_where_the_mcp_endpoint_asks_for_a_token(designer, app, monkeypatch):
+    monkeypatch.setitem(app.config, 'MCP_TOKEN', 'kept-secret-token')
+    designer.reload()
+    designer.wait_for_selector('#field .ln')
+    open_settings(designer, 'connections')
+    mcp = designer.locator('.set-conn >> nth=0')
+    assert 'Authorization: Bearer <token>' in mcp.locator('code').all_inner_texts()
+    assert 'They need the token set as MCP_TOKEN.' in mcp.inner_text()
+    assert 'no login' not in mcp.inner_text()
+    # The page only learns that there is one
+    assert 'kept-secret-token' not in designer.content()
+
+
 def test_connections_have_the_addresses_of_this_server(designer, server):
     open_settings(designer, 'connections')
     codes = designer.locator('.set-conn code').all_inner_texts()
     assert f'{server}/labeldesigner/api/homebox' in codes
     assert f'{server}/labeldesigner/api/repository/print?name=Grocy.json' in codes
     assert f'{server}/mcp' in codes
+    assert 'Authorization: Bearer <token>' not in codes
     assert f'{server}/labeldesigner/api/webhook/print' in codes
     assert any('/api/demos/print?id=office/015-paperless-asn' in c for c in codes)
     # MCP first, with a robot, then the others

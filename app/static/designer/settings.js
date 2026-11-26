@@ -657,9 +657,9 @@ function connections() {
     return [
         {
             name: 'MCP for direct AI connections', icon: 'robot', doc: 'docs/mcp.md',
-            what: 'AI assistants see the printers and the saved labels and print. It has no login, keep it in your home network.',
+            what: `AI assistants see the printers and the saved labels and print. ${C.mcp_token ? 'They need the token set as MCP_TOKEN.' : 'It has no login, keep it in your home network.'}`,
             lead: 'Assistants in the cloud, e.g. claude.ai or ChatGPT, cannot reach a server in your home network.',
-            rows: [['Address', mcp]],
+            rows: [['Address', mcp], ...(C.mcp_token ? [['Header', 'Authorization: Bearer <token>']] : [])],
             // The setup of each client, as its documentation gives it for a
             // server reached over HTTP (see docs/mcp.md)
             clients: [

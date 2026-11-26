@@ -225,6 +225,8 @@ def _designer_config() -> dict:
         # behind a reverse proxy, keep what they store in the browser
         # apart. The one at the root keeps the names it always had.
         'storage_prefix': f'{request.script_root}/' if request.script_root else '',
+        # Whether the MCP endpoint asks for MCP_TOKEN, never the token itself
+        'mcp_token': bool(current_app.config.get('MCP_TOKEN')),
         # The font menu: families, the weight, width and slant of each style
         'font_families': fonts.families(),
         'default_font': ','.join(fonts.get_default_font()),
