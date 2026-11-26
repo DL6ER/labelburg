@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, DEMO_NAME, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, DEMO_NAME, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, found_model, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .dates import LANGUAGES as DATE_LANGUAGES
@@ -2844,8 +2844,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     elif quiet and (known := _known_model(device, printers, configured, model)):
         model = known
     else:
-        # The model a printer tells, e.g. in its device ID, else the configured one
-        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
+        # The model a printer tells, e.g. in its device ID, else the one it
+        # is listed or was found with, else the configured one
+        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), None) or found_model(device) or model)[1]
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
     if model not in MODELS:
