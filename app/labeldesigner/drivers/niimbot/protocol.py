@@ -13,6 +13,7 @@ import struct
 import threading
 import time
 
+from ... import bluetooth
 from .. import backends, bitmap, devices
 
 # 8 dots per mm, the printhead of the D110_M is 15 mm wide, that of the B1 48 mm
@@ -172,7 +173,7 @@ class LeSocket:
         # it is closed unused
         self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
         try:
-            self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+            self.s.bind((bluetooth.adapter_for(mac), 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:
                 try:
                     self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))

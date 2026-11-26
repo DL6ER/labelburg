@@ -5,7 +5,7 @@ import socket
 
 import pytest
 
-from app.labeldesigner import print_queue, print_store, printer, printer_settings
+from app.labeldesigner import bluetooth, print_queue, print_store, printer, printer_settings
 from app.labeldesigner.drivers import backends, devices, usbip
 from app.labeldesigner.drivers.brother import usb
 from app.labeldesigner.drivers import escpos as escpos_driver
@@ -100,6 +100,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(devices, '_unreached', {})
     monkeypatch.setattr(escpos_driver, '_told', {})
+    monkeypatch.setattr(bluetooth, 'heard_by', {})
 
 
 @pytest.fixture(autouse=True)

@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from app.labeldesigner import bluetooth
 from app.labeldesigner.drivers import devices, niimbot
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client, outcome
@@ -153,6 +154,14 @@ def test_b1_on_bluetooth_answers_over_bluetooth_le(b1, le):
     assert le.addresses == [(MAC, 0, 4, socket.BDADDR_LE_PUBLIC)]
     # Asked without a beep, the label designer follows it closely
     assert printer_['follow'] is True
+
+
+@pytest.mark.parametrize('heard_by, adapter', [({}, socket.BDADDR_ANY), ({MAC: '00:00:5E:00:53:F0'}, '00:00:5E:00:53:F0')])
+def test_b1_is_reached_through_the_adapter_that_heard_it(b1, le, monkeypatch, heard_by, adapter):
+    # Any adapter where no search heard it, e.g. set up by its address
+    monkeypatch.setattr(bluetooth, 'heard_by', heard_by)
+    b1.get(STATUS)
+    assert le.bound == (adapter, 0, 4, socket.BDADDR_LE_PUBLIC)
 
 
 def test_the_printers_mtu_request_is_answered(b1, le):
