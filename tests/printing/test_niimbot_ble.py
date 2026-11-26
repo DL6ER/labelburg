@@ -164,6 +164,17 @@ def test_b1_is_reached_through_the_adapter_that_heard_it(b1, le, monkeypatch, he
     assert le.bound == (adapter, 0, 4, socket.BDADDR_LE_PUBLIC)
 
 
+def test_b1_on_bluetooth_le_tells_it_needs_python_3_14(b1, le, monkeypatch):
+    # Before Python 3.14 an L2CAP address has no address type
+    monkeypatch.delattr(protocol.socket, 'BDADDR_LE_PUBLIC')
+    needs = 'Printers on Bluetooth LE need Python 3.14 or newer'
+    assert b1.get(STATUS).get_json()['printers'][0]['errors'] == [needs]
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(b1, response) == ('failed', f'Could not send the label to the printer: {needs}')
+    assert le.made == []
+
+
 def test_the_printers_mtu_request_is_answered(b1, le):
     b1.get(STATUS)
     assert any(pdu[0] == 0x03 for pdu in le.sent)

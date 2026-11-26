@@ -100,6 +100,7 @@ Everything below is for those who want to set Labelburg up in depth, use it from
 | `PRINT_MAX_COUNT` | Most labels per print request | `100` |
 | `MCP_ENABLED` | `false` to turn off the [MCP endpoint](docs/mcp.md) for AI assistants | `true` |
 | `MCP_MAX_COUNT` | Most labels per call of an [AI assistant](docs/mcp.md) | `10` |
+| `MCP_TOKEN` | A token the [MCP endpoint](docs/mcp.md#token) then asks for as `Authorization: Bearer <token>` | none |
 | `MAX_CONTENT_LENGTH` | Largest request in bytes, e.g. for uploaded images | 32 MB |
 | `FONT_FOLDER` | Folder with more fonts, see [Fonts](#fonts) | none |
 | `SYSTEM_FONTS` | `false` to offer only the fonts of `FONT_FOLDER`, not those installed on the system | `true` |
@@ -122,7 +123,7 @@ Labelburg answers only requests for the names a home network uses, IP addresses,
 | `tcp://<host>` | A network printer, an IPv6 address in brackets |
 | `vc500w://<host>` | A VC-500W on the network |
 | `usbip://<host>` | A USB printer another device shares, see [USB/IP](docs/usbip.md) |
-| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M or Niimbot B1 on Bluetooth, channel 2 on a PUQU and 1 on a D110_M if left out. A D110_M has to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`. |
+| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M or Niimbot B1 on Bluetooth, channel 2 on a PUQU and 1 on a D110_M if left out. A D110_M has to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`, outside one a B1 needs Python 3.14 or newer. |
 | `simulation` | The demo printer, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them. Its model and roll are chosen in the Settings of the label designer, else it is `PRINTER_MODEL` or the model listed with it in `PRINTERS`. |
 
 The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.

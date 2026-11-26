@@ -922,7 +922,8 @@ export function printerState(p) {
     if (!p) return { cls: 'off', text: 'No printer' };
     if (p.errors && p.errors.length) return { cls: 'bad', text: p.errors[0] };
     if (p.status_type === 'Asking the printer') return { cls: 'off', text: 'Asking the printer...' };
-    if (p.job) return { cls: '', text: jobText(p.job) };
+    // E.g. waiting for the cover to be closed
+    if (p.job) return { cls: p.job.waiting ? 'bad' : '', text: jobText(p.job) };
     if (p.status_type === 'Printing') return { cls: '', text: 'Printing' };
     if (isDemo(p)) return { cls: '', text: 'Ready, prints nothing' };
     return { cls: '', text: 'Ready' };
