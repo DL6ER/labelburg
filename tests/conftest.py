@@ -93,6 +93,7 @@ def printer_output(tmp_path, monkeypatch):
 def no_known_printers(monkeypatch):
     # What one test found stays out of the next
     monkeypatch.setattr(printer, '_cached_printers', [])
+    monkeypatch.setattr(printer, '_found', {})
     monkeypatch.setattr(printer, '_cached_hints', [])
     monkeypatch.setattr(printer, '_last_scan_ts', 0)
     monkeypatch.setattr(printer, '_last_states', {})

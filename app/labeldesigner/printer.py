@@ -50,6 +50,11 @@ DISCOVERY_INTERVAL = 60
 # first. The monotonic clock starts at boot, so a time of 0 would count as
 # recent in a container started less than a minute ago.
 _discovered = None
+# A printer found before stays for FOUND_KEPT seconds after the last round
+# that found it, e.g. a VC-500W busy with a label misses a round: its address
+# -> (time.monotonic() it was last found, (address, model))
+FOUND_KEPT = 3 * DISCOVERY_INTERVAL
+_found = {}
 # Printers on Bluetooth LE, e.g. a Niimbot B1. Searched for in the background
 # for BLUETOOTH_SEARCH seconds, first at the first detection, then when the
 # label designer looks for printers, at most every BLUETOOTH_INTERVAL
@@ -303,7 +308,8 @@ def found_devices() -> set[str]:
 def _discovered_label_printers() -> list[tuple[str, str]]:
     """Label printers that announce themselves on the network, as (address,
     model), e.g. tcp://<address>[:<port>] or vc500w://<address>. Kept for
-    DISCOVERY_INTERVAL."""
+    DISCOVERY_INTERVAL, each one found also up to FOUND_KEPT after it was
+    last found."""
     global _discovered
     if not NETWORK_DISCOVERY:
         return []
@@ -319,7 +325,15 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
         found = next((found for driver in drivers.DRIVERS if (found := driver.announced(service))), None)
         if found and all(urlsplit(known).hostname != service['address'] for known, _ in printers):
             printers.append(found)
-    _discovered = (time.monotonic(), printers)
+    now = time.monotonic()
+    _found.update((found[0], (now, found)) for found in printers)
+    for address, (seen, found) in list(_found.items()):
+        if now - seen > FOUND_KEPT:
+            # Another status request searching meanwhile may have dropped it
+            _found.pop(address, None)
+        elif all(urlsplit(known).hostname != urlsplit(address).hostname for known, _ in printers):
+            printers.append(found)
+    _discovered = (now, printers)
     return printers
 
 
