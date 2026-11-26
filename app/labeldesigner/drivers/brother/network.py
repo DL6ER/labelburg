@@ -12,7 +12,7 @@ from .. import devices, reach
 from ..base import network_status
 from . import usb
 from .models import MODELS
-from .status import StatusError, parse_status
+from .status import COVER_OPEN, FEED_ERROR, NO_LABELS, StatusError, parse_status, plain_errors
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +34,9 @@ IPP_PORT = 631
 # Messages for the reasons a network printer gives over IPP why it cannot
 # print (printer-state-reasons, RFC 8011), without the -error suffix
 IPP_REASON_MESSAGES = {
-    'cover-open': 'The cover is open',
-    'media-empty': 'There are no labels in the printer',
-    'media-needed': 'There are no labels in the printer',
+    'cover-open': COVER_OPEN,
+    'media-empty': NO_LABELS,
+    'media-needed': NO_LABELS,
     'media-jam': 'The labels are jammed',
     'offline': 'The printer is offline',
     'paused': 'The printer is paused',
@@ -68,21 +68,6 @@ SNMP_TIMEOUT = 3.0
 # A printer without SNMP is asked again after this many seconds
 SNMP_RETRY = 60
 _snmp_unavailable = {}
-
-NO_LABELS = IPP_REASON_MESSAGES['media-empty']
-# The printer keeps the job and prints it once the labels are fed
-FEED_ERROR = ('The labels cannot be fed. Feed them into the slot (or insert a new roll) and close the cover, '
-              'then the printer prints the waiting label by itself. Do not print it again')
-
-# Messages for the errors of the status, by their names in status.py
-STATUS_ERROR_MESSAGES = {
-    'No media when printing': NO_LABELS,
-    'End of media (die-cut size only)': 'The labels are used up',
-    'Tape cutter jam': 'The cutter is jammed',
-    'Replace media error': 'The loaded labels do not fit the job',
-    'Cover opened while printing (Except QL-500)': IPP_REASON_MESSAGES['cover-open'],
-    'Media cannot be fed (also when the media end is detected)': FEED_ERROR,
-}
 
 
 def send(data: bytes, device_specifier: str):
@@ -195,12 +180,13 @@ def _snmp_network_status(device_specifier: str, host: str, default_model: str) -
     _snmp_unavailable.pop(host, None)
     model = state.get('model')
     status = network_printer(device_specifier, model if model in MODELS else default_model)
-    errors = [STATUS_ERROR_MESSAGES.get(error, error) for error in state['errors']]
+    errors = plain_errors(state['errors'])
     if state['media_width']:
         status['media_width'] = state['media_width']
         status['media_length'] = state['media_length']
         status['media_type'] = state['media_type']
         status['red_roll'] = state['red_roll']
+        status['colors'] = state['colors']
     elif not errors:
         errors = [NO_LABELS]
     status['errors'] = errors

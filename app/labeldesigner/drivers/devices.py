@@ -327,6 +327,11 @@ _UNANSWERED = (
     ((errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN), 'The printer cannot be reached'),
 )
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
+NO_LE = 'Printers on Bluetooth LE need Python 3.14 or newer'
+
+
+class NoBluetoothLe(OSError):
+    """Python before 3.14 has no L2CAP addresses of Bluetooth LE."""
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
 
@@ -339,6 +344,8 @@ def unanswered_reason(error: Exception) -> str:
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
         return NO_LIBUSB
+    if isinstance(error, NoBluetoothLe):
+        return NO_LE
     if isinstance(error, reach.NotAllowed):
         return reach.NOT_ALLOWED
     for numbers, text in _UNANSWERED:
@@ -357,7 +364,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, reach.NOT_ALLOWED])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NO_LE, reach.NOT_ALLOWED])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 
@@ -383,6 +390,7 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
         'red_roll': known.get('red_roll'),
+        'colors': known.get('colors') or {},
         'errors': [unanswered(error)],
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',

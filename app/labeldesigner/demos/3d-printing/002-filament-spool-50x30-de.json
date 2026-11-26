@@ -1,0 +1,110 @@
+{
+  "label_size": "niimbot50x30",
+  "orientation": "standard",
+  "sync_font_settings": false,
+  "print_color": "black",
+  "barcode_type": "QR",
+  "qrcode_size": "10",
+  "qrcode_correction": "M",
+  "code_text": "",
+  "image_mode": "black_and_white",
+  "image_fit": true,
+  "image_crop": false,
+  "image_scaling_factor": "100",
+  "image_rotation": "0",
+  "image_bw_threshold": "128",
+  "margin_top": "12",
+  "margin_bottom": "12",
+  "margin_left": "16",
+  "margin_right": "16",
+  "border_thickness": "0",
+  "border_roundness": "0",
+  "border_distance_x": "0",
+  "border_distance_y": "0",
+  "border_color": "black",
+  "print_type": "text",
+  "pdf_pages": "",
+  "shrink_text": true,
+  "title": "Filamentspule",
+  "language": "de",
+  "text": [
+    {
+      "font": "DejaVu Sans,Bold",
+      "size": "48",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Material}} {{blank:Farbe}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "28",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Marke}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "26",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "Düse {{blank:Düse}}{{mdi:temperature-celsius}}, Bett {{blank:Bett}}{{mdi:temperature-celsius}}"
+    },
+    {
+      "font": "DejaVu Sans,Book",
+      "size": "26",
+      "inverted": false,
+      "checkbox": false,
+      "align": "center",
+      "line_spacing": "100",
+      "color": "black",
+      "text": "{{blank:Geöffnet oder getrocknet}} {{datetime:%d.%m.%Y}}"
+    }
+  ],
+  "label_text": "{{blank:Material}} {{blank:Farbe}}\n{{blank:Marke}}\nDüse {{blank:Düse}}{{mdi:temperature-celsius}}, Bett {{blank:Bett}}{{mdi:temperature-celsius}}\n{{blank:Geöffnet oder getrocknet}} {{datetime:%d.%m.%Y}}",
+  "fields": {
+    "Material": {
+      "type": "choice",
+      "choices": [
+        "PLA",
+        "PETG",
+        "ABS",
+        "ASA",
+        "TPU",
+        "PA/Nylon",
+        "PC"
+      ]
+    },
+    "Farbe": {
+      "type": "text",
+      "default": "Schwarz"
+    },
+    "Marke": {
+      "type": "text",
+      "default": "Beispiel"
+    },
+    "Düse": {
+      "type": "number",
+      "default": "210"
+    },
+    "Bett": {
+      "type": "number",
+      "default": "60"
+    },
+    "Geöffnet oder getrocknet": {
+      "type": "choice",
+      "choices": [
+        "Geöffnet am",
+        "Getrocknet am"
+      ]
+    }
+  }
+}

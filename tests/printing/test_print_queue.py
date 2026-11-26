@@ -492,10 +492,114 @@ def test_the_process_exits_once_the_job_that_prints_ended(tmp_path):
 
 
 @pytest.mark.parametrize('source, told, detail', [
-    ('designer', '', ''), ('calibration', '', ''), ('homebox', 'Homebox', ''),
+    ('designer', '', ''), ('calibration', '', ''), ('feed', '', ''), ('homebox', 'Homebox', ''),
     ('api', 'another program', 'Sent over the API'), ('webhook', 'another program', 'Sent over the webhook'),
     ('mcp', 'an AI assistant', 'Sent over MCP')])
 def test_where_a_job_comes_from_in_plain_words(source, told, detail):
     # The technical word is told apart, for a hover text
     job = add(USB, recorder([], 1), source=source)
     assert (job.told()['from'], job.told()['from_detail']) == (told, detail)
+
+
+def test_a_job_keeps_the_id_it_is_given():
+    job = add(USB, recorder([], 1), job_id='given')
+    assert job.id == 'given' and job.done.wait(WAIT)
+    assert print_queue.get('given') is job
+
+
+def test_the_hooks_of_a_job_are_called_outside_the_lock_as_it_starts_and_ends():
+    called = []
+
+    def hook(name):
+        def call(job):
+            # Free to read the queue, which takes the lock
+            called.append((name, job.state, print_queue.summary(USB)['printing']))
+        return call
+    job = add(USB, recorder([], 1), on_start=hook('start'), on_end=hook('end'))
+    assert job.done.wait(WAIT)
+    assert called == [('start', 'printing', True), ('end', 'printed', False)]
+    assert job.on_start is job.on_end is None
+
+
+def test_the_end_hook_runs_before_the_job_is_done():
+    # A request answered once the job ended reads what the hook kept
+    hooked = threading.Event()
+
+    def slow_end(job):
+        hooked.wait(0.2)
+        hooked.set()
+    job = add(USB, recorder([], 1), on_end=slow_end)
+    assert job.done.wait(WAIT) and hooked.is_set()
+
+
+def test_a_removed_job_and_one_failed_for_want_of_a_worker_end_with_their_hook(monkeypatch):
+    ended = []
+    started, release = threading.Event(), threading.Event()
+
+    def exits():
+        started.set()
+        release.wait(WAIT)
+        raise SystemExit
+    add(USB, exits)
+    assert started.wait(WAIT)
+    removed = add(USB, recorder([], 2), on_start=lambda job: ended.append('started'), on_end=lambda job: ended.append(job.state))
+    assert print_queue.remove(removed.id) == ''
+    assert ended == ['removed']
+    behind = add(USB, recorder([], 3), on_end=lambda job: ended.append(job.state))
+
+    def refuses(thread):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(threading.Thread, 'start', refuses)
+    release.set()
+    assert behind.done.wait(WAIT)
+    assert ended == ['removed', 'failed']
+
+
+def test_a_failing_hook_neither_stops_the_line_nor_the_job(caplog):
+    def raises(job):
+        raise OSError('disk full')
+    job = add(USB, recorder([], 1), on_start=raises, on_end=raises)
+    assert job.done.wait(WAIT) and job.state == 'printed'
+    later = add(USB, recorder([], 2))
+    assert later.done.wait(WAIT) and later.state == 'printed'
+    assert sum(1 for record in caplog.records if record.exc_info) == 2
+
+
+def test_restored_jobs_keep_their_ids_and_wait_beyond_the_limit():
+    run, started, release = blocked()
+    add(USB, run)
+    assert started.wait(WAIT)
+    for _ in range(print_queue.MAX_WAITING):
+        add(USB, recorder([], 1))
+    order = []
+    restored = print_queue.restore(USB, recorder(order, 'restored'), job_id='kept', title='Kept', labels=2, source='api',
+                                   explain=explain, preview=b'png')
+    assert (restored.id, restored.title, restored.labels, restored.state) == ('kept', 'Kept', 2, 'waiting')
+    assert print_queue.get('kept') is restored and print_queue.full(USB)
+    release.set()
+    assert restored.done.wait(WAIT) and order == ['restored']
+
+
+def test_a_job_is_never_queued_twice():
+    run, started, release = blocked()
+    job = add(USB, run, job_id='twice')
+    assert started.wait(WAIT)
+    with pytest.raises(ValueError):
+        print_queue.restore(USB, recorder([], 1), job_id='twice', title='Label', labels=1, source='api', explain=explain)
+    release.set()
+    assert job.done.wait(WAIT)
+    assert print_queue.line(USB)['waiting'] == []
+
+
+def test_restored_jobs_go_before_those_added_meanwhile():
+    # E.g. a new worker of gunicorn takes jobs before the queue of the old one
+    run, started, release = blocked()
+    add(USB, run)
+    assert started.wait(WAIT)
+    order = []
+    newer = add(USB, recorder(order, 'newer'))
+    for name in ('old', 'older'):
+        print_queue.restore(USB, recorder(order, name), job_id=name, title=name, labels=1, source='api', explain=explain)
+    assert [job['id'] for job in print_queue.line(USB)['waiting']] == ['old', 'older', newer.id]
+    release.set()
+    assert newer.done.wait(WAIT) and order == ['old', 'older', 'newer']

@@ -17,7 +17,8 @@ sync_api = pytest.importorskip('playwright.sync_api')
 from werkzeug.serving import make_server  # noqa: E402
 
 from app import create_app  # noqa: E402
-from app.labeldesigner import printer  # noqa: E402
+from app.labeldesigner import print_store, printer  # noqa: E402
+from app.labeldesigner.routes import restore_print_queue  # noqa: E402
 from app.labeldesigner.drivers import devices  # noqa: E402
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,14 +35,21 @@ def app(tmp_path_factory):
     # A copy of the sample labels, the tests must not change the working tree
     repo = tmp_path_factory.mktemp('labels')
     for name in os.listdir(os.path.join(REPO_ROOT, 'labels')):
-        shutil.copy(os.path.join(REPO_ROOT, 'labels', name), repo)
+        # Not what a server run from the working tree keeps there, e.g. its print queue
+        if not name.startswith('.'):
+            shutil.copy(os.path.join(REPO_ROOT, 'labels', name), repo)
     app.config['LABEL_REPOSITORY_DIR'] = str(repo)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(printer, 'USB_PRINTER_DEVICES', [])
         patch.setattr(devices, 'found_usb_printers', lambda: ([], []))
         patch.setattr(printer, 'ARP_TABLE', os.devnull)
         patch.setattr(printer, 'NETWORK_DISCOVERY', False)
+        # The printed labels are kept with the copy
+        patch.setattr(print_store, 'ENABLED', True)
+        patch.setattr(print_store, 'FOLDER', None)
+        restore_print_queue(app)
         yield app
+        print_store.close()
 
 
 @pytest.fixture(scope='session')

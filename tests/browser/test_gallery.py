@@ -6,12 +6,16 @@ import json
 import os
 import random
 import time
+from urllib.request import urlopen
 
 import pytest
 from PIL import Image
 
-from tests.browser.helpers import png
+from tests.browser.helpers import clear_printed, png
+from tests.helpers import printed_days_ago
+from tests.browser.test_demo_printer import MODEL, designer  # noqa: F401
 from tests.browser.test_editor import changed_preview, editor, sent, type_label, wait_for_preview  # noqa: F401
+from tests.browser.test_settings import back_to_the_editor, open_settings
 
 
 def save_new(page, name, *lines):
@@ -28,6 +32,34 @@ def open_saved(page, title):
     page.click('.tpl-nav [data-cat="saved"]')
     page.click(f'.thumb:has-text("{title}")')
     page.wait_for_selector('#tplPrint')
+
+
+def shown_width(page, group):
+    """The width of the Templates showing the group, once the thumbnails in
+    sight are drawn."""
+    page.click(f'.tpl-nav [data-cat="{group}"]')
+    page.wait_for_selector(f'.tpl-nav [data-cat="{group}"].on')
+    page.wait_for_function("""() => { const g = document.querySelector('.tpl-grid').getBoundingClientRect();
+        return [...document.querySelectorAll('.tpl-grid .thumb img')].filter(i => i.getBoundingClientRect().top < g.bottom)
+            .every(i => i.complete && i.naturalWidth > 0); }""")
+    return page.evaluate("() => document.querySelector('.dialog.tpl').getBoundingClientRect().width")
+
+
+def test_the_templates_keep_their_width_for_every_group_and_tape(designer):  # noqa: F811
+    # As wide as set, whatever the size of the thumbnails shown
+    widths = set()
+    for model, size in (('QL-800', '62'), ('Niimbot/B1', 'niimbot50x30')):
+        if model != 'QL-800':
+            open_settings(designer)
+            designer.select_option(MODEL, model)
+            designer.wait_for_function('m => labelEditor.S.printers[0].model === m', arg=model)
+            designer.select_option('[data-card="0"] select[data-k="label_size"]', size)
+            back_to_the_editor(designer)
+        designer.wait_for_function('t => labelEditor.S.tape === t', arg=size)
+        designer.click('#templates')
+        widths |= {shown_width(designer, group) for group in ('all', 'workshop', 'kitchen', 'office', 'saved')}
+        designer.click('.dialog [data-close]')
+    assert widths == {1060}
 
 
 def test_templates_replace_the_wizard(editor):  # noqa: F811
@@ -113,6 +145,11 @@ def test_use_from_anywhere_and_the_links_to_the_gallery(editor, server):  # noqa
     link = editor.input_value('#tplLink')
     assert link.endswith(f'/labeldesigner/#fill/{name}?What=Chili')
     editor.wait_for_function("() => document.querySelector('#tplSticker').src.startsWith('blob:')")
+    # Named, its first line says nothing of it
+    with editor.expect_request('**/api/print') as request:
+        editor.click('#tplPrintSticker')
+    assert sent(request.value)['title'] == 'Gallery box sticker'
+    editor.wait_for_selector('#toast:has-text("Printed the sticker")')
     # The link opens the label in the gallery, its blank filled in
     editor.goto(f'{server}/labeldesigner/#fill/{name}?What=Beans')
     editor.wait_for_selector('#tplFields [data-blank="What"]')
@@ -180,7 +217,8 @@ def open_another(page, way, title):
     elif way == 'printed':
         page.click('#tabs [data-tab="settings"]')
         page.click('.set-nav [data-part="printed"]')
-        page.click(f'#setHist .set-hrow:has-text("{title}") [data-open]')
+        # Listed by its first line as printed
+        page.click('#setHist .set-hrow:has-text("Other label") >> nth=0 >> [data-open]')
     else:
         page.click('#tabs [data-tab="settings"]')
         page.click('.set-nav [data-part="connections"]')
@@ -411,7 +449,8 @@ def print_jar(page, what, copies=1):
     page.wait_for_function("() => labelEditor.S.history.every(h => h.state !== 'printing')")
 
 
-def test_labels_printed_here_are_a_group_of_templates(editor):  # noqa: F811
+def test_labels_printed_here_are_a_group_of_templates(editor, server):  # noqa: F811
+    clear_printed(server)
     print_jar(editor, 'Peas', copies=2)
     editor.click('#newLabel')
     editor.click('#newDiscard')
@@ -423,12 +462,11 @@ def test_labels_printed_here_are_a_group_of_templates(editor):  # noqa: F811
     editor.wait_for_selector('#tplPrint:has-text("Print again")')
     assert editor.input_value('#tplFields [data-blank="What"]') == 'Peas'
     assert editor.input_value('#tplCopies') == '2'
-    with editor.expect_request('**/api/print') as request:
+    with editor.expect_request('**/api/history/*/print') as request:
         editor.click('#tplPrint')
     fields = sent(request.value)
     assert json.loads(fields['blanks'])['What'] == 'Peas' and fields['print_count'] == '2'
-    assert json.loads(fields['text'])[0]['text'] == 'Jar {{blank:What}}'
-    editor.wait_for_function("() => labelEditor.S.history.length === 2 && labelEditor.S.history[0].state === 'printed'")
+    editor.wait_for_selector('#toast:has-text("Printed 2 labels: Jar Peas")')
     # And opened in the editor with them
     editor.click('#tplOpen')
     editor.wait_for_selector('.tpl', state='detached')
@@ -437,39 +475,8 @@ def test_labels_printed_here_are_a_group_of_templates(editor):  # noqa: F811
     editor.wait_for_selector('.tpl-nav [data-cat="printed"].on')
 
 
-def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noqa: F811
-    type_label(editor, 'Jar [What] [Where]')
-    editor.fill('#fill [data-blank="What"]', 'Beans')
-    editor.fill('#fill [data-blank="Where"]', 'Pantry')
-    for _ in range(2):
-        editor.click('.printbtn [data-step="1"]')
-    with editor.expect_request('**/api/print'):
-        editor.press('#fill [data-blank="Where"]', 'Enter')
-    editor.wait_for_function("() => labelEditor.S.history.every(h => h.state !== 'printing')")
-    editor.click('#newLabel')
-    editor.click('#newDiscard')
-    editor.keyboard.press('Control+k')
-    editor.wait_for_selector('.palette #palQ:focus')
-    # Found by a value printed besides the one it is named by
-    editor.keyboard.type('pantry')
-    row = editor.locator('#palRes .res:has-text("Beans")')
-    assert 'Pantry' in row.inner_text() and '3 x' in row.inner_text()
-    assert 'Enter print again' in editor.inner_text('.pal-foot')
-    with editor.expect_request('**/api/print') as request:
-        editor.keyboard.press('Enter')
-    fields = sent(request.value)
-    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Pantry'} and fields['print_count'] == '3'
-    editor.wait_for_selector('#toast:has-text("Printed 3 labels: Beans")')
-    # The editor keeps the label it had
-    assert editor.evaluate('() => labelEditor.S.edit.design.text[0].text') == ''
-    # Enter opens what is not printed before
-    editor.keyboard.press('Control+k')
-    editor.keyboard.type('todo')
-    editor.wait_for_selector('#palRes .res:has-text("TODO List")')
-    assert 'Enter open' in editor.inner_text('.pal-foot') and 'print again' not in editor.inner_text('.pal-foot')
-
-
-def test_values_typed_for_a_label_printed_before_leave_it_as_printed(editor):  # noqa: F811
+def test_values_typed_for_a_label_printed_before_leave_it_as_printed(editor, server):  # noqa: F811
+    clear_printed(server)
     print_jar(editor, 'Peas', copies=2)
     editor.click('#newLabel')
     editor.click('#newDiscard')
@@ -480,6 +487,104 @@ def test_values_typed_for_a_label_printed_before_leave_it_as_printed(editor):  #
     editor.keyboard.press('Escape')
     editor.wait_for_selector('.tpl', state='detached')
     assert editor.evaluate('() => labelEditor.S.history[0].values') == {'What': 'Peas'}
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.click('.tpl-grid .thumb:has-text("Peas")')
+    editor.wait_for_selector('#tplFields [data-blank="What"]')
+    assert editor.input_value('#tplFields [data-blank="What"]') == 'Peas'
+
+
+def test_a_label_printed_with_the_day_asks_in_the_templates_unless_its_date_is_set(editor, server):  # noqa: F811
+    clear_printed(server)
+    editor.evaluate("""async () => {
+        const core = await import('/static/designer/core.js'), ed = await import('/static/designer/editor.js');
+        const design = Object.assign(core.baseDesign('62'), { text: [core.L('Opened {{blank:Day}}', 40)], fields: { Day: { type: 'date' } } });
+        ed.openEditor({ title: 'Opened', design, values: {}, origin: null });
+    }""")
+    wait_for_preview(editor)
+    with editor.expect_request('**/api/print'):
+        editor.click('#print')
+    editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+    # Printed on another day, its date comes out otherwise today
+    printed_days_ago(editor.evaluate('() => labelEditor.S.history[0].job'), 1)
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.wait_for_function("() => location.hash === '#templates/printed'")
+    editor.click('.tpl-grid .thumb >> nth=0')
+    editor.wait_for_selector('#tplFields [data-blank="Day"]')
+    # Asked in the panel, the Templates stay
+    editor.click('#tplPrint')
+    editor.wait_for_selector('#tplAsk:not([hidden])')
+    # Under the button it answers, the main answer first, side by side where they fit, else each a line of its own
+    assert editor.locator('#tplAsk button').all_inner_texts() == ['Same date', "Today's date", 'Cancel']
+    assert 'Print again' not in editor.inner_text('#tplAsk')
+    box, same, today = (editor.locator(selector).bounding_box() for selector in ('#tplAsk', '#againSame', '#againNext'))
+    assert same['y'] == today['y'] or same['width'] == today['width'] > box['width'] - 40
+    editor.click('#againNot')
+    editor.wait_for_selector('#tplAsk[hidden]', state='attached')
+    editor.click('#tplPrint')
+    editor.wait_for_selector('#tplAsk:not([hidden])')
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplAsk button:text-is("Same date")')
+    assert sent(request.value)['as_before'] == '1'
+    editor.wait_for_selector('#toast:has-text("Printed 1 label")')
+    assert editor.locator('.tpl').count() == 1 and editor.evaluate('() => location.hash') == '#templates/printed'
+    # A date set by hand is printed as set, nothing to ask
+    editor.fill('#tplFields [data-blank="Day"]', '2026-11-03')
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplPrint')
+    assert json.loads(sent(request.value)['blanks']) == {'Day': '2026-11-03'}
+    assert editor.locator('#tplAsk:not([hidden])').count() == 0
+
+
+def test_a_picture_of_another_program_printed_again_takes_copies(editor, server):  # noqa: F811
+    clear_printed(server)
+    with urlopen(server + '/labeldesigner/api/homebox', png(200, 100)) as r:
+        assert json.load(r)['success']
+    editor.click('#templates')
+    editor.click('.tpl-nav [data-cat="printed"]')
+    editor.click('.tpl-grid .thumb >> nth=0')
+    editor.wait_for_selector('#tplCopies')
+    assert editor.locator('#tplFields, #tplOpen').count() == 0
+    editor.click('.tpl-print [data-cp="1"]')
+    with editor.expect_request('**/api/history/*/print') as request:
+        editor.click('#tplPrint')
+    assert sent(request.value)['print_count'] == '2'
+    editor.wait_for_selector('#toast:has-text("Printed 2 labels")')
+
+
+def test_a_label_printed_before_is_printed_again_from_the_search(editor):  # noqa: F811
+    type_label(editor, 'Jar [What] [Where]')
+    editor.fill('#fill [data-blank="What"]', 'Beans')
+    # Saved labels come first in the search, those of other tests must not
+    # match it
+    editor.fill('#fill [data-blank="Where"]', 'Larder')
+    for _ in range(2):
+        editor.click('.printbtn [data-step="1"]')
+    with editor.expect_request('**/api/print'):
+        editor.press('#fill [data-blank="Where"]', 'Enter')
+    editor.wait_for_function("() => labelEditor.S.history.every(h => h.state !== 'printing')")
+    editor.click('#newLabel')
+    editor.click('#newDiscard')
+    editor.keyboard.press('Control+k')
+    editor.wait_for_selector('.palette #palQ:focus')
+    # Found by a value printed besides the one it is named by
+    editor.keyboard.type('larder')
+    row = editor.locator('#palRes .res.on:has-text("Beans")')
+    assert 'Larder' in row.inner_text() and '3 x' in row.inner_text()
+    assert 'Enter print again' in editor.inner_text('.pal-foot')
+    with editor.expect_request('**/api/print') as request:
+        editor.keyboard.press('Enter')
+    fields = sent(request.value)
+    assert json.loads(fields['blanks']) == {'What': 'Beans', 'Where': 'Larder'} and fields['print_count'] == '3'
+    editor.wait_for_selector('#toast:has-text("Printed 3 labels: Jar Beans Larder")')
+    # The editor keeps the label it had
+    assert editor.evaluate('() => labelEditor.S.edit.design.text[0].text') == ''
+    # Enter opens what is not printed before
+    editor.keyboard.press('Control+k')
+    editor.keyboard.type('todo')
+    editor.wait_for_selector('#palRes .res:has-text("TODO List")')
+    assert 'Enter open' in editor.inner_text('.pal-foot') and 'print again' not in editor.inner_text('.pal-foot')
 
 
 def held(page, key, times=5):

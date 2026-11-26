@@ -380,7 +380,7 @@ def test_printer_failures_are_told_from_refused_requests(tmp_path, monkeypatch, 
     # Both were 400, a client could not tell whether to fix its request or
     # to try again later
     from app.labeldesigner import printer
-    failure = 'The printer reports: Replace media error'
+    failure = 'The printer reports: The loaded labels do not fit the job'
     monkeypatch.setattr(printer.PrinterQueue, 'process_queue', lambda self: failure)
     client = make_client(tmp_path, empty_repo=True)
     client.application.config['WEBHOOK_PASSWORD'] = 'secret'

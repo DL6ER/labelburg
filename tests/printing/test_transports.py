@@ -623,7 +623,7 @@ def test_classic_search_finds_devices_with_their_class(management):
     assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [],
                                    'classic': True, 'device_class': 0x5a020c}
     # Classic Bluetooth and LE, and stopped again
-    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0004, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
 
 
 class LeOnly(Management):
@@ -644,9 +644,36 @@ def test_search_on_an_adapter_without_classic_bluetooth_still_finds_le(monkeypat
     monkeypatch.setattr(bluetooth.socket, 'socket', fake)
     monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
     assert [(d['address'], d['name']) for d in bluetooth.discover(5, classic=True)] == [(MAC, 'B1-TEST0001')]
-    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0023, b'\x06'), (0x0024, b'\x06')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0004, b''), (0x0023, b'\x07'), (0x0023, b'\x06'), (0x0024, b'\x06')]
     # As long as a search of LE alone
     assert waits[-1] <= 5
+
+
+class OneLeOnly(Management):
+    """Two adapters, of which the first listed has no classic Bluetooth."""
+
+    def send(self, data):
+        op, index, _ = struct.unpack_from('<HHH', data)
+        if op == 0x0023 and index == 1 and data[6] != 0x06:
+            self.sent.append((op, index, data[6:]))
+            self.incoming.append(event(0x0002, index, struct.pack('<HB', op, 0x0c)))
+            return len(data)
+        return super().send(data)
+
+
+def test_classic_search_goes_on_on_the_adapter_that_has_it(monkeypatch):
+    classic = '00:00:5E:00:53:0A'
+    fake = OneLeOnly([found(MAC, name='B1-TEST0001', index=1), found(classic, kind=0, name='PT-P710BT0001', index=0)],
+                     controllers=(1, 0))
+    waits = []
+    monkeypatch.setattr(bluetooth.socket, 'socket', fake)
+    monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
+    assert {d['address'] for d in bluetooth.discover(5, classic=True)} == {MAC, classic}
+    started = [(index, params) for op, index, params in fake.sent if op == 0x0023]
+    assert sorted(started) == [(0, b'\x07'), (1, b'\x06'), (1, b'\x07')]
+    assert sorted((index, params) for op, index, params in fake.sent if op == 0x0024) == [(0, b'\x07'), (1, b'\x06')]
+    # As long as the kernel searches both on the other one
+    assert min(waits) > 5
 
 
 @pytest.mark.parametrize('classic, longest', [(True, 11), (False, 5)])

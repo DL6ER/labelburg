@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from app.labeldesigner import mcp_tools, print_queue, printer, printer_settings, tape
+from app.labeldesigner.label import SMALL_CODE, SMALL_SIZED_CODE
 from tests.helpers import make_client
 
 HEADERS = {'Accept': 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-06-18'}
@@ -451,6 +452,21 @@ def test_the_image_returned_is_the_one_printed(client, tmp_path):
     assert returned.convert('L').tobytes() == label.convert('L').tobytes()
 
 
+def test_labels_are_checked_with_the_number_of_labels(client, tmp_path, monkeypatch):
+    # As printed, e.g. Box 1 of 3, also in the preview the assistant gets
+    from app.labeldesigner.label import SimpleLabel
+    drawn = set()
+    process = SimpleLabel.process_templates
+    monkeypatch.setattr(SimpleLabel, 'process_templates', lambda self: process(self) or drawn.update(line['text'] for line in self.text))
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'text': [{'text': 'Box {{counter}} of {{total}}', 'size': '60'}]}).status_code == 200
+    assert not tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=3).get('isError')
+    assert not tool(client, 'print_text', printer='Kitchen', label_size='62', count=2, lines=['Jar {{counter}}/{{total}}']).get('isError')
+    assert printed(tmp_path) == 5
+    assert drawn == {'Box 1 of 3', 'Box 2 of 3', 'Box 3 of 3', 'Jar 1/2', 'Jar 2/2'}
+
+
 def test_home_assistant_gets_the_addresses_without_the_image_data(client):
     status, answer = call(client, 'tools/call', {'name': 'preview_label', 'arguments': {'lines': ['Chili'], 'label_size': '62'}},
                           **{'User-Agent': 'HomeAssistant/2026.11.0 httpx2/1.0.0 Python/3.14'})
@@ -540,6 +556,49 @@ def test_a_font_not_installed_prints_with_the_fallback_font(client, tmp_path):
     assert result['isError'] and 'part of it is cut off' in result['content'][0]['text'] and printed(tmp_path) == 1
 
 
+LINK = 'https://www.example.com/inventory/garage/shelf-3/box-17?item=cordless-drill-and-charger'
+
+
+def test_a_code_that_may_be_too_small_to_scan_prints_only_when_the_user_wants_it(client, tmp_path):
+    # As the label designer shows it before Print
+    result = tool(client, 'preview_label', printer='Kitchen', label_size='12', code=LINK)
+    assert result['content'][0]['text'].startswith(f'Preview. {SMALL_CODE}')
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK)
+    assert result['isError'] and printed(tmp_path) == 0
+    text = result['content'][0]['text']
+    assert f'Nothing printed: {SMALL_CODE} Tell the user: a larger code' in text and 'small_code_ok' in text
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 1
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label to the queue of Kitchen'
+    # A saved code with dots of a size set too small
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Box.json', 'label_size': '62', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text': [{'text': 'Box 17', 'size': '60'}]}).status_code == 200
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1)
+    assert result['isError'] and f'Nothing printed: {SMALL_SIZED_CODE} Tell the user' in result['content'][0]['text']
+    assert printed(tmp_path) == 1
+    result = tool(client, 'print_label', name='Box.json', printer='Kitchen', label_size='62', count=1, small_code_ok=True)
+    assert not result.get('isError') and printed(tmp_path) == 2
+    assert result['content'][0]['text'].splitlines()[0] == 'Added 1 label of Box.json to the queue of Kitchen'
+
+
+def test_small_code_ok_prints_no_label_cut_off(client, tmp_path):
+    client.application.config['LABEL_REPOSITORY_DIR'] = str(tmp_path / 'repo')
+    assert client.post('/labeldesigner/api/repository/save', json={
+        'name': 'Badge.json', 'label_size': '62x29', 'print_type': 'qrcode_text', 'code_text': 'BOX-17', 'image_fit': '0',
+        'qrcode_size': '2', 'text_fit': 'none', 'text': [{'text': '{{blank:Name}}', 'size': '80'}]}).status_code == 200
+    name = {'Name': 'Maximilian-Alexander von Hohenzollern'}
+    for small_code_ok in (False, True):
+        result = tool(client, 'print_label', name='Badge.json', printer='Kitchen', label_size='62x29', count=1, fillings=[name],
+                      small_code_ok=small_code_ok)
+        assert result['isError'] and 'cut off' in result['content'][0]['text'] and printed(tmp_path) == 0
+        assert (SMALL_SIZED_CODE in result['content'][0]['text']) != small_code_ok
+    result = tool(client, 'print_text', printer='Kitchen', label_size='12', count=1, code=LINK, lines=['A' * 200], font_size=200,
+                  small_code_ok=True)
+    assert result['isError'] and 'small_code_ok' not in result['content'][0]['text'] and printed(tmp_path) == 0
+
+
 def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monkeypatch):
     previews = []
     monkeypatch.setattr(mcp_tools.Tools, 'preview', lambda self, spec, headers=None: previews.append(spec))
@@ -550,7 +609,9 @@ def test_more_fillings_than_the_cap_are_refused_before_any_preview(client, monke
 def test_the_mcp_package_is_loaded_with_the_first_call_only():
     import subprocess
     import sys
-    code = 'import sys; from app import create_app; create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)'
+    # Without the print queue of the labels of the working tree
+    code = ('import sys; from app.labeldesigner import print_store; print_store.ENABLED = False; from app import create_app; '
+            'create_app(); print("mcp" in sys.modules, "asyncio" in sys.modules)')
     output = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True).stdout
     assert output.split()[-2:] == ['False', 'False']
 
@@ -675,3 +736,22 @@ def test_label_for_the_paper_of_the_other_model(client, tmp_path):
     assert printed(tmp_path) == 4
     # Other paper stays refused
     assert tool(client, 'print_label', name='Receipt.json', printer='Till', count=1, label_size='62')['isError']
+
+
+def test_with_a_token_only_requests_that_send_it_use_the_tools(client):
+    assert call(client, 'tools/list')[0] == 200
+    client.application.config['MCP_TOKEN'] = 'secret-token'
+    for headers in ({}, {'Authorization': 'Bearer wrong'}, {'Authorization': 'secret-token'}, {'Authorization': 'Bearer secret-token2'}):
+        response = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}, headers={**HEADERS, **headers})
+        assert response.status_code == 401 and response.headers['WWW-Authenticate'] == 'Bearer'
+    status, answer = call(client, 'tools/list', Authorization='Bearer secret-token')
+    assert status == 200 and answer['result']['tools']
+    # The host is still checked first
+    response = client.post('/mcp', json={}, headers={**HEADERS, 'Authorization': 'Bearer secret-token', 'Host': 'evil.example.com'})
+    assert response.status_code == 403
+
+
+def test_the_previews_need_no_token(client):
+    # Their address holds what they show, a chat loads them as images
+    client.application.config['MCP_TOKEN'] = 'secret-token'
+    assert client.get('/mcp/preview.png?r=nonsense').status_code == 400

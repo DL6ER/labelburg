@@ -68,6 +68,8 @@ class Config(object):
     IMAGE_DEFAULT_MODE = 'grayscale'
     IMAGE_DEFAULT_BW_THRESHOLD = 70
 
+    # In dots on 62 mm wide labels, other labels get them in proportion to
+    # their width
     LABEL_DEFAULT_MARGIN_TOP = 24
     LABEL_DEFAULT_MARGIN_BOTTOM = 24
     LABEL_DEFAULT_MARGIN_LEFT = 35
@@ -95,6 +97,10 @@ class Config(object):
 
     # Most labels an AI assistant may print with one call to the MCP endpoint
     MCP_MAX_COUNT = 10
+
+    # A token the MCP endpoint then asks for as "Authorization: Bearer
+    # <token>", e.g. the one Home Assistant gets from the discovery of an app
+    MCP_TOKEN = None
 
     # Maximum size of a request (uploaded images, JSON payloads) in bytes
     MAX_CONTENT_LENGTH = 32 * 1024 * 1024

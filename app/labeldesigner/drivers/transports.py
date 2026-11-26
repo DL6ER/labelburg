@@ -12,6 +12,7 @@ import struct
 import threading
 import time
 
+from .. import bluetooth
 from . import backends, devices
 
 # Connecting took about 4 s for a PUQU Q00, also with the printer close by
@@ -179,6 +180,8 @@ class LeLink:
     def __init__(self, device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer):
         mac, _ = bt_address(device, 0)
         self.error, self.no_answer = error, no_answer
+        if not hasattr(socket, 'BDADDR_LE_PUBLIC'):
+            raise devices.NoBluetoothLe('Python before 3.14 opens no L2CAP connection of Bluetooth LE')
         self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
         self.s.settimeout(CONNECT_WAIT)
         self.mtu, self.unread = 23, b''
@@ -186,7 +189,7 @@ class LeLink:
         # it is closed unused
         self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
         try:
-            self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+            self.s.bind((bluetooth.adapter_for(mac), 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:
                 try:
                     self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))

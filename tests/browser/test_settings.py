@@ -5,14 +5,17 @@ labels the server keeps for every browser."""
 import contextlib
 import json
 import os
+from datetime import datetime
 from urllib.parse import quote, urlencode
 from urllib.request import urlopen
 
 import pytest
 
 from app.labeldesigner import printer_settings
-from tests.browser.helpers import shown_again, with_tape
+from app.labeldesigner.dates import format_date
+from tests.browser.helpers import clear_printed, shown_again, with_tape
 from tests.browser.test_editor import sent, type_label, wait_for_preview
+from tests.browser.test_shell import phone  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -217,7 +220,8 @@ def test_the_printer_chip_switches_printers(designer, server):
     designer.wait_for_selector('#toast:has-text("Printed 1 label")')
 
 
-def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designer, server):
+def test_labels_are_kept_on_the_server_and_printed_ones_listed_from_it(designer, server):
+    clear_printed(server)
     open_settings(designer, 'labels')
     assert designer.inner_text('#setPart .set-h p') == 'Kept on the server, the same in every browser.'
     family = other_family(designer)
@@ -226,7 +230,7 @@ def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designe
         with designer.expect_response('**/api/settings/labels') as answer:
             change()
         assert answer.value.ok
-    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '0', 'font_family': family}
+    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'date_language': '', 'collate': '0', 'font_family': family, 'history': ''}
     assert designer.locator('[data-k="collate"][data-v="0"].on').count() == 1
     # Nothing of them is kept in this browser
     assert designer.evaluate("() => [localStorage.getItem('designer_settings'), localStorage.getItem('designer_font')]") == [None, None]
@@ -243,10 +247,12 @@ def test_labels_are_kept_on_the_server_and_printed_labels_in_the_browser(designe
     designer.wait_for_selector('#setHist .set-hrow')
     assert 'Flour' in designer.inner_text('#setHist .set-hrow')
     designer.wait_for_selector('#setHist .set-thumb.shown')
-    with designer.expect_request('**/api/print'):
+    with designer.expect_request('**/api/history/*/print'):
         designer.click('#setHist [data-again]')
-    designer.wait_for_function('() => labelEditor.S.history.length === 2 && labelEditor.S.history[0].state === "printed"')
-    assert designer.locator('#setHist .set-hrow').count() == 2
+    designer.wait_for_selector('#toast:has-text("Printed 1 label: Flour")')
+    designer.wait_for_function("() => document.querySelectorAll('#setHist .set-hrow').length === 2")
+    # Printed again by the server, this browser keeps the label printed here
+    assert designer.evaluate('() => labelEditor.S.history.length') == 1
 
 
 def test_two_browsers_have_the_same_label_settings(designer, browser, server):
@@ -323,7 +329,7 @@ def test_label_settings_this_browser_kept_are_carried_over_once(designer, server
     with designer.expect_response('**/api/settings/labels'):
         designer.reload()
     designer.wait_for_function("() => localStorage.getItem('designer_font') === null && window.labelEditor")
-    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'collate': '1', 'font_family': family}
+    assert label_settings(server) == {'date_format': '%d.%m.%Y', 'date_language': '', 'collate': '1', 'font_family': family, 'history': ''}
     assert designer.evaluate("() => JSON.parse(localStorage.getItem('designer_settings'))") == {'largePreview': True}
     assert designer.evaluate('() => [labelEditor.S.settings.date_format, labelEditor.S.settings.collate]') == ['%d.%m.%Y', '1']
     # Once: removed on the server since, they stay removed
@@ -331,7 +337,20 @@ def test_label_settings_this_browser_kept_are_carried_over_once(designer, server
     designer.reload()
     designer.wait_for_selector('#field .ln')
     wait_for_preview(designer)
-    assert label_settings(server) == {'date_format': '', 'collate': '1', 'font_family': ''}
+    assert label_settings(server) == {'date_format': '', 'date_language': '', 'collate': '1', 'font_family': '', 'history': ''}
+
+
+def test_connections_name_the_header_where_the_mcp_endpoint_asks_for_a_token(designer, app, monkeypatch):
+    monkeypatch.setitem(app.config, 'MCP_TOKEN', 'kept-secret-token')
+    designer.reload()
+    designer.wait_for_selector('#field .ln')
+    open_settings(designer, 'connections')
+    mcp = designer.locator('.set-conn >> nth=0')
+    assert 'Authorization: Bearer <token>' in mcp.locator('code').all_inner_texts()
+    assert 'They need the token set as MCP_TOKEN.' in mcp.inner_text()
+    assert 'no login' not in mcp.inner_text()
+    # The page only learns that there is one
+    assert 'kept-secret-token' not in designer.content()
 
 
 def test_connections_have_the_addresses_of_this_server(designer, server):
@@ -340,6 +359,7 @@ def test_connections_have_the_addresses_of_this_server(designer, server):
     assert f'{server}/labeldesigner/api/homebox' in codes
     assert f'{server}/labeldesigner/api/repository/print?name=Grocy.json' in codes
     assert f'{server}/mcp' in codes
+    assert 'Authorization: Bearer <token>' not in codes
     assert f'{server}/labeldesigner/api/webhook/print' in codes
     assert any('/api/demos/print?id=office/015-paperless-asn' in c for c in codes)
     # MCP first, with a robot, then the others
@@ -373,7 +393,7 @@ def test_connections_have_the_addresses_of_this_server(designer, server):
         designer.wait_for_function('line => navigator.clipboard.readText().then(t => t === line)', arg=line)
     open_settings(designer, 'about')
     # One label designer, no other one to open or compare
-    assert designer.locator('#setPart .set-grid > .k').all_inner_texts() == ['Appearance', 'Version', 'Source code']
+    assert designer.locator('#setPart .set-grid > .k').all_inner_texts() == ['Appearance', 'Version', 'Source code', 'Problems']
     assert 'designer' not in designer.inner_text('#setPart .set-card')
     designer.click('button[data-theme="dark"]')
     assert designer.evaluate("() => [document.documentElement.dataset.theme, localStorage.getItem('designer_theme')]") == ['dark', 'dark']
@@ -386,6 +406,44 @@ def test_the_label_is_drawn_again_with_label_settings_changed_elsewhere(designer
     with designer.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST', timeout=5000):
         shown_again(designer)
     wait_for_preview(designer)
+
+
+def test_the_language_of_dates_names_the_weekday_in_the_preview(designer, server, monkeypatch):
+    from app.labeldesigner import routes
+    made = []
+    make = routes.create_label_from_request
+    monkeypatch.setattr(routes, 'create_label_from_request', lambda *args, **kwargs: made.append(make(*args, **kwargs)) or made[-1])
+
+    def drawn():
+        label = next(label for label in reversed(made) if label.input_text and 'Packed' in label.input_text[0]['text'])
+        return label.text[0]['text']
+    type_label(designer, 'Packed [today]')
+    designer.click('#field .chip.date')
+    designer.fill('#cpFormat', '%A')
+    with designer.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST'):
+        designer.press('#cpFormat', 'Enter')
+    wait_for_preview(designer)
+    assert drawn() == 'Packed ' + format_date(datetime.now(), '%A')
+    designer.keyboard.press('Escape')
+    open_settings(designer, 'labels')
+    assert designer.locator('#setDateLang option').all_inner_texts() == [
+        'English', 'Čeština', 'Dansk', 'Deutsch', 'Español', 'Français', 'Italiano', 'Nederlands', 'Norsk bokmål', 'Polski', 'Português', 'Suomi', 'Svenska']
+    assert designer.inner_text('#setDateLang + small') == 'For dates with the name of the month or weekday, e.g. March or Saturday.'
+    with designer.expect_response('**/api/settings/labels'):
+        designer.select_option('#setDateLang', 'de')
+    designer.wait_for_selector('#toast:has-text("Months and weekdays are written like März and Samstag")')
+    assert designer.inner_text('#setDateLang + small') == 'For dates with the name of the month or weekday, e.g. März or Samstag.'
+    assert label_settings(server)['date_language'] == 'de'
+    # The label is drawn again, with the weekday in German
+    with designer.expect_request(lambda r: r.url.endswith('/api/preview') and r.method == 'POST'):
+        designer.click('#tabs [data-tab="edit"]')
+    wait_for_preview(designer)
+    assert drawn() == 'Packed ' + format_date(datetime.now(), '%A', 'de')
+    # The codes name it as well
+    designer.click('#field .chip.date')
+    designer.click('.chip-pop [data-codes]')
+    assert designer.inner_text('.codes tr:has(td code:text-is("%A")) td >> nth=2') == 'Samstag'
+    assert designer.inner_text('.codes tr:has(td code:text-is("%m")) td >> nth=2') == '03'
 
 
 def test_the_empty_new_label_takes_the_font_of_new_labels(designer, server):
@@ -409,3 +467,11 @@ def test_the_cutting_of_a_printer_is_said_as_in_the_editor(designer, server):
     printers_are(designer, server, {'path': 'simulation', 'model': 'PT-E550W', 'name': 'Shop'})
     open_settings(designer)
     assert 'The tape fed before the first label is waste, short labels get some extra tape.' in designer.inner_text('#setPrinters')
+
+
+@pytest.mark.parametrize('part', ['printed', 'about'])
+def test_the_part_shown_is_in_sight_in_the_tabs_on_a_phone(phone, server, part):  # noqa: F811
+    phone.goto(server + f'/labeldesigner/#settings/{part}')
+    phone.wait_for_selector(f'#setPart[data-part="{part}"]')
+    tabs, shown = phone.locator('.set-nav').bounding_box(), phone.locator('.set-nav a.on').bounding_box()
+    assert tabs['x'] <= shown['x'] and shown['x'] + shown['width'] <= tabs['x'] + tabs['width']

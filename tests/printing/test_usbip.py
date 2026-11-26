@@ -79,11 +79,12 @@ class HoldingQL(FakeQL):
 
 class FakeTM:
     """An Epson receipt printer behind a shared device: answers the status
-    requests with the bytes in 'replies', keeps the job."""
+    requests with the bytes in 'replies' and its model name as a TM-T20II
+    does, keeps the job."""
 
     def __init__(self, device):
         self.received = b''
-        self.replies = {escpos.OFFLINE: 0x12, escpos.PAPER: 0x12}
+        self.replies = {escpos.OFFLINE: bytes([0x12]), escpos.PAPER: bytes([0x12]), escpos.MODEL_NAME: b'\x5fTM-T20II\x00'}
         self._printer = device.printer
         threading.Thread(target=self._answer, daemon=True).start()
 
@@ -94,7 +95,7 @@ class FakeTM:
                 if not data:
                     return
                 if data in self.replies:
-                    self._printer.sendall(bytes([self.replies[data]]))
+                    self._printer.sendall(self.replies[data])
                 else:
                     self.received += data
             except OSError:
@@ -581,13 +582,13 @@ def test_shared_receipt_printer(tmp_path):
         tm = FakeTM(device)
         client = make_client(tmp_path)
         client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Epson/ESC-POS')
-        tm.replies[escpos.PAPER] = 0x12 | 0x60
+        tm.replies[escpos.PAPER] = bytes([0x12 | 0x60])
         shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
         assert (shown['model'], shown['errors']) == ('Epson/ESC-POS', ['The printer has no paper'])
-        tm.replies[escpos.PAPER] = 0x12
+        tm.replies[escpos.PAPER] = bytes([0x12])
         response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
         assert outcome(client, response) == ('printed', '')
-        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + b'\x1dv0')
+        assert tm.wait_for(escpos.CUT).startswith(escpos.INIT + escpos.CENTER + b'\x1dv0')
         assert (device.imports, device.resets) == (1, 0)
     finally:
         host.close()
@@ -745,8 +746,47 @@ def test_a_job_made_for_another_model_is_not_sent(unknown_epson):
         assert routes._printer(None, None)[1] == 'Epson/ESC-POS'
 
 
+@pytest.mark.parametrize('path, values', [('feed', {}), ('calibration/print', {'model': 'Niimbot/B1', 'label_size': 'niimbot40x30'})])
+def test_a_job_of_its_own_made_for_another_model_is_not_sent(unknown_epson, path, values):
+    client, tm = unknown_epson
+    answer = client.post(f'/labeldesigner/api/{path}', data=values)
+    assert (answer.status_code, outcome(client, answer)) == (200, ('failed', printer.WRONG_MODEL))
+    assert tm.received == b''
+
+
 def test_a_printer_that_never_told_its_model_is_asked_in_its_own_commands(unknown_epson):
     client, tm = unknown_epson
     shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     assert shown['model'] == 'Epson/ESC-POS'
     assert tm.received == b''
+
+
+def test_shared_zpl_printer(tmp_path):
+    # A Datamax in its ZPL emulation shared by a Raspberry Pi: asked with ~HS
+    # and sent the label over USB/IP as on USB
+    from app.labeldesigner.drivers.zpl import protocol as zpl
+    from tests.printing.test_zpl import DATAMAX_HS
+    device = SharedDevice(product=0x106E, device_id='MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;')
+    host = FakeHost(device)
+    try:
+        received = []
+
+        def answer():
+            while data := device.printer.recv(65536):
+                if data == zpl.HOST_STATUS:
+                    device.printer.sendall(DATAMAX_HS)
+                else:
+                    received.append(data)
+        threading.Thread(target=answer, daemon=True).start()
+        client = make_client(tmp_path)
+        client.application.config.update(PRINTER_PRINTER=host.address(), PRINTER_MODEL='Zebra/ZPL')
+        shown = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (shown['model'], shown['errors']) == ('Zebra/ZPL', [])
+        response = client.post('/labeldesigner/api/print', data={'label_size': 'zpl50x30', 'print_type': 'text', 'text': TEXT})
+        assert outcome(client, response) == ('printed', '')
+        deadline = time.monotonic() + 5
+        while b'^XZ' not in b''.join(received) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert b''.join(received).startswith(b'^XA')
+    finally:
+        host.close()

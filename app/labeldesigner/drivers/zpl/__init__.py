@@ -118,8 +118,6 @@ class Zpl(Driver):
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
-    # Its jobs go to usblp, PyUSB or the network only
-    takes_usbip = False
 
     def model_of(self, device, device_id=None):
         # By the IEEE 1284 device ID on USB, e.g. MFG:Zebra Technologies;
@@ -147,7 +145,7 @@ class Zpl(Driver):
 
     def status(self, device, model, unconfirmed=False):
         path = device.removeprefix('file://')
-        if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
+        if not device.startswith(('tcp://', 'usb://', 'usbip://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type='Die-cut labels')
         key = devices.lock_key(device)
@@ -187,12 +185,19 @@ class Zpl(Driver):
         devices.status_cache[devices.lock_key(device)] = state
         return state
 
+    def feed_kind(self, model, label_size):
+        return 'label'
+
+    def feed_job(self, queue):
+        return [protocol.FEED]
+
     def print_speed(self, model, fast, red):
         return SPEED, BESIDES
 
     def label_lengths(self, job):
-        # Each label of the job tells its rows in ^LL
-        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / DOTS_PER_MM for label in job]
+        # Each label of the job tells its rows in ^LL, the one fed by
+        # feed_job() is unknown
+        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / DOTS_PER_MM for label in job if b'^LL' in label]
 
     def render(self, queue, entries, keep=None):
         job = []

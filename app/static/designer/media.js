@@ -378,7 +378,7 @@ function moveTo(name, to) {
 const orderHTML = () => '<span class="order" data-order hidden></span>';
 function drawOrder() {
     const box = $('#ltb [data-order]');
-    if (!box) return;
+    if (!box || ed.heldBack(drawOrder)) return;
     const d = S.edit.design, parts = orderOf(d), dir = directionOf(d), sig = `${parts}|${dir}`;
     if (box.dataset.sig === sig) return;
     const focused = box.contains(document.activeElement) ? document.activeElement : null;

@@ -57,7 +57,9 @@ MODELS = {model.identifier: model for model in (
     Model('PT-E550W', speed=30, max_length_dots=14172, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x66),
     Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x67),
     Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x68),
-    Model('PT-P900W', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
+    # "o" is 6Fh, not the 69h of the PT-P900 reference; Brother's index links it as 6F30
+    # https://support.brother.com/g/s/es/dev/en/command/reference/index.html
+    Model('PT-P900W', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x6F),
     Model('PT-P950NW', speed=60, max_length_dots=28346, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
 )}
 
