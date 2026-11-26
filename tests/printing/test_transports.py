@@ -315,6 +315,26 @@ def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
     assert off.tries == 0
 
 
+@pytest.mark.parametrize('device', ['usbip://192.0.2.7/1-1', '/dev/usb/lp_brother'])
+def test_printer_of_unknown_model_elsewhere_is_asked_for_its_model(tmp_path, monkeypatch, device):
+    # On USB/IP or a port named by udev, the fallback driver may well be the
+    # one of the printer: it is asked as before
+    asked = []
+    # Its device ID names no model, e.g. it did not answer
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device_: '')
+    driver = drivers.resolve(device, 'Unknown')[0]
+
+    def status(self, device_, model):
+        asked.append(device_)
+        raise OSError(errno.EHOSTUNREACH, 'No route to host')
+    monkeypatch.setattr(type(driver), 'status', status)
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = device
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer=device, model='Unknown'))
+    assert response.get_json()['message'] != refusals.UNKNOWN_MODEL
+    assert asked == [device]
+
+
 @pytest.fixture
 def brother_bluetooth(monkeypatch):
     """The QL-820NWB as a model with Bluetooth, which no row tells yet."""
