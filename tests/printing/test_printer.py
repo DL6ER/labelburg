@@ -306,7 +306,7 @@ def test_print_error_of_the_printer_is_reported(client, monkeypatch):
         self.responses.append(bytes(packet))
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', replace_media)
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: Replace media error'))
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: The loaded labels do not fit the job'))
 
 
 def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monkeypatch):
@@ -321,12 +321,12 @@ def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monke
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', refused)
     monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
+    assert outcome(client, response) == ('failed', 'The printer reports: The loaded labels do not fit the job')
     status = client.get('/labeldesigner/api/printer_status').get_json()
-    assert (status['errors'], status['media_width']) == (['Replace media error, clear it at the printer'], 62)
+    assert (status['errors'], status['media_width']) == (['The loaded labels do not fit the job. Clear the error at the printer'], 62)
     # The next job too, asked for its tape the printer answers with the error it holds
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
+    assert outcome(client, response) == ('failed', 'The printer reports: The loaded labels do not fit the job')
     # Cleared, asked again once the request it held counts as lost
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
     monkeypatch.setattr(usb, 'ASK_AGAIN', 0)
