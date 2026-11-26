@@ -291,6 +291,7 @@ def test_printer_without_status_answer_stays_listed(client, monkeypatch):
     (ConnectionRefusedError(errno.ECONNREFUSED, 'Connection refused'), 'The printer refuses the connection'),
     (OSError(errno.EHOSTUNREACH, 'No route to host'), 'The printer cannot be reached'),
     (backends.NoLibusb('No backend available'), 'Printers on usb:// need libusb, please install it'),
+    (devices.NoBluetoothLe('no L2CAP addresses of Bluetooth LE'), 'Printers on Bluetooth LE need Python 3.14 or newer'),
     # Other errors only in the log, they may show paths of the server
     (ValueError('Unexpected status in /app/instance'), 'The printer does not answer the status query, the log of the server names the reason'),
 ])
@@ -544,7 +545,8 @@ def test_an_answer_after_the_wait_is_told_next_time(client, monkeypatch):
 
 
 def test_printer_that_cannot_be_asked_is_told_with_a_fixed_message():
-    errors = [TimeoutError(), backends.NoLibusb('No backend available'), RuntimeError('/app/instance/secret.json is gone')]
+    errors = [TimeoutError(), backends.NoLibusb('No backend available'), devices.NoBluetoothLe('no L2CAP addresses of Bluetooth LE'),
+              RuntimeError('/app/instance/secret.json is gone')]
     errors += [OSError(number, os.strerror(number)) for numbers, _ in devices._UNANSWERED for number in numbers]
     for told in [devices.not_sent(error) for error in errors] + [printer.BUSY]:
         assert refusals.message(routes.PrinterUnreachable(told), refusals.PRINT_FAILED) == told
