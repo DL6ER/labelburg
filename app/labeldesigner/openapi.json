@@ -4200,6 +4200,11 @@
             "enum": ["top", "bottom"],
             "description": "The end of the labels that leaves the printer first, else as the driver prints them."
           },
+          "save_energy": {
+            "type": "string",
+            "enum": ["0", "1"],
+            "description": "Of a printer whose connection on Bluetooth is kept between uses, e.g. a Niimbot B1 (`can_save_energy` in its status): `1` connects to it only to print or to ask it and closes the connection right after. It may then beep each time, and the label designer no longer asks it every 2 s. Default: `0`."
+          },
           "quality": {
             "type": "string",
             "enum": ["quality", "high", "fast"],

@@ -475,3 +475,16 @@ def test_the_part_shown_is_in_sight_in_the_tabs_on_a_phone(phone, server, part):
     phone.wait_for_selector(f'#setPart[data-part="{part}"]')
     tabs, shown = phone.locator('.set-nav').bounding_box(), phone.locator('.set-nav a.on').bounding_box()
     assert tabs['x'] <= shown['x'] and shown['x'] + shown['width'] <= tabs['x'] + tabs['width']
+
+
+def test_a_printer_on_bluetooth_le_offers_to_save_energy(designer, server):
+    b1 = {'path': 'bt://00:00:5E:00:53:01', 'model': 'Niimbot/B1', 'name': '', 'status_type': 'Reply to status request',
+          'can_save_energy': True, 'media_width': 50, 'media_length': 30}
+    demo = {'path': 'simulation', 'model': 'QL-800', 'name': '', 'status_type': 'Simulator', 'can_save_energy': False}
+    printers_are(designer, server, b1, demo)
+    open_settings(designer)
+    card = '#setPrinters [data-card="0"]'
+    assert 'Connects only to print or to check the printer. It may beep more often.' in designer.inner_text(card)
+    assert not designer.is_checked(f'{card} [data-k="save_energy"]')
+    assert setting(designer, f'{card} [data-k="save_energy"]') == {'printer': b1['path'], 'model': 'Niimbot/B1', 'save_energy': '1'}
+    assert designer.locator('#setPrinters [data-card="1"] [data-k="save_energy"]').count() == 0

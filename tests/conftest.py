@@ -102,6 +102,7 @@ def no_known_printers(monkeypatch):
     monkeypatch.setattr(printer, '_last_states', {})
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
+    monkeypatch.setattr(devices, 'saving_energy', frozenset())
     monkeypatch.setattr(devices, '_unreached', {})
     monkeypatch.setattr(escpos_driver, '_told', {})
     monkeypatch.setattr(devices, '_unanswered', {})

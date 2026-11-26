@@ -750,3 +750,27 @@ def test_classic_bluetooth_is_searched_only_when_looking_for_printers(searches, 
     # Not at the first detection, which runs without being asked for
     assert search() is False
     assert search(look=True) is True and kinds == [False, True]
+
+
+class KeptLink:
+    """What release_le() takes of a link it keeps."""
+
+    def __init__(self):
+        self.busy, self.used, self.broken, self.timer, self.closed = True, 0.0, False, None, 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_a_kept_bluetooth_link_is_closed_after_each_use_where_the_printer_saves_energy(monkeypatch):
+    saving, other = 'bt://00:00:5E:00:53:01', 'bt://00:00:5E:00:53:02'
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(saving)}))
+    monkeypatch.setattr(transports, '_kept', {})
+    links = {device: KeptLink() for device in (saving, other)}
+    for device, link in links.items():
+        transports._kept[devices.lock_key(device)] = link
+        transports.release_le(device, link)
+    # The other one is kept until it was unused for KEEP_LE seconds
+    links[other].timer.cancel()
+    assert (links[saving].closed, links[other].closed) == (1, 0)
+    assert list(transports._kept) == [devices.lock_key(other)]
