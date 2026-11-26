@@ -117,7 +117,6 @@ class SerialLink:
         try:
             mode = termios.tcgetattr(self.fd)
             tty.cfmakeraw(mode)
-            mode[tty.IFLAG] &= ~(termios.IXOFF | termios.IXANY)
             mode[tty.CFLAG] &= ~(termios.CSTOPB | getattr(termios, 'CRTSCTS', 0))
             mode[tty.CFLAG] |= termios.CREAD | termios.CLOCAL
             mode[tty.ISPEED] = mode[tty.OSPEED] = termios.B115200

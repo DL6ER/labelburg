@@ -54,6 +54,27 @@ def test_serial_port_is_raw_at_115200_baud_8n1(pty):
         link.close()
 
 
+def test_serial_port_set_up_otherwise_before_is_set_back_to_8n1(pty):
+    # e.g. by another program: two stop bits and flow control
+    device, _ = pty
+    fd = os.open(device.removeprefix('serial://'), os.O_RDWR | os.O_NOCTTY)
+    try:
+        mode = termios.tcgetattr(fd)
+        mode[0] |= termios.IXOFF | termios.IXANY
+        mode[2] |= termios.CSTOPB | termios.CRTSCTS
+        termios.tcsetattr(fd, termios.TCSANOW, mode)
+        before = termios.tcgetattr(fd)
+        assert before[0] & termios.IXOFF and before[0] & termios.IXANY and before[2] & termios.CSTOPB and before[2] & termios.CRTSCTS
+    finally:
+        os.close(fd)
+    link = transports.SerialLink(device)
+    try:
+        iflag, _, cflag = termios.tcgetattr(link.fd)[:3]
+        assert not cflag & (termios.CSTOPB | termios.CRTSCTS) and not iflag & (termios.IXOFF | termios.IXANY)
+    finally:
+        link.close()
+
+
 def test_serial_port_sends_and_receives_bytes_as_they_are(pty):
     device, printer_end = pty
     link = transports.SerialLink(device)
@@ -208,6 +229,53 @@ def test_serial_port_on_usb_that_refuses_its_setup_is_used_as_it_is(pyusb, monke
     printer_.dispose()
 
 
+def test_serial_port_on_usb_gives_back_the_interfaces_the_kernel_did_not_take_yet(pyusb, monkeypatch):
+    # cdc_acm may take one back together with the other
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    device = SerialDevice(0x0001)
+    attach = device.attach_kernel_driver
+
+    def taken(interface):
+        if interface == 0:
+            raise USBError('Resource busy')
+        attach(interface)
+    device.attach_kernel_driver = taken
+    pyusb.append(device)
+    backends.open_printer('usb://0x3513:0x0001').dispose()
+    assert device.calls[-1] == ('attach', 1)
+
+
+class Unconfigured(SerialDevice):
+    """A serial port on USB no configuration is set on yet, so no driver of
+    the kernel holds it and its interfaces cannot be asked."""
+
+    configured = False
+
+    def is_kernel_driver_active(self, interface):
+        if not self.configured:
+            raise USBError('Entity not found')
+        return super().is_kernel_driver_active(interface)
+
+    def set_configuration(self):
+        self.configured = True
+        super().set_configuration()
+
+    def get_active_configuration(self):
+        if not self.configured:
+            raise USBError('Entity not found')
+        return self
+
+
+def test_serial_port_on_usb_not_configured_yet_is_set_up(pyusb, monkeypatch):
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    device = Unconfigured(0x0001, reads=[b'ok'], bound=())
+    pyusb.append(device)
+    printer_ = backends.open_printer('usb://0x3513:0x0001')
+    assert printer_.read() == b'ok'
+    printer_.dispose()
+    assert device.calls == ['configure', 'dispose']
+
+
 def test_serial_port_on_usb_no_driver_lists_is_no_printer(pyusb):
     # As before: only devices with a printer interface are printed on
     assert all(driver.usb_serial_ids == () for driver in drivers.DRIVERS)
@@ -254,7 +322,9 @@ def test_printer_on_classic_bluetooth_takes_a_stream_of_bytes(rfcomm):
     printer_.write(b'\x1b@job')
     assert theirs.recv(64) == b'\x1b@job'
     # Nothing to read is told at once, an answer as it came
+    started = time.monotonic()
     assert printer_.read(32) == b''
+    assert time.monotonic() - started < 0.5
     theirs.sendall(b'status')
     deadline = time.monotonic() + 2
     while not (answer := printer_.read(32)) and time.monotonic() < deadline:
