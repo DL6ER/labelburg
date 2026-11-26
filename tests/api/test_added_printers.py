@@ -160,6 +160,18 @@ def test_printer_listed_already(client, host):
     assert (answer.status_code, answer.get_json()['message']) == (400, adding.ALREADY)
 
 
+def test_host_alone_is_added_as_the_printer_it_shares(client, host, monkeypatch):
+    monkeypatch.setattr(usbip, 'PORT', host.port)
+    answer = add(client, '127.0.0.1', 'Garage')
+    assert answer.get_json()['printer'] == {'address': 'usbip://127.0.0.1', 'model': 'QL-1100', 'name': 'Garage'}
+    assert kept(client)['added'] == [{'address': 'usbip://127.0.0.1', 'model': 'QL-1100', 'name': 'Garage'}]
+    # Typed alone again, the printer in use is not let go
+    answer = add(client, '127.0.0.1', 'Shed')
+    assert (answer.status_code, answer.get_json()['message']) == (400, adding.ALREADY)
+    assert usbip.connected('usbip://127.0.0.1')
+    usbip.disconnect('usbip://127.0.0.1')
+
+
 def test_refused_addresses_are_told_plainly(client, names):  # noqa: F811
     names['printer.test'] = ['8.8.8.8']
     for path in ('identify', 'add'):

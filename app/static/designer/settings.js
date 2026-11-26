@@ -290,8 +290,6 @@ function bindCards(box) {
 // Printers the search does not find, added by their address. The server
 // asks what answers there before it adds anything, ADD_PRINTERS of its
 // configuration says where it may look.
-const EXAMPLES = [['usbip://192.168.1.50', 'USB printer on another device'], ['tcp://192.168.1.60', 'Network printer'],
-    ['vc500w://192.168.1.70', 'VC-500W']];
 const adding = { mode: '', allows: '', unused: [], address: '', name: '', asking: false, found: null, error: '' };
 const removeHTML = p => p.added ? `<button class="btn ghost sm" type="button" data-remove title="Remove the printer added here">${icon('trash')}Remove</button>` : '';
 
@@ -337,9 +335,8 @@ function addHTML() {
     return head + `<div class="set-add">
         <label class="k" for="addAddress">Address</label>
         <div class="row"><input class="in set-address" id="addAddress" autocomplete="off" autocapitalize="off" spellcheck="false"
-            placeholder="usbip://192.168.1.50" value="${esc(adding.address)}"${adding.asking ? ' disabled' : ''}>
+            placeholder="e.g. 192.168.1.50" value="${esc(adding.address)}"${adding.asking ? ' disabled' : ''}>
             <button class="btn soft" type="button" id="addAsk"${adding.asking ? ' disabled' : ''}>${icon('search')}${adding.asking ? 'Asking the printer...' : 'Identify'}</button></div>
-        <div class="set-examples">${EXAMPLES.map(([v, n]) => `<button type="button" class="set-ex" data-example="${esc(v)}">${esc(n)} <code>${esc(v)}</code></button>`).join('')}</div>
         ${found}
         ${adding.error ? `<small class="set-bad" role="alert">${esc(adding.error)}</small>` : allows}
     </div>`;
@@ -383,9 +380,6 @@ function bindAdd(box) {
         else if (b.id === 'addSave') save();
         else if (b.id === 'addCancel') {
             Object.assign(adding, { address: '', name: '', found: null, error: '' });
-            drawAdd('#addAddress');
-        } else if (b.dataset.example) {
-            Object.assign(adding, { address: b.dataset.example.replace(/\/\/.*/, '//'), found: null, error: '' });
             drawAdd('#addAddress');
         } else if (b.dataset.remove) removePrinter(adding.unused.find(p => p.address === b.dataset.remove));
     });

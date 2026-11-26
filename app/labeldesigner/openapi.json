@@ -1690,7 +1690,7 @@
     "/labeldesigner/api/printers/identify": {
       "post": {
         "summary": "Ask what answers at an address",
-        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP, a host alone over USB/IP first. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "identifyPrinter",
         "requestBody": {
           "content": {
@@ -1741,7 +1741,7 @@
     "/labeldesigner/api/printers/add": {
       "post": {
         "summary": "Add a printer",
-        "description": "Adds the printer at an address, asked what it is first as by `printers/identify`. It is kept with the printer settings in the folder of the labels. A network printer is kept by the address its model takes, e.g. `vc500w://` for a VC-500W given as `tcp://`. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Adds the printer at an address, asked what it is first as by `printers/identify`. It is kept with the printer settings in the folder of the labels. A network printer is kept by the address its model takes, e.g. `vc500w://` for a VC-500W given as `tcp://` or alone. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "addPrinter",
         "requestBody": {
           "content": {
@@ -5010,7 +5010,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone, e.g. `192.168.1.50`, is asked over USB/IP first, then on the network."
           }
         },
         "required": ["address"]
@@ -5020,7 +5020,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone, e.g. `192.168.1.50`, is asked over USB/IP first, then on the network."
           },
           "name": {
             "type": "string",

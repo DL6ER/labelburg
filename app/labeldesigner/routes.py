@@ -2111,9 +2111,10 @@ def add_printer():
     is. It is kept with the printer settings."""
     values = {**request.values.to_dict(), **_json_body()}
 
-    def checked(added: list[dict], address: str, name: str) -> str:
-        """The name, ValueError where another printer has it or the address."""
-        if _listed_as(address, added) is not None:
+    def checked(added: list[dict], addresses: list[str], name: str) -> str:
+        """The name, ValueError where another printer has it or one of the
+        addresses."""
+        if any(_listed_as(address, added) is not None for address in addresses):
             raise ValueError(adding.ALREADY)
         return adding.name_of(name, [n for _, n in _configured_devices()] + [e['name'] for e in added])
     try:
@@ -2129,10 +2130,12 @@ def add_printer():
     except ValueError as e:
         return _refused('Adding a printer', e, refusals.INVALID_INPUT)
     try:
-        address = adding.address_of(values.get('address') or '')
-        name = checked(_added(kept), address, values.get('name'))
-        imported = usbip.is_address(address) and usbip.connected(address)
-        found = adding.identify(address, _add_mode(), keep=True)
+        typed = values.get('address') or ''
+        # A host alone may also be a printer it shares over USB/IP
+        addresses = [address for address in (adding.shared_at(typed), adding.address_of(typed)) if address]
+        name = checked(_added(kept), addresses, values.get('name'))
+        imported = any(usbip.is_address(address) and usbip.connected(address) for address in addresses)
+        found = adding.identify(typed, _add_mode(), keep=True)
     except Exception as e:
         return _refused('Adding a printer', e, adding.NOT_ASKED)
     repo = _get_repo_dir()
@@ -2141,7 +2144,7 @@ def add_printer():
             data = _kept_settings(changing=True)
             # Again, another request may have added it meanwhile; a VC-500W
             # given as tcp:// is kept as vc500w://
-            checked(_added(data), found['address'], name)
+            checked(_added(data), [found['address']], name)
             data = printer_settings.with_added(data, found['address'], found['model'], name)
             _write_atomically(os.path.join(repo, printer_settings.FILE),
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
