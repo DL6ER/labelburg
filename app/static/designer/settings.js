@@ -3,7 +3,7 @@
 // other programs and about this page. Shown at #settings/<part>.
 
 import {
-    $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
+    $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf, modelOnly,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, browserDateFormat, dateCodeExamples, settingsSaves,
     itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE,
@@ -125,9 +125,11 @@ function tapeHTML(p) {
 // The demo printer prints as any model, grouped by maker, e.g. QL-500 before QL-1100
 function modelHTML(p) {
     const groups = new Map();
-    Object.keys(C.models).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
-        .forEach(m => groups.set(C.models[m].vendor, [...(groups.get(C.models[m].vendor) || []), m]));
     const chosen = kept(p).demo_model || p.model;
+    // A model shown as another one, e.g. ZPL-300 as ZPL, only while chosen
+    const listed = m => m === chosen || modelOnly(m) === m.split('/').pop();
+    Object.keys(C.models).filter(listed).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+        .forEach(m => groups.set(C.models[m].vendor, [...(groups.get(C.models[m].vendor) || []), m]));
     return `<div class="set-stack"><select class="in set-sel" data-k="demo_model" aria-label="Model of ${esc(printerLabel(p))}">${[...groups]
         .sort(([a], [b]) => a.localeCompare(b, 'en')).map(([vendor, models]) => `<optgroup label="${esc(vendor)}">${models.map(m =>
             `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(m.split('/').pop())}</option>`).join('')}</optgroup>`).join('')}</select>

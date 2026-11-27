@@ -164,3 +164,85 @@ def test_every_name_before_ends_at_a_model():
     # canonical() looks a name up once
     for name in drivers._ALIASES:
         assert drivers.canonical(name) in drivers.MODELS, name
+
+
+@pytest.mark.parametrize('device_id, vendor, name', [
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;CLS:PRINTER;SN:X5JK012345;', 'Epson', 'Epson TM-T20II'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra', 'Zebra ZTC ZD611'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra', 'Zebra ZD420'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD611_300dpi;', 'Zebra', 'Zebra ZD611'),
+    # A number before dpi in the model stays
+    ('MFG:Printer;CMD:ZPL;MDL:LP300dpi;', '', 'LP300dpi'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra', 'HP KE103'),
+    ('MFG:Xprinter;CMD:ESC/POS;MDL:Xprinter XP-58IIH;', 'Epson', 'Xprinter XP-58IIH'),
+    ('MFG:Printer;CMD:ESC/POS,Raster;MDL:POS58;', 'Epson', 'POS58'),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', '', 'Thermal Printer'),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', '', 'VEVOR Y428BT'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II\x00\x1b  ;', 'Epson', 'Epson TM-T20II'),
+    # Without what tells one printer from another: serial numbers, MAC and IP addresses
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 SN0123456789;', 'Epson', 'POS-80'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 (S/N:A1B2);', 'Epson', 'POS-80'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 X5JK0123;SN:X5JK0123;', 'Epson', 'POS-80'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 12J123456;', 'Epson', 'POS-80'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 00:11:22:33:44:55;', 'Epson', 'Epson TM-T20II'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 00-11-22-AA-BB-CC;', 'Epson', 'Epson TM-T20II'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 001122AABBCC;', 'Epson', 'Epson TM-T20II'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II AABBCCDDEEF1;', 'Epson', 'Epson TM-T20II'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 192.168.1.50;', 'Epson', 'POS-80'),
+    # A word of six digits is a serial number, one of fewer is of the model
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 123456;', 'Epson', 'POS-80'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 12345;', 'Epson', 'POS-80 12345'),
+    # Makers that name none
+    ('MFG:Generic;CMD:ESC/POS;MDL:POS-80;', 'Epson', 'POS-80'),
+    ('MFG:UNKNOWN;CMD:ESC/POS;MDL:POS-80;', 'Epson', 'POS-80'),
+    ('MFG:SNBC;CMD:ESC/POS;MDL:BTP-R880NP;', 'Epson', 'SNBC BTP-R880NP'),
+    # Too long to be a name, or none
+    ('MFG:Some Printer Manufacturing Company;CMD:ESC/POS;MDL:Thermal Receipt Printer 80;', 'Epson', ''),
+    ('MFG:EPSON;CMD:ESC/POS;', 'Epson', ''),
+    ('', 'Epson', '')])
+def test_device_name(device_id, vendor, name):
+    assert devices.device_name(device_id, vendor) == name
+
+
+def test_known_device_id_asks_no_printer(monkeypatch, tmp_path):
+    from app.labeldesigner.drivers import backends, usbip
+    told = 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;'
+    # As usblp read it when the printer was plugged in
+    (tmp_path / 'lp7').mkdir()
+    (tmp_path / 'lp7' / 'ieee1284_id').write_text(told)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / '{name}' / 'ieee1284_id'))
+    assert devices.known_device_id('file:///dev/usb/lp7') == devices.known_device_id('/dev/usb/lp7') == told
+    # On usb:// only once it was read
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(backends, 'device_id', lambda device: pytest.fail('asked the printer'))
+    assert devices.known_device_id('usb://0x04b8:0x0e15/5443') == ''
+    monkeypatch.setattr(backends, 'device_id', lambda device: told)
+    devices.usb_device_id('usb://0x04b8:0x0e15/5443')
+    assert devices.known_device_id('usb://0x04B8:0x0E15/05443') == told
+    # Shared over USB/IP, the one it told last, it is not imported for it
+    monkeypatch.setattr(usbip, 'device_id', lambda device: pytest.fail('imported the printer'))
+    monkeypatch.setattr(usbip, 'known_device_id', lambda device: told)
+    assert devices.known_device_id('usbip://192.0.2.1') == told
+    assert devices.known_device_id('tcp://192.0.2.1') == ''
+
+
+def test_device_name_without_the_serial_number_of_the_address(monkeypatch):
+    from app.labeldesigner.drivers import backends, escpos
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(backends, 'device_id', lambda device: 'MFG:Printer;CMD:ESC/POS;MDL:POS-58 AB12;')
+    devices.usb_device_id('usb://0x0416:0x5011/AB12')
+    assert escpos.DRIVER.device_name('usb://0x0416:0x5011/AB12') == 'POS-58'
+
+
+@pytest.mark.parametrize('device_id, model, name', [
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-58;', 'Epson/ESC-POS', 'POS-58'),
+    # Found by the search, of a model not known yet
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-58;', 'Unknown', 'POS-58'),
+    # A Brother is named by its model
+    ('MFG:Brother;CMD:PT-CBP;MDL:QL-700;', 'QL-700', None)])
+def test_printer_that_did_not_answer_is_named_by_its_device_id(monkeypatch, tmp_path, device_id, model, name):
+    (tmp_path / 'lp7').mkdir()
+    (tmp_path / 'lp7' / 'ieee1284_id').write_text(device_id)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / '{name}' / 'ieee1284_id'))
+    monkeypatch.setattr(devices, 'status_cache', {})
+    assert devices.failed_printer_state('file:///dev/usb/lp7', TimeoutError(), model).get('device_name') == name

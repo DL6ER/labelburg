@@ -107,7 +107,8 @@ export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 // With what the printer told of itself, e.g. a receipt printer without a cutter
 export const printerCaps = (p = S.printer) => p && p.caps ? Object.assign({}, capsOf(p.model), p.caps) : capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
-export const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
+// The maker and model the server read from the printer, else those of its model
+export const printerName = p => (p && p.device_name) || [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 export const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
 // The demo printer, the simulator of the server, prints as any model
 export const isDemo = p => !!p && /simulat/i.test(p.status_type || p.phase_type || '');

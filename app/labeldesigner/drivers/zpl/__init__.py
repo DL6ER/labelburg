@@ -19,10 +19,12 @@ from . import protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('Zebra/ZPL',)
-DOTS_PER_MM = 8
+# Printers of 203 dpi and of 300 dpi
+MODELS = ('Zebra/ZPL', 'Zebra/ZPL-300')
+DPI = {MODELS[0]: 203, MODELS[1]: 300}
+DOTS_PER_MM = {MODELS[0]: 8, MODELS[1]: 300 / 25.4}
 # A printhead of 104 mm, as on a GK420t, a 105 mm label loses 1 mm
-HEAD = 832
+HEAD_MM = 104
 # mm/s, 4 in/s, the most a Datamax-O'Neil E-4204B prints and less than the
 # 5 in/s of a GK420t, and the seconds a label takes besides, to take its job
 # and find the gap to the next label
@@ -38,10 +40,12 @@ SIZES = ((105, 148),
          (51, 25), (50, 30), (50, 25), (40, 30), (40, 20), (38, 25), (30, 20))
 
 
-def _label(width: int, length: int) -> Label:
-    total = (width * DOTS_PER_MM, length * DOTS_PER_MM)
-    return Label(f'zpl{width}x{length}', (width, length), FormFactor.DIE_CUT, total,
-                 (min(total[0], HEAD), total[1]), 0, models=MODELS)
+def _label(width: int, length: int, model: str) -> Label:
+    # The names of the 203 dpi sizes are those from before there were two
+    prefix = 'zpl' if model == MODELS[0] else 'zpl300-'
+    total = (round(width * DOTS_PER_MM[model]), round(length * DOTS_PER_MM[model]))
+    return Label(f'{prefix}{width}x{length}', (width, length), FormFactor.DIE_CUT, total,
+                 (min(total[0], round(HEAD_MM * DOTS_PER_MM[model])), total[1]), 0, models=(model,))
 
 
 # A Datamax-O'Neil E-4204B leaves ~HS unanswered within about 5 s of the one
@@ -63,31 +67,58 @@ def _asked_lately(key: str) -> bool:
 
 # The command set ZPL in a device ID
 ZPL_DEVICE_ID = re.compile(r'(^|;)\s*(CMD|COMMAND SET):[^;]*\bZPL', re.IGNORECASE)
+# The resolution of a model, e.g. MDL:ZTC ZD611-300dpi ZPL, and the models
+# of each, 200 as some name 203 dpi. A printer of another one, e.g. 600 dpi,
+# is no printer of this driver until configured.
+RESOLUTION = re.compile(r'(\d+)\s*dpi', re.IGNORECASE)
+OF_RESOLUTION = {200: MODELS[0], 203: MODELS[0], 300: MODELS[1]}
+# Printers on ZPL by the maker and model of their device ID, where it names
+# no ZPL or no resolution. The device IDs are those LPrint lists in
+# lprint-zpl.h (https://github.com/michaelrsweet/lprint, Apache-2.0).
+KNOWN_IDS = {
+    # Arkscan 2054A, ZPL as CEZD, 203 dpi
+    ('4BARCODE', '4B-2054A'): MODELS[0],
+    # HP KE103, 300 dpi
+    ('HP', 'KE103'): MODELS[1],
+    # The GX430 prints 300 dpi, LPrint has it at 203: Zebra's GX series spec sheet,
+    # https://www.zebra.com/content/dam/external-dam/knowledge-base/cpws/docs/gseries/gx_specs.pdf
+    ('Zebra Technologies', 'ZTC GX430d'): MODELS[1],
+    ('Zebra Technologies', 'ZTC GX430t'): MODELS[1],
+}
+
+
+def _plain(text: str) -> str:
+    """A field of a device ID compared in any case and spacing."""
+    return ' '.join(text.split()).casefold()
+
+
+_KNOWN = {(_plain(maker), _plain(model)): known for (maker, model), known in KNOWN_IDS.items()}
 
 # A measured length further off than this from all sizes is not taken
 LENGTH_TOLERANCE = 2
 
 
-def measured(length: int) -> int | None:
+def measured(length: int, dots_per_mm: float = DOTS_PER_MM[MODELS[0]]) -> int | None:
     """The length in mm of the labels of a length the printer measured in
-    dots, e.g. 235 dots 30 mm, None if no labels have about that length or
-    it is as near to two lengths."""
-    mm = length / DOTS_PER_MM
+    dots, of dots_per_mm, e.g. 235 dots 30 mm, None if no labels have about
+    that length or it is as near to two lengths."""
+    mm = length / dots_per_mm
     nearest = min(abs(size[1] - mm) for size in SIZES)
     lengths = {size[1] for size in SIZES if abs(size[1] - mm) == nearest}
     return lengths.pop() if nearest <= LENGTH_TOLERANCE and len(lengths) == 1 else None
 
 
-def loaded(length: int) -> tuple[int, int] | None:
+def loaded(length: int, dots_per_mm: float = DOTS_PER_MM[MODELS[0]]) -> tuple[int, int] | None:
     """Width and length in mm of the labels of a length the printer measured
-    in dots, e.g. 1214 dots (152 mm) 102 x 152 mm. None if labels of another
-    width have that length too, the printer does not tell their width."""
-    mm = measured(length)
+    in dots, of dots_per_mm, e.g. 1214 dots (152 mm) 102 x 152 mm. None if
+    labels of another width have that length too, the printer does not tell
+    their width."""
+    mm = measured(length, dots_per_mm)
     sizes = [size for size in SIZES if size[1] == mm]
     return sizes[0] if len(sizes) == 1 else None
 
 
-LABELS = tuple(_label(width, length) for width, length in SIZES)
+LABELS = tuple(_label(width, length, model) for model in MODELS for width, length in SIZES)
 NAMES = {label.identifier: f'{label.tape_size[0]} x {label.tape_size[1]} mm die-cut (ZPL)' for label in LABELS}
 
 
@@ -111,6 +142,10 @@ class Zpl(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
+    # Both models are shown alike
+    shown_as = {MODELS[1]: MODELS[0]}
+    # Its models are those of many makers
+    names_devices = True
     # usblp's device, also a name a udev rule gives it, e.g.
     # /dev/usb/lp_datamax, or the printer on the network on the port of raw
     # printing only, as the other drivers
@@ -128,26 +163,46 @@ class Zpl(Driver):
         return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
 
     def model_in(self, device_id):
-        return MODELS[0] if ZPL_DEVICE_ID.search(device_id) else None
+        fields = devices.device_id_fields(device_id)
+        known = _KNOWN.get((_plain(fields.get('MFG', '')), _plain(fields.get('MDL', ''))))
+        if known or not ZPL_DEVICE_ID.search(device_id):
+            return known
+        resolution = RESOLUTION.search(fields.get('MDL', ''))
+        return OF_RESOLUTION.get(int(resolution[1])) if resolution else MODELS[0]
 
     def fits(self, label, model):
-        return label in LABELS
+        return label in LABELS and model in label.models
+
+    def label_for(self, label_size, model):
+        # zpl102x152 and zpl300-102x152 are the same labels
+        paper = next((label.tape_size for label in LABELS if label.identifier == label_size), None)
+        return next((label.identifier for label in LABELS if label.tape_size == paper and model in label.models), label_size)
 
     def dpi(self, high_res):
-        return protocol.DPI
+        return DPI[MODELS[0]]
+
+    def label_dpi(self, label):
+        return DPI[label.models[0]], DPI[label.models[0]]
 
     def resolution_problem(self, model, high_res):
         return f'The {shown(model)} printer cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
 
     def capabilities(self, model):
         # The labels are torn off, their top leaves it first
-        return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True)
+        return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
+                    model_shown=self.shown_as.get(model, model).split('/')[-1])
+
+    def device_name(self, device):
+        # Zebra's models start with ZTC, Zebra Technologies Corporation
+        return re.sub(r'\bZTC\s+', '', super().device_name(device), count=1, flags=re.IGNORECASE)
 
     def status(self, device, model, unconfirmed=False):
         path = device.removeprefix('file://')
         if not device.startswith(('tcp://', 'usb://', 'usbip://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type='Die-cut labels')
+        if name := self.device_name(device):
+            state['device_name'] = name
         key = devices.lock_key(device)
         cached = devices.status_cache.get(key)
         if _asked_lately(key):
@@ -177,10 +232,11 @@ class Zpl(Driver):
         state['phase_type'] = 'Waiting to receive'
         # The label designer then picks the labels. Of a length that labels
         # of several widths have, only the length is told.
-        size = loaded(answer['length'])
+        dots_per_mm = DOTS_PER_MM.get(model, DOTS_PER_MM[MODELS[0]])
+        size = loaded(answer['length'], dots_per_mm)
         if size:
             state['media_width'], state['media_length'] = size
-        elif length := measured(answer['length']):
+        elif length := measured(answer['length'], dots_per_mm):
             state['media_length'] = length
         devices.status_cache[devices.lock_key(device)] = state
         return state
@@ -189,7 +245,7 @@ class Zpl(Driver):
         return 'label'
 
     def feed_job(self, queue):
-        return [protocol.FEED]
+        return [(protocol.FEED, None)]
 
     def print_speed(self, model, fast, red):
         return SPEED, BESIDES
@@ -197,21 +253,23 @@ class Zpl(Driver):
     def label_lengths(self, job):
         # Each label of the job tells its rows in ^LL, the one fed by
         # feed_job() is unknown
-        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / DOTS_PER_MM for label in job if b'^LL' in label]
+        return [int(label.split(b'^LL', 1)[1].split(b'\n', 1)[0]) / dots_per_mm for label, dots_per_mm in job if b'^LL' in label]
 
     def render(self, queue, entries, keep=None):
         job = []
+        # The dots per mm of the labels, for their length
+        dots_per_mm = DOTS_PER_MM[next(label.models[0] for label in LABELS if label.identifier == queue.label_size)]
         for i, entry in enumerate(entries):
             img, rows, width = label_rows(entry['label'], queue.label_size)
             if keep:
                 keep(img, f'zpl_{i}')
-            job.append(protocol.label(rows, width))
+            job.append((protocol.label(rows, width), dots_per_mm))
         return job
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
         try:
-            protocol.write(device, b''.join(job))
+            protocol.write(device, b''.join(label for label, _ in job))
         except OSError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)

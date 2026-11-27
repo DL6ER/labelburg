@@ -383,3 +383,152 @@ def test_asked_right_after_boot(monkeypatch):
     monkeypatch.setattr(protocol, 'host_status', lambda device: asked.append(device) or DATAMAX_HS)
     zpl.DRIVER.status('tcp://127.0.0.1', 'Zebra/ZPL')
     assert asked == ['tcp://127.0.0.1']
+
+
+# Device IDs as LPrint lists them in lprint-zpl.h, and ones of other printers
+@pytest.mark.parametrize('device_id, model', [
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-203dpi ZPL;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra/ZPL-300'),
+    ('MFG:4BARCODE;CMD:CEZD;MDL:4B-2054A;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420d;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430d;', 'Zebra/ZPL-300'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'Zebra/ZPL-300'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD621-203dpi ZPL;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420t;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX430t;', 'Zebra/ZPL-300'),
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD621-300dpi ZPL;', 'Zebra/ZPL-300'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZD420 300 DPI;', 'Zebra/ZPL-300'),
+    # Other spellings of the known ones
+    ('MFG:4barcode;CMD:CEZD;MDL:4b-2054a;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra  Technologies;COMMAND SET:ZPL;MODEL: ztc  GX430t ;', 'Zebra/ZPL-300'),
+    ('MFG:hp;CMD:Bixolon_01;MDL:ke103;', 'Zebra/ZPL-300'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZTC ZD611_300dpi ZPL;', 'Zebra/ZPL-300'),
+    # 200 dpi as some Zebras name their 203 dpi
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT230-200dpi ZPL;', 'Zebra/ZPL'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZP 450-200dpi;', 'Zebra/ZPL'),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZM400 200 dpi;', 'Zebra/ZPL'),
+    # Of a resolution without a model, its labels would come out a third as large
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;', None),
+    ('MFG:Zebra Technologies;CMD:ZPL;MDL:ZT411 600 DPI;', None),
+    # Other models of the same makers and the TSPL printers of lprint-tspl.h
+    ('MFG:4BARCODE;CMD:CEZD;MDL:4B-3064TB;', None),
+    ('MFG:HP;CMD:PJL,PCL,PCLXL,URF;MDL:HP LaserJet M110w;', None),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None),
+    ('MFG:Marklife ;MDL:X4;CMD:XPP,XL;', None),
+    ('MFG:;MDL:PM-241-BT;CMD:XPP,XL;', None),
+    ('MFG:VEVOR ;CMD: ;MODEL:Y428BT;DES:LabelPrinter;', None)])
+def test_model_in_device_ids_lprint_publishes(device_id, model):
+    from app.labeldesigner import drivers
+    assert zpl.DRIVER.model_in(device_id) == model
+    # No other driver takes it for one of its printers
+    assert drivers.told_model(device_id) == model
+
+
+def test_300_dpi_labels_are_the_same_paper():
+    from app.labeldesigner.label_names import label_dpi, label_fits, label_name
+    low = [label for label in zpl.LABELS if label.models == ('Zebra/ZPL',)]
+    high = [label for label in zpl.LABELS if label.models == ('Zebra/ZPL-300',)]
+    # The names of the 203 dpi sizes stay, saved labels name them
+    assert [label.identifier for label in low] == [f'zpl{w}x{l}' for w, l in zpl.SIZES]
+    assert [label.identifier for label in high] == [f'zpl300-{w}x{l}' for w, l in zpl.SIZES]
+    assert [label.tape_size for label in low] == [label.tape_size for label in high]
+    assert [label_name(label) for label in low] == [label_name(label) for label in high]
+    by_id = {label.identifier: label for label in zpl.LABELS}
+    # 102 x 152 mm (4 x 6 in) at 300 dpi, 105 mm wider than a printhead of 104 mm
+    assert by_id['zpl300-102x152'].dots_total == (1205, 1795) and by_id['zpl300-102x152'].dots_printable == (1205, 1795)
+    assert by_id['zpl300-105x148'].dots_total == (1240, 1748) and by_id['zpl300-105x148'].dots_printable == (1228, 1748)
+    assert by_id['zpl105x148'].dots_printable == (832, 1184)
+    assert (label_dpi('zpl300-57x32', False), label_dpi('zpl57x32', False)) == (300, 203)
+    assert label_fits(by_id['zpl300-57x32'], 'Zebra/ZPL-300') and not label_fits(by_id['zpl300-57x32'], 'Zebra/ZPL')
+    assert label_fits(by_id['zpl57x32'], 'Zebra/ZPL') and not label_fits(by_id['zpl57x32'], 'Zebra/ZPL-300')
+
+
+@pytest.mark.parametrize('saved, model, printed', [
+    ('zpl102x152', 'Zebra/ZPL-300', 'zpl300-102x152'),
+    ('zpl300-102x152', 'Zebra/ZPL', 'zpl102x152'),
+    ('zpl57x32', 'Zebra/ZPL', 'zpl57x32'),
+    ('zpl300-57x32', 'Zebra/ZPL-300', 'zpl300-57x32'),
+    ('62', 'Zebra/ZPL-300', '62')])
+def test_label_for_the_same_paper_of_the_other_model(saved, model, printed):
+    from app.labeldesigner import tape
+    assert zpl.DRIVER.label_for(saved, model) == printed
+    assert tape.same_paper(saved, model) == printed
+
+
+def test_300_dpi_model_is_shown_as_the_other_one():
+    from app.labeldesigner.drivers.base import shown
+    assert shown('Zebra/ZPL-300') == shown('Zebra/ZPL') == 'Zebra ZPL'
+    assert zpl.DRIVER.capabilities('Zebra/ZPL-300')['model_shown'] == 'ZPL'
+    assert zpl.DRIVER.resolution_problem('Zebra/ZPL-300', True) == 'The Zebra ZPL printer cannot print at 600 dpi, turn off 600 dpi printing'
+
+
+@pytest.mark.parametrize('label_size', ['zpl300-102x152', 'zpl102x152'])
+def test_300_dpi_label_is_printed_in_its_dots(tmp_path, sent, label_size):
+    client = make_client(tmp_path, model='Zebra/ZPL-300', printer=DEVICE)
+    response = client.post('/labeldesigner/api/print', data={'label_size': label_size, 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    (_, data), = sent
+    # 1205 dots across, sent as 151 bytes a row, and 1795 rows
+    assert data.startswith(b'^XA\n^PW1208\n^LL1795\n^FO0,0^GFA,271045,271045,151,')
+
+
+def test_label_length_at_300_dpi():
+    from types import SimpleNamespace
+    from PIL import Image
+    label = SimpleNamespace(label_content=None, generate=lambda: Image.new('1', (1205, 1795), 1))
+    job = zpl.DRIVER.render(SimpleNamespace(label_size='zpl300-102x152'), [{'label': label, 'cut': True}])
+    assert zpl.DRIVER.label_lengths(job) == [pytest.approx(152, abs=0.1)]
+
+
+@pytest.mark.parametrize('model, length, size', [
+    ('Zebra/ZPL-300', 1795, (102, 152)),
+    ('Zebra/ZPL-300', 1214, (102, 102)),
+    ('Zebra/ZPL', 1214, (102, 152))])
+def test_labels_by_their_length_in_the_dots_of_the_model(model, length, size):
+    assert zpl.loaded(length, zpl.DOTS_PER_MM[model]) == size
+
+
+def test_status_of_a_300_dpi_printer(monkeypatch):
+    from app.labeldesigner import tape
+    # 4 x 6 in labels, 1795 dots long at 300 dpi
+    thread, server = _answering(monkeypatch, DATAMAX_HS.replace(b'0235', b'1795'))
+    state = zpl.DRIVER.status('tcp://127.0.0.1', 'Zebra/ZPL-300')
+    thread.join(5)
+    server.close()
+    assert (state['media_width'], state['media_length']) == (102, 152)
+    assert tape.in_printer(state, 'Zebra/ZPL-300', '', '62').id == 'zpl300-102x152'
+
+
+@pytest.mark.parametrize('device_id, name', [
+    ('MANUFACTURER:Zebra Technologies ;COMMAND SET:ZPL;MODEL:ZTC ZD611-300dpi ZPL;', 'Zebra ZD611'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC GX420t;SN:12J123456;', 'Zebra GX420t'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ztc GX420t;', 'Zebra GX420t'),
+    ('MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZD611_300dpi ZPL;', 'Zebra ZD611'),
+    ('MFG:4BARCODE;CMD:CEZD;MDL:4B-2054A;', '4BARCODE 4B-2054A'),
+    ('MFG:HP ;CMD:Bixolon_01;MODEL:KE103;', 'HP KE103'),
+    ('CMD:ZPL;', None)])
+def test_status_names_the_printer_by_its_device_id(monkeypatch, device_id, name):
+    from app.labeldesigner import drivers
+    device = 'usb://0x0a5f:0x0080/12J123456'
+    monkeypatch.setattr(devices, '_usb_device_ids', {})
+    monkeypatch.setattr(backends, 'device_id', lambda device: device_id)
+    monkeypatch.setattr(protocol, 'host_status', lambda device: b'')
+    driver, model = drivers.resolve(device, 'Zebra/ZPL')
+    state = driver.status(device, model)
+    assert state.get('device_name') == name
+
+
+def test_printer_of_600_dpi_is_left_to_be_configured(client, monkeypatch):
+    from app.labeldesigner import printer
+    from app.labeldesigner.drivers import devices
+    # Not found on USB as a ZPL printer
+    told = {'usb://0x0a5f:0x0120/ZT610': 'MANUFACTURER:Zebra Technologies;COMMAND SET:ZPL;MODEL:ZTC ZT610-600dpi ZPL;'}
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device: told.get(device, ''))
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: (list(told), []))
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(printer, '_last_scan_ts', 0)
+    monkeypatch.setattr(printer, '_cached_printers', [])
+    client.application.config['PRINTER_PRINTER'] = '?'
+    found = client.get('/labeldesigner/api/printer_status').get_json()['printers']
+    assert [p['path'] for p in found] == ['simulation']
+    assert zpl.DRIVER.model_of('usb://0x0a5f:0x0120/ZT610') is None

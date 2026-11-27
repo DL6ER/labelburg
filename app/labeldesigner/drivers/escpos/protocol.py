@@ -29,6 +29,9 @@ ASK_AGAIN = 20
 # When each printer was asked the request it left unanswered, by the key
 # get_errors() is given
 _asked: dict[str, float] = {}
+# By the same key: True for a printer that answered a request once, False
+# for one that was asked and never answered, e.g. a clone without DLE EOT
+_answered: dict[str, bool] = {}
 
 INIT = b'\x1b@'
 # Images centered, e.g. a 384-dot one of 58 mm paper on the 420 dots a
@@ -200,9 +203,10 @@ def connect(device: str) -> Connection:
 
 
 def get_errors(c: Connection, key: str | None = None) -> list[str]:
-    """What the printer tells is wrong. With key, the printer's lock key, a
-    request it leaves unanswered counts as outstanding for ASK_AGAIN s, in
-    which it is asked again only once anything came from it."""
+    """What the printer tells is wrong. With key, the printer's lock key and
+    device ID as the driver's _answer_key() gives them, a request it leaves
+    unanswered counts as outstanding for ASK_AGAIN s, in which it is asked
+    again only once anything came from it."""
     if key in _asked and time.monotonic() - _asked[key] < ASK_AGAIN and not c.came():
         raise EscposError('no answer to the status request')
     sent = time.monotonic()
@@ -211,8 +215,11 @@ def get_errors(c: Connection, key: str | None = None) -> list[str]:
     except EscposError:
         if key is not None:
             _asked[key] = sent
+            _answered.setdefault(key, False)
         raise
     _asked.pop(key, None)
+    if key is not None:
+        _answered[key] = True
     return found
 
 
@@ -239,3 +246,8 @@ def has_autocutter(c: Connection) -> bool | None:
     except EscposError:
         return None
     return bool(type_id(reply) & 0x02)
+
+
+def never_answered(key: str) -> bool:
+    """Whether the printer of the key was asked and never answered."""
+    return _answered.get(key) is False

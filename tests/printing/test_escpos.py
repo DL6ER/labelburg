@@ -6,10 +6,11 @@ import os
 import select
 import socket
 import threading
+import time
 
 import pytest
 
-from app.labeldesigner.drivers import backends, escpos
+from app.labeldesigner.drivers import backends, devices, escpos
 from app.labeldesigner.drivers.escpos import protocol
 from tests.helpers import make_client, outcome, printing
 
@@ -25,6 +26,7 @@ class FakePrinter:
 
     def __init__(self, offline=QUIET, paper=QUIET, answers=None):
         self.sent, self.replies, self.answers = b'', {protocol.OFFLINE: offline, protocol.PAPER: paper}, answers or {}
+        self.silent = False
 
     def __call__(self, device):
         return self
@@ -38,8 +40,13 @@ class FakePrinter:
     def write(self, data):
         self.sent += data
 
+    def came(self):
+        return False
+
     def ask(self, request):
         self.write(request)
+        if self.silent:
+            raise protocol.EscposError('no answer to the status request')
         return self.replies[request]
 
     def answer(self, request, done):
@@ -47,6 +54,17 @@ class FakePrinter:
         if request not in self.answers or not done(self.answers[request]):
             raise protocol.EscposError('no answer to the request')
         return self.answers[request]
+
+
+@pytest.fixture(autouse=True)
+def asked_afresh(monkeypatch):
+    monkeypatch.setattr(protocol, '_asked', {})
+    monkeypatch.setattr(protocol, '_answered', {})
+
+
+def answered_before(device):
+    """The printer answered a status request before, as a TM-T20II does."""
+    protocol._answered[escpos._answer_key(device)] = True
 
 
 @pytest.fixture
@@ -223,15 +241,22 @@ def silent(monkeypatch):
 SHARED = 'usbip://192.0.2.1'
 
 
-def test_printer_that_does_not_answer_polled_for_a_minute(silent):
+@pytest.mark.parametrize('before', [True, False], ids=['answered before', 'never answered'])
+def test_printer_that_does_not_answer_polled_for_a_minute(silent, before):
     # As the label designer asks every 2 s: a request at most every 20 s,
-    # the polls between neither write nor wait
+    # the polls between neither write nor wait. One that never answered is
+    # told without errors.
+    if before:
+        answered_before(SHARED)
     clock = silent.clock
     end = clock.now + 60
     while clock.now < end:
         start, written = clock.now, len(silent.writes)
-        with pytest.raises(protocol.EscposError):
-            escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
+        if before:
+            with pytest.raises(protocol.EscposError):
+                escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
+        else:
+            assert escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')['errors'] == []
         assert len(silent.writes) > written or clock.now - start < 0.1
         clock.sleep(2)
     asked = [at for at, _ in silent.writes]
@@ -239,6 +264,7 @@ def test_printer_that_does_not_answer_polled_for_a_minute(silent):
 
 
 def test_printer_whose_answer_came_late_is_asked_again(silent):
+    answered_before(SHARED)
     with pytest.raises(protocol.EscposError):
         escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
     silent.unread, silent.answering = bytes([QUIET]), True
@@ -248,6 +274,7 @@ def test_printer_whose_answer_came_late_is_asked_again(silent):
 
 
 def test_job_does_not_wait_for_an_outstanding_request(silent):
+    answered_before(SHARED)
     with pytest.raises(protocol.EscposError):
         escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
     start, written = silent.clock.now, len(silent.writes)
@@ -609,6 +636,206 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on == [(size, dots // 8)]
+
+
+@pytest.mark.parametrize('device_id, model', [
+    # As LPrint lists them in lprint-escpos.h
+    ('CMD:ESC/POS;', 'Epson/ESC-POS'),
+    ('MFG:EPSON;MDL:TM-m10;CMD:ESC/POS;', 'Epson/ESC-POS'),
+    ('MFG:EPSON;MDL:TM-T20III;CMD:ESC/POS;', 'Epson/ESC-POS'),
+    ('MFG:EPSON;MDL:TM-T88VI;CMD:ESC/POS;', 'Epson/ESC-POS-180'),
+    ('MFG:EPSON;MDL:TM-T70II;CMD:ESC/POS;', 'Epson/ESC-POS-180'),
+    # Other spellings of the command set
+    ('MFG:Printer;CMD:ESCPOS;MDL:POS-58;', 'Epson/ESC-POS'),
+    ('MFG:Printer;CMD:escpos;MDL:POS-58;', 'Epson/ESC-POS'),
+    ('MFG:Printer;CMD:ESC/POS-1.0,Raster;MDL:POS-80;', 'Epson/ESC-POS'),
+    # Epson's command sets of other printers, and other printers
+    ('MFG:EPSON;CMD:ESC/P;MDL:LX-350;', None),
+    ('MFG:EPSON;CMD:ESCPL2,BDC,D4,D4PX,ESCPR1,END4,GENEP,URF;MDL:XP-2100 Series;', None),
+    ('MFG:EPSON;CMD:ESC/PAGE,PJL;MDL:AL-M200;', None),
+    ('MFG:EPSON;CMD:ESC/P-R;MDL:ET-2810;', None),
+    ('MFG:Printer;CMD:ESC/POSX;MDL:POS-58;', None),
+    # Impact printers, which print no raster images, as LPrint lists them
+    ('MFG:EPSON;MDL:TM-U220;CMD:ESC/POS;', None),
+    ('MFG:EPSON;MDL:TM-U220II;CMD:ESC/POS;', None),
+    # and one it does not list
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-U295;', None),
+    ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None)])
+def test_model_in_device_ids(device_id, model):
+    from app.labeldesigner import drivers
+    assert escpos.DRIVER.model_in(device_id) == model
+    # No other driver takes it for one of its printers
+    assert drivers.told_model(device_id) == model
+
+
+class Usblp:
+    """A receipt printer in place of /dev/usb/lp<N>: it takes everything
+    written to it and answers each status request where it answers."""
+
+    def __init__(self, answering):
+        self.ours, self.printer = socket.socketpair()
+        self.received, self.answering = b'', answering
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while data := self.printer.recv(65536):
+            self.received += data
+            if self.answering and data in (protocol.OFFLINE, protocol.PAPER):
+                self.printer.sendall(bytes([QUIET]))
+
+    def connect(self, device):
+        c = protocol.Connection.__new__(protocol.Connection)
+        c.dev = os.dup(self.ours.fileno())
+        return c
+
+    def got(self, end):
+        """What it received once that ends with end."""
+        for _ in range(500):
+            if self.received.endswith(end):
+                break
+            time.sleep(0.01)
+        return self.received
+
+    def close(self):
+        self.ours.close()
+
+
+@pytest.mark.parametrize('answering', [False, True], ids=['never answers', 'answers'])
+def test_printer_that_never_answered_gets_the_job_without_being_asked(client, monkeypatch, answering):
+    # A clone that knows no DLE EOT is told as ready and prints, a printer
+    # that answers is asked before each job
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.2)
+    printer = Usblp(answering)
+    monkeypatch.setattr(protocol, 'connect', printer.connect)
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (told['errors'], told['path']) == ([], DEVICE)
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    status = protocol.OFFLINE + protocol.PAPER
+    asked = status + protocol.MODEL_NAME + status if answering else protocol.OFFLINE
+    assert printer.got(protocol.CUT).startswith(asked + protocol.INIT + protocol.CENTER)
+    assert printer.received.count(b'\x1dv0\x00') == 1
+    printer.close()
+
+
+def test_printer_that_never_answered_is_not_told_as_answering(fake):
+    fake().silent = True
+    state = escpos.DRIVER.status(DEVICE, 'Epson/ESC-POS')
+    assert (state['errors'], state['status_type']) == ([], 'Network Printer')
+    # Nothing it told is kept for the time it is busy
+    assert devices.lock_key(DEVICE) not in devices.status_cache
+
+
+def test_printer_that_answered_before_is_not_printed_on_without_an_answer(client, fake):
+    printer = fake()
+    client.get('/labeldesigner/api/printer_status')
+    printer.silent = True
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('failed', 'The printer does not answer')
+    assert protocol.INIT not in printer.sent
+
+
+def test_status_names_the_printer_by_its_device_id(client, fake, monkeypatch, tmp_path):
+    # As usblp read it when the printer was plugged in, with its serial number
+    (tmp_path / 'sys' / 'lp3').mkdir(parents=True)
+    (tmp_path / 'sys' / 'lp3' / 'ieee1284_id').write_text('MFG:Xprinter;CMD:ESC/POS;MDL:XP-58IIH;SN:XP0123456789;')
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'sys' / '{name}' / 'ieee1284_id'))
+    printer = fake()
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (told['model'], told['device_name']) == ('Epson/ESC-POS', 'Xprinter XP-58IIH')
+    # Kept while it does not answer
+    printer.silent = True
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert told['status_type'] == devices.FAILED_STATUS_TYPE and told['device_name'] == 'Xprinter XP-58IIH'
+
+
+def test_status_of_a_printer_without_a_device_id_names_none(client, fake):
+    fake()
+    told = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert 'device_name' not in told
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    from tests.printing.test_usb_jobs import Clock
+    clock = Clock()
+    monkeypatch.setattr(protocol, 'time', clock)
+    return clock
+
+
+def print_one(client):
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT})
+    return outcome(client, response)
+
+
+def test_epson_that_left_a_request_unanswered_is_asked_again(client, fake, clock):
+    # Its first job goes out without an answer, a later one is refused once it tells it has no paper
+    printer = fake(paper=QUIET | 0x60)
+    printer.silent = True
+    assert print_one(client) == ('printed', '')
+    printer.silent = False
+    clock.sleep(protocol.ASK_AGAIN + 1)
+    assert print_one(client) == ('failed', 'The printer has no paper')
+
+
+@pytest.fixture
+def told(monkeypatch, tmp_path):
+    """Sets the device ID usblp read of DEVICE."""
+    (tmp_path / 'sys' / 'lp3').mkdir(parents=True)
+    monkeypatch.setattr(devices, 'USB_DEVICE_ID', str(tmp_path / 'sys' / '{name}' / 'ieee1284_id'))
+    return (tmp_path / 'sys' / 'lp3' / 'ieee1284_id').write_text
+
+
+CLONE = 'MFG:Printer;CMD:ESC/POS;MDL:POS-58;'
+TM_T20II = 'MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;'
+
+
+def test_clone_swapped_for_an_epson_at_the_same_address(client, fake, clock, told):
+    told(CLONE)
+    printer = fake(paper=QUIET | 0x60)
+    printer.silent = True
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    assert print_one(client) == ('printed', '')
+    # The Epson is asked at once
+    told(TM_T20II)
+    printer.silent = False
+    assert print_one(client) == ('failed', 'The printer has no paper')
+
+
+def test_epson_swapped_for_a_clone_at_the_same_address(client, fake, clock, told):
+    told(TM_T20II)
+    printer = fake()
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    told(CLONE)
+    printer.silent = True
+    assert print_one(client) == ('printed', '')
+    assert printer.sent.count(protocol.INIT) == 1
+
+
+def test_epson_without_a_cutter_swapped_for_a_clone_at_the_same_address(client, fake, told):
+    told('MFG:EPSON;CMD:ESC/POS;MDL:TM-P20;')
+    printer = fake(answers=named(b'TM-P20'))
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (state['caps'], state['feed']) == ({'lead_mm': 9.4, 'cutter': False}, 'paper')
+    # The clone cuts, as it tells no model of its own
+    told(CLONE)
+    printer.answers = {}
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (state['device_name'], state.get('caps'), state['feed']) == ('POS-58', None, 'cut_paper')
+
+
+def test_clone_that_cannot_be_reached_keeps_its_name(client, fake, told, monkeypatch):
+    import errno
+    told(CLONE)
+    printer = fake()
+    printer.silent = True
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['device_name'] == 'POS-58'
+
+    def busy(device):
+        raise OSError(errno.EBUSY, 'Device or resource busy')
+    monkeypatch.setattr(protocol, 'connect', busy)
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert state['errors'] == ['The printer is in use by another program'] and state['device_name'] == 'POS-58'
 
 
 def named(name: bytes, autocutter=None) -> dict:

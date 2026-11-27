@@ -7,6 +7,7 @@ import errno
 import hashlib
 import logging
 import os
+import re
 import stat
 import tempfile
 import threading
@@ -206,6 +207,17 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
         return ''
 
 
+def known_device_id(device_specifier: str) -> str:
+    """The device ID usb_device_id() tells without asking the printer: the
+    one usblp read, else the one a printer on usb:// or usbip:// told
+    before, empty if none."""
+    if usbip.is_address(device_specifier):
+        return usbip.known_device_id(device_specifier)
+    if device_specifier.startswith('usb://'):
+        return _usb_device_ids.get(_usb_key(device_specifier), '')
+    return usb_device_id(device_specifier)
+
+
 def device_id_fields(device_id: str) -> dict:
     """The fields of an IEEE 1284 device ID by their short names, MFG, CMD,
     MDL, also when it spells them out (MANUFACTURER, COMMAND SET, MODEL)."""
@@ -217,6 +229,47 @@ def device_id_fields(device_id: str) -> dict:
             name = name.strip().upper()
             fields[long_names.get(name, name)] = value.strip()
     return fields
+
+
+# Makers some printers name that name none
+NO_MAKER = ('printer', 'generic', 'unknown')
+# A resolution in the model, e.g. ZD611-300dpi or ZD611_300dpi, not digits
+# of the model before it
+_RESOLUTION = re.compile(r'[-_\s]*(?<![A-Za-z0-9])\d+\s*dpi(?![A-Za-z0-9])', re.IGNORECASE)
+# Words of a model that tell one printer from another: a serial number after
+# SN or S/N, a MAC address, also without separators, or an IPv4 address
+_ONE_PRINTER = re.compile(r'S/?N[-:#]?(?=\w*\d)\w+|([0-9A-F]{2}[:-]){5}[0-9A-F]{2}|[0-9A-F]{12}|\d{1,3}(\.\d{1,3}){3}',
+                          re.IGNORECASE)
+# As many digits in a word make a serial number rather than a model
+SERIAL_DIGITS = 6
+DEVICE_NAME_LENGTH = 40
+
+
+def device_name(device_id: str, vendor: str = '', serial: str = '') -> str:
+    """Maker and model as a device ID names them, e.g. Xprinter XP-58IIH, the
+    maker as vendor spells it where it starts so (Epson for EPSON), without
+    a resolution or the command set in the model, nor what tells one printer
+    from another, e.g. its serial number, that of the device ID or serial.
+    Empty where it names no model or the name is longer than
+    DEVICE_NAME_LENGTH."""
+    fields = device_id_fields(device_id)
+    plain = {name: ' '.join(''.join(c for c in fields.get(name, '') if c.isprintable()).split())
+             for name in ('MFG', 'MDL', 'CMD')}
+    commands = {command.strip().upper() for command in plain['CMD'].split(',')}
+    serials = {told.casefold().lstrip('0') for told in (fields.get('SN'), fields.get('SERN'), serial) if told} - {''}
+
+    def of_the_model(word: str) -> bool:
+        bare = word.strip('()[],')
+        return not (word.upper() in commands or bare.casefold().lstrip('0') in serials or _ONE_PRINTER.fullmatch(bare)
+                    or sum(c.isdigit() for c in bare) >= SERIAL_DIGITS)
+    model = ' '.join(word for word in _RESOLUTION.sub('', plain['MDL']).split() if of_the_model(word))
+    maker = plain['MFG']
+    if vendor and maker.casefold().startswith(vendor.casefold()):
+        maker = vendor
+    if maker.casefold() in NO_MAKER or model.casefold().startswith(maker.casefold()):
+        maker = ''
+    name = f'{maker} {model}'.strip() if model else ''
+    return name if len(name) <= DEVICE_NAME_LENGTH else ''
 
 
 def found_usb_printers() -> tuple[list[str], list[str]]:
@@ -387,10 +440,11 @@ def unanswered(error: Exception) -> str:
 
 
 def failed_printer_state(device_specifier: str, error: Exception, model: str = 'Unknown') -> dict:
-    """Status of a printer that did not answer the status query: model and
-    media from its last answer, if there was one, and the error."""
+    """Status of a printer that did not answer the status query: model,
+    media and name from its last answer, if there was one, else the name of
+    its device ID, and the error."""
     known = status_cache.get(lock_key(device_specifier), {})
-    return {
+    state = {
         'path': device_specifier,
         'model': known.get('model', model),
         'media_width': known.get('media_width'),
@@ -402,3 +456,11 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',
     }
+    name = known.get('device_name')
+    if not name:
+        # Of one that never answered, by the driver its device ID tells
+        from . import for_model, told_model
+        name = for_model(told_model(known_device_id(device_specifier)) or state['model']).device_name(device_specifier)
+    if name:
+        state['device_name'] = name
+    return state

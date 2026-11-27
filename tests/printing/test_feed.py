@@ -98,7 +98,7 @@ def test_a_zpl_printer_feeds_one_label_and_changes_no_setting():
     job = ZPL.feed_job(SimpleNamespace(model='Zebra/ZPL', label_size='zpl57x32'))
     # As its feed button does: no format, so neither the width nor the length
     # of its labels is set
-    assert job == [b'~PH\n']
+    assert job == [(b'~PH\n', None)]
     assert ZPL.label_lengths(job) == []
 
 

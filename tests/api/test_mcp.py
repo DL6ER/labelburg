@@ -258,6 +258,18 @@ def test_label_sizes_without_the_prefix_of_their_driver(monkeypatch):
         mcp_tools.label_size_for('Zebra/ZPL', '30')
 
 
+@pytest.mark.parametrize('model, label_size, size', [
+    ('Zebra/ZPL', '100 x 30 mm', 'zpl100x30'),
+    ('Zebra/ZPL-300', '100 x 30 mm', 'zpl300-100x30'),
+    ('Zebra/ZPL-300', '100x30', 'zpl300-100x30'),
+    ('Epson/ESC-POS', '80', 'escpos80'),
+    ('Epson/ESC-POS-180', '80', 'escpos80-180'),
+    ('Epson/ESC-POS-180', '58 mm', 'escpos58-180'),
+])
+def test_label_sizes_without_the_prefix_on_each_resolution(model, label_size, size):
+    assert mcp_tools.label_size_for(model, label_size) == size
+
+
 def _address(result):
     return re.search(r'!\[Label\]\((\S+)\)', result['content'][0]['text']).group(1)
 

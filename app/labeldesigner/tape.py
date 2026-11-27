@@ -41,9 +41,18 @@ def _takes(size_id: str, model) -> bool:
     return model in TAKEN_BY[size_id] if known else bool(TAKEN_BY[size_id])
 
 
+def _shown_as_another(size_id: str) -> bool:
+    """Whether only models shown as another one take a label size, e.g.
+    escpos80-180, the same paper as escpos80."""
+    return all(drivers.for_model(m).shown_as.get(m, m) != m for m in TAKEN_BY[size_id])
+
+
 def takes(model) -> list[str]:
-    """The label sizes a printer takes, for the label designer."""
-    return [s for s in SIZES if _takes(s, model)]
+    """The label sizes a printer takes, for the label designer. A printer of
+    no known model takes each paper once, not again as the size of a model
+    shown as another one."""
+    known = bool(model) and model in _LISTED
+    return [s for s in SIZES if _takes(s, model) and (known or not _shown_as_another(s))]
 
 
 def same_paper(size_id: str | None, model) -> str | None:

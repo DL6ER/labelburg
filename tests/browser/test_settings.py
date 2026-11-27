@@ -196,6 +196,25 @@ def test_the_tape_is_set_only_where_the_printer_does_not_report_it(designer, ser
     assert designer.is_disabled('[data-card="2"] [data-test]')
 
 
+def test_a_printer_is_called_as_it_names_itself(designer, server):
+    # A receipt printer of another maker is not called Epson ESC-POS, a 300
+    # dpi ZPL printer that names nothing is called as the other ZPL ones
+    printers_are(designer, server,
+                 {'path': 'tcp://192.0.2.10', 'model': 'Epson/ESC-POS', 'device_name': 'Xprinter XP-58IIH'},
+                 {'path': 'tcp://192.0.2.11', 'model': 'Epson/ESC-POS', 'name': 'Till', 'device_name': 'Epson TM-T20II'},
+                 {'path': 'file:///dev/usb/lp3', 'model': 'Zebra/ZPL-300'})
+    # After them the demo printer shown before, which the answer leaves out
+    designer.click('#printerChip')
+    assert designer.locator('.pp [data-p] b').all_inner_texts()[:3] == ['Xprinter XP-58IIH', 'Till', 'Zebra ZPL']
+    assert designer.inner_text('.pp [data-p="1"] small').startswith('Epson TM-T20II, ')
+    designer.locator('.pp [data-p="0"]').click()
+    designer.wait_for_selector('#printerChip b:text-is("Xprinter XP-58IIH")')
+    designer.click('#toSettings')
+    designer.wait_for_selector('#setPart[data-part="printers"]')
+    assert designer.locator('.set-card-h b').all_inner_texts()[:3] == ['Xprinter XP-58IIH', 'Till', 'Zebra ZPL']
+    assert designer.inner_text('[data-card="1"] .set-card-h small').startswith('Epson TM-T20II, ')
+
+
 def test_the_printer_chip_switches_printers(designer, server):
     printers_are(designer, server, {'path': 'simulation', 'model': 'QL-1100', 'name': 'Kitchen'}, {'path': 'simulation', 'model': 'QL-800', 'name': 'Office'})
     assert designer.inner_text('#printerChip b') == 'Kitchen'

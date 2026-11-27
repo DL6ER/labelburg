@@ -78,6 +78,9 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
+    # Whether each of its models is one for printers of many makers, whose
+    # name its status tells, see device_name()
+    names_devices: bool = False
     # (vendor, product) of its printers on USB that are reached through their
     # serial interface, not a printer interface, see backends.UsbSerialPrinter
     usb_serial_ids: tuple = ()
@@ -215,6 +218,16 @@ class Driver:
         printer of this driver. Raises one of self.errors if it does not
         answer."""
         raise NotImplementedError
+
+    def device_name(self, device: str) -> str:
+        """Maker and model a printer on USB names in its device ID, e.g.
+        Xprinter XP-58IIH, which status() tells as device_name where its
+        driver names_devices; empty otherwise or if it names none."""
+        if not self.names_devices:
+            return ''
+        # usb://<vendor>:<product>/<serial number>
+        serial = device.removeprefix('usb://').partition('/')[2] if device.startswith('usb://') else ''
+        return devices.device_name(devices.known_device_id(device), self.vendor, serial)
 
     def noted_status(self, device: str, query) -> dict:
         """The status query() tells, noted whether the printer answered, see

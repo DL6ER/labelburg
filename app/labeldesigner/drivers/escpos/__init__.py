@@ -19,6 +19,10 @@ MODELS = ('Epson/ESC-POS', 'Epson/ESC-POS-180')
 # Most heads print 203 dpi, Epson's TM-T88, TM-T90, TM-T70, TM-T81 and
 # TM-T83(II) 180 dpi, by the model in the device ID; a TM-T81III prints 203
 HEADS_180 = re.compile(r'TM-T(88|90|70)|TM-T81$|TM-T83(II)?$')
+# ESC/POS in the command sets of a device ID, also as other makers spell it
+COMMAND_SET = re.compile(r'ESC/?POS|ESC/POS-.*', re.IGNORECASE)
+# Epson's impact printers, e.g. the TM-U220, print no raster images
+IMPACT = re.compile(r'TM-U\d', re.IGNORECASE)
 DPI = {MODELS[0]: 203, MODELS[1]: 180}
 # Paper width in mm and the dots across it, the first one assumed, as the
 # printer does not tell. 384 on 58 mm paper as most printers print, a
@@ -66,7 +70,7 @@ NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
 
 
-# What each printer told of itself, by its lock key: its model name and
+# What each printer told of itself, by _answer_key(): its model name and
 # whether it has an autocutter, None where it did not tell
 _told: dict[str, tuple[str | None, bool | None]] = {}
 
@@ -81,6 +85,25 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
     img = bitmap.black_and_white(img, label)
     rows, width = bitmap.packed_rows(img)
     return img, rows, width
+
+
+def _answer_key(device: str) -> str:
+    """The key protocol.get_errors() and _told note a printer by: its lock
+    key and its device ID, so that another printer at the same address, e.g.
+    a clone plugged in at /dev/usb/lp0 where an Epson was, is asked afresh."""
+    return f'{devices.lock_key(device)} {devices.known_device_id(device)}'.rstrip()
+
+
+def _problems(c, key: str) -> list[str] | None:
+    """What the printer tells is wrong, None if it never answered DLE EOT,
+    e.g. a clone without it: it is told as ready and printed on, as a ZPL
+    printer that never answered ~HS. EscposError if it answered before."""
+    try:
+        return protocol.get_errors(c, key)
+    except protocol.EscposError:
+        if protocol.never_answered(key):
+            return None
+        raise
 
 
 class Escpos(Driver):
@@ -99,6 +122,8 @@ class Escpos(Driver):
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
     errors = (OSError, protocol.EscposError)
     reports_tape = False
+    # Its models are those of many makers
+    names_devices = True
 
     def model_of(self, device, device_id=None):
         # By the device ID on USB, e.g. MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II;...
@@ -108,8 +133,9 @@ class Escpos(Driver):
 
     def model_in(self, device_id):
         fields = devices.device_id_fields(device_id)
-        commands = [command.strip().upper() for command in fields.get('CMD', '').split(',')]
-        if 'ESC/POS' not in commands:
+        if not any(COMMAND_SET.fullmatch(command.strip()) for command in fields.get('CMD', '').split(',')):
+            return None
+        if IMPACT.match(fields.get('MDL', '')):
             return None
         return MODELS[1] if HEADS_180.match(fields.get('MDL', '')) else MODELS[0]
 
@@ -141,7 +167,7 @@ class Escpos(Driver):
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def device_capabilities(self, device, model):
-        name, autocutter = _told.get(devices.lock_key(device), (None, None))
+        name, autocutter = _told.get(_answer_key(device), (None, None))
         if name is None:
             return {}
         own = {}
@@ -162,16 +188,23 @@ class Escpos(Driver):
     def status(self, device, model, unconfirmed=False):
         state = network_status(device, model)
         state.update({'media_type': 'Receipt paper', 'phase_type': 'Waiting to receive'})
+        if name := self.device_name(device):
+            state['device_name'] = name
+        key = devices.lock_key(device)
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
-                state.update(devices.status_cache.get(devices.lock_key(device), {}))
+                state.update(devices.status_cache.get(key, {}))
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                state['errors'] = protocol.get_errors(c, devices.lock_key(device))
-                _note_model(c, devices.lock_key(device))
-        state['status_type'] = 'Error occurred' if state['errors'] else 'Reply to status request'
-        devices.status_cache[devices.lock_key(device)] = state
+                errors = _problems(c, answer_key := _answer_key(device))
+                if errors is not None:
+                    _note_model(c, answer_key)
+        if errors is None:
+            return state
+        state['errors'] = errors
+        state['status_type'] = 'Error occurred' if errors else 'Reply to status request'
+        devices.status_cache[key] = state
         return state
 
     def print_speed(self, model, fast, red):
@@ -194,7 +227,7 @@ class Escpos(Driver):
         device = queue.device_specifier
         try:
             with protocol.connect(device) as c:
-                problems = protocol.get_errors(c, devices.lock_key(device))
+                problems = _problems(c, _answer_key(device))
                 if problems:
                     return problems[0]
                 c.write(protocol.job(job))
