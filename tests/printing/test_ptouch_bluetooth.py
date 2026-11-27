@@ -356,6 +356,20 @@ def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, brother_on_bl
     assert asked(60) == 4 and len(fake.jobs) == 1
 
 
+def test_status_while_a_job_holds_the_printer_is_not_an_answer(brother_on_bluetooth, clock, monkeypatch):
+    # The first status query after the job asks the printer
+    fake = brother_on_bluetooth()
+    monkeypatch.setattr(devices, 'STATUS_LOCK_TIMEOUT', 0.05)
+    start = clock[0]
+    drivers.BROTHER.status(DEVICE, 'PT-P710BT')
+    clock[0] = start + 31
+    with devices.device_lock(DEVICE):
+        assert drivers.BROTHER.status(DEVICE, 'PT-P710BT')['status_type'] == devices.BUSY_STATUS_TYPE
+    clock[0] = start + 32
+    assert drivers.BROTHER.status(DEVICE, 'PT-P710BT')['status_type'] != devices.BUSY_STATUS_TYPE
+    assert fake.requests == 2
+
+
 def test_pt_p710bt_is_not_followed_on_bluetooth():
     assert drivers.BROTHER.followed(DEVICE, 'PT-P710BT') is False
     assert drivers.BROTHER.followed('usb://0x04f9:0x20af', 'PT-P710BT') is True
