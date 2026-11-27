@@ -187,7 +187,14 @@ def test_every_name_before_ends_at_a_model():
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 00:11:22:33:44:55;', 'Epson', 'Epson TM-T20II'),
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 00-11-22-AA-BB-CC;', 'Epson', 'Epson TM-T20II'),
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II 001122AABBCC;', 'Epson', 'Epson TM-T20II'),
+    ('MFG:EPSON;CMD:ESC/POS;MDL:TM-T20II AABBCCDDEEF1;', 'Epson', 'Epson TM-T20II'),
     ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 192.168.1.50;', 'Epson', 'POS-80'),
+    # A word of six digits is a serial number, one of fewer is of the model
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 123456;', 'Epson', 'POS-80'),
+    ('MFG:Printer;CMD:ESC/POS;MDL:POS-80 12345;', 'Epson', 'POS-80 12345'),
+    # Makers that name none
+    ('MFG:Generic;CMD:ESC/POS;MDL:POS-80;', 'Epson', 'POS-80'),
+    ('MFG:UNKNOWN;CMD:ESC/POS;MDL:POS-80;', 'Epson', 'POS-80'),
     ('MFG:SNBC;CMD:ESC/POS;MDL:BTP-R880NP;', 'Epson', 'SNBC BTP-R880NP'),
     # Too long to be a name, or none
     ('MFG:Some Printer Manufacturing Company;CMD:ESC/POS;MDL:Thermal Receipt Printer 80;', 'Epson', ''),

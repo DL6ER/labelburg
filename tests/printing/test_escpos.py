@@ -717,6 +717,14 @@ def test_printer_that_never_answered_gets_the_job_without_being_asked(client, mo
     printer.close()
 
 
+def test_printer_that_never_answered_is_not_told_as_answering(fake):
+    fake().silent = True
+    state = escpos.DRIVER.status(DEVICE, 'Epson/ESC-POS')
+    assert (state['errors'], state['status_type']) == ([], 'Network Printer')
+    # Nothing it told is kept for the time it is busy
+    assert devices.lock_key(DEVICE) not in devices.status_cache
+
+
 def test_printer_that_answered_before_is_not_printed_on_without_an_answer(client, fake):
     printer = fake()
     client.get('/labeldesigner/api/printer_status')
