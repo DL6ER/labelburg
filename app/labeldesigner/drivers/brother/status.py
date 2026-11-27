@@ -68,11 +68,18 @@ def plain_errors(errors: list) -> list:
     """The errors of a status in plain words, each once."""
     return list(dict.fromkeys(ERROR_MESSAGES.get(error, UNKNOWN_ERROR) for error in errors))
 
+
+# Fabric, FLe, flexible ID and satin tape after Brother's raster command
+# reference of the PT-P900 series
 MEDIA_TYPES = {
     0x00: ('No media', 'No media'),
     0x01: ('Laminated tape', 'TZe'),
     0x03: ('Non-laminated type', 'TZe'),
+    0x04: ('Fabric tape', 'TZe'),
     0x11: ('Heat-Shrink Tube (HS 2:1)', 'TZe'),
+    0x13: ('FLe tape', 'FLe'),
+    0x14: ('Flexible ID tape', 'TZe'),
+    0x15: ('Satin tape', 'TZe'),
     0x17: ('Heat-Shrink Tube (HS 3:1)', 'TZe'),
     0x0A: ('Continuous length tape', 'DK'),
     0x0B: ('Die-cut labels', 'DK'),
@@ -80,6 +87,9 @@ MEDIA_TYPES = {
     0x4B: ('Die-cut labels', 'RD'),
     0xFF: ('Incompatible tape', 'Incompatible'),
 }
+
+# Heat-shrink tube, HS 2:1 and 3:1
+TUBES = {MEDIA_TYPES[0x11][0], MEDIA_TYPES[0x17][0]}
 
 TAPE_COLORS = {
     0x01: 'White', 0x02: 'Other', 0x03: 'Clear', 0x04: 'Red', 0x05: 'Blue', 0x06: 'Yellow', 0x07: 'Green',

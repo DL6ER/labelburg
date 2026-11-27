@@ -635,6 +635,8 @@ def get_ptr_status(config: Config, added=()):
                         logger.info('Status query of %s failed: %s', spec, e)
                         printer = devices.failed_printer_state(spec, e, model)
                     if printer is not None:
+                        # A Brother printer on Bluetooth answers as on USB, without its address
+                        printer.setdefault('path', spec)
                         found_list.append(printer)
                         logger.debug('Found network printer at %s -> %s', spec, printer.get('model'))
 

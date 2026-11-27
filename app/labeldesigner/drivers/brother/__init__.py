@@ -6,15 +6,23 @@ brother_ql-inventree by Matthias Mair, both GPLv3."""
 import errno
 import logging
 import re
+import time
 
 from .. import devices, usbip
 from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
 from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, length_problem, longest_label, resolution_problem)
+                     RED_SPEED, TUBE_TOO_LONG, length_problem, longest_label, resolution_problem, tube_lines)
 
 logger = logging.getLogger(__name__)
+
+
+# A printer on Bluetooth is asked at most every BLUETOOTH_STATUS_EVERY s, or
+# when looking for printers or printing; status queries between get its last
+# answer. When each was asked, by devices.lock_key(), and the error it gave.
+BLUETOOTH_STATUS_EVERY = 30
+_bluetooth_asked: dict[str, tuple[float, Exception | None]] = {}
 
 
 def _without_bluetooth(device: str, model: str):
@@ -22,6 +30,34 @@ def _without_bluetooth(device: str, model: str):
     contacting it, as a device file that is not there."""
     if device.startswith('bt://') and not getattr(MODELS.get(model), 'bluetooth', False):
         raise FileNotFoundError(errno.ENOENT, 'No such file or directory', device)
+
+
+def _on_bluetooth(device: str, model: str) -> dict:
+    """The status of a printer on Bluetooth, see BLUETOOTH_STATUS_EVERY."""
+    key = devices.lock_key(device)
+    asked, error = _bluetooth_asked.get(key, (None, None))
+    if asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY:
+        if error is not None:
+            raise error.with_traceback(None)
+        if key in devices.status_cache:
+            return dict(devices.status_cache[key])
+    try:
+        state = usb.query_status(device, model)
+    except OSError as e:
+        _bluetooth_asked[key] = (time.monotonic(), e)
+        raise
+    # One a job holds was not asked
+    if state.get('status_type') != devices.BUSY_STATUS_TYPE:
+        _bluetooth_asked[key] = (time.monotonic(), None)
+    return state
+
+
+def _named(state: dict, model: str) -> dict:
+    """The status with the model asked for where it names none and Brother
+    documents no model code of that model, e.g., the PT-P710BT."""
+    if state.get('model') == 'Unknown' and model in MODELS and MODELS[model].model_code > 0xFF:
+        state['model'] = model
+    return state
 
 
 class BrotherRaster(Driver):
@@ -38,13 +74,19 @@ class BrotherRaster(Driver):
         re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'),
     )
     mac_address_prefixes = network.MAC_ADDRESS_PREFIXES
-    refusals = tuple(length_problem(model) for model in MODELS)
+    # On classic Bluetooth by the model and digits of the serial number, e.g.
+    # PT-P710BT1234, as Brother's User's Guide names it
+    bluetooth_names = {re.escape(model) + r'\d*': model for model, spec in MODELS.items() if spec.bluetooth}
+    bluetooth_kind = 'classic'
+    refusals = (*(length_problem(model) for model in MODELS), TUBE_TOO_LONG)
 
     def model_of(self, device, device_id=None):
-        # Over USB/IP the device ID read at the import names the model
-        if not usbip.is_address(device):
-            return None
-        return self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        # Over USB/IP the device ID read at the import names the model, on USB
+        # that of a model whose status names it by no documented model code
+        told = self.model_in(devices.usb_device_id(device) if device_id is None else device_id)
+        if usbip.is_address(device) or (told and MODELS[told].model_code > 0xFF):
+            return told
+        return None
 
     def model_in(self, device_id):
         model = devices.device_id_fields(device_id).get('MDL')
@@ -77,10 +119,13 @@ class BrotherRaster(Driver):
         # The printer feeds the margin before and after the print
         return label.feed_margin / self.label_dpi(label)[0] * 25.4, shortest, longest
 
-    def length_problem(self, model, dots, high_res):
+    def length_problem(self, model, dots, high_res, device=''):
         # As raster.py counts the lines, at 600 dpi a label has twice as many
-        if dots // (2 if high_res else 1) > MODELS[model].max_length_dots:
+        lines = dots // (2 if high_res else 1)
+        if lines > MODELS[model].max_length_dots:
             return length_problem(model)
+        if lines > tube_lines(model) and raster.on_tube(device):
+            return TUBE_TOO_LONG
         return ''
 
     def capabilities(self, model):
@@ -112,8 +157,8 @@ class BrotherRaster(Driver):
         if device.startswith('bt://'):
             _without_bluetooth(device, model)
             # One switched off is not paged at every status query, it takes the radio
-            return self.noted_status(device, lambda: usb.query_status(device, model))
-        return usb.query_status(device, model)
+            return _named(self.noted_status(device, lambda: _on_bluetooth(device, model)), model)
+        return _named(usb.query_status(device, model), model)
 
     def announced(self, service):
         return network.announced(service)
@@ -139,6 +184,8 @@ class BrotherRaster(Driver):
         device = queue.device_specifier
         try:
             _without_bluetooth(device, queue.model)
+            # On Bluetooth asked again at the next status query
+            _bluetooth_asked.pop(devices.lock_key(device), None)
             network_printer = device.startswith('tcp://')
             if network_printer:
                 # Not sent to a printer that cannot take it, e.g. with an

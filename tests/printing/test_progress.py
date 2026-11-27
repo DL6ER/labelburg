@@ -234,7 +234,7 @@ def test_label_length_at_the_resolution_of_the_printer(model, label_size, dots, 
     lines = round(100 / 25.4 * dpi)
     label = SimpleNamespace(label_type=LabelType.ENDLESS_LABEL, label_orientation=LabelOrientation.STANDARD,
                             label_content=LabelContent.IMAGE_BW, generate=lambda: Image.new('1', (dots, lines), 1))
-    queue = SimpleNamespace(model=model, label_size=label_size, cut='each', half_cut=True, chain=False)
+    queue = SimpleNamespace(model=model, device_specifier='/dev/usb/lp0', label_size=label_size, cut='each', half_cut=True, chain=False)
     job = raster.render(queue, [{'label': label, 'high_res': high_res, 'fast': True, 'cut': True}])
     assert drivers.for_model(model).label_lengths(job) == [pytest.approx(200 if high_res else 100, abs=0.1)]
 

@@ -6,5 +6,6 @@ check-hidden = true
 # Vendored libraries and fonts, the German demo labels (tools/spelling_de.py)
 # and the names of months and weekdays in other languages
 skip = ./.git,*.min.js,*-min.js,*.min.css,*.map,./app/labeldesigner/demos/*/*-de.json,./app/labeldesigner/cldr/date_names.json
-# ZINK (zero ink), the paper of the VC-500W
-ignore-words-list = zink
+# ZINK (zero ink), the paper of the VC-500W, and FLe, Brother's die-cut
+# labels of the PT-P900 series
+ignore-words-list = zink,fle

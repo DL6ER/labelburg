@@ -126,9 +126,10 @@ class Driver:
         longest print. None where labels are as long as their content."""
         return None
 
-    def length_problem(self, model: str, dots: int, high_res: bool) -> str:
+    def length_problem(self, model: str, dots: int, high_res: bool, device: str = '') -> str:
         """Why the model refuses a label of dots along the tape, made at 600
-        dpi with high_res, as too long, or an empty string."""
+        dpi with high_res, as too long, or an empty string. device: the
+        printer, whose media may allow less."""
         return ''
 
     def label_for(self, label_size: str, model: str) -> str:

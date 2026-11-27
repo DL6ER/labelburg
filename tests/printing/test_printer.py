@@ -616,14 +616,20 @@ def test_labels_are_converted_as_they_are_generated(monkeypatch, model, label_si
     assert events == expected
 
 
-def test_cut_count_of_a_ptouch_job_fits_its_byte(monkeypatch):
-    # ESC i A counts up to 255 labels, cut_once with more cuts every 255
+@pytest.mark.parametrize('model, label_size, count', [
+    # ESC i A counts up to 99 labels on the PT-E550W and PT-P750W, up to 255
+    # on the PT-P900 series, cut_once with more cuts after as many and the last
+    ('PT-E550W', 'pt12', 99), ('PT-P750W', 'pt12', 99), ('PT-P900W', 'pt36', 255),
+    # Without ESC i A the last page alone is told to cut
+    ('PT-P700', 'pt12', 300), ('PT-P710BT', 'pt12', 300),
+])
+def test_cut_count_of_a_ptouch_job_fits_its_printer(monkeypatch, model, label_size, count):
     counts = []
     monkeypatch.setattr(raster, 'convert', lambda job, images, *args, **kwargs: counts.append(kwargs['cut_every']))
-    queue = printer.PrinterQueue('PT-E550W', 'file:///dev/usb/lp0', 'pt12')
+    queue = printer.PrinterQueue(model, 'file:///dev/usb/lp0', label_size)
     job = {'settings': (0, True, False, False), 'images': [None] * 300, 'cuts': [False] * 300}
-    raster._add_job(queue, raster.Raster('PT-E550W'), job)
-    assert counts == [255]
+    raster._add_job(queue, raster.Raster(model), job)
+    assert counts == [count]
 
 
 def test_copies_on_ql_printers_are_sent_at_once(client, monkeypatch):

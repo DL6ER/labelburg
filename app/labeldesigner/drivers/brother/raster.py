@@ -7,10 +7,12 @@ import math
 from PIL import Image, ImageChops, ImageOps
 
 from ...label import LabelContent, LabelOrientation, LabelType
+from .. import devices
 from ..labels import FormFactor
 from .commands import Raster, RasterError
 from .labels import BY_ID, PTOUCH_LABELS
-from .models import MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, length_problem
+from .models import MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, TUBE_TOO_LONG, length_problem, tube_lines
+from .status import TUBES
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +56,11 @@ def render(queue, entries, keep=None) -> Raster:
     return raster
 
 
+def on_tube(device: str) -> bool:
+    """Whether the printer holds heat-shrink tube, as its last status tells."""
+    return devices.status_cache.get(devices.lock_key(device or ''), {}).get('media_type') in TUBES
+
+
 def feed(queue) -> Raster:
     """An empty label cut after it: one whole die-cut label, else the
     shortest the tape takes. Not chain printed, so that a P-touch printer
@@ -78,10 +85,12 @@ def _add_job(queue, raster, job):
     options = {}
     if raster.ptouch:
         # Cut after every label, or with cut_once after the last one, the
-        # printer half cuts between them. ESC i A counts up to 255 labels.
+        # printer half cuts between them. ESC i A counts up to cut_every
+        # labels of the model, a printer without it is told to cut the last.
         # Chain printing: the last label stays in the printer, the next job
         # cuts it off and saves the tape fed before it.
-        options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(len(job['images']), 255),
+        labels = len(job['images'])
+        options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(labels, raster.spec.cut_every or labels),
                    'half_cut': queue.half_cut, 'chain': queue.chain}
     # Unless printing fast, the printer gives priority to print quality. A
     # QL-810W printed a 29 x 90 mm label in 3.0 s instead of 1.8 s with it, a
@@ -90,17 +99,18 @@ def _add_job(queue, raster, job):
     # half cut the tape and hung in the printing state.
     convert(raster, job['images'], queue.label_size, red='red' in str(queue.label_size), dither=dither,
             cut=raster.ptouch or any(job['cuts']), dpi_600=high_res, hq=not fast, rotate=rotate,
-            compress=raster.ptouch, **options)
+            compress=raster.ptouch, tube=on_tube(queue.device_specifier), **options)
 
 
 def convert(raster: Raster, images: list, label_size: str, *, red: bool = False, dither: bool = False,
             cut: bool = True, dpi_600: bool = False, hq: bool = True, rotate='auto', compress: bool = False,
-            autocut: bool = True, cut_every: int = 1, half_cut: bool = True, chain: bool = False):
+            autocut: bool = True, cut_every: int = 1, half_cut: bool = True, chain: bool = False, tube: bool = False):
     """Add the images to the raster as the pages of one job. rotate is 0, 90,
     180, 270 or 'auto', which turns die-cut labels made the other way round.
     On P-touch printers autocut says whether the tape is cut at all,
     cut_every after how many labels, half_cut whether it is half cut between
-    them and chain whether the last label stays in the printer."""
+    them, chain whether the last label stays in the printer and tube whether
+    it prints on heat-shrink tube."""
     label = BY_ID[label_size]
     dots_printable = label.dots_printable
     right_margin = label.offset_r + raster.spec.additional_offset_r
@@ -112,6 +122,7 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
     raster.add_invalidate()
     raster.add_initialize()
     raster.add_switch_mode()
+    raster.add_status_notification()
     for i, im in enumerate(images):
         if im.mode.endswith('A'):
             # In front of a white background
@@ -151,6 +162,8 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
         # At 600 dpi a label has twice the lines
         if im.size[1] // (2 if dpi_600 else 1) > raster.spec.max_length_dots:
             raise ValueError(length_problem(raster.model))
+        if tube and im.size[1] // (2 if dpi_600 else 1) > tube_lines(raster.model):
+            raise ValueError(TUBE_TOO_LONG)
 
         if red:
             hsv = im.convert('HSV').split()
@@ -173,10 +186,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             raster.add_media_and_quality(im.size[1], 0x0A, tape[0], 0, hq)
         else:
             # A P-touch printer reads media type 0 as "no tape", a PT-E550W
-            # half cut the tape and hung in the printing state
-            raster.add_media_and_quality(im.size[1], None, tape[0], 0, hq)
+            # half cut the tape and hung in the printing state. The PT-P900
+            # series prints at high resolution on laminated tape, told as 09h.
+            raster.add_media_and_quality(im.size[1], 0x09 if dpi_600 else None, tape[0], 0, hq)
         if cut:
-            raster.add_autocut(autocut)
+            # A printer without ESC i A cuts after each page told to cut
+            raster.add_autocut(autocut and (raster.spec.cut_every > 0 or (i + 1) % cut_every == 0 or i == len(images) - 1))
             if autocut:
                 raster.add_cut_every(cut_every)
         raster.add_expanded_mode(cut, dpi_600, red, half_cut, chain)

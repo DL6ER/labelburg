@@ -10,8 +10,8 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 
 | Vendor | Printers | Labels |
 |---|---|---|
-| Brother | PT-E550W\*, PT-P700, PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
-| Brother | PT-P900W, PT-P950NW | TZe tapes 18 and 36 mm wide |
+| Brother | PT-E550W\*, PT-P700, PT-P710BT (USB, Bluetooth), PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
+| Brother | PT-P900W, PT-P910BT (USB, Bluetooth), PT-P950NW | TZe tapes 18 and 36 mm wide |
 | Brother | QL-500, QL-550, QL-560\*, QL-570, QL-580N, QL-600, QL-650TD, QL-700\*, QL-710W, QL-720NW | up to 62 mm wide |
 | Brother | QL-800, QL-810W\*, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100\*, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
@@ -123,10 +123,10 @@ Labelburg answers only requests for the names a home network uses, IP addresses,
 | `tcp://<host>` | A network printer, an IPv6 address in brackets |
 | `vc500w://<host>` | A VC-500W on the network |
 | `usbip://<host>` | A USB printer another device shares, see [USB/IP](docs/usbip.md) |
-| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M or Niimbot B1 on Bluetooth, channel 2 on a PUQU and 1 on a D110_M if left out. A D110_M has to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`, outside one a B1 needs Python 3.14 or newer. |
+| `bt://<MAC>[/<RFCOMM channel>]` | A PUQU Q00, Reekon P1 Tagger, Niimbot D110_M, Niimbot B1, Brother PT-P710BT or PT-P910BT on Bluetooth, channel 2 on a PUQU and 1 on a D110_M and the Brother printers if left out. A D110_M and the Brother printers have to be paired with the computer, a B1 needs no pairing. In a container only with `network_mode: host`, outside one a B1 needs Python 3.14 or newer. |
 | `simulation` | The demo printer, which saves the labels as PNG files in `simulated_labels` (the newest 100) instead of printing them. Its model and roll are chosen in the Settings of the label designer, else it is `PRINTER_MODEL` or the model listed with it in `PRINTERS`. |
 
-The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
+The installation above gives the container all of USB, the network and Bluetooth, so that it finds printers by itself, also a Niimbot B1 nearby on Bluetooth, and a PT-P710BT or PT-P910BT when the label designer looks for printers. Other Bluetooth printers are paired with the computer and set up by their `bt://` address. `/dev/usb` holds the printers as `/dev/usb/lp<N>`, `/dev/bus/usb` the USB devices that `usb://<vendor>:<product>` printers are reached through. A printer gets a new device there each time it is plugged in or switched on, so the folder is mounted rather than single devices given. Without `privileged`, the container may use them with `device_cgroup_rules: ['c 189:* rmw']` next to the volume.
 
 To give it a single printer instead, map that one and name it:
 

@@ -15,7 +15,7 @@ import time
 from werkzeug.security import safe_join
 
 from . import reach, usbip
-from .backends import NoLibusb
+from .backends import NoLibusb, NotPaired
 
 try:
     import fcntl
@@ -95,8 +95,8 @@ NOT_FOUND = (errno.EHOSTDOWN, errno.EHOSTUNREACH)
 
 
 def note_answer(device_specifier: str, error: Exception | None = None):
-    """Note that the printer answered, or that it was not found."""
-    if error is not None and getattr(error, 'errno', None) in NOT_FOUND:
+    """Note that the printer answered, or that it was not found or not paired."""
+    if error is not None and (getattr(error, 'errno', None) in NOT_FOUND or isinstance(error, NotPaired)):
         _unanswered[lock_key(device_specifier)] = error
     else:
         _unanswered.pop(lock_key(device_specifier), None)
@@ -334,6 +334,7 @@ _UNANSWERED = (
     ((errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EHOSTDOWN), 'The printer cannot be reached'),
 )
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
+NOT_PAIRED = 'Pair the printer with this computer first'
 NO_LE = 'Printers on Bluetooth LE need Python 3.14 or newer'
 
 
@@ -351,6 +352,8 @@ def unanswered_reason(error: Exception) -> str:
         return 'The printer does not answer'
     if isinstance(error, NoLibusb):
         return NO_LIBUSB
+    if isinstance(error, NotPaired):
+        return NOT_PAIRED
     if isinstance(error, NoBluetoothLe):
         return NO_LE
     if isinstance(error, reach.NotAllowed):
@@ -371,7 +374,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NO_LE, reach.NOT_ALLOWED])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NOT_PAIRED, NO_LE, reach.NOT_ALLOWED])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 
@@ -392,7 +395,8 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
     known = status_cache.get(lock_key(device_specifier), {})
     return {
         'path': device_specifier,
-        'model': known.get('model', model),
+        # An answer that named no model tells less than the model given
+        'model': model if known.get('model', 'Unknown') == 'Unknown' else known['model'],
         'media_width': known.get('media_width'),
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
