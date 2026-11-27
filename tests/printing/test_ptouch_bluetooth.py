@@ -222,6 +222,15 @@ def test_pt_p710bt_on_usb_is_found_by_its_device_id(tmp_path, monkeypatch):
     assert drivers.resolve(f'file://{lp}', 'QL-800') == (drivers.BROTHER, 'QL-800')
 
 
+def test_pt_p710bt_on_usb_is_known_by_its_product_id(tmp_path, monkeypatch):
+    # 0x20af in Appendix A of its reference, also where its device ID is not read
+    assert drivers.resolve('usb://0x04f9:0x20af/A1', 'QL-800') == (drivers.BROTHER, 'PT-P710BT')
+    monkeypatch.setattr(devices, 'USB_IDS', str(tmp_path / '{name}-{field}'))
+    (tmp_path / 'lp1-idVendor').write_text('04f9\n')
+    (tmp_path / 'lp1-idProduct').write_text('20af\n')
+    assert drivers.resolve('/dev/usb/lp1', 'QL-800') == (drivers.BROTHER, 'PT-P710BT')
+
+
 class FakeBrother:
     """A Brother printer on classic Bluetooth in place of the RFCOMM socket:
     a socket pair for each connection, whose far end answers a status request

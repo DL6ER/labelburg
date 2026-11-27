@@ -70,10 +70,11 @@ MODELS = {model.identifier: model for model in (
     # https://download.brother.com/welcome/docp000771/cv_pth500p700e500_eng_raster_111.pdf
     Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0, series_code=0x30, model_code=0x67),
     Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=99, series_code=0x30, model_code=0x68),
-    # The same reference names no model code of the PT-P710BT. It takes no
-    # ESC i A, and Brother's driver turns its status while printing off.
+    # The same reference names no model code of the PT-P710BT, but its product
+    # ID 20AFh on USB (Appendix A). It takes no ESC i A, and Brother's driver
+    # turns its status while printing off.
     Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0,
-          status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
+          status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True, usb_product=0x20AF),
     # "q" (71h) on USB as 2083h in the reference of the PT-P900 series (pp. 24, 49)
     Model('PT-P900', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x71),
     # "o" is 6Fh, not the 69h of the PT-P900 reference; Brother's index links it as 6F30
