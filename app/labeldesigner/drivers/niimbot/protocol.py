@@ -38,11 +38,13 @@ WITH_GAPS = 1
 # each answer within a page and ask every STATUS_POLL seconds how many pages
 # were printed (src/print_tasks/AbstractPrintTask.ts:54-56), up to
 # PACKET_WAIT in Utils.doUntilTrue() and for a printEnd after a failed label
-# (DEFAULT_PACKET_TIMEOUT of src/packets/protocol.ts:37)
+# (DEFAULT_PACKET_TIMEOUT of src/packets/protocol.ts:37), which tries again
+# RETRY_GAP seconds after an answer of 0 (B21L2BPrintTask.ts:21, 40)
 PACKET_GAP = 0.01
 PAGE_WAIT = 10
 STATUS_POLL = 0.3
 PACKET_WAIT = 1
+RETRY_GAP = 0.5
 # The answer to each packet of those tasks, by niimbluelib's commandsMap
 ANSWERS = {0x01: 0x02, 0x03: 0x04, 0x13: 0x14, 0x15: 0x16, 0x20: 0x30, 0x21: 0x31, 0x23: 0x33, 0x86: 0xd3,
            0xa3: 0xb3, 0xa5: 0xb5, 0xe3: 0xe4, 0xf3: 0xf4}
@@ -454,26 +456,26 @@ def _request(c: Connection, command: int, data: bytes = b'\x01', wait: float | N
 
 def _until_true(c: Connection, command: int, attempts: int, error: NiimbotError):
     """Utils.doUntilTrue(): the packet until the printer answers 1, attempts
-    times at most, PAGE_POLL seconds apart after an answer of 0, each answer
+    times at most, RETRY_GAP seconds apart after an answer of 0, each answer
     waited for PACKET_WAIT. Raises the last error of an attempt, else error."""
     for _ in range(attempts):
         try:
             if _request(c, command, wait=PACKET_WAIT)[:1] == b'\x01':
                 return
-            time.sleep(PAGE_POLL)
+            time.sleep(RETRY_GAP)
         except NiimbotError as e:
             error = e
     raise error
 
 
 def _until_ended(c: Connection):
-    """waitUntilPrintFinishedByPrintEndPoll(): printEnd every PAGE_POLL
-    seconds until the printer takes it. niimbluelib's printEnd() stops that
-    poll at its first packet (protocol.ts:450), one refused is sent again
-    here as the poll means to."""
+    """waitUntilPrintFinishedByPrintEndPoll(): printEnd every STATUS_POLL
+    seconds (B21V1PrintTask.ts:43) until the printer takes it. niimbluelib's
+    printEnd() stops that poll at its first packet (protocol.ts:450), one
+    refused is sent again here as the poll means to."""
     deadline = time.monotonic() + PRINT_WAIT
     while True:
-        time.sleep(PAGE_POLL)
+        time.sleep(STATUS_POLL)
         if _request(c, 0xf3)[:1] == b'\x01':
             return
         if time.monotonic() > deadline:

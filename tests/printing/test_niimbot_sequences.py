@@ -89,6 +89,8 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_to_ask', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.001)
+    monkeypatch.setattr(protocol, 'STATUS_POLL', 0.001)
+    monkeypatch.setattr(protocol, 'RETRY_GAP', 0.001)
 
 
 def printed(monkeypatch, model, rows, answers):
@@ -173,6 +175,34 @@ def test_b21_asks_again_to_end_a_print_it_refused_to_end(monkeypatch):
     message, sent = printed(monkeypatch, 'B21', ROWS_320, {0xf3: [p(0xf4, [0]), p(0xf4, [1])]})
     assert message == ''
     assert sent[-3:] == [p(0xe3, [1]), p(0xf3, [1]), p(0xf3, [1])]
+
+
+class _Timed(Printer):
+    """When each packet came."""
+
+    def __init__(self, answers):
+        super().__init__(answers)
+        self.times = []
+
+    def sendall(self, data):
+        self.times.append(time.monotonic())
+        super().sendall(data)
+
+
+@pytest.mark.parametrize('model, answers, command, gap', [
+    # B21V1PrintTask.ts:43 polls printEnd every statusPollIntervalMs
+    ('B21', {0xf3: [p(0xf4, [0]), p(0xf4, [1])]}, 0xf3, 'STATUS_POLL'),
+    # B21L2BPrintTask.ts:21 asks for the page start again 500 ms later
+    ('B21_L2B', {0x03: [p(0x04, [0]), p(0x04, [1])]}, 0x03, 'RETRY_GAP')])
+def test_packet_asked_again_waits_as_long_as_niimbluelib(monkeypatch, model, answers, command, gap):
+    monkeypatch.setattr(protocol, gap, 0.05)
+    known = models.BY_NAME[f'Niimbot/{model}']
+    printer = _Timed({0x40: p(0x48, known.ids[0].to_bytes(2)), 0xdc: B21S_BEAT, **TAKEN, **answers})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    queue = SimpleNamespace(device_specifier=DEVICE, model=known.name, label_size='niimbot12x40')
+    assert niimbot.DRIVER.send(queue, [ROWS_320]) == ''
+    first, again = [when for when, packet in zip(printer.times, printer.sent) if packet[2] == command][:2]
+    assert again - first >= 0.05
 
 
 def test_b21_l2b_gets_the_packets_of_niimbluelibs_b21_l2b_task(monkeypatch):
