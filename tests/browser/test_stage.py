@@ -86,6 +86,18 @@ def test_the_bottom_leaving_first_and_the_large_preview(editor):  # noqa: F811
     editor.click('#zoom')
 
 
+@pytest.mark.parametrize('job, told, bad', [
+    ({'labels': 1, 'label': 1, 'stage': 'The cover is open', 'waiting': True}, 'The cover is open', True),
+    ({'labels': 1, 'label': 1, 'seconds_left': 3}, 'A few seconds left', False),
+])
+def test_a_job_waiting_for_the_printer_shows_red(editor, job, told, bad):  # noqa: F811
+    # E.g. for the cover to be closed, the printer prints the label then
+    status_is(editor, with_tape({'model': 'QL-1100', 'name': 'Office', 'status_type': 'Printing', 'job': job}))
+    editor.wait_for_function('told => document.querySelector("#slot").title === told', arg=told)
+    assert ('bad' in editor.get_attribute('#slot .led', 'class').split()) == bad
+    assert ('bad' in editor.get_attribute('#printerChip .d', 'class').split()) == bad
+
+
 def test_a_tape_the_printer_does_not_tell_is_noted_with_the_fits(editor):  # noqa: F811
     status_is(editor, with_tape({'model': 'QL-1100', 'name': 'Office'}))
     type_label(editor, 'Shelf 3')

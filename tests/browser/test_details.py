@@ -74,10 +74,34 @@ def test_a_line_drawn_small_grows_every_few_steps(editor):  # noqa: F811
 def test_margins_none(editor):  # noqa: F811
     type_label(editor, 'Shelf 3')
     editor.click('#advBtn')
-    assert [b.inner_text() for b in editor.locator('#adv [data-margins]').all()] == ['None', 'Tight', 'Normal', 'Roomy']
+    assert [b.inner_text() for b in editor.locator('#adv [data-margins]').all()] == ['None', 'Tight', 'Normal', 'Large']
     request = changed_preview(editor, lambda: editor.click('#adv [data-margins="none"]'))
     assert [request['margin_' + side] for side in ('top', 'bottom', 'left', 'right')] == ['0', '0', '0', '0']
     assert 'on' in editor.get_attribute('#adv [data-margins="none"]', 'class').split()
+
+
+def test_margins_are_in_proportion_to_the_tape(editor):  # noqa: F811
+    printers = [with_tape({'errors': [], 'path': 'simulation', 'model': model, 'name': name, 'media_width': None, 'media_length': 0,
+                           'settings': {'label_size': size}}) for model, name, size in (('QL-1100', 'Kitchen', '62'), ('QL-800', 'Office', '29'))]
+    editor.route('**/api/printer_status*', lambda route: route.fulfill(json={**printers[0], 'printers': printers, 'selected': 'simulation'}))
+    editor.reload()
+    editor.wait_for_selector('#field .ln')
+    wait_for_preview(editor)
+    type_label(editor, 'Pantry')
+    margins = lambda request: [request['margin_' + side] for side in ('top', 'bottom', 'left', 'right')]  # noqa: E731
+    editor.click('#advBtn')
+    assert margins(changed_preview(editor, lambda: editor.click('#adv [data-margins="tight"]'))) == ['12', '12', '18', '18']
+    # On the 29 mm tape of the other printer the label keeps tight margins, those of its width
+
+    def choose():
+        editor.click('#printerChip')
+        editor.click('.pp [data-p="1"]')
+        editor.keyboard.press('Escape')
+    assert margins(changed_preview(editor, choose)) == ['5', '5', '8', '8']
+    if not editor.is_visible('#adv [data-margins]'):
+        editor.click('#advBtn')
+    assert 'on' in editor.get_attribute('#adv [data-margins="tight"]', 'class').split()
+    assert margins(changed_preview(editor, lambda: editor.click('#adv [data-margins="large"]'))) == ['21', '21', '31', '31']
 
 
 def test_thumbnails_of_saved_labels_do_not_ask_the_printer(editor):  # noqa: F811

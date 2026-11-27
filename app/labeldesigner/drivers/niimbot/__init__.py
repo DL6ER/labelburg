@@ -60,7 +60,7 @@ ROUND = {'080924002'}
 # On Bluetooth it beeps at each connection: it is asked only when the label
 # designer looks for printers and when printing, the other status queries are
 # answered from the last state. A B1 keeps its connection over Bluetooth LE
-# while used, see protocol.KEEP_LE, and is also asked by the label designer
+# while used, see transports.KEEP_LE, and is also asked by the label designer
 # that follows it, see followed_status(). When each was last asked:
 _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
@@ -84,10 +84,15 @@ def _over_le(model: str) -> bool:
     return model == 'Niimbot/B1'
 
 
+def _kept(device: str, model: str) -> bool:
+    """Whether the connection to a printer on bt:// is kept, see
+    transports.KEEP_LE: over Bluetooth LE, unless it saves energy."""
+    return device.startswith('bt://') and _over_le(model) and not devices.saves_energy(device)
+
+
 def _beeps(device: str, model: str) -> bool:
-    """Whether each status query beeps, a new connection over classic
-    Bluetooth."""
-    return device.startswith('bt://') and not _over_le(model)
+    """Whether each status query beeps, a new connection over Bluetooth."""
+    return device.startswith('bt://') and not _kept(device, model)
 
 
 def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
@@ -168,6 +173,10 @@ class Niimbot(Driver):
                        re.compile(r'usb://0x3513:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.NiimbotError)
     refusals = (calibration.KIND_MESSAGE,)
+    # Over Bluetooth LE only the B1 prints. It tells its name, B1-<serial>,
+    # or Niimbot's service where it leaves the name out.
+    bluetooth_names = {re.compile(r'B1-.*', re.IGNORECASE | re.DOTALL): 'Niimbot/B1'}
+    bluetooth_services = {protocol.NIIMBOT_SERVICE: 'Niimbot/B1'}
 
     def model_of(self, device, device_id=None):
         if device_id is None:
@@ -194,6 +203,9 @@ class Niimbot(Driver):
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
                     calibration=model == 'Niimbot/B1')
 
+    def keeps_connection(self, device, model):
+        return device.startswith('bt://') and _over_le(model)
+
     def calibration_kind(self, model, label_size):
         size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
         if model != 'Niimbot/B1' or size is None:
@@ -218,16 +230,15 @@ class Niimbot(Driver):
         return calibration.example(kind)
 
     def found_on_bluetooth(self, device):
-        # Over Bluetooth LE only the B1 prints. It tells its name, B1-<serial>,
-        # or Niimbot's service where it leaves the name out.
-        name = device.get('name', '').upper()
-        if device.get('le') and (name.startswith('B1-') or (not name and protocol.NIIMBOT_SERVICE in device.get('services', []))):
-            return f"bt://{device['address']}", 'Niimbot/B1'
-        return None
+        # Other models advertise the service too: it counts only without a name
+        name = device.get('name')
+        if name and not any(re.fullmatch(pattern, name) for pattern in self.bluetooth_names):
+            return None
+        return super().found_on_bluetooth(device)
 
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
-        return (device.startswith('bt://') and _over_le(model)) or super().followed(device, model)
+        return _kept(device, model) or super().followed(device, model)
 
     def followed_status(self, device, model):
         return self.status(device, model, fresh=True)
@@ -240,7 +251,7 @@ class Niimbot(Driver):
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
         # asked every time, it tells another roll or a lost connection so.
-        if (device.startswith('bt://') and not (fresh and _over_le(model)) and cached and not cached.get('errors')
+        if (device.startswith('bt://') and not (fresh and _kept(device, model)) and cached and not cached.get('errors')
                 and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:

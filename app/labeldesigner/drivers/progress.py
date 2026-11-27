@@ -34,6 +34,7 @@ class _Job:
         self.counted = False
         self.stage = None
         self.percent = None
+        self.waiting = False
         self.unit = 'label'
 
 
@@ -65,6 +66,7 @@ def printed(device: str, count: int):
         if job and count > job.printed:
             job.printed, job.printed_at = count, time.monotonic()
             job.stage = job.percent = None
+            job.waiting = False
 
 
 def stage(device: str, name: str, percent: int | None = None):
@@ -73,6 +75,16 @@ def stage(device: str, name: str, percent: int | None = None):
         job = _jobs.get(devices.lock_key(device))
         if job:
             job.stage, job.percent = name, percent
+
+
+def waiting(device: str, reason: str | None):
+    """The printer waits for reason to be fixed, e.g. the cover to be closed,
+    and prints the job then; None once it is fixed. How long the job takes
+    is no longer estimated."""
+    with _guard:
+        job = _jobs.get(devices.lock_key(device))
+        if job:
+            job.stage, job.percent, job.waiting, job.estimated = reason, None, reason is not None, False
 
 
 def finish(device: str, success: bool):
@@ -113,6 +125,8 @@ def state(device: str) -> dict | None:
             result['stage'] = job.stage
             if job.percent is not None:
                 result['percent'] = job.percent
+        if job.waiting:
+            result['waiting'] = True
         if job.estimated:
             result['seconds_left'] = round(_seconds_left(job))
         if job.unit != 'label':

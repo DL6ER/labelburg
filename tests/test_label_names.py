@@ -10,7 +10,7 @@ from app.labeldesigner.drivers.brother.labels import LABELS as BROTHER_LABELS, P
 from app.labeldesigner.drivers.brother.models import MODELS as BROTHER_MODELS
 from app.labeldesigner.drivers.brother.raster import convert
 from app.labeldesigner.drivers.vc500w import NEVER_WHY
-from app.labeldesigner.label_names import LABELS, check_label_size, label_fits, label_printers
+from app.labeldesigner.label_names import LABELS, SIZES, check_label_size, label_fits, label_printers, margin_presets
 from tests.helpers import make_client
 
 
@@ -161,3 +161,15 @@ def test_tape_of_another_printer_is_refused_with_its_name(tmp_path, label_size, 
         'printer': 'simulation', 'label_size': label_size, 'model': model, 'print_type': 'text', 'text': text})
     assert response.status_code == 400
     assert response.get_json()['message'] == label_size_problem(label_size, model) != ''
+
+
+def test_margin_presets_are_in_proportion_to_the_width_of_the_label():
+    # Given for 62 mm wide labels, 696 dots
+    assert margin_presets(SIZES['62'], (24, 24, 35, 35)) == {
+        'none': (0, 0, 0, 0), 'tight': (12, 12, 18, 18), 'normal': (24, 24, 35, 35), 'large': (48, 48, 70, 70)}
+    # 306 dots across 29 mm tape, 117 across the 9 mm tape of the VC-500W
+    assert margin_presets(SIZES['29'], (24, 24, 35, 35))['normal'] == (11, 11, 15, 15)
+    assert margin_presets(SIZES['vc9'], (24, 24, 35, 35)) == {
+        'none': (0, 0, 0, 0), 'tight': (2, 2, 3, 3), 'normal': (4, 4, 6, 6), 'large': (8, 8, 12, 12)}
+    # Of a page of several labels, one of them
+    assert margin_presets(SIZES['niimbot15x8-2x3'], (24, 24, 35, 35))['normal'] == (4, 4, 6, 6)

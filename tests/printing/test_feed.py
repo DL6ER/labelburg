@@ -89,7 +89,7 @@ def test_printers_without_it(model, label_size):
 def test_a_receipt_printer_feeds_to_its_cutter_and_cuts(model, label_size):
     assert ESCPOS.feed_kind(model, label_size) == 'cut_paper'
     job = ESCPOS.feed_job(SimpleNamespace(model=model, label_size=label_size))
-    assert escpos.job(job) == escpos.INIT + escpos.CUT == b'\x1b@\x1dVA\x00'
+    assert escpos.job(job) == escpos.INIT + escpos.CENTER + escpos.CUT == b'\x1b@\x1ba\x01\x1dVA\x00'
     assert ESCPOS.label_lengths(job) == [0.0]
 
 
@@ -131,7 +131,7 @@ def test_a_receipt_printer_gets_it_through_the_label_designer(tmp_path, monkeypa
     client = make_client(tmp_path, empty_repo=True, model='Epson/ESC-POS', printer='file:///dev/usb/lp3')
     assert outcome(client, client.post(FEED)) == ('printed', '')
     # Asked for its errors first, as for labels
-    assert fake.sent == escpos.OFFLINE + escpos.PAPER + escpos.INIT + escpos.CUT
+    assert fake.sent == escpos.OFFLINE + escpos.PAPER + escpos.INIT + escpos.CENTER + escpos.CUT
 
 
 def test_a_zpl_printer_gets_it_through_the_label_designer(tmp_path, monkeypatch):

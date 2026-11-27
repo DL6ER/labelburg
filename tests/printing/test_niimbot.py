@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.labeldesigner import printer, printer_settings
-from app.labeldesigner.drivers import devices, niimbot, progress, usbip
+from app.labeldesigner.drivers import devices, niimbot, progress, transports, usbip
 from app.labeldesigner.drivers.niimbot import calibration, protocol
 from tests.helpers import make_client, outcome, without_status
 
@@ -201,7 +201,7 @@ def test_b1_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
     def open_printer(device):
         opened.append(UsbPrinter(printer))
         return opened[-1]
-    monkeypatch.setattr(protocol.backends, 'open_printer', open_printer)
+    monkeypatch.setattr(transports.backends, 'open_printer', open_printer)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
     # Not asked over the network for a device ID
     monkeypatch.setattr(printer_settings, 'usb_device_id', lambda device, connect=True: '')
@@ -218,7 +218,7 @@ def test_b1_prints_with_the_packets_of_bluetooth(b1, monkeypatch):
 def test_b1_that_does_not_answer(monkeypatch):
     printer = UsbPrinter(FakePrinter())
     printer.read = lambda length=32: b''
-    monkeypatch.setattr(protocol.backends, 'open_printer', lambda device: printer)
+    monkeypatch.setattr(transports.backends, 'open_printer', lambda device: printer)
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     with protocol.connect('usb://0x3513:0x0002') as c:
         with pytest.raises(protocol.NoAnswer):
@@ -658,8 +658,8 @@ def test_usb_read_waits_no_longer_than_its_time(monkeypatch):
     read_end, write_end = os.pipe()
     printer = backends.KernelPrinter.__new__(backends.KernelPrinter)
     printer.dev = read_end
-    monkeypatch.setattr(protocol.backends, 'open_printer', lambda device: printer)
-    usb = protocol.UsbSocket('/dev/usb/lp0')
+    monkeypatch.setattr(transports.backends, 'open_printer', lambda device: printer)
+    usb = transports.UsbLink('/dev/usb/lp0')
     usb.settimeout(0.1)
     outcome = []
 

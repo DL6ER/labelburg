@@ -110,3 +110,27 @@ def test_a_refusal_is_told(designer, server):
     designer.route('**/api/feed', lambda route: route.fulfill(status=400, json={'success': False, 'message': 'This printer offers no feed and cut'}))
     designer.click(f'{CARD} [data-feed]')
     designer.wait_for_function('() => document.querySelector("#toast").textContent.includes("This printer offers no feed and cut")')
+
+
+
+def test_receipt_printer_without_a_cutter_feeds_to_its_tear_bar(designer, server, monkeypatch):
+    # The demo printer as a TM-P20, which told its model name
+    from app.labeldesigner.drivers import escpos
+    monkeypatch.setitem(escpos._told, 'simulation', ('TM-P20', None))
+    for name, value in {'demo_model': 'Epson/ESC-POS', 'label_size': 'escpos58'}.items():
+        with urlopen(f'{server}/labeldesigner/api/settings', urlencode({'printer': 'simulation', name: value}).encode()) as r:
+            assert json.load(r)['success']
+    designer.goto(server + '/labeldesigner/')
+    designer.wait_for_selector('#field .ln')
+    wait_for_preview(designer)
+    # Its tear bar 7.9 mm from the head, no cut drawn
+    assert designer.get_attribute('#lead', 'title') == 'Blank paper, 9.4 mm'
+    assert designer.is_hidden('#cutmark')
+    open_settings(designer)
+    designer.wait_for_selector(f'{CARD} [data-feed]')
+    assert designer.inner_text(f'{CARD} .set-stack:has([data-feed]) .set-val') == 'Torn off'
+    feed = designer.locator(f'{CARD} [data-feed]')
+    assert (feed.inner_text(), designer.inner_text(f'{CARD} [data-feed] + small')) == ('Feed paper', 'Feeds the last label to the tear bar.')
+    with designer.expect_response('**/api/feed') as answer:
+        feed.click()
+    assert answer.value.ok

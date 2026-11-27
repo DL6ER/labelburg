@@ -163,3 +163,18 @@ def test_text_wrap_that_is_no_flag_is_refused(tmp_path):
     client = make_client(tmp_path)
     response = preview(client, text=lines(SENTENCE), text_wrap='often')
     assert response.status_code == 400 and response.get_json()['message'] == 'text_wrap must be 0 or 1'
+
+
+@pytest.mark.parametrize('cluster', ['\U0001F44D\U0001F3FD', '\U0001F1E9\U0001F1EA', '\U0001F468\u200d\U0001F469\u200d\U0001F467', 'e\u0301'],
+                         ids=['skin_tone', 'flag', 'family', 'accent'])
+def test_a_long_word_is_broken_between_characters_drawn_as_one(tmp_path, cluster):
+    # Not between an emoji and its skin tone, the two letters of a flag, the
+    # people of a family or a letter and its accent
+    client = make_client(tmp_path)
+    data = dict(EXAMPLE_FORMDATA, label_size='62x29', text=lines(cluster * 40, size=30), text_wrap='1', text_fit='none')
+    with client.application.test_request_context():
+        label = create_label_from_request(data)
+        label.generate()
+        broken = drawn(label)
+    assert len(broken) > 1 and ''.join(broken) == cluster * 40
+    assert all(line == cluster * (len(line) // len(cluster)) for line in broken)

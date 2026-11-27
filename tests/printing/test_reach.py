@@ -268,11 +268,12 @@ def test_metadata_addresses_of_cloud_providers_are_never_allowed(address):
 
 class Holes(set):
     """Addresses whose hosts drop connection attempts, which then run into
-    their timeout. 'tried' are the addresses connected to, in their order."""
+    their timeout. 'tried' are the addresses connected to, in their order,
+    'waited' the timeouts the dropped ones ran into."""
 
     def __init__(self):
         super().__init__()
-        self.tried = []
+        self.tried, self.waited = [], []
 
 
 @pytest.fixture
@@ -284,7 +285,8 @@ def blackholed(monkeypatch):
         if sock.type == socket.SOCK_STREAM:
             holes.tried.append(address[0])
             if address[0] in holes:
-                time.sleep(sock.gettimeout() or 1)
+                holes.waited.append(sock.gettimeout() or 1)
+                time.sleep(holes.waited[-1])
                 raise TimeoutError('timed out')
         return real(sock, address)
     monkeypatch.setattr(socket.socket, 'connect', connect)
@@ -294,18 +296,20 @@ def blackholed(monkeypatch):
 MANY = [f'127.0.0.{i}' for i in range(2, 8)]
 
 
-def ends_within(seconds: float, connect):
-    started = time.monotonic()
+def waited(holes: Holes, connect) -> float:
+    """How long connect() waited for the addresses that do not answer, all
+    together, before it failed: by the timeouts it gave them, not by the
+    clock, which a busy machine runs late."""
     with pytest.raises(OSError):
         within(10, connect)
-    return time.monotonic() - started < seconds
+    return sum(holes.waited)
 
 
 def test_a_connection_ends_by_its_timeout_however_many_addresses_a_name_has(names, blackholed):
     names['many.test'] = MANY
     blackholed.update(MANY)
     reach.watch(['many.test'], 'local')
-    assert ends_within(1.5, lambda: reach.create_connection(('many.test', 9300), timeout=1))
+    assert waited(blackholed, lambda: reach.create_connection(('many.test', 9300), timeout=1)) <= 1.001
     assert len(blackholed.tried) <= reach.MAX_ADDRESSES
 
 
@@ -313,7 +317,7 @@ def test_one_address_of_each_family_is_tried(names, blackholed):
     names['many.test'] = ['fd00::1', 'fd00::2', '127.0.0.2', '127.0.0.3']
     blackholed.update(['fd00::1', '127.0.0.2'])
     reach.watch(['many.test'], 'local')
-    assert ends_within(1.5, lambda: reach.create_connection(('many.test', 9300), timeout=1))
+    assert waited(blackholed, lambda: reach.create_connection(('many.test', 9300), timeout=1)) <= 1.001
     assert blackholed.tried == ['fd00::1', '127.0.0.2']
 
 
@@ -332,14 +336,14 @@ def test_the_import_of_a_shared_printer_ends_with_connecting(names, blackholed, 
     names['many.test'] = MANY
     blackholed.update(MANY)
     reach.watch(['many.test'], 'local')
-    assert ends_within(1.5, lambda: usbip.connect('usbip://many.test:3299'))
+    assert waited(blackholed, lambda: usbip.connect('usbip://many.test:3299')) <= 1.001
 
 
 def test_ipp_ends_with_connecting(names, blackholed):
     names['many.test'] = MANY
     blackholed.update(MANY)
     reach.watch(['many.test'], 'local')
-    assert ends_within(1, lambda: ipp.get_printer_attributes('many.test', 3299, timeout=0.5))
+    assert waited(blackholed, lambda: ipp.get_printer_attributes('many.test', 3299, timeout=0.5)) <= 0.501
 
 
 def test_a_slow_name_leaves_the_connection_its_timeout(names, listener):

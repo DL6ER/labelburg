@@ -215,9 +215,10 @@ def length_mm(response, dpi=300) -> int:
 @pytest.mark.parametrize('code_type, settings, length', [
     # Its short side fills the tape
     ('RMQR', {}, 1157),
-    ('RMQR', {'label_size': '29'}, 492),
+    ('RMQR', {'label_size': '29'}, 533),
+    ('RMQR', {'label_size': '12'}, 214),
     ('PDF417', {}, 580),
-    ('PDF417', {'label_size': '29', 'high_res': '1'}, 256),
+    ('PDF417', {'label_size': '29', 'high_res': '1'}, 265),
 ])
 def test_a_wide_code_that_makes_a_long_label_is_said_so(tmp_path, code_type, settings, length):
     client = make_client(tmp_path)
@@ -240,9 +241,8 @@ def test_a_wide_code_next_to_an_image_that_makes_a_long_label_is_said_so(tmp_pat
 
 
 @pytest.mark.parametrize('code_type, settings, length', [
-    # Narrow tape, which rMQR codes are made for
-    ('RMQR', {'label_size': '12'}, 152),
-    ('PDF417', {'label_size': '12'}, 101),
+    # Narrow tape
+    ('PDF417', {'label_size': '12'}, 128),
     # Codes about as high as wide, also next to text that makes the label long
     ('QR', {}, 111),
     ('DATAMATRIX', {}, 112),

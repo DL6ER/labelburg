@@ -153,8 +153,6 @@ class Zpl(Driver):
                        re.compile(r'usb://0x[0-9a-fA-F]{4}:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'),
                        re.compile(r'tcp://[A-Za-z0-9.-]+(:9100)?'),
                        re.compile(r'tcp://\[[0-9A-Fa-f:.]+\](:9100)?'))
-    # Its jobs go to usblp, PyUSB or the network only
-    takes_usbip = False
 
     def model_of(self, device, device_id=None):
         # By the IEEE 1284 device ID on USB, e.g. MFG:Zebra Technologies;
@@ -200,7 +198,7 @@ class Zpl(Driver):
 
     def status(self, device, model, unconfirmed=False):
         path = device.removeprefix('file://')
-        if not device.startswith(('tcp://', 'usb://')) and not os.path.exists(path):
+        if not device.startswith(('tcp://', 'usb://', 'usbip://')) and not os.path.exists(path):
             raise FileNotFoundError(2, 'No such device', path)
         state = dict(network_status(device, model), media_type='Die-cut labels')
         if name := self.device_name(device):

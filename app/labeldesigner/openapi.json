@@ -68,6 +68,20 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
+                      },
+                      "date_format": {
+                        "type": "string",
+                        "description": "How dates are written, a `date_format` of the label settings, e.g., as a label printed before wrote them (`dates` of `/labeldesigner/api/history/{job_id}/label`). Left out, as the label settings write them."
+                      },
+                      "date_language": {
+                        "type": "string",
+                        "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
+                      },
+                      "tape_colors": {
+                        "type": "string",
+                        "enum": ["0", "1"],
+                        "default": "0",
+                        "description": "1 shows the label in the colors of the tape in its printer (`printer`, `model`, else the configured one) as the label designer does, where the last status of the printer tells them (`colors` of `/labeldesigner/api/printer_status`) and the label is on that tape: white in the color of the tape, black in that of the print, red stays red. Clear tape is transparent. The printer is not asked. Only the preview changes, not the print. See `X-Label-Tape-Colors`."
                       }
                     }
                   }
@@ -118,6 +132,20 @@
                         "type": "integer",
                         "minimum": 1,
                         "description": "Number of labels `{{total}}` shows, e.g. of a job printed before, without the copies on a page of `X-Label-Sheet`. Left out, `print_count` times `labels_per_copy`."
+                      },
+                      "date_format": {
+                        "type": "string",
+                        "description": "How dates are written, a `date_format` of the label settings, e.g., as a label printed before wrote them (`dates` of `/labeldesigner/api/history/{job_id}/label`). Left out, as the label settings write them."
+                      },
+                      "date_language": {
+                        "type": "string",
+                        "description": "The language of the names in dates, a `date_language` of the label settings, e.g., as a label printed before wrote them. Left out, as the label settings write them."
+                      },
+                      "tape_colors": {
+                        "type": "string",
+                        "enum": ["0", "1"],
+                        "default": "0",
+                        "description": "1 shows the label in the colors of the tape in its printer (`printer`, `model`, else the configured one) as the label designer does, where the last status of the printer tells them (`colors` of `/labeldesigner/api/printer_status`) and the label is on that tape: white in the color of the tape, black in that of the print, red stays red. Clear tape is transparent. The printer is not asked. Only the preview changes, not the print. See `X-Label-Tape-Colors`."
                       }
                     }
                   }
@@ -152,6 +180,12 @@
                 "description": "Number of the pages of an uploaded PDF `pdf_pages` selects, each printed as a label of its own.",
                 "schema": {
                   "type": "integer"
+                }
+              },
+              "X-Label-Tape-Colors": {
+                "description": "The colors of the tape and of its print the preview is shown in with `tape_colors`, e.g. `#ffd400,#000000` for black on yellow, `#ffffff00` for clear tape. Not set where it is shown as printed on white.",
+                "schema": {
+                  "type": "string"
                 }
               },
               "X-Image-Faint": {
@@ -927,7 +961,7 @@
     "/labeldesigner/api/queue/{job_id}": {
       "get": {
         "summary": "Read a print job",
-        "description": "The state of a job a print request added. A job that ended is told for 24 hours, its preview for 10 minutes. `start` changes when the server restarts: jobs it did not print are lost with it.",
+        "description": "The state of a job a print request added. A job that ended is told for 24 hours, its preview for 10 minutes, and after that, also after a restart, as the printed labels keep it (see `/labeldesigner/api/history`). Jobs waiting when the server stops print when it starts again, with their ids; the one that printed then ends as `unknown`. `start` changes when the server restarts.",
         "operationId": "getQueueJob",
         "parameters": [
           {
@@ -952,7 +986,7 @@
             }
           },
           "404": {
-            "description": "No such job, e.g. it ended long ago or the server was restarted.",
+            "description": "No such job, e.g. it ended long ago and printed labels are not kept.",
             "content": {
               "application/json": {
                 "schema": {
@@ -967,7 +1001,7 @@
     "/labeldesigner/api/queue/{job_id}/preview.png": {
       "get": {
         "summary": "The preview of a print job",
-        "description": "Its first label, at most 240 pixels on the long side.",
+        "description": "Its first label, at most 240 pixels on the long side, of a job that ended as the printed labels keep it.",
         "operationId": "getQueuePreview",
         "parameters": [
           {
@@ -1092,6 +1126,302 @@
           },
           "400": {
             "description": "No printer named, or one that is not supported, `message` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/history": {
+      "get": {
+        "summary": "Labels printed",
+        "description": "The labels printed on this server, newest first, from every browser and program, also those that did not print. Kept on the server in `.print-history` in the folder of the labels: the entries of the last year, at most 1000, the images of the oldest ones go beyond 200 MB. Calibration labels are not kept. Nothing is kept while the label setting `history` is 0, setting it to 0 removes what was kept.",
+        "operationId": "getHistory",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many, at most 200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 60
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "The `id` of an entry: those printed before it, for the next page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The labels printed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/History"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`limit` is not a whole number from 1 to 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/history/{job_id}/preview.png": {
+      "get": {
+        "summary": "The preview of a label printed",
+        "description": "Its first label as the queue showed it, at most 240 pixels on the long side.",
+        "operationId": "getHistoryPreview",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `id` of a label printed, the `job` of the answer to the print request.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview.",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such label printed, or printed labels are not kept (`history` is 0), `message` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/history/{job_id}/label": {
+      "get": {
+        "summary": "Open a label printed",
+        "description": "The label as it was printed, as `/labeldesigner/api/repository/load` answers for a saved label: with the values of its blanks in `blanks`, its first image as base64 in `image_data` and its title. Only labels made from a label of this server, not images of the webhook or Homebox.",
+        "operationId": "getHistoryLabel",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `id` of a label printed, the `job` of the answer to the print request.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The label.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SavedLabel"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "printed_for": {
+                          "type": "integer",
+                          "description": "The time its dates showed as it printed, as a Unix timestamp: `timestamp` of a preview that shows it as it printed."
+                        },
+                        "printed_dates": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "description": "The days its date blanks that follow the day showed as it printed, by the name of the blank."
+                        },
+                        "dates": {
+                          "type": "object",
+                          "properties": {
+                            "date_format": {
+                              "type": "string"
+                            },
+                            "date_language": {
+                              "type": "string"
+                            }
+                          },
+                          "description": "The label settings its dates were written with, for a preview that shows it as it printed."
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such label printed, or printed labels are not kept (`history` is 0), `message` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An image of the webhook or Homebox, not a label made here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/history/{job_id}/print": {
+      "post": {
+        "summary": "Print a label printed again",
+        "description": "Prints the label again on the printer of the request, the configured one where it names none, as a new job. A label made here is placed on the tape in that printer and printed in the quality and cut as set for it, like a saved label; an image of the webhook or Homebox is printed on the label size it was made for. Counters count as before, random texts and UUIDs are new. The entry tells in `again_asks` what `as_before` changes.",
+        "operationId": "printHistoryAgain",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "description": "The `id` of a label printed, the `job` of the answer to the print request.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "return_format",
+            "in": "query",
+            "description": "`png` adds the image of the first label printed, as the printer got it, as base64 in `image`.",
+            "schema": {
+              "type": "string",
+              "enum": ["png"]
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrintAgain"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/PrintAgain"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted into the queue of the printer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedAnswer"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The printer or the label size is refused, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such label printed, or printed labels are not kept (`history` is 0), `message` says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Its image is no longer kept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The printer is busy: its queue is full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/labeldesigner/api/history/clear": {
+      "post": {
+        "summary": "Clear the labels printed",
+        "description": "Removes every entry with its images, also jobs of the queue on disk that could not be read.",
+        "operationId": "clearHistory",
+        "responses": {
+          "200": {
+            "description": "Cleared.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Not cleared, the log of the server names the reason.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1360,7 +1690,7 @@
     "/labeldesigner/api/printers/identify": {
       "post": {
         "summary": "Ask what answers at an address",
-        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Asks the device at an address what it is, without adding it: a printer shared over USB/IP for its IEEE 1284 device ID, a network printer over SNMP and IPP, a host alone over USB/IP first. Nothing is sent to the port a printer takes jobs on before it is known as a printer of a model this server prints on; then its status is read, e.g. the tape in it. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "identifyPrinter",
         "requestBody": {
           "content": {
@@ -1411,7 +1741,7 @@
     "/labeldesigner/api/printers/add": {
       "post": {
         "summary": "Add a printer",
-        "description": "Adds the printer at an address, asked what it is first as by `printers/identify`. It is kept with the printer settings in the folder of the labels. A network printer is kept by the address its model takes, e.g. `vc500w://` for a VC-500W given as `tcp://`. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
+        "description": "Adds the printer at an address, asked what it is first as by `printers/identify`. It is kept with the printer settings in the folder of the labels. A network printer is kept by the address its model takes, e.g. `vc500w://` for a VC-500W given as `tcp://` or alone. Where the address may be is set by `ADD_PRINTERS` of the server: `local` (the default) only in the local network (loopback, 10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7), `any` also elsewhere, `off` not at all. Every address a host name resolves to must be allowed, link-local, multicast, broadcast and reserved ones never are.",
         "operationId": "addPrinter",
         "requestBody": {
           "content": {
@@ -1545,7 +1875,7 @@
     "/labeldesigner/api/settings/labels": {
       "get": {
         "summary": "Settings of labels",
-        "description": "The settings made under Settings > Labels of the label designer, kept on the server for every browser and the API: how dates are written and the language of their names, the order of copies of several files and the font of new labels. Print requests and previews take what they leave out from them. A setting not made is empty.",
+        "description": "The settings made under Settings > Labels and Printed labels of the label designer, kept on the server for every browser and the API: how dates are written and the language of their names, the order of copies of several files, the font of new labels and whether labels printed are kept. Print requests and previews take what they leave out from them. A setting not made is empty.",
         "operationId": "getLabelSettings",
         "responses": {
           "200": {
@@ -3520,6 +3850,10 @@
             "type": "integer",
             "description": "Number of labels of the job, which `{{total}}` shows, not its pages on a roll of several labels to a page."
           },
+          "title": {
+            "type": "string",
+            "description": "What the job prints, as the queue and the labels printed name it: the `title` of the request, else its first line as printed, else its code, else the name of the file of its picture. A Wi-Fi code names it by its network alone, a contact, an event or a one-time password key not at all."
+          },
           "image": {
             "type": "string",
             "description": "The image of the first label as base64 PNG, with `return_format=png`."
@@ -3555,8 +3889,10 @@
               "printing",
               "printed",
               "failed",
-              "removed"
-            ]
+              "removed",
+              "unknown"
+            ],
+            "description": "`unknown`: it printed as the server stopped, it may not have printed."
           },
           "message": {
             "type": "string",
@@ -3638,6 +3974,153 @@
           }
         }
       },
+      "History": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether labels printed are kept, see the label setting `history`. `false` lists none."
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            }
+          }
+        }
+      },
+      "HistoryEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The `job` of the answer to the print request."
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it printed, in UTC: the time dates on it show."
+          },
+          "title": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "integer"
+          },
+          "copies": {
+            "type": "integer",
+            "description": "The copies it was printed with, which printing it again takes unless `print_count` is given."
+          },
+          "date_blanks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The date blanks that show the day it printed, e.g. today or 5 days later, not a date of their own. A value given for one in `blanks` printing it again takes its place."
+          },
+          "from": {
+            "type": "string",
+            "description": "As `from` of a job of the queue, empty for the label designer."
+          },
+          "from_detail": {
+            "type": "string"
+          },
+          "printer_name": {
+            "type": "string",
+            "description": "The printer it was sent to, by its name, else `Demo printer` or its model."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["printed", "failed", "removed", "unknown"]
+          },
+          "message": {
+            "type": "string",
+            "description": "Why it did not print, or may not have."
+          },
+          "preview": {
+            "type": ["string", "null"],
+            "description": "The URL of its preview, `null` without one."
+          },
+          "again": {
+            "type": "boolean",
+            "description": "Whether it can be printed again: its images are kept."
+          },
+          "again_asks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["date", "asn"]
+            },
+            "description": "What printing it again with `as_before` 0 changes: `date` for a date or time of when it printed, `asn` for Paperless-ngx archive serial numbers."
+          },
+          "open": {
+            "type": "boolean",
+            "description": "Whether `/labeldesigner/api/history/{job_id}/label` opens it: a label made here, not an image of the webhook or Homebox."
+          }
+        }
+      },
+      "PrintAgain": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "printer": {
+                "type": "string",
+                "description": "The device or name of the printer, as `/labeldesigner/api/print` takes it. Default: the configured printer."
+              },
+              "model": {
+                "type": "string"
+              },
+              "as_before": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "1: the dates it printed with and the same archive serial numbers, e.g. for a label that tore; with them only the first labels as they were printed, at most as many as before, else it is refused with \"Print all its labels again, or choose the next number.\" 0: today's date and the next numbers. Default: 1."
+              },
+              "print_count": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Copies, as for `/labeldesigner/api/print`, e.g. 1 for one label that tore of 10. Default: the copies it was printed with."
+              },
+              "blanks": {
+                "$ref": "#/components/schemas/BlankValues",
+                "description": "Values for blanks in place of those it printed with, the others as printed, also as a JSON object in a JSON body. Not for an image of the webhook or Homebox."
+              },
+              "title": {
+                "type": "string",
+                "description": "The title of the job in the queue. Default: as before while it prints as before, else as it prints now, e.g., its first line."
+              },
+              "source": {
+                "type": "string",
+                "enum": ["designer", "mcp"],
+                "description": "Where the job comes from, as for `/labeldesigner/api/print`."
+              },
+              "high_res": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "Default: as set in the printer settings (`/labeldesigner/api/settings`) of the printer it prints on, not as it printed before."
+              },
+              "fast_printing": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "Default: as set in the printer settings."
+              },
+              "leaves_first": {
+                "type": "string",
+                "enum": ["top", "bottom"],
+                "description": "Default: as set in the printer settings."
+              },
+              "cut_once": {
+                "type": "integer",
+                "enum": [0, 1],
+                "description": "1 cuts only after the last label, like `cut` `last`. Without `cut` and `cut_once` it is cut as set in the printer settings."
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/Cutting"
+          }
+        ]
+      },
       "QueueNotFound": {
         "type": "object",
         "properties": {
@@ -3717,6 +4200,11 @@
             "enum": ["top", "bottom"],
             "description": "The end of the labels that leaves the printer first, else as the driver prints them."
           },
+          "save_energy": {
+            "type": "string",
+            "enum": ["0", "1"],
+            "description": "Of a printer whose connection on Bluetooth is kept between uses, e.g. a Niimbot B1 (`can_save_energy` in its status): `1` connects to it only to print or to ask it and closes the connection right after. It may then beep each time, and the label designer no longer asks it every 2 s. Default: `0`."
+          },
           "quality": {
             "type": "string",
             "enum": ["quality", "high", "fast"],
@@ -3764,6 +4252,11 @@
           "font_family": {
             "type": "string",
             "description": "A font family of the server or of the label designer's font menu, e.g. `DejaVu Sans` or `DejaVu Sans Mono`: new labels of the label designer start with it, lines of a request without a font are printed in its regular style. Empty: the configured default font."
+          },
+          "history": {
+            "type": "string",
+            "enum": ["", "0", "1"],
+            "description": "Whether labels printed are kept, see `/labeldesigner/api/history`. 0 removes those kept and keeps none from now on. Empty: kept."
           }
         }
       },
@@ -4082,20 +4575,16 @@
           },
           "margin_top": {
             "type": "integer",
-            "default": 24,
-            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm."
+            "description": "Margins in dots, at 300 dpi about 12 dots are 1 mm. Left out, 24 dots at the top and bottom and 35 at the sides of 62 mm wide labels, other labels get them in proportion to their width, e.g., 4 and 6 dots on the 9 mm tape of the VC-500W."
           },
           "margin_bottom": {
-            "type": "integer",
-            "default": 24
+            "type": "integer"
           },
           "margin_left": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "margin_right": {
-            "type": "integer",
-            "default": 35
+            "type": "integer"
           },
           "border_thickness": {
             "type": "integer",
@@ -4312,6 +4801,31 @@
           }
         }
       },
+      "TapeColors": {
+        "type": "object",
+        "description": "Colors of the loaded tape (`tape`) and of its print (`ink`) as the printer reports them, Brother P-touch printers for TZe tape, e.g. `yellow` and `black` for black on yellow tape. Both or neither: `{}` where the printer does not tell them, e.g. for the rolls of QL printers, and for tape it names no colors of, e.g. cleaning or stencil tape.",
+        "properties": {
+          "tape": {
+            "$ref": "#/components/schemas/TapeColor"
+          },
+          "ink": {
+            "$ref": "#/components/schemas/TapeColor"
+          }
+        }
+      },
+      "TapeColor": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "In plain words, e.g. `yellow`, `clear`, `satin gold`."
+          },
+          "hex": {
+            "type": "string",
+            "description": "As it is shown, `#rrggbb`, `#ffffff00` (transparent) for clear tape."
+          }
+        }
+      },
       "PrinterState": {
         "type": "object",
         "properties": {
@@ -4374,6 +4888,9 @@
             "type": ["boolean", "null"],
             "description": "Whether the loaded roll is a black and red one, as the QL-800 series reports it. `null` where the printer does not tell."
           },
+          "colors": {
+            "$ref": "#/components/schemas/TapeColors"
+          },
           "color_support": {
             "type": "boolean",
             "description": "The printer prints in color (VC-500W), the label designer then offers any color."
@@ -4433,8 +4950,16 @@
           },
           "feed": {
             "type": "string",
-            "enum": ["cut", "cut_paper", "cut_label", "label"],
-            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label. Missing where the printer offers none."
+            "enum": ["cut", "cut_paper", "cut_label", "label", "paper"],
+            "description": "What `/labeldesigner/api/feed` does on the printer with the tape it prints on: `cut` feeds a little paper and cuts it, `cut_paper` feeds the paper to the cutter and cuts it, `cut_label` feeds one empty label and cuts it, `label` feeds one empty label, `paper` feeds the paper to the tear bar of a printer without a cutter. Missing where the printer offers none."
+          },
+          "caps": {
+            "type": "object",
+            "description": "What the printer told of itself that differs from its model, e.g. an Epson receipt printer by the model name it tells: `cutter` false where it has no cutter, `lead_mm` the blank paper before each label that is cut. Missing where it told nothing.",
+            "properties": {
+              "cutter": {"type": "boolean"},
+              "lead_mm": {"type": "number"}
+            }
           },
           "queue": {
             "type": "object",
@@ -4494,7 +5019,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone, e.g. `192.168.1.50`, is asked over USB/IP first, then on the network."
           }
         },
         "required": ["address"]
@@ -4504,7 +5029,7 @@
         "properties": {
           "address": {
             "type": "string",
-            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone is taken as `tcp://<host>`."
+            "description": "The address of the printer, as for `PRINTERS`: `usbip://<host>[:<port>][/<bus ID>]`, `tcp://<host>`, `vc500w://<host>`, `usb://<vendor>:<product>[/<serial number>]` or `file:///dev/usb/lp<N>`. A host alone, e.g. `192.168.1.50`, is asked over USB/IP first, then on the network."
           },
           "name": {
             "type": "string",
@@ -4577,6 +5102,9 @@
           },
           "tape": {
             "$ref": "#/components/schemas/Tape"
+          },
+          "colors": {
+            "$ref": "#/components/schemas/TapeColors"
           },
           "listed": {
             "type": ["string", "null"],

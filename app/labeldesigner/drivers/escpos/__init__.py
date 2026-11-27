@@ -34,9 +34,33 @@ LABELS = tuple(Label(f'escpos{width}' + ('-180' if model == MODELS[1] else ''), 
                for model, widths in WIDTHS.items() for width, dots in widths.items())
 # Paper fed to the cutter after each label that is cut, blank before the
 # next one: on a TM-T20II a 15 mm label took 27 mm of paper, two of them
-# not cut between them 42 mm. Other printers have their head nearer to or
-# further from the cutter.
+# not cut between them 42 mm, 1.5 mm more than the 10.5 mm from its head
+# to its cutter. Other models get as much more than their distance.
 LEAD_MM = 12
+TM_T20II_CUTTER_MM = 10.5
+# Epson's models by the name they tell, and the distance from their head to
+# the cutter in mm after Epson's GS V reference; of a TM-P20 and a TM-P20II
+# to their tear bar
+CUTTERS = (
+    (re.compile(r'TM-J2[01]00'), 24.5),
+    (re.compile(r'TM-L90'), 14),
+    (re.compile(r'TM-m30III(-H)?|TM-m50II(-H)?'), 9.5),
+    (re.compile(r'TM-P20'), 7.9),
+    (re.compile(r'TM-P20II'), 8),
+    (re.compile(r'TM-P60(II)?'), 6.4),
+    (re.compile(r'TM-P80'), 7.8),
+    (re.compile(r'TM-P80II'), 9),
+    (re.compile(r'TM-T(20(II|III|IIIL|IV|IV-L|IV-SP|X|X-II)?|81III|82(II|III|IIIL|IV|IV-L|X|X-II)|83(III|IV)|100)'), 10.5),
+    (re.compile(r'TM-T70(II)?'), 13),
+    (re.compile(r'TM-T88(IV|V|VI|VII)'), 15),
+    (re.compile(r'TM-T90'), 14),
+)
+# Models without a cutter, and those whose peeler models have none, which
+# their type ID tells. Epson gives the type ID of every TM-P80 as without
+# one, also of its autocutter models, so it keeps cutting.
+NO_CUTTER = re.compile(r'TM-P20(II)?')
+PEELERS = re.compile(r'TM-P60(II)?')
+EPSON_NAME = re.compile(r'TM-[A-Za-z0-9-]+')
 # mm/s after Epson's data sheet of the TM-T20II, and the seconds a label
 # takes besides, to feed and cut it
 SPEED = 200
@@ -44,6 +68,11 @@ BESIDES = 0.5
 # Below the cutter, inside the printer
 NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
+
+
+# What each printer told of itself, by its lock key: its model name and
+# whether it has an autocutter, None where it did not tell
+_told: dict[str, tuple[str | None, bool | None]] = {}
 
 
 def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
@@ -137,6 +166,18 @@ class Escpos(Driver):
                     # The model as shown, without its maker
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
+    def device_capabilities(self, device, model):
+        name, autocutter = _told.get(devices.lock_key(device), (None, None))
+        if name is None:
+            return {}
+        own = {}
+        if (mm := next((mm for pattern, mm in CUTTERS if pattern.fullmatch(name)), None)) is not None:
+            own['lead_mm'] = round(mm + LEAD_MM - TM_T20II_CUTTER_MM, 1)
+        if NO_CUTTER.fullmatch(name) or PEELERS.fullmatch(name) and autocutter is False:
+            # The cut after a label only feeds it to the tear bar
+            own['cutter'] = False
+        return own
+
     def feed_kind(self, model, label_size):
         return 'cut_paper'
 
@@ -157,6 +198,8 @@ class Escpos(Driver):
                 return state
             with protocol.connect(device) as c:
                 errors = _problems(c, _answer_key(device))
+                if errors is not None:
+                    _note_model(c, key)
         if errors is None:
             return state
         state['errors'] = errors
@@ -195,6 +238,18 @@ class Escpos(Driver):
             logger.warning('Printing on %s failed: %s', device, e)
             return devices.not_sent(e)
         return ''
+
+
+def _note_model(c, key: str):
+    """Ask a printer that answered its status once for its model name and,
+    where that tells nothing, whether it has an autocutter."""
+    if key in _told:
+        return
+    name = protocol.model_name(c)
+    if name is None or not EPSON_NAME.fullmatch(name):
+        _told[key] = (None, None)
+        return
+    _told[key] = (name, protocol.has_autocutter(c) if PEELERS.fullmatch(name) else None)
 
 
 DRIVER = Escpos()

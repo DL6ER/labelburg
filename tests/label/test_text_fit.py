@@ -254,6 +254,7 @@ def test_distance_next_to_shrunk_text_is_found_quickly(tmp_path, monkeypatch, or
     client = make_client(tmp_path)
     data = {'label_size': '29x90', 'print_type': 'qrcode_text', 'orientation': orientation, 'code_text': 'https://example.com',
             'qrcode_size': qrcode_size, 'image_fit': '0', 'shrink_text': '1',
+            'margin_top': '24', 'margin_bottom': '24', 'margin_left': '35', 'margin_right': '35',
             'text': json.dumps([{'font': 'DejaVu Sans,Book', 'text': text, 'size': '120'}])}
     with client.application.test_request_context():
         label = create_label_from_request(data)
