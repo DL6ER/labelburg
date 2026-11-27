@@ -13,8 +13,13 @@ from .protocol import B1, B21_L2B, B21_V1, D11_V1, D110, D110M_V4, H1S, V4
 # from printer_models.ts
 WIKI = 'https://printers.niim.blue/hardware/'
 # The model IDs niimbluelib reads the lid of the other way round in a
-# heartbeat (src/packets/packet_parser.ts:268), see protocol.heartbeat()
-INVERTED_LID = (512, 514, 513, 2304, 1792, 3584, 5120, 2560, 3840, 4352, 272, 273, 274)
+# heartbeat (src/packets/packet_parser.ts:268), see protocol.heartbeat(), and
+# the D110_M's: byte 8 of the 10 it answers is 1 with the lid closed, with a
+# roll inside and without one (10 1f 00 69 00 69 32 46 01 04 and 10 20 00 97
+# 00 97 32 46 01 04), 0 with the lid open (10 22 00 54 00 54 32 46 00 04). It
+# tells no paper: the bytes that change without a roll change with an open
+# lid too.
+INVERTED_LID = (512, 514, 513, 2304, 1792, 3584, 5120, 2560, 3840, 4352, 272, 273, 274, 2320)
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,12 @@ def lid_inverted(model: Model, model_id: int | None) -> bool:
     if model_id is not None:
         return model_id in INVERTED_LID
     return all(model_id in INVERTED_LID for model_id in model.ids)
+
+
+def lid_differs(model: Model) -> bool:
+    """Whether some IDs of the model have their lid the other way round, e.g.
+    the D110's 2304 but not its 2305."""
+    return len({model_id in INVERTED_LID for model_id in model.ids}) > 1
 
 
 def sequence(model: Model, version: int) -> str:

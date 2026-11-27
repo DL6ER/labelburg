@@ -424,6 +424,9 @@ class Niimbot(Driver):
                         if named not in models.PRINTED:
                             return self._refused(device, model, named)
                         model = named.name
+                # Its model IDs read the lid either way round, e.g. a D110's
+                elif model in models.BY_NAME and models.lid_differs(models.BY_NAME[model]):
+                    _told(c, device)
                 told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])

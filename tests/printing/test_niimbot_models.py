@@ -80,7 +80,11 @@ def fake(monkeypatch):
 
 
 def told(monkeypatch, model_id):
+    """The printer tells model_id, and a heartbeat of 10 bytes with its lid
+    closed as niimbluelib reads one of that model ID."""
     monkeypatch.setitem(REPLIES, 0x40, (0x48, struct.pack('>H', model_id)))
+    lid = 1 if model_id in models.INVERTED_LID else 0
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes.fromhex('101f006900693246') + bytes([lid, 4])))
 
 
 def niimbluelib_packet(command, data):

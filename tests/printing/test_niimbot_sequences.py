@@ -505,7 +505,10 @@ def test_roll_query_not_supported_is_no_roll(monkeypatch):
     ('D101', '1f340095009500005401030001', False), ('D101', '1f340095009500005400030001', True),
     ('D11', '000000000000000000000000000000' + '01030001', False)])
 def test_lid_is_read_as_niimbluelib_reads_it(monkeypatch, model, beat, cover_open):
-    printer = Printer({0xdc: p(0xdd, bytes.fromhex(beat)), 0x1a: p(0x1b, [0])})
+    # A D110 is asked for its model ID, 2304 as that of dumps.ts:113 tells
+    # (test/virtual-client.test.ts:189)
+    model_id = models.BY_NAME[f'Niimbot/{model}'].ids[0]
+    printer = Printer({0x40: p(0x48, model_id.to_bytes(2)), 0xdc: p(0xdd, bytes.fromhex(beat)), 0x1a: p(0x1b, [0])})
     monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
     errors = niimbot.DRIVER.status(DEVICE, f'Niimbot/{model}')['errors']
     assert errors == (['The cover of the printer is open'] if cover_open else [])
@@ -533,6 +536,33 @@ def test_lid_of_a_printer_asked_for_its_model_is_read_by_its_model_id(monkeypatc
                                               'services': [protocol.NIIMBOT_SERVICE]}) == (DEVICE, 'Niimbot/B1')
     state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')
     assert (state['model'], state['errors']) == ('Niimbot/D110', errors)
+
+
+# Heartbeats of 10 bytes as dumps.ts:113, the lid byte 0 and 1
+BEATS_10 = [p(0xdd, bytes.fromhex('0fd700640064324d') + bytes([lid, 3])) for lid in (0, 1)]
+
+
+@pytest.mark.parametrize('model_id', [2305, 768, 769, 771, 775, 776, 777, 3586, 528, 2304])
+def test_lid_of_10_bytes_is_read_by_the_model_id_as_niimbluelib_reads_it(monkeypatch, model_id):
+    # packet_parser.ts:241-244 lidClosed with byte 8 at 0, the other way
+    # round for the IDs of :268, e.g. 2304
+    printer = Printer({0x40: p(0x48, model_id.to_bytes(2)), 0xdc: BEATS_10, 0x1a: p(0x1b, [0])})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': '', 'le': True,
+                                       'services': [protocol.NIIMBOT_SERVICE]})
+    opened = [bool(niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)['errors']) for _ in BEATS_10]
+    assert opened == ([True, False] if model_id == 2304 else [False, True])
+
+
+@pytest.mark.parametrize('model_id, lid', [(2304, 1), (2305, 0)])
+def test_d110_set_up_by_its_address_is_asked_for_its_model_id_for_its_lid(monkeypatch, model_id, lid):
+    # Its model IDs read the lid either way round
+    beat = p(0xdd, bytes.fromhex('0fd700640064324d') + bytes([lid, 3]))
+    printer = Printer({0x40: p(0x48, model_id.to_bytes(2)), 0xdc: beat, 0x1a: p(0x1b, [0])})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    for _ in range(2):
+        assert niimbot.DRIVER.status(DEVICE, 'Niimbot/D110', fresh=True)['errors'] == []
+    assert printer.sent.count(p(0x40, [8])) == 1
 
 
 def test_lid_of_a_printer_that_told_no_model_id_is_reversed_where_each_of_its_model_is():

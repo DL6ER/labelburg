@@ -50,12 +50,6 @@ ANSWERS = {0x01: 0x02, 0x03: 0x04, 0x13: 0x14, 0x15: 0x16, 0x20: 0x30, 0x21: 0x3
 ERROR = 0xdb
 # niimbluelib's In_NotSupported, an answer it takes as an error too
 NOT_SUPPORTED = 0x00
-# Byte 8 of the heartbeat of a D110_M: 1 with the lid closed, with a roll
-# inside and without one (10 1f 00 69 00 69 32 46 01 04 and 10 20 00 97 00 97
-# 32 46 01 04), 0 with the lid open (10 22 00 54 00 54 32 46 00 04). It tells
-# no paper: the bytes that change without a roll change with an open lid too.
-# niimbluelib reads the D110's 10 bytes so too, see models.INVERTED_LID.
-LID_OPEN = 0
 # Bytes 9 to 12 of the 13 a B1 answers: lid (1 open), battery, paper (1 none)
 # and whether it read the RFID tag of the roll, e.g. 1f f7 00 61 00 61 00 00
 # 4f 00 04 00 01 closed with a roll, 20 17 00 54 00 54 00 00 4f 01 04 01 00
@@ -237,10 +231,11 @@ def connect(device: str, le: bool = False) -> Connection:
 
 def heartbeat(c: Connection, send: bool = True, wait: float | None = None, inverted: bool = False) -> dict:
     """Whether the lid is open and the battery (0 to 4), from the 10 bytes
-    a D110_M answers, e.g. 10 1f 00 69 00 69 32 46 01 04, or the 13 a B1
-    answers or 19 as niimbluelib reads them, their lid the other way round
-    where inverted; the raw data if the length is another. send and wait as
-    for Connection.ask()."""
+    a D110_M answers, e.g. 10 1f 00 69 00 69 32 46 01 04, the 13 a B1
+    answers or 19, as niimbluelib reads them (packet_parser.ts:241-258): the
+    lid 0 when closed, the other way round where inverted, see
+    models.INVERTED_LID; the raw data if the length is another. send and
+    wait as for Connection.ask()."""
     try:
         data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf}, send, wait)
     except NoAnswer:
@@ -249,12 +244,10 @@ def heartbeat(c: Connection, send: bool = True, wait: float | None = None, inver
         # An error answer left from a job the printer stopped, e.g. with its
         # cover opened, comes before the answer
         data = c.ask(0xdc, b'\x01', {0xd9, 0xdd, 0xde, 0xdf}, send, wait)
-    if len(data) in (13, 19):
-        lid = len(data) - 4
-        return {'open': (data[lid] != 0) != inverted, 'battery': data[lid + 1]}
-    if len(data) != 10:
+    if len(data) not in (10, 13, 19):
         return {'raw': data.hex()}
-    return {'open': data[8] == LID_OPEN, 'battery': data[9]}
+    lid = 8 if len(data) == 10 else len(data) - 4
+    return {'open': (data[lid] != 0) != inverted, 'battery': data[lid + 1]}
 
 
 def model_id(c: Connection) -> int | None:
