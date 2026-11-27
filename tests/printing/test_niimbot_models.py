@@ -337,6 +337,14 @@ def test_d110_m_and_b1_keep_their_packets(fake, monkeypatch):
     assert packets[0x85][:6] == struct.pack('>H3BB', 0, 40, 40, 16, 8)
 
 
+def test_rows_of_up_to_6_dots_are_sent_by_their_places():
+    # niimbluelib's packet_generator.ts:442, more as bitmap
+    six, seven = ([1] * n + [0] * (96 - n) for n in (6, 7))
+    by_places, bitmap = protocol.image_packets([six, seven], 96)
+    assert by_places == protocol.packet(0x83, bytes([0, 0, 6, 0, 0, 1]) + struct.pack('>6H', *range(6)))
+    assert bitmap[2] == 0x85
+
+
 def test_rows_fit_into_three_thirds_or_are_counted_together():
     # As niimbluelib counts them: thirds of 5 bytes of 142 dots hold 15
     third = [1] * 40 + [0] * 80
@@ -491,7 +499,8 @@ def test_serial_port_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fa
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
-    assert fake.commands.count(0x40) == 1
+    # Not even looked at again
+    assert fake.commands.count(0x40) == 1 and serial_port == ['usb://0x3513:0x0003']
     told(monkeypatch, 785)
     monkeypatch.setattr(devices, 'looked', 1e12)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
