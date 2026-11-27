@@ -29,6 +29,45 @@ ERRORS_2 = {
     7: 'System error',
 }
 
+COVER_OPEN = 'The cover is open'
+NO_LABELS = 'There are no labels in the printer'
+SWITCHED_OFF = 'The printer is switched off'
+TOO_HOT = 'The printer is too hot, let it cool down'
+FAULT = 'The printer has a fault, switch it off and on again'
+# The printer keeps the job and prints it once the labels are fed
+FEED_ERROR = ('The labels cannot be fed. Feed them into the slot (or insert a new roll) and close the cover, '
+              'then the printer prints the waiting label by itself. Do not print it again')
+# The errors of ERRORS_1 and ERRORS_2 as the label designer shows them
+ERROR_MESSAGES = {
+    'No media when printing': NO_LABELS,
+    'End of media (die-cut size only)': 'The labels are used up',
+    'Tape cutter jam': 'The cutter is jammed',
+    'Weak batteries': 'The battery is low',
+    'Main unit in use (QL-560/650TD/1050)': 'The printer is in use',
+    'Printer turned off': SWITCHED_OFF,
+    'High-voltage adapter (not used)': 'The power adapter does not fit the printer',
+    "Fan doesn't work (QL-1050/1060N)": 'The fan of the printer does not work',
+    'Replace media error': 'The loaded labels do not fit the job',
+    'Expansion buffer full error': 'The memory of the printer is full',
+    'Transmission / Communication error': 'The label did not reach the printer completely',
+    'Communication buffer full error (not used)': 'The memory of the printer is full',
+    'Cover opened while printing (Except QL-500)': COVER_OPEN,
+    'Cancel key (not used) or Overheating error (PT-E550W/P750W/P710BT)': TOO_HOT,
+    'Media cannot be fed (also when the media end is detected)': FEED_ERROR,
+    'System error': FAULT,
+}
+UNKNOWN_ERROR = 'The printer reports an error'
+# Errors that say what to do, or go away once fixed, e.g. the cover closed
+SAY_WHAT_TO_DO = {COVER_OPEN, SWITCHED_OFF, TOO_HOT, FEED_ERROR, FAULT}
+# Errors after which the printer keeps the job and prints it once they are
+# fixed, with what to tell when the job is given up
+KEEPS_JOB = {'Cover opened while printing (Except QL-500)': 'The label prints once the cover is closed, do not print it again'}
+
+
+def plain_errors(errors: list) -> list:
+    """The errors of a status in plain words, each once."""
+    return list(dict.fromkeys(ERROR_MESSAGES.get(error, UNKNOWN_ERROR) for error in errors))
+
 MEDIA_TYPES = {
     0x00: ('No media', 'No media'),
     0x01: ('Laminated tape', 'TZe'),

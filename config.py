@@ -98,6 +98,10 @@ class Config(object):
     # Most labels an AI assistant may print with one call to the MCP endpoint
     MCP_MAX_COUNT = 10
 
+    # A token the MCP endpoint then asks for as "Authorization: Bearer
+    # <token>", e.g. the one Home Assistant gets from the discovery of an app
+    MCP_TOKEN = None
+
     # Maximum size of a request (uploaded images, JSON payloads) in bytes
     MAX_CONTENT_LENGTH = 32 * 1024 * 1024
 

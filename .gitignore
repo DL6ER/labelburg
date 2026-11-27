@@ -120,5 +120,9 @@ venv.bak/
 # Simulated label output
 simulated_labels/
 
+# The print queue and the printed labels of a server run from here
+labels/.print-queue/
+labels/.print-history/
+
 # The project website, built by website/build.py
 _site/

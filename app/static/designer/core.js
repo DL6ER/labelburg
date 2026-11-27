@@ -106,7 +106,8 @@ export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
 const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
-export const printerCaps = (p = S.printer) => capsOf(p && p.model);
+// With what the printer told of itself, e.g. a receipt printer without a cutter
+export const printerCaps = (p = S.printer) => p && p.caps ? Object.assign({}, capsOf(p.model), p.caps) : capsOf(p && p.model);
 export const modelOnly = model => model === 'Unknown' ? '' : capsOf(model).model_shown || (model || '').split('/').pop();
 export const printerName = p => [capsOf(p && p.model).vendor, p && modelOnly(p.model)].filter(Boolean).join(' ');
 export const printerLabel = p => (p && (p.name || printerName(p))) || 'Printer';
@@ -354,7 +355,12 @@ export function blankRequest(design, values) {
         if (f.type === 'date' && !f.format && !S.settings.date_format) f.format = browserDateFormat();
         fields[name] = f;
         const v = values ? values[name] : undefined;
-        if (v !== undefined) blanks[name] = String(v);
+        if (v === undefined) continue;
+        // A date still at its start, e.g. today or 5 days from today, goes as
+        // that start: the server dates it when it prints, a print again asks
+        const saved = design.blanks || {};
+        if (f.type === 'date' && String(v) === startOf({ design }, name)) { if (name in saved) blanks[name] = String(saved[name]); }
+        else blanks[name] = String(v);
     }
     return { blanks, fields };
 }
@@ -392,12 +398,13 @@ export const CUTS = [['each', 'After each label'], ['last', 'After the last labe
 export const CUT_KEYS = ['cut', 'half_cut', 'chain'];
 export const sizeCaps = (id, p = S.printer) => {
     const models = SIZES[id] ? SIZES[id].models : [], model = p && p.model;
-    return capsOf(models.includes(model) ? model : models.find(m => !noCutter(capsOf(m))) || models[0]);
+    return models.includes(model) ? printerCaps(p) : capsOf(models.find(m => !noCutter(capsOf(m))) || models[0]);
 };
 export const neverWhy = k => k.never_cut || '';
 export const noCutter = k => k.cutter === false;
 export const noCutterWhy = k => k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
-const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: 'none' })
+// Without a cutter, one that must not keep the last label inside feeds it to the tear bar
+const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: neverWhy(k) ? 'last' : 'none' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 export const kept = (p = S.printer) => (p && p.settings) || {};
 export const printerCut = (p = S.printer) => { const k = kept(p); return usableCut({ cut: k.cut || 'each', half_cut: k.half_cut || '1', chain: k.chain || '0' }, printerCaps(p)); };
@@ -571,7 +578,7 @@ export async function preview(design, values, copies = 1, perCopy = 0, total = 0
     }
     const shown = JSON.stringify(Object.assign({}, asked, { image: design.image ? imageKey(design.image) : null, more_images: undefined },
         Object.fromEntries(CUT_KEYS.map(k => [k, undefined]))));
-    const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && !(name in blanks.blanks));
+    const dated = shown.includes('{{datetime') || Object.entries(blanks.fields).some(([name, f]) => f.type === 'date' && (!(name in blanks.blanks) || DATE_OFFSET_RE.test(blanks.blanks[name])));
     // Several printers can share a path, e.g. simulators of other models
     const colors = onTapeColors ? shownColors() : '';
     const key = JSON.stringify([shown, blanks, S.printer && S.printer.path, S.printer && S.printer.model, dated ? Math.floor(Date.now() / 60000) : 0, S.settings.date_format, S.settings.date_language,
@@ -917,7 +924,8 @@ export function printerState(p) {
     if (!p) return { cls: 'off', text: 'No printer' };
     if (p.errors && p.errors.length) return { cls: 'bad', text: p.errors[0] };
     if (p.status_type === 'Asking the printer') return { cls: 'off', text: 'Asking the printer...' };
-    if (p.job) return { cls: '', text: jobText(p.job) };
+    // E.g. waiting for the cover to be closed
+    if (p.job) return { cls: p.job.waiting ? 'bad' : '', text: jobText(p.job) };
     if (p.status_type === 'Printing') return { cls: '', text: 'Printing' };
     if (isDemo(p)) return { cls: '', text: 'Ready, prints nothing' };
     return { cls: '', text: 'Ready' };
@@ -1032,6 +1040,9 @@ export const savedAs = d => `as ${sizeName(d.label_size)} label`;
 // --- Printing ----------------------------------------------------------------
 
 export function entryName(e) {
+    if (e.told) return e.told;
+    // Printed again from the list of the server, without its label here
+    if (!e.design) return e.title || 'Label';
     const blanks = blanksOf(e.design);
     const first = blanks.length ? (e.values || {})[blanks[0]] : '';
     if (first) return first;
@@ -1065,29 +1076,44 @@ export function untold(entry) {
 // Sent one after the other per printer, so that its queue gets them in the
 // order they were printed; a slow printer holds back no other
 const sending = new Map();
-// job: { title, design, values, copies, source }. Kept in the history of
-// this browser, Settings list it under Printed labels. Printed on printer,
+// job: { title, design, values, copies, source, name }, name to name it
+// where the label has no text of its own. Kept in the history of
+// this browser for its search and the values of blanks. Printed on printer,
 // the one chosen unless another is given. onAccepted(entry) once the server
 // took it, onDone(entry) with its outcome.
 export async function printJob(job, onDone, printer = S.printer, onAccepted = null) {
     job = Object.assign({}, job, { design: clone(job.design) });
-    const behind = lineBusy(printer), path = (printer && printer.path) || '';
-    const entry = {
-        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), title: job.title,
-        design: clone(job.design), values: Object.assign({}, job.values || {}), copies: job.copies || 1,
-        source: job.source || null, printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path, state: 'printing', message: ''
-    };
+    const entry = Object.assign(newEntry(printer, job.copies || 1), {
+        title: job.title, design: clone(job.design), values: Object.assign({}, job.values || {}), source: job.source || null
+    });
     S.history.unshift(entry);
     saveHistory();
+    return sendJob(entry, printer, () => {
+        const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
+        const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
+        // Named by the server by its first line or code as printed, a label
+        // of neither by job.name, else its title once it has one
+        const worded = (job.design.text || []).some(l => String(l.text || '').trim()) || (withCode(job.design) && String(job.design.code_text || '').trim());
+        const name = job.name || (!worded && job.title !== 'New label' ? job.title : '');
+        if (name) form.set('title', name);
+        form.set('source', 'designer');
+        return ['/print', form];
+    }, onDone, onAccepted);
+}
+const newEntry = (printer, copies) => ({
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), time: Date.now(), copies,
+    printer: printer ? printer.model : '', printerName: (printer && printer.name) || '', path: (printer && printer.path) || '', state: 'printing', message: ''
+});
+// Sends the request request() gives as [path, body] for the job of entry
+// and follows it until its outcome is known
+async function sendJob(entry, printer, request, onDone, onAccepted = null) {
+    const behind = lineBusy(printer), path = entry.path;
     const printing = toast(`Printing ${entry.copies} ${entry.copies === 1 ? 'label' : 'labels'}...`, null, 120000);
     const shown = () => !!S.printer && S.printer.path === path;
     QUEUE.follow();
     try {
-        const placedOn = printer === S.printer ? onTape(job.design) : onTapeOf(job.design, printer);
-        const form = formFor(placedOn, entry.copies, true, job.values, false, undefined, printer);
-        form.set('title', entryName(entry));
-        form.set('source', 'designer');
-        const sent = (sending.get(path) || Promise.resolve()).then(() => post('/print', form));
+        const [to, form] = request();
+        const sent = (sending.get(path) || Promise.resolve()).then(() => post(to, form));
         const settled = sent.catch(() => { }).then(() => { if (sending.get(path) === settled) sending.delete(path); });
         sending.set(path, settled);
         const r = await sent;
@@ -1095,6 +1121,8 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
         try { data = await r.json(); } catch (e) { }
         // The labels the server counted, {{total}} in the previews of the entry
         if (r.ok && data.labels > 0) entry.labels = data.labels;
+        // Named by the server as the list of the labels printed names it
+        if (r.ok && data.title) entry.told = data.title;
         if (!r.ok || data.success === false) {
             entry.state = 'failed';
             entry.message = data.message || ('The printer answered ' + r.status);
@@ -1108,7 +1136,8 @@ export async function printJob(job, onDone, printer = S.printer, onAccepted = nu
             else if (shown()) QUEUE.read().then(() => hideToast(printing));
             await followJob(entry);
         } else {
-            entry.state = 'printed';
+            // Printed already, e.g. on the demo printer: its job names it in the printed labels
+            Object.assign(entry, { state: 'printed' }, data.job ? { job: data.job, start: data.start } : {});
             if (onAccepted) onAccepted(entry);
         }
     } catch (e) {
@@ -1177,6 +1206,7 @@ async function askJob(entry) {
             else endJob(entry, 'failed', 'The label designer was restarted before it printed');
         } else if (data.state === 'printed') endJob(entry, 'printed');
         else if (data.state === 'failed' || data.state === 'removed') endJob(entry, 'failed', data.message || 'It was not printed');
+        else if (data.state === 'unknown') endJob(entry, 'unknown', data.message);
         else if (data.state) sawJob(entry, data.state);
         else if (entry.seen === 'failed') endJob(entry, 'failed', 'It was not printed');
     } catch (e) {
@@ -1237,9 +1267,77 @@ export function announcePrint(entry, again = () => printAgain(entry)) {
     else if (entry.state === 'unknown') toast(`Maybe not printed: ${entry.message}`, { label: 'Print again', run: again }, 10000);
     else toast(`Not printed: ${entry.message}`, { label: 'Try again', run: again }, 10000);
 }
+// --- Labels printed, as the server keeps them ------------------------------
+
+// The newest ones, those before the entry before for the next ones;
+// enabled is false where they are not kept
+export async function loadPrinted(before = '') {
+    const r = await reached(fetch(`${API}/history?limit=60${before ? '&before=' + encodeURIComponent(before) : ''}`));
+    if (!r.ok) throw new Error('The printed labels could not be loaded');
+    return r.json();
+}
+// What a label printed is listed with: its labels, when, where and from
+export const keptSub = h => h.state === 'printed' ? [`${h.labels} x`, fmtTime(Date.parse(h.time)), h.printer_name, h.from && `from ${h.from}`].filter(Boolean).join(', ')
+    : `${h.state === 'unknown' ? 'Maybe not printed' : 'Not printed'}: ${h.message}`;
+// A label printed, printed again on the printer chosen. Where that changes
+// its date or Paperless number, it asks whether they stay. With the label
+// before it is printed again (opts): its copies, the values of its blanks,
+// the label to tell its dates and ask(same, next, choose) to ask elsewhere
+// than in a dialog.
+export const IMAGE_GONE = 'Its image is no longer kept';
+export function printKeptAgain(h, onDone = announceKept, opts = {}) {
+    if (!h.again) { toast(IMAGE_GONE); return Promise.resolve(null); }
+    const asks = h.again_asks || [], number = asks.includes('asn');
+    // A date set by hand in a date blank is printed as set; the question is
+    // for one that shows the day it prints, or a date of the text
+    const set = opts.design ? blanksOf(opts.design).filter(name => fieldType(opts, name) === 'date' && name in (opts.blanks || {}) && !DATE_OFFSET_RE.test(opts.blanks[name])) : [];
+    const template = !opts.design || /\{\{datetime/.test(JSON.stringify(opts.design.text) + (opts.design.code_text || ''));
+    const date = asks.includes('date') && (template || (h.date_blanks || []).some(name => !set.includes(name)));
+    if (!date && !number) return sendAgain(h, true, onDone, opts);
+    const [same, next] = date && number ? ['Same date and number', "Today's date, next number"] : date ? ['Same date', "Today's date"] : ['Same number', 'Next number'];
+    return new Promise(resolve => {
+        const choose = asBefore => resolve(asBefore === null ? null : sendAgain(h, asBefore, onDone, opts));
+        if (opts.ask) { opts.ask(same, next, choose); return; }
+        openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="Print again">
+            <div class="dialog-h"><h2>Print again</h2><span class="sp"></span><button class="iconbtn" type="button" data-close aria-label="Close">${icon('x', '')}</button></div>
+            <div class="acts"><button class="btn" type="button" id="againNext">${esc(next)}</button><button class="btn primary" type="button" id="againSame">${esc(same)}</button></div></div>`, 'center', () => choose(null));
+        $('#againSame').onclick = () => { closeLayer(true); choose(true); };
+        $('#againNext').onclick = () => { closeLayer(true); choose(false); };
+        $('#againSame').focus();
+    });
+}
+function sendAgain(h, asBefore, onDone, opts = {}) {
+    const printer = S.printer, entry = Object.assign(newEntry(printer, opts.copies || h.labels), { title: h.title });
+    return sendJob(entry, printer, () => {
+        const form = new URLSearchParams({ as_before: asBefore ? '1' : '0', source: 'designer' });
+        if (printer && printer.path) form.set('printer', printer.path);
+        if (printer && printer.model) form.set('model', printer.model);
+        if (opts.copies) form.set('print_count', String(opts.copies));
+        if (opts.blanks) form.set('blanks', JSON.stringify(opts.blanks));
+        return [`/history/${encodeURIComponent(h.id)}/print`, form];
+    }, entry => onDone(entry, h), opts.accepted);
+}
+export function announceKept(entry, h) {
+    announcePrint(entry, () => printKeptAgain(h));
+}
+// A label printed as the editor opens it, with the values it was printed with,
+// as the saved label it was printed from: told by the print of this browser,
+// else by the name of a saved label printed by name, e.g., by Grocy. With the
+// time its dates were printed for and the days its date blanks showed then.
+export async function keptLabel(h) {
+    const r = await reached(fetch(`${API}/history/${encodeURIComponent(h.id)}/label`));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The label could not be loaded');
+    const raw = await r.json(), design = normalize(raw);
+    const own = S.history.find(x => x.job === h.id), saved = typeof raw.name === 'string' && S.saved.find(x => x.name === raw.name);
+    const origin = own && own.source && own.source.kind === 'saved' ? own.source : saved ? originOf('saved', saved.name, saved.mtime) : null;
+    return { title: raw.title, design, values: Object.assign({}, design.blanks || {}), origin, printedFor: raw.printed_for, printedDates: raw.printed_dates || {}, dates: raw.dates || {} };
+}
+
+// Whether name shows value as words of their own
+const shows = (name, value) => new RegExp(`(^|[^\\p{L}\\p{N}])${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'u').test(name);
 // What a label printed before is listed with: its copies, the values
 // printed, when
-export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && String(v) !== entryName(h)), fmtTime(h.time)].join(', ');
+export const printedSub = h => h.state === 'failed' ? `Not printed: ${h.message}` : h.state === 'unknown' ? `Maybe not printed: ${h.message}` : [`${h.copies} x`, ...Object.values(h.values || {}).filter(v => String(v).trim() && !shows(entryName(h), String(v).trim())), fmtTime(h.time)].join(', ');
 
 // --- Overlays ----------------------------------------------------------------
 

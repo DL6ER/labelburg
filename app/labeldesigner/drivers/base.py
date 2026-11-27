@@ -78,6 +78,14 @@ class Driver:
     reports_tape: bool = True
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
+    # (vendor, product) of its printers on USB that are reached through their
+    # serial interface, not a printer interface, see backends.UsbSerialPrinter
+    usb_serial_ids: tuple = ()
+    # Its printers on Bluetooth by their names and services, with their models,
+    # and whether they are on Bluetooth LE or classic, see found_on_bluetooth()
+    bluetooth_names: dict = {}
+    bluetooth_services: dict = {}
+    bluetooth_kind: str = 'le'
 
     def model_of(self, device: str, device_id: str | None = None) -> str | None:
         """The model of a printer known by its address or device ID alone,
@@ -142,6 +150,12 @@ class Driver:
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False}
+
+    def device_capabilities(self, device: str, model: str) -> dict:
+        """What the printer at device told of itself that differs from the
+        capabilities() of its model, e.g. that it has no cutter, empty where
+        it told nothing."""
+        return {}
 
     def calibration_kind(self, model: str, label_size: str) -> str:
         """The calibration label of the model for the label size: narrow,
@@ -222,9 +236,20 @@ class Driver:
         return None
 
     def found_on_bluetooth(self, device: dict) -> tuple[str, str] | None:
-        """(address, model) of a printer of this driver on Bluetooth LE as
-        bluetooth.discover() found it, None for other devices."""
-        return None
+        """(address, model) of a printer of this driver on Bluetooth as
+        bluetooth.discover() found it, None for other devices. By default one
+        on the Bluetooth of bluetooth_kind, 'le' or 'classic', whose name a
+        regular expression of bluetooth_names matches, else that advertises
+        a 128-bit service UUID of bluetooth_services. Classic Bluetooth is
+        searched only once a driver names printers there, see
+        drivers.classic_bluetooth()."""
+        if not device.get('classic' if self.bluetooth_kind == 'classic' else 'le'):
+            return None
+        name = device.get('name', '')
+        model = next((model for pattern, model in self.bluetooth_names.items() if re.fullmatch(pattern, name)), None)
+        if model is None:
+            model = next((model for service, model in self.bluetooth_services.items() if service in device.get('services', [])), None)
+        return (f"bt://{device['address']}", model) if model else None
 
     def network_device(self, address: str) -> str:
         """The address of a printer found by its MAC address."""

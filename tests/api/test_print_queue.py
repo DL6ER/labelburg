@@ -168,10 +168,13 @@ def test_the_title_of_a_job(client, tmp_path, monkeypatch):
     assert title('print', data=dict(EXAMPLE_FORMDATA, text=lines, title='x' * 300)) == 'x' * 200
     assert title('print', data=dict(EXAMPLE_FORMDATA, text=lines)) == 'Spices'
     assert title('print', data=EXAMPLE_FORMDATA) == 'Label'
-    # A saved label without text by the name it is saved under
-    for saved, name in (({'name': 'Rack', 'title': 'Gewürzregal'}, 'Gewürzregal'), ({'name': 'Shelf'}, 'Shelf')):
-        assert client.post(f'{API}/repository/save', json={
-            **saved, 'label_size': '62', 'print_type': 'qrcode', 'code_text': 'x', 'text': []}).status_code == 200
+    # A saved label without text by its code as printed, one of a picture alone by the name it is saved under
+    picture = io.BytesIO()
+    Image.new('L', (40, 20), 0).save(picture, 'PNG')
+    picture = {'print_type': 'image', 'image_data': base64.b64encode(picture.getvalue()).decode(), 'image_mime': 'image/png'}
+    for saved, name in (({'name': 'Rack', 'title': 'Gewürzregal', 'print_type': 'qrcode', 'code_text': 'x'}, 'x'),
+                        ({'name': 'Rack2', 'title': 'Gewürzregal', **picture}, 'Gewürzregal'), ({'name': 'Shelf', **picture}, 'Shelf')):
+        assert client.post(f'{API}/repository/save', json={**saved, 'label_size': '62', 'text': []}).status_code == 200
         assert title('repository/print', json={'name': f'{saved["name"]}.json'}) == name
     assert title('repository/print', json={'name': 'Shelf.json', 'title': 'Pantry'}) == 'Pantry'
 
@@ -220,10 +223,11 @@ def test_the_title_is_the_first_line_of_the_first_label(client, tmp_path):
             response = client.post(f'{API}/repository/print', json=dict(values, name='Jar.json', printer='simulation'))
         assert response.status_code == 200, response.get_json()
         return _job(response).title
-    # With its blanks filled in, the counter and the archive serial number of the first copy
+    # With its blanks filled in, also a saved label printed by name, the counter and the archive serial number of the first copy
     assert client.post(f'{API}/repository/save', json={
         'name': 'Jar', 'label_size': '62', 'text': [{'text': '{{blank:Content}}', 'size': '40'}]}).status_code == 200
     assert title([], path='repository', blanks={'Content': 'Chili'}) == 'Chili'
+    assert title(['{{blank:Content}}'], blanks=json.dumps({'Content': 'Chili'})) == 'Chili'
     assert title(['Box {{counter:8}}'], print_count='3') == 'Box 8'
     assert title(['ASN{{asn:5}}']) == 'ASN00001'
     # Without its icons, the first of its lines, spaces as one

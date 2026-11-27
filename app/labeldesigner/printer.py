@@ -50,10 +50,16 @@ DISCOVERY_INTERVAL = 60
 # first. The monotonic clock starts at boot, so a time of 0 would count as
 # recent in a container started less than a minute ago.
 _discovered = None
+# A printer found before stays for FOUND_KEPT seconds after the last round
+# that found it, e.g. a VC-500W busy with a label misses a round: its address
+# -> (time.monotonic() it was last found, (address, model))
+FOUND_KEPT = 3 * DISCOVERY_INTERVAL
+_found = {}
 # Printers on Bluetooth LE, e.g. a Niimbot B1. Searched for in the background
 # for BLUETOOTH_SEARCH seconds, first at the first detection, then when the
 # label designer looks for printers, at most every BLUETOOTH_INTERVAL
-# seconds: the search takes the radio. Kept while the server runs, by address
+# seconds: the search takes the radio. Classic Bluetooth only when looking,
+# see drivers.classic_bluetooth(). Kept while the server runs, by address
 # with their model, since a printer connected stops advertising.
 BLUETOOTH_DISCOVERY = True
 BLUETOOTH_SEARCH = 5.0
@@ -303,7 +309,8 @@ def found_devices() -> set[str]:
 def _discovered_label_printers() -> list[tuple[str, str]]:
     """Label printers that announce themselves on the network, as (address,
     model), e.g. tcp://<address>[:<port>] or vc500w://<address>. Kept for
-    DISCOVERY_INTERVAL."""
+    DISCOVERY_INTERVAL, each one found also up to FOUND_KEPT after it was
+    last found."""
     global _discovered
     if not NETWORK_DISCOVERY:
         return []
@@ -319,14 +326,23 @@ def _discovered_label_printers() -> list[tuple[str, str]]:
         found = next((found for driver in drivers.DRIVERS if (found := driver.announced(service))), None)
         if found and all(urlsplit(known).hostname != service['address'] for known, _ in printers):
             printers.append(found)
-    _discovered = (time.monotonic(), printers)
+    now = time.monotonic()
+    _found.update((found[0], (now, found)) for found in printers)
+    for address, (seen, found) in list(_found.items()):
+        if now - seen > FOUND_KEPT:
+            # Another status request searching meanwhile may have dropped it
+            _found.pop(address, None)
+        elif all(urlsplit(known).hostname != urlsplit(address).hostname for known, _ in printers):
+            printers.append(found)
+    _discovered = (now, printers)
     return printers
 
 
-def _search_bluetooth():
+def _search_bluetooth(classic: bool = False):
     global _last_scan_ts
     found = {}
-    for device in bluetooth.discover(BLUETOOTH_SEARCH):
+    nearby = bluetooth.discover(BLUETOOTH_SEARCH, classic=True) if classic else bluetooth.discover(BLUETOOTH_SEARCH)
+    for device in nearby:
         printer = next((printer for driver in drivers.DRIVERS if (printer := driver.found_on_bluetooth(device))), None)
         if printer:
             found[printer[0]] = printer[1]
@@ -341,17 +357,19 @@ def bluetooth_searching() -> bool:
 
 
 def _bluetooth_printers() -> list[tuple[str, str]]:
-    """The printers found on Bluetooth LE as (address, model), a search
+    """The printers found on Bluetooth as (address, model), a search
     started where one is due, see BLUETOOTH_INTERVAL."""
     global _bluetooth_searched, _bluetooth_thread
     if not BLUETOOTH_DISCOVERY:
         return []
     with _bluetooth_lock:
         now = time.monotonic()
-        due = _bluetooth_searched is None or (devices.looked > _bluetooth_searched and now - _bluetooth_searched >= BLUETOOTH_INTERVAL)
+        looked = devices.looked > (_bluetooth_searched or 0.0)
+        due = _bluetooth_searched is None or (looked and now - _bluetooth_searched >= BLUETOOTH_INTERVAL)
         if due and not bluetooth_searching():
             _bluetooth_searched = now
-            _bluetooth_thread = threading.Thread(target=_search_bluetooth, daemon=True)
+            classic = looked and drivers.classic_bluetooth()
+            _bluetooth_thread = threading.Thread(target=_search_bluetooth, args=(classic,), daemon=True)
             _bluetooth_thread.start()
         return list(_bluetooth.items())
 

@@ -1,13 +1,13 @@
 // The Settings tab: the printers with what the server keeps for each of
-// them, what it keeps for labels, the labels printed here, the
-// addresses for other programs and about this page. Shown at #settings/<part>.
+// them, what it keeps for labels, the labels printed, the addresses for
+// other programs and about this page. Shown at #settings/<part>.
 
 import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
-    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, entryName, preview, fmtTime, browserDateFormat, dateCodeExamples, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, NO_IMAGE, printAgain, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE, SOURCE,
-    withColors
+    neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, browserDateFormat, dateCodeExamples, settingsSaves,
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE, SOURCE,
+    openLayer, closeLayer, loadPrinted, keptSub, printKeptAgain, IMAGE_GONE, keptLabel, withColors
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
 import { fontButton, openFontMenu } from './fontmenu.js';
@@ -54,6 +54,9 @@ export function renderSettings(el, hooks) {
         <nav class="set-nav" aria-label="Settings">${PARTS.map(([id, name, i]) =>
             `<a href="#settings/${esc(id)}" data-part="${esc(id)}"${id === part ? ' class="on" aria-current="page"' : ''}>${ic(i)}<span>${esc(name)}</span></a>`).join('')}</nav>
         <div class="set-main"><div class="set-inner" id="setPart" data-part="${esc(part)}"></div></div></div>`;
+    // On a phone the parts are a row of tabs wider than the screen: the one shown in sight
+    const nav = $('.set-nav', el), on = $('.set-nav .on', el);
+    if (on) nav.scrollLeft += on.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - on.offsetWidth) / 2;
     (Object.hasOwn(DRAW, part) ? DRAW[part] : DRAW.printers)($('#setPart'));
 }
 
@@ -152,6 +155,7 @@ const FEEDS = {
     cut_paper: ['Feed and cut', '', 'Feeding and cutting...'],
     cut_label: ['Feed one label', 'Cuts off the last label, uses one empty label.', 'Feeding one label...'],
     label: ['Feed one label', 'Feeds one empty label.', 'Feeding one label...'],
+    paper: ['Feed paper', 'Feeds the last label to the tear bar.', 'Feeding the paper...'],
 };
 // Printers feeding their paper, by path: one at a time, a second click would feed again
 const feeding = new Set();
@@ -159,7 +163,7 @@ function feedHTML(p) {
     if (!Object.hasOwn(FEEDS, p.feed || '')) return '';
     const [name, hint] = FEEDS[p.feed];
     const off = unreachable(p) ? ' disabled title="The printer cannot be reached"' : feeding.has(p.path) ? ' disabled' : '';
-    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(p.feed === 'label' ? 'down' : 'scissors')}${esc(name)}</button>
+    return `<button class="btn soft sm" type="button" data-feed${off}>${icon(['label', 'paper'].includes(p.feed) ? 'down' : 'scissors')}${esc(name)}</button>
         ${hint ? `<small class="muted">${esc(hint)}</small>` : ''}`;
 }
 
@@ -193,7 +197,7 @@ async function feed(p) {
 }
 
 function cuttingHTML(p) {
-    const caps = capsOf(p.model), c = printerCut(p);
+    const caps = printerCaps(p), c = printerCut(p);
     if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
@@ -285,8 +289,6 @@ function bindCards(box) {
 // Printers the search does not find, added by their address. The server
 // asks what answers there before it adds anything, ADD_PRINTERS of its
 // configuration says where it may look.
-const EXAMPLES = [['usbip://192.168.1.50', 'USB printer on another device'], ['tcp://192.168.1.60', 'Network printer'],
-    ['vc500w://192.168.1.70', 'VC-500W']];
 const adding = { mode: '', allows: '', unused: [], address: '', name: '', asking: false, found: null, error: '' };
 const removeHTML = p => p.added ? `<button class="btn ghost sm" type="button" data-remove title="Remove the printer added here">${icon('trash')}Remove</button>` : '';
 
@@ -332,9 +334,8 @@ function addHTML() {
     return head + `<div class="set-add">
         <label class="k" for="addAddress">Address</label>
         <div class="row"><input class="in set-address" id="addAddress" autocomplete="off" autocapitalize="off" spellcheck="false"
-            placeholder="usbip://192.168.1.50" value="${esc(adding.address)}"${adding.asking ? ' disabled' : ''}>
+            placeholder="e.g. 192.168.1.50" value="${esc(adding.address)}"${adding.asking ? ' disabled' : ''}>
             <button class="btn soft" type="button" id="addAsk"${adding.asking ? ' disabled' : ''}>${icon('search')}${adding.asking ? 'Asking the printer...' : 'Identify'}</button></div>
-        <div class="set-examples">${EXAMPLES.map(([v, n]) => `<button type="button" class="set-ex" data-example="${esc(v)}">${esc(n)} <code>${esc(v)}</code></button>`).join('')}</div>
         ${found}
         ${adding.error ? `<small class="set-bad" role="alert">${esc(adding.error)}</small>` : allows}
     </div>`;
@@ -378,9 +379,6 @@ function bindAdd(box) {
         else if (b.id === 'addSave') save();
         else if (b.id === 'addCancel') {
             Object.assign(adding, { address: '', name: '', found: null, error: '' });
-            drawAdd('#addAddress');
-        } else if (b.dataset.example) {
-            Object.assign(adding, { address: b.dataset.example.replace(/\/\/.*/, '//'), found: null, error: '' });
             drawAdd('#addAddress');
         } else if (b.dataset.remove) removePrinter(adding.unused.find(p => p.address === b.dataset.remove));
     });
@@ -502,11 +500,10 @@ function testLabel(p) {
 }
 
 // The list of printed labels shows the new one too
-function announce(entry, again = () => reprint(entry)) {
+function announce(entry, again) {
     announcePrint(entry, again);
     if ($('#setHist')) drawHistory();
 }
-const reprint = h => printAgain(h, announce);
 
 // --- Labels -----------------------------------------------------------------------
 
@@ -514,9 +511,9 @@ const formatDate = (iso, fmt) => { const [y, m, d] = iso.split('-'); return fmt.
 const DATES = () => [['', 'Like the browser: ' + formatDate('2026-11-01', browserDateFormat())], ...C.date_formats.map(f => [f, formatDate('2026-11-01', f)])];
 
 // Shown at once, then kept on the server, as the printer settings
-async function keepLabels(box, changes, told) {
+async function keepLabels(box, changes, told, draw = DRAW.labels) {
     const saving = saveLabelSettings(changes);
-    DRAW.labels(box);
+    draw(box);
     let text;
     try {
         await saving;
@@ -524,7 +521,7 @@ async function keepLabels(box, changes, told) {
     } catch (e) {
         text = e.message;
     }
-    if (box.isConnected) DRAW.labels(box);
+    if (box.isConnected) draw(box);
     toast(text);
 }
 
@@ -566,64 +563,81 @@ DRAW.labels = box => {
 // --- Printed labels -----------------------------------------------------------------
 
 DRAW.queue = queuePage;
+// The labels listed, as the server told them
+let printed = [];
 DRAW.printed = box => {
-    box.innerHTML = `<header class="set-h"><div class="grow"><h2>Printed labels</h2><p class="muted">The labels printed in this browser, newest first.</p></div></header>
-        <section class="set-card set-hist" id="setHist"></section>`;
+    const on = S.settings.history !== '0';
+    box.innerHTML = `<header class="set-h"><div class="grow"><h2>Printed labels</h2><p class="muted">From every device and program.</p></div></header>
+        <section class="set-card set-hist" id="setHist"></section>
+        <section class="set-card"><div class="set-grid">
+            <span class="k">Remember printed labels</span>
+            <div class="set-stack">${seg('history', [['1', 'On'], ['0', 'Off']], on ? '1' : '0', 'Remember printed labels')}
+                <small class="muted">Everyone on your network can see them.</small></div>
+            <span class="k"></span>
+            <div><button class="btn ghost danger sm" type="button" id="setClear">${icon('trash')}Clear the list</button></div>
+        </div></section>`;
     drawHistory();
     $('#setHist').addEventListener('click', e => {
+        if (e.target.closest('#setMore')) { drawHistory(printed[printed.length - 1].id); return; }
         const b = e.target.closest('button[data-h]');
-        const h = b && S.history.find(x => x.id === b.dataset.h);
+        const h = b && printed.find(x => x.id === b.dataset.h);
         if (!h || b.disabled) return;
-        if ('open' in b.dataset) openEditor({ title: h.title, design: h.design, values: h.values, origin: h.source && h.source.kind === 'saved' ? h.source : null });
-        else reprint(h);
+        if ('open' in b.dataset) keptLabel(h).then(openEditor, e => toast(e.message));
+        else printKeptAgain(h, againDone);
+    });
+    // Off, the server removes those kept: asked first where there are any
+    const remember = on => keepLabels(box, { history: on ? '' : '0' }, () => on ? 'Printed labels are remembered' : 'Printed labels are not remembered', DRAW.printed);
+    $$('[data-k="history"]', box).forEach(b => b.onclick = () => {
+        if (b.dataset.v === '1') remember(true);
+        else if (b.getAttribute('aria-pressed') !== 'true') printed.length ? askFirst('Stop remembering printed labels?', 'The list will be cleared.', 'Turn off', () => remember(false)) : remember(false);
+    });
+    $('#setClear').onclick = () => askFirst('Clear all printed labels?', '', icon('trash') + 'Clear the list', async () => {
+        try {
+            const r = await post('/history/clear', new URLSearchParams());
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'The printed labels could not be cleared');
+        } catch (e) { toast(e.message); }
+        drawHistory();
     });
 };
+// button is HTML, e.g. with an icon
+function askFirst(question, hint, button, then) {
+    openLayer(`<div class="dialog narrow" role="alertdialog" aria-label="${esc(question)}">
+        <h2>${esc(question)}</h2>${hint ? `<p class="muted">${esc(hint)}</p>` : ''}
+        <div class="acts"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="button" id="clearGo">${button}</button></div></div>`, 'center');
+    $('#clearGo').onclick = () => { closeLayer(true); then(); };
+    $('#clearGo').focus();
+}
+const againDone = (entry, h) => announce(entry, () => printKeptAgain(h, againDone));
 
-function drawHistory() {
+// From the server, newest first, the next ones after before
+async function drawHistory(before = '') {
     const box = $('#setHist');
     if (!box) return;
-    const list = S.history.slice(0, 60);
-    box.innerHTML = list.length ? list.map(h => {
-        const failed = h.state === 'failed' || h.state === 'unknown', who = h.printerName || (h.printer ? printerName({ model: h.printer }) : '');
-        const sub = h.state === 'printing' ? 'Printing...' : failed ? `${h.state === 'unknown' ? 'Maybe not printed' : 'Not printed'}: ${h.message}` : [`${h.copies} x`, fmtTime(h.time), who].filter(Boolean).join(', ');
-        return `<div class="set-hrow${failed ? ' failed' : ''}"><span class="set-thumb"><img alt="" data-thumb="${esc(h.id)}"></span>
-            <div class="grow"><b>${esc(entryName(h))}</b><small class="${failed ? 'set-bad' : 'muted'}">${esc(sub)}</small></div>
-            <button class="btn ghost sm" type="button" data-h="${esc(h.id)}" data-open>Open</button>
-            <button class="btn soft sm" type="button" data-h="${esc(h.id)}" data-again${h.noImage ? ` disabled title="${esc(NO_IMAGE)}"` : ''}>${icon('refresh')}Print again</button></div>`;
-    }).join('') : '<p class="set-empty muted">Nothing printed yet. Labels you print show up here.</p>';
-    watchThumbs(box);
-}
-
-// Pictures of past labels as the server draws them now, a few at a time
-// and only those scrolled into view
-let thumbs = null;
-const thumbQueue = [];
-let thumbsRunning = 0;
-function watchThumbs(box) {
-    if (thumbs) thumbs.disconnect();
-    thumbs = 'IntersectionObserver' in window ? new IntersectionObserver(seen => seen.forEach(e => {
-        if (!e.isIntersecting) return;
-        thumbs.unobserve(e.target);
-        thumbQueue.push(e.target);
-        nextThumb();
-    }), { root: box.closest('.set-main'), rootMargin: '200px' }) : null;
-    $$('img[data-thumb]', box).forEach(img => thumbs ? thumbs.observe(img) : (thumbQueue.push(img), nextThumb()));
-}
-async function nextThumb() {
-    if (thumbsRunning >= 2 || !thumbQueue.length) return;
-    const img = thumbQueue.shift();
-    const h = S.history.find(x => x.id === img.dataset.thumb);
-    if (!img.isConnected || !h) return nextThumb();
-    thumbsRunning++;
+    let told;
     try {
-        const p = await preview(h.design, h.values || {}, 1, 0, h.labels || 0);
-        if (img.isConnected) { img.src = p.url; img.parentElement.classList.add('shown'); }
+        told = await loadPrinted(before);
     } catch (e) {
-        if (img.isConnected) img.parentElement.classList.add('none');
-    } finally {
-        thumbsRunning--;
-        nextThumb();
+        if (!before && box.isConnected) box.innerHTML = `<p class="set-empty muted">${esc(e.message)}</p>`;
+        return;
     }
+    if (!box.isConnected) return;
+    printed = before ? printed.concat(told.entries) : told.entries;
+    const more = told.entries.length >= 60 ? '<button class="btn ghost sm" type="button" id="setMore">Show more</button>' : '';
+    box.innerHTML = !told.enabled ? '<p class="set-empty muted">Printed labels are not remembered.</p>' : printed.length ? printed.map(h => {
+        const failed = h.state !== 'printed';
+        return `<div class="set-hrow${failed ? ' failed' : ''}"><span class="set-thumb">${h.preview ? `<img alt="" loading="lazy" src="${esc(h.preview)}">` : ''}</span>
+            <div class="grow"><b>${esc(h.title)}</b><small class="${failed ? 'set-bad' : 'muted'}"${h.from_detail ? ` title="${esc(h.from_detail)}"` : ''}>${esc(keptSub(h))}</small></div>
+            ${h.open ? `<button class="btn ghost sm" type="button" data-h="${esc(h.id)}" data-open>Open</button>` : ''}
+            <button class="btn soft sm" type="button" data-h="${esc(h.id)}" data-again${h.again ? '' : ` disabled title="${esc(IMAGE_GONE)}"`}>${icon('refresh')}Print again</button></div>`;
+    }).join('') + more : '<p class="set-empty muted">Nothing printed yet. Labels you print show up here.</p>';
+    $$('.set-thumb img', box).forEach(img => {
+        const shown = () => img.parentElement.classList.add('shown');
+        if (img.complete && img.naturalWidth) shown();
+        else {
+            img.onload = shown;
+            img.onerror = () => img.parentElement.classList.add('none');
+        }
+    });
 }
 
 // --- Connections --------------------------------------------------------------------
@@ -636,9 +650,9 @@ function connections() {
     return [
         {
             name: 'MCP for direct AI connections', icon: 'robot', doc: 'docs/mcp.md',
-            what: 'AI assistants see the printers and the saved labels and print. It has no login, keep it in your home network.',
+            what: `AI assistants see the printers and the saved labels and print. ${C.mcp_token ? 'They need the token set as MCP_TOKEN.' : 'It has no login, keep it in your home network.'}`,
             lead: 'Assistants in the cloud, e.g. claude.ai or ChatGPT, cannot reach a server in your home network.',
-            rows: [['Address', mcp]],
+            rows: [['Address', mcp], ...(C.mcp_token ? [['Header', 'Authorization: Bearer <token>']] : [])],
             // The setup of each client, as its documentation gives it for a
             // server reached over HTTP (see docs/mcp.md)
             clients: [

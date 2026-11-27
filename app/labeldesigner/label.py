@@ -92,6 +92,8 @@ _REFUSED_ENV_VARS: set = set()
 _MAX_REFUSED_ENV_VARS = 100
 # A blank, filled in when the label is printed, as the label designer stores it
 BLANK_TEMPLATE = re.compile(r"\{\{blank:([^}]+)\}\}")
+# {{datetime:<format>}}, {{datetime+5d:<format>}} moved from now, see shift_date
+DATETIME_TEMPLATE = re.compile(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}")
 
 
 class TextTooLong(ValueError):
@@ -413,6 +415,7 @@ class SimpleLabel:
         fixed_length: bool = False,
         vertical_align: str = 'center',
         mirror: bool = False,
+        image_size: tuple | None = None,
         date_format: str = '%Y-%m-%d',
         fallback_fonts: tuple[str, ...] = (),
         date_language: str = '',
@@ -551,6 +554,9 @@ class SimpleLabel:
         # Printed mirror-inverted, to be read through clear tape stuck behind
         # glass
         self._mirror = mirror
+        # Of the picture a smaller copy in image was made of, which it is
+        # fitted as, so that the label comes out as it did with the picture
+        self._image_size = tuple(image_size) if image_size else None
         self._fallback_fonts = tuple(fallback_fonts)
         # The pieces of lines measured, see _measured_piece()
         self._pieces: dict[tuple, tuple] = {}
@@ -708,7 +714,7 @@ class SimpleLabel:
         def datetime_replacer(match):
             when = self._now()
             return format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language)
-        substitute(r"\{\{datetime([+-]\d{1,6}(?:min|[hdwmy]))?:([^}]+)\}\}", datetime_replacer)
+        substitute(DATETIME_TEMPLATE, datetime_replacer)
 
         # Replace {{uuid}} with a new UUID, the same one in the whole text
         if any("{{uuid}}" in piece for piece in pieces):
@@ -798,6 +804,19 @@ class SimpleLabel:
         blanks."""
         return line.get('unmarked', line.get('text', ''))
 
+    def dates_shown(self) -> list[str]:
+        """The dates and times the label shows, made for its time: of
+        {{datetime}} and of its date blanks, e.g. to tell whether it shows
+        others on another day."""
+        shown = []
+        for text in [line.get('text', '') for line in self.input_text or [] if isinstance(line, dict)] + [self._code_text or '']:
+            for match in DATETIME_TEMPLATE.finditer(str(text)):
+                when = self._now()
+                shown.append(format_date(shift_date(when, match.group(1)) if match.group(1) else when, match.group(2), self._date_language))
+            shown += [self._fill_blank(name) for name in BLANK_TEMPLATE.findall(str(text))
+                      if (self._blank_fields.get(name) or {}).get('type') == 'date']
+        return shown
+
     def has_text(self) -> bool:
         """Whether the label has text. A line of blanks left empty has none."""
         return any(self._has_content(line.get('text', '')) for line in self.input_text or [])
@@ -854,13 +873,7 @@ class SimpleLabel:
             return value
         if value == '' and given:
             return ''
-        # Without a value the same date as the other templates
-        if value == '':
-            date = self._now().date()
-        elif DATE_OFFSET.fullmatch(value.strip()):
-            date = shift_date(self._now().date(), value.strip())
-        else:
-            date = _iso_date(value)
+        date = self.blank_date(name)
         if date is None:
             return value
         date_format = str(field.get('format') or self._date_format)
@@ -870,6 +883,23 @@ class SimpleLabel:
             return format_date(date, date_format, self._date_language)
         except ValueError:
             return date.isoformat()
+
+    def blank_date(self, name: str) -> datetime.date | None:
+        """The date the date blank name shows: its value, else its default,
+        else the date of the label, also moved from it, e.g. +5d. None for
+        one left empty, not a date or no date blank."""
+        field = self._blank_fields.get(name)
+        field = field if isinstance(field, dict) else {}
+        given = name in self._blanks
+        value = str(self._blanks[name]) if given else '' if field.get('default') is None else str(field['default'])
+        if field.get('type') != 'date' or (value == '' and given):
+            return None
+        # Without a value the same date as the other templates
+        if value == '':
+            return self._now().date()
+        if DATE_OFFSET.fullmatch(value.strip()):
+            return shift_date(self._now().date(), value.strip())
+        return _iso_date(value)
 
     # Turned by 180 degrees for printing, set by the queue
     turned = False
@@ -941,7 +971,8 @@ class SimpleLabel:
             code, self._code_scale = self._sized(code, width, height, parts, own_look=False, between=between)
         self._code_size = code.size if code is not None else None
 
-        if self.want_text(img):
+        with_text = self.want_text(img)
+        if with_text:
             self._text_scale = 1.0
             self._layouts = self._shared_layouts if self._shared_layouts is not None else {}
             # The text is part of the key: copies differ e.g. by a counter
@@ -1103,7 +1134,7 @@ class SimpleLabel:
             imgResult.paste(code, code_offset)
 
         self._line_boxes = {}
-        if self.want_text(img):
+        if with_text:
             self._draw_text(imgResult, bboxes, text_offset)
 
         # Draw border if thickness > 0
@@ -1191,7 +1222,7 @@ class SimpleLabel:
                     max_height = max((max_height - between) // parts, 1)
 
             # Get image dimensions
-            img_width, img_height = img.size
+            img_width, img_height = self._image_size if own_look and self._image_size else img.size
 
             # Print the original image size
             logger.debug(f"Maximal allowed dimensions: {max_width}x{max_height} mm")
@@ -1211,7 +1242,8 @@ class SimpleLabel:
             # Use image_scaling_factor if provided
             scale = self._image_scaling_factor / 100.0 if own_look else 1.0
             logger.debug(f"Manual image scaling factor: {scale}")
-        new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+        width_of, height_of = self._image_size if self._image_fit and own_look and self._image_size else img.size
+        new_size = (max(1, int(width_of * scale)), max(1, int(height_of * scale)))
         logger.debug(f"Resized image size: {new_size} px")
         check_image_size(*new_size)
         return img.resize(new_size, Image.Resampling.LANCZOS), scale
@@ -1353,20 +1385,19 @@ class SimpleLabel:
             extents = []
             if do_draw:
                 # What the line draws is what changes around its room
-                region = self._line_region(img, bboxes, i, text_offset)
+                region = self._line_region(img, bboxes, i, text_offset, left, right)
                 before = img.crop(region)
             if do_draw and INVERT_LINE:
                 # Draw a filled rectangle
-                center_x = 0
                 if anchor == "lt":
-                    min_bbox_x = text_offset[0] + min(bbox[0][0] for bbox in bboxes)
-                    max_bbox_x = text_offset[0] + bboxes[i][0][2] # max(bbox[0][2] for bbox in bboxes)
+                    min_bbox_x = text_offset[0] + left
+                    max_bbox_x = text_offset[0] + bboxes[i][0][2]
                 elif anchor == "mt":
                     center_x = (left + right) // 2
                     min_bbox_x = text_offset[0] + center_x - (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                     max_bbox_x = text_offset[0] + center_x + (bboxes[i][0][2] - bboxes[i][0][0]) // 2
                 elif anchor == "rt":
-                    max_bbox_x = text_offset[0] + max(bbox[0][2] for bbox in bboxes)
+                    max_bbox_x = text_offset[0] + right
                     min_bbox_x = max_bbox_x - (bboxes[i][0][2] - bboxes[i][0][0])
                 # As high as the line was measured, see below
                 y_min = bboxes[i][0][1] + text_offset[1]
@@ -1408,11 +1439,9 @@ class SimpleLabel:
                     text_y = y - top
                     bbox = (bbox[0], y, bbox[2], y + bottom - top)
                 elif not IS_LAST_LINE:
-                    # Some characters may need special height
+                    # As wide as its text, as high as PRINTABLE in its font
                     top, bottom = _printable_extent(font)
-                    Ag = (0, y + top, 0, y + bottom)
-                    # Get bbox with width of text and dummy height
-                    bbox = (bbox[0], Ag[1], bbox[2], Ag[3])
+                    bbox = (bbox[0], y + top, bbox[2], y + bottom)
                 # The box is drawn from the top of the line, its lower edge
                 # included, also where the text is lower or there is none
                 if checkbox:
@@ -1468,7 +1497,7 @@ class SimpleLabel:
                         return 0.03 * random.randint(5, 10) * self._line_size(line)
                     for x_shift in [-get_shift_amount(), get_shift_amount()]:
                         for y_shift in [-get_shift_amount(), get_shift_amount()]:
-                            new_random_text = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=len(line['text'])))
+                            new_random_text = ''.join(random.choices(PRINTABLE, k=len(line['text'])))
                             self._draw_line(draw, (x + x_shift, y + y_shift), new_random_text, font, anchor, fill=color, align=align,
                                             spacing=spacing, letter_spacing=letter_spacing)
 
@@ -1499,14 +1528,14 @@ class SimpleLabel:
             known = self._line_boxes.get(line['line_index'], box)
             self._line_boxes[line['line_index']] = (min(known[0], box[0]), min(known[1], box[1]), max(known[2], box[2]), max(known[3], box[3]))
 
-    def _line_region(self, img, bboxes, i, text_offset) -> tuple:
+    def _line_region(self, img, bboxes, i, text_offset, left, right) -> tuple:
         """Where line i of the text placed at text_offset draws on img: its
-        room and the width of the text, a size around them for letters
-        reaching out and shifted text."""
+        room and the width of the text, from left to right, a size around
+        them for letters reaching out and shifted text."""
         size = self._line_size(bboxes[i][2])
         room = bboxes[i][0]
-        x0 = text_offset[0] + min(bbox[0][0] for bbox in bboxes) - size
-        x1 = text_offset[0] + max(bbox[0][2] for bbox in bboxes) + size
+        x0 = text_offset[0] + left - size
+        x1 = text_offset[0] + right + size
         y0, y1 = room[1] + text_offset[1] - size, room[3] + text_offset[1] + size
         x0, y0 = min(max(0, math.floor(x0)), img.width), min(max(0, math.floor(y0)), img.height)
         return x0, y0, max(x0, min(img.width, math.ceil(x1))), max(y0, min(img.height, math.ceil(y1)))
