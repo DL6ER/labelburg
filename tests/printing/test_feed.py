@@ -59,6 +59,17 @@ def test_brother_printers_feed_an_empty_label_and_cut_it(model, label_size, line
     assert len(job.page_lengths) == 1 and job.page_lengths[0] == pytest.approx(lines / MODELS[model].dpi * 25.4)
 
 
+def test_a_pt_p710bt_feeds_an_empty_label_and_cuts_it_without_esc_i_a():
+    # It takes no ESC i A, auto cut on the page cuts after it
+    assert BROTHER.feed_kind('PT-P710BT', 'pt12') == 'cut'
+    job = BROTHER.feed_job(printer.PrinterQueue('PT-P710BT', 'bt://00:00:5E:00:53:01', 'pt12'))
+    assert struct.unpack('<L', _told(job.data, b'z', 8)[4:]) == (32,)
+    assert _blank_rows(job.data, 'PT-P710BT') == 32
+    assert (_told(job.data, b'M'), _told(job.data, b'K')) == (b'\x40', b'\x08')
+    assert b'\x1biA' not in job.data
+    assert job.data.endswith(b'\x1a') and job.data.count(b'\x1biz') == 1
+
+
 def test_a_ptouch_printer_cuts_also_after_chain_printing():
     # The last label of a chain stays in the printer, this cuts it off
     queue = printer.PrinterQueue('PT-E550W', DEVICE, 'pt12')
