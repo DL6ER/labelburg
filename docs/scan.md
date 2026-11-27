@@ -12,13 +12,13 @@ Then choose the label under "Templates", "Your labels" and press "Use from anywh
 
 Most USB and Bluetooth barcode scanners type what they read, like a keyboard. Nothing needs to be installed: open the station, hold a code under the scanner and the label prints. Typing anywhere else in the label designer never prints.
 
-The scanner has to type with the keyboard layout of the computer or phone, e.g., German. Most scanners come set to US English; the setup codes in their manual switch the layout. With another layout, characters like `:` and `/` come out wrong. For links and contacts the station notices that and says so instead of printing.
+The scanner has to type with the keyboard layout of the computer or phone, e.g., German. Most scanners come set to US English; the setup codes in their manual switch the layout. With another layout, characters like `:` and `/` come out wrong. For links and contacts the station notices some of these, e.g., a German scanner on a US computer, and says so instead of printing.
 
 Use one scanner per station. Codes of several lines, e.g., contacts, come in line by line, so two scanners reading at the same moment can end up in one code. A contact that comes in incomplete is not printed, the station asks to scan it again.
 
 ## The camera
 
-"Use the camera" reads codes with the camera of the phone or computer, and "Stop the camera" ends it. A code that stays in view prints once; to print it again, take it out of view for a few seconds.
+"Use the camera" reads codes with the camera of the phone or computer, and "Stop the camera" ends it. A code that stays in view prints once; to print it again, take it out of view for a few seconds. The camera reads a code as most scanners type it, e.g., a GS1 code as its digits without brackets; a PZN comes out as `PZN-1234562`, where a scanner may type only `-1234562`.
 
 The browser allows the camera only over a secure address (https), the address of the label designer in the home network is not one. The [reverse proxy guide](reverse-proxy.md) shows how to set one up. The first time, the browser asks whether the label designer may use the camera.
 
@@ -68,7 +68,7 @@ The station sends each scan to `POST /labeldesigner/api/scan`, which scripts can
 curl -X POST http://localhost:8013/labeldesigner/api/scan -F name=Box.json -F code=A-17
 ```
 
-The answer tells which blanks got which value in `filled`, and has the label as a base64 PNG in `image`: as the printer gets it, or with `preview_only` as it would print. A label sent to the printer waits in its queue like any other, `job` names it for `GET /labeldesigner/api/queue/<job>`, which tells when it has printed. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`, and where the label does not fit the code `hint` says what to change in it; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
+The answer tells which blanks got which value in `filled`, and has the label as a base64 PNG in `image`: as the printer gets it, or with `preview_only` as it would print. A label sent to the printer waits in its queue like any other, `job` names it for `GET /labeldesigner/api/queue/<job>`, which tells when it has printed. A refused scan answers `{"success": false, "message": ...}` with the reason, e.g., several blanks without one named `code`, and where the label does not fit the code or the scanner types with another layout, `hint` says what to change; a label that is not saved answers 404. The label is printed as a saved label printed by name: with its copies and cutting, on the tape in the printer. [`openapi.json`](../app/labeldesigner/openapi.json) describes the request in full.
 
 A scanner ends each code with Enter or Tab; a line that follows within a moment belongs to the same code. A scanner without Enter or Tab at the end is recognized by its speed, the code ends when it stops typing. Codes typed by hand print on Enter.
 

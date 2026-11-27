@@ -172,6 +172,20 @@ def test_a_queued_scan_that_did_not_print_says_why(station):
     station.page.wait_for_selector('#scanResult:has-text("Not printed: The printer is out of labels")', timeout=6000)
 
 
+def test_a_scan_that_did_not_print_after_a_later_one_says_so_as_well(station):
+    page = station.page
+    state = {'state': 'waiting'}
+    queued(station, state, 'The printer is out of labels')
+    station.scan('A-17')
+    page.wait_for_selector('#scanResult:has-text("Printing: Box")')
+    station.answer = (200, {'success': True, 'printed': True, 'label': 'Box', 'filled': {'code': 'B-42'}, 'image': IMAGE})
+    station.scan('B-42')
+    page.wait_for_selector('#scanResult:has-text("B-42")')
+    state['state'] = 'failed'
+    page.wait_for_selector('#toast:has-text("A-17: Not printed: The printer is out of labels")', timeout=6000)
+    assert 'B-42' in card(page) and 'Not printed' not in card(page)
+
+
 def test_card_names_the_blanks_the_server_filled(station):
     page = station.page
     station.answer = (200, {'success': True, 'printed': True, 'label': 'Box', 'filled': {'Name': 'Erika', '<b>Room</b>': 'x'}, 'image': IMAGE})
@@ -197,6 +211,25 @@ def test_enter_inside_a_fast_scan_is_a_line_break(station):
     station.wait_for(1)
     assert station.none_for(400) == 1
     assert station.codes() == ['BEGIN:VCARD\nFN:Erika Muster\nEND:VCARD']
+
+
+def test_keys_typed_fast_after_a_paste_wait_for_enter(station):
+    station.page.evaluate("""() => {
+        let now = performance.now();
+        performance.now = () => now;
+        const field = document.querySelector('#scanField');
+        field.value = 'Pasted';
+        field.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', bubbles: true }));
+        for (const ch of 'xy') {
+            now += 10;
+            field.value += ch;
+            field.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: ch, bubbles: true }));
+        }
+    }""")
+    assert station.none_for(600) == 0
+    station.page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['Pastedxy']
 
 
 def test_a_scanner_that_stops_briefly_around_shift_is_fast(station):
@@ -249,6 +282,43 @@ def test_alt_codes_of_the_bytes_of_a_character_in_utf8_are_read(station):
     page.keyboard.press('Enter')
     station.wait_for(1)
     assert station.codes() == ['Grüße 5']
+
+
+@pytest.mark.parametrize('codes, echoes, code', [
+    (['0252', '0223'], ['ü', 'ß'], 'Grüße 5'),
+    # The bytes of UTF-8 come back as characters of Windows
+    (['0195', '0188', '0195', '0159'], ['Ã', '¼', 'Ã', 'Ÿ'], 'Grüße 5'),
+    (['129', '225'], ['ü', 'ß'], 'Grüße 5'),
+])
+def test_the_character_windows_types_after_an_alt_code_is_not_taken_twice(station, codes, echoes, code):
+    page = station.page
+    page.keyboard.type('Gr')
+    for digits, echo in zip(codes, echoes):
+        alt_code(page, 'Numpad', digits)
+        page.keyboard.insert_text(echo)
+    page.keyboard.type('e 5')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == [code]
+
+
+def test_the_same_character_typed_after_another_key_is_kept(station):
+    page = station.page
+    alt_code(page, 'Numpad', '0252')
+    page.keyboard.type('x')
+    page.keyboard.insert_text('ü')
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['üxü']
+
+
+def test_a_byte_that_does_not_go_on_with_a_character_starts_anew(station):
+    page = station.page
+    for code in ('0195', '0195', '0188'):
+        alt_code(page, 'Digit', code)
+    page.keyboard.press('Enter')
+    station.wait_for(1)
+    assert station.codes() == ['Ãü']
 
 
 def test_alt_codes_that_are_no_utf8_are_windows_characters(station):
@@ -365,8 +435,8 @@ def test_show_only_sends_preview_only(station):
 
 def test_refusal_is_shown_without_an_image(station):
     page = station.page
-    message = 'The label has several blanks, so it is not clear which one the code fills.'
-    hint = 'Open "Box" in the editor, click the blank "Room", change its name to code and save the label.'
+    message = 'The label has several blanks and none named code.'
+    hint = 'In the editor, rename the blank "Room" of "Box" to code.'
     station.answer = (400, {'success': False, 'message': message, 'hint': '<b>' + hint + '</b>'})
     station.scan('A-17')
     page.wait_for_selector('#scanResult .warn')
@@ -379,7 +449,7 @@ def test_label_no_longer_saved(station):
     page = station.page
     station.answer = (404, {'success': False, 'message': 'Not found'})
     station.scan('<b>A-17</b>')
-    page.wait_for_selector('#scanResult:has-text("The label Box is no longer saved. Choose another one.")')
+    page.wait_for_selector('#scanResult:has-text("Box is no longer saved, choose another label")')
     assert page.locator('#scanResult img, #scanResult .scan-code b').count() == 0
     assert '<b>A-17</b>' in card(page)
 

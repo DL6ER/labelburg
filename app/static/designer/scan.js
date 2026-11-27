@@ -2,7 +2,7 @@
 // (it types like a keyboard) is sent to the server, which fills the blanks
 // of the label with it and prints it.
 
-import { $, $$, esc, icon, S, own, load, storeQuiet, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, followJob, UNREACHABLE, SOURCE } from './core.js';
+import { $, $$, esc, icon, S, own, load, storeQuiet, toast, savedItem, itemDesign, blanksOf, drawThumb, loadSaved, post, openLayer, closeLayer, layerOpen, followJob, UNREACHABLE, SOURCE } from './core.js';
 import { camera, cameraBlocked } from './camera.js';
 
 // ms: a scanner types faster than FAST between characters; after Enter or
@@ -83,7 +83,9 @@ export function scanInput(target, onScan, clock = performance) {
     // A scanner types a character its layout lacks as Alt and its code on
     // the digits, which the browser would take for a shortcut, e.g. a tab.
     // Codes with a leading 0 are bytes, some scanners send the UTF-8 ones.
-    let alt = '', bytes = [];
+    // Windows types the character of an Alt code once more after Alt goes
+    // up, as a key of its own: taken only before the next key
+    let alt = '', bytes = [], echo = '';
     const insert = text => {
         target.setRangeText(text, target.selectionStart, target.selectionEnd, 'end');
         changed();
@@ -96,6 +98,7 @@ export function scanInput(target, onScan, clock = performance) {
     };
     // Before the key it comes with, so the characters stay in order
     const onAltDigit = e => {
+        echo = '';
         const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
         if (digit && e.altKey && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
@@ -107,6 +110,7 @@ export function scanInput(target, onScan, clock = performance) {
         e.preventDefault();
         const code = alt, n = Number(code) % 256;
         alt = '';
+        echo = code.startsWith('0') ? new TextDecoder('windows-1252').decode(Uint8Array.of(n)) : altChar(code);
         if (!code.startsWith('0') || n < 32) {
             flush();
             const ch = altChar(code);
@@ -117,6 +121,11 @@ export function scanInput(target, onScan, clock = performance) {
         if (bytes.length && (n & 0xC0) !== 0x80) flush();
         bytes.push(n);
         if (bytes.length >= utf8Length(bytes[0])) flush();
+    };
+    const onEcho = e => {
+        if (!echo || e.inputType !== 'insertText' || e.data !== echo) return;
+        e.preventDefault();
+        echo = '';
     };
     // The field keeps the focus: the scanner types where it is. A layer
     // open, e.g. the search, keeps its own, so does text selected with the mouse.
@@ -144,7 +153,7 @@ export function scanInput(target, onScan, clock = performance) {
     };
     const layer = new MutationObserver(refocus);
     // The pointer and stray keys are seen before anything else
-    const on = [[target, 'input', onInput], [target, 'keydown', onAltDigit], [target, 'keydown', onKey], [target, 'keyup', onAltUp],
+    const on = [[target, 'input', onInput], [target, 'beforeinput', onEcho], [target, 'keydown', onAltDigit], [target, 'keydown', onKey], [target, 'keyup', onAltUp],
         [target, 'focusout', onBlur], [target, 'pointerdown', onTap],
         [document, 'click', refocus], [document, 'visibilitychange', onShown], [window, 'focus', refocus], [window, 'blur', onPress], [document, 'keydown', onStray, true],
         ...['pointerdown', 'pointermove', 'pointerup', 'pointercancel'].map(type => [document, type, onPress, true])];
@@ -168,7 +177,7 @@ const REMEMBERED = own('designer_scan_label');
 const queue = [];
 let sending = null, last = null;
 const titleOf = name => { const s = S.saved.find(x => x.name === name); return s ? s.title : name.replace(/\.json$/i, ''); };
-const GONE = name => `The label ${titleOf(name)} is no longer saved. Choose another one.`;
+const GONE = name => `${titleOf(name)} is no longer saved, choose another label`;
 
 export function renderScan(el, name) {
     if (!name) name = load(REMEMBERED, null);
@@ -198,7 +207,7 @@ export function renderScan(el, name) {
     const toggleCamera = () => {
         note = '';
         if (cam) stopCamera();
-        else if (cameraBlocked()) note = `${esc('The camera works only over a secure address (https).')} <a href="${esc(SOURCE + '/blob/master/docs/reverse-proxy.md')}" target="_blank" rel="noopener">The guide</a> shows how to set one up.`;
+        else if (cameraBlocked()) note = `${esc('The camera needs a secure address (https), see')} <a href="${esc(SOURCE + '/blob/master/docs/reverse-proxy.md')}" target="_blank" rel="noopener">the guide</a>`;
         else cam = camera(video, onScan, { paused: layerOpen, onError: message => { cam = null; note = esc(message); drawCamera(); } });
         drawCamera();
     };
@@ -258,6 +267,8 @@ function pick(chosen) {
     });
 }
 
+const short = (text, n) => text.length > n ? text.slice(0, n) + '...' : text;
+
 // The last scan and how it went, or the one being sent
 function drawResult() {
     const box = $('#scanResult');
@@ -265,7 +276,7 @@ function drawResult() {
     const shown = sending ? sending : last;
     box.hidden = !shown;
     if (!shown) return;
-    const code = shown.code.length > 200 ? shown.code.slice(0, 200) + '...' : shown.code;
+    const code = short(shown.code, 200);
     let state;
     if (shown === sending) state = `<p class="scan-state">${esc(shown.previewOnly ? 'Showing' : 'Printing')}${esc(queue.length ? ', the next scans wait their turn' : '...')}</p>`;
     else if (shown.message) state = `<p class="scan-state warn">${icon('warn')}<span>${esc(shown.message)}</span></p>
@@ -286,6 +297,8 @@ function follow(scan, data) {
         scan.pending = false;
         if (job.state === 'unknown') scan.message = `Maybe not printed: ${job.message}`;
         else if (job.state !== 'printed') scan.message = `Not printed: ${job.message}`;
+        // The card shows a later scan by now
+        if (scan.message && scan !== last) toast(`${short(scan.code, 40)}: ${scan.message}`, null, 8000);
         drawResult();
     });
 }
