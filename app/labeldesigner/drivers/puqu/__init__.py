@@ -1,6 +1,8 @@
 """The PUQU Q00, a thermal printer for die-cut labels on Bluetooth
 (protocol.py), also sold as the Reekon P1 Tagger (P1L), configured as a
-Q00 as well. It has no cutter, the labels are torn off."""
+Q00 as well. It has no cutter, the labels are torn off. The Q1 and AQ20
+have its printhead after their manuals (48 mm, 384 dots, 203 dpi), and
+puquprintJS names their series as using its protocol."""
 
 import logging
 import re
@@ -14,7 +16,7 @@ from . import protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('PUQU/Q00',)
+MODELS = ('PUQU/Q00', 'PUQU/Q1', 'PUQU/AQ20')
 
 # Width x length in mm, and how far from the left of the printhead the
 # label lies, in mm. Labels narrower than the printhead are held by a slider

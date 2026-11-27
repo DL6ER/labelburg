@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from app.labeldesigner import tape
 from app.labeldesigner.drivers import devices, progress, puqu
 from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
@@ -294,3 +295,19 @@ def test_printer_that_took_too_long_once_is_asked_again(client, monkeypatch):
     for _ in range(2):
         assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The printer does not answer']
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize('model', ['PUQU/Q1', 'PUQU/AQ20'])
+def test_other_models_print_as_the_q00(tmp_path, fake, model):
+    # The same printhead and protocol: the same labels and bytes
+    printer = fake()
+    client = make_client(tmp_path, model=model, printer=DEVICE)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'puqu40x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert printer.headers()[0][:4] == bytes([0x3a, 48, 240, 0])
+
+
+@pytest.mark.parametrize('model', ['PUQU/Q1', 'PUQU/AQ20'])
+def test_other_models_are_offered_the_labels_of_the_q00(model):
+    assert tape.takes(model) == tape.takes('PUQU/Q00')
