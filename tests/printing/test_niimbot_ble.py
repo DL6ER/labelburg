@@ -8,7 +8,8 @@ import time
 
 import pytest
 
-from app.labeldesigner.drivers import devices, niimbot
+from app.labeldesigner import bluetooth
+from app.labeldesigner.drivers import devices, niimbot, transports
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client, outcome
 from tests.printing.test_niimbot import B1_CLOSED, B1_REPLIES, REPLIES, TEXT, FakePrinter
@@ -119,7 +120,7 @@ class LePrinter:
 
 @pytest.fixture(autouse=True)
 def answered(monkeypatch):
-    monkeypatch.setattr(protocol, '_kept', {})
+    monkeypatch.setattr(transports, '_kept', {})
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(niimbot, '_asked', {})
@@ -153,6 +154,25 @@ def test_b1_on_bluetooth_answers_over_bluetooth_le(b1, le):
     assert le.addresses == [(MAC, 0, 4, socket.BDADDR_LE_PUBLIC)]
     # Asked without a beep, the label designer follows it closely
     assert printer_['follow'] is True
+
+
+@pytest.mark.parametrize('heard_by, adapter', [({}, socket.BDADDR_ANY), ({MAC: '00:00:5E:00:53:F0'}, '00:00:5E:00:53:F0')])
+def test_b1_is_reached_through_the_adapter_that_heard_it(b1, le, monkeypatch, heard_by, adapter):
+    # Any adapter where no search heard it, e.g. set up by its address
+    monkeypatch.setattr(bluetooth, 'heard_by', heard_by)
+    b1.get(STATUS)
+    assert le.bound == (adapter, 0, 4, socket.BDADDR_LE_PUBLIC)
+
+
+def test_b1_on_bluetooth_le_tells_it_needs_python_3_14(b1, le, monkeypatch):
+    # Before Python 3.14 an L2CAP address has no address type
+    monkeypatch.delattr(protocol.socket, 'BDADDR_LE_PUBLIC')
+    needs = 'Printers on Bluetooth LE need Python 3.14 or newer'
+    assert b1.get(STATUS).get_json()['printers'][0]['errors'] == [needs]
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(b1, response) == ('failed', f'Could not send the label to the printer: {needs}')
+    assert le.made == []
 
 
 def test_the_printers_mtu_request_is_answered(b1, le):
@@ -196,7 +216,7 @@ def test_b1_on_bluetooth_keeps_its_connection_for_the_designer_following_it(b1, 
 def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le, monkeypatch):
     # A label designer left open in the background asks every 20 s; that
     # keeps the B1 neither connected nor beeping
-    monkeypatch.setattr(protocol, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:
@@ -207,7 +227,7 @@ def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le
 
 def test_kept_connection_is_closed_unused(b1, le, monkeypatch):
     # Then the phone app can connect to the printer
-    monkeypatch.setattr(protocol, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:

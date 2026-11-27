@@ -802,6 +802,28 @@ def test_vc500w_on_usb_is_detected_by_its_device_id(tmp_path, monkeypatch):
         printer_.close()
 
 
+def test_vc500w_that_misses_a_round_of_the_search_stays_listed(tmp_path, monkeypatch):
+    printer_ = FakeVC500W()
+    try:
+        monkeypatch.setattr(vc500w, 'PORT', printer_.port)
+        monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', True)
+        monkeypatch.setattr(printer, '_discovered', None)
+        rounds = iter([[{'name': 'Brother VC-500W._ipp._tcp.local', 'service': '_ipp._tcp.local', 'address': '127.0.0.1',
+                         'port': 631, 'txt': {'ty': 'print', 'product': '(Brother VC-500W)'}}], []])
+        monkeypatch.setattr(printer.mdns, 'discover', lambda: next(rounds))
+        client = make_client(tmp_path)
+        client.application.config['PRINTER_PRINTER'] = '?'
+        assert 'vc500w://127.0.0.1' in [p['path'] for p in client.get('/labeldesigner/api/printer_status').get_json()['printers']]
+        # The next round of the search finds nothing, e.g. while it prints
+        monkeypatch.setattr(printer, 'DISCOVERY_INTERVAL', 0)
+        monkeypatch.setattr(printer, '_last_scan_ts', 0)
+        assert 'vc500w://127.0.0.1' in [p['path'] for p in client.get('/labeldesigner/api/printer_status').get_json()['printers']]
+        one = client.get('/labeldesigner/api/printer_status', query_string={'printer': 'vc500w://127.0.0.1'})
+        assert (one.status_code, one.get_json()['printers'][0]['model']) == (200, 'VC-500W')
+    finally:
+        printer_.close()
+
+
 def test_vc500w_on_the_network_is_detected_by_its_announcement(tmp_path, monkeypatch):
     printer_ = FakeVC500W()
     try:

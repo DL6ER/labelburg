@@ -326,3 +326,42 @@ def test_compose_waits_for_the_print_queue_on_stop():
     with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docker-compose.yml')) as fh:
         grace = int(re.search(r'^\s+stop_grace_period: (\d+)s', fh.read(), re.M).group(1))
     assert grace > STOP_WAIT
+
+
+@pytest.mark.parametrize('debug, child, opened', [('0', None, True), ('1', None, False), ('1', 'true', True)])
+def test_run_py_opens_the_print_queue_with_its_settings_and_not_in_the_reloader(monkeypatch, debug, child, opened):
+    import run
+    seen = []
+    monkeypatch.setattr(run, 'restore_print_queue', lambda app: seen.append(app.config['PRINTER_PRINTER']))
+    monkeypatch.setattr(run.app, 'run', lambda **kwargs: seen.append('served'))
+    monkeypatch.setattr(run, 'exit_on_sigterm', lambda: None)
+    monkeypatch.setenv('FLASK_DEBUG', debug)
+    if child:
+        monkeypatch.setenv('WERKZEUG_RUN_MAIN', child)
+    else:
+        monkeypatch.delenv('WERKZEUG_RUN_MAIN', raising=False)
+    printer = run.app.config['PRINTER_PRINTER']
+    try:
+        run.main(['file:///dev/usb/lp3'])
+    finally:
+        run.app.config['PRINTER_PRINTER'] = printer
+    # The jobs left are checked against the printer of the command line
+    assert seen == (['file:///dev/usb/lp3', 'served'] if opened else ['served'])
+
+
+def test_wsgi_opens_the_print_queue_of_its_app(monkeypatch):
+    import importlib
+    import wsgi
+    from app.labeldesigner import routes
+    opened = []
+    monkeypatch.setattr(routes, 'restore_print_queue', opened.append)
+    wsgi = importlib.reload(wsgi)
+    assert opened == [wsgi.app]
+
+
+def test_the_app_alone_opens_no_print_queue(monkeypatch):
+    from app.labeldesigner import routes
+    opened = []
+    monkeypatch.setattr(routes, 'restore_print_queue', opened.append)
+    create_app()
+    assert opened == []

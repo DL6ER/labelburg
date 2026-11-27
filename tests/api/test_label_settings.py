@@ -18,7 +18,7 @@ from app.labeldesigner.routes import create_label_from_request
 from tests.helpers import _pdf, EXAMPLE_FORMDATA, make_client, outcome, pixels
 
 URL = '/labeldesigner/api/settings/labels'
-NONE_SET = {'date_format': '', 'date_language': '', 'collate': '', 'font_family': ''}
+NONE_SET = {'date_format': '', 'date_language': '', 'collate': '', 'font_family': '', 'history': ''}
 
 
 def test_label_settings_are_kept_for_every_browser(tmp_path):
@@ -55,7 +55,7 @@ def test_label_settings_are_kept_with_the_printer_settings(tmp_path, monkeypatch
 
 def test_label_settings_are_checked(tmp_path):
     client = make_client(tmp_path, empty_repo=True)
-    for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'},
+    for wrong in ({'date_format': '%A'}, {'date_format': '%Y'}, {'collate': '2'}, {'collate': 'yes'}, {'history': 'off'},
                   {'date_language': 'xx'}, {'date_language': 'en'}, {'date_language': 'DE'}, {'date_language': 'de_DE'},
                   {'font_family': 'No Such Font'}, {'font_family': 'DejaVu Sans,Book'}, {'quality': 'fast'},
                   {'date_format': '%d.%m.%Y', 'colour': 'red'}, {}):
@@ -79,7 +79,7 @@ def test_label_settings_written_by_hand_that_are_wrong_are_not_set(tmp_path):
     # The file may be edited by hand, a font may be gone since
     client = make_client(tmp_path, empty_repo=True)
     path = tmp_path / 'label_repo' / printer_settings.FILE
-    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'date_language': 'xx', 'collate': 0, 'font_family': 'Gone Sans'}}))
+    path.write_text(json.dumps({'printers': {}, 'labels': {'date_format': '%A', 'date_language': 'xx', 'collate': 0, 'font_family': 'Gone Sans', 'history': False}}))
     assert client.get(URL).get_json() == NONE_SET
     path.write_text(json.dumps({'printers': {}, 'labels': ['collate', '0']}))
     assert client.get(URL).get_json() == NONE_SET

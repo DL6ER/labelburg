@@ -127,6 +127,7 @@ ENV_OVERRIDES = {
     'MCP_ENABLED': _bool,
     'MCP_MAX_COUNT': _positive_int,
     'MCP_HOSTS': host_list,
+    'MCP_TOKEN': str,
     'MAX_CONTENT_LENGTH': _positive_int,
     'WEBHOOK_PASSWORD': str,
     'PROXY_COUNT': _non_negative_int,

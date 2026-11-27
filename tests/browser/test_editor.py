@@ -118,13 +118,6 @@ def test_the_number_of_labels_from_the_bracket_menu(editor):
     editor.wait_for_function("() => labelEditor.S.edit.design.text[0].text === 'Box {{counter}} of '")
 
 
-def thumb_preview(page, action) -> dict:
-    """The preview request a printed label with the number of labels is drawn with."""
-    with page.expect_request(lambda r: r.url.endswith('/api/preview') and '%7B%7Btotal%7D%7D' in (r.post_data or '')) as request:
-        action()
-    return sent(request.value)
-
-
 def test_printed_labels_show_the_number_of_labels_printed(editor):
     type_label(editor, 'Box [counter] of ')
     editor.keyboard.type('[')
@@ -138,25 +131,12 @@ def test_printed_labels_show_the_number_of_labels_printed(editor):
     # As many as the server counted, Box 1 of 6, the copies apart: they
     # would fill a page roll
     assert editor.evaluate('() => labelEditor.S.history[0].labels') == 6
-    request = thumb_preview(editor, lambda: (editor.click('#tabs [data-tab="settings"]'), editor.click('.set-nav [data-part="printed"]')))
-    assert (request['total'], request['print_count']) == ('6', '1')
-    editor.click('#tabs [data-tab="edit"]')
-    editor.wait_for_selector('#field .ln')
-    editor.reload()
-    editor.wait_for_selector('#field .ln')
-    request = thumb_preview(editor, lambda: (editor.click('#templates'), editor.click('.tpl-nav [data-cat="printed"]')))
-    assert (request['total'], request['print_count']) == ('6', '1')
-    editor.keyboard.press('Escape')
-    editor.wait_for_function("() => location.hash === '#edit'")
-    # Printed before the server told it, it stays at 1 of 1
-    editor.evaluate("""() => {
-        const key = Object.keys(localStorage).find(k => k.endsWith('designer_history'));
-        localStorage.setItem(key, JSON.stringify(JSON.parse(localStorage.getItem(key)).map(h => { delete h.labels; return h; })));
-    }""")
-    editor.reload()
-    editor.wait_for_selector('#field .ln')
-    request = thumb_preview(editor, lambda: (editor.click('#templates'), editor.click('.tpl-nav [data-cat="printed"]')))
-    assert 'total' not in request and request['print_count'] == '1'
+    # Listed with them, the picture as it was printed
+    editor.click('#tabs [data-tab="settings"]')
+    editor.click('.set-nav [data-part="printed"]')
+    row = editor.locator('#setHist .set-hrow >> nth=0')
+    assert row.locator('small').inner_text().startswith('6 x, ')
+    assert '/api/history/' in row.locator('img').get_attribute('src')
 
 
 def test_a_line_picked_on_the_label_changes_its_size_and_is_inverted(editor):

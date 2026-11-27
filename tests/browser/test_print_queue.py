@@ -2,6 +2,7 @@
 outcome is known: printed, not printed, or not known. The queue of the
 printer chosen shows at the place of the print message."""
 import contextlib
+import json
 import os
 from urllib.parse import parse_qs, unquote
 
@@ -54,6 +55,12 @@ def test_a_label_removed_in_another_tab_is_not_printed(editor):  # noqa: F811
     answer_queue(editor, [job('removed', message='Removed from the queue')])
     editor.click('#print')
     editor.wait_for_selector('[role=alertdialog]:has-text("Removed from the queue")', timeout=15000)
+    assert history(editor) == [['failed', 'Removed from the queue', 'waiting']]
+    # Listed as the server keeps it
+    removed = {'id': 'j1', 'time': '2026-11-22T10:00:00Z', 'title': 'Shelf', 'labels': 1, 'copies': 1, 'from': '', 'from_detail': '',
+               'printer_name': 'Demo printer', 'state': 'removed', 'message': 'Removed from the queue', 'preview': None,
+               'again': True, 'again_asks': [], 'date_blanks': [], 'open': False}
+    editor.route('**/api/history?*', lambda route: route.fulfill(json={'enabled': True, 'entries': [removed]}))
     editor.click('[role=alertdialog] [data-close]')
     editor.click('#templates')
     editor.click('.tpl-nav [data-cat="printed"]')
@@ -75,12 +82,17 @@ def test_a_restart_before_or_while_printing(editor, seen, state, text):  # noqa:
     if state == 'unknown':
         assert editor.locator('[role=alertdialog] button:text-is("Print again")').count() == 1
         assert editor.locator('[role=alertdialog] button:text-is("Try again")').count() == 0
-        editor.click('[role=alertdialog] [data-close]')
-        editor.click('#templates')
-        editor.click('.tpl-nav [data-cat="printed"]')
-        editor.wait_for_selector(f'.thumb small:text-is("Maybe not printed: {text}")')
-        editor.click('.thumb')
-        editor.wait_for_selector('#tplPrint:text-is("Print again")')
+
+
+def test_a_job_the_server_kept_through_a_restart_is_followed_on(editor):  # noqa: F811
+    # Found in the labels printed, or still waiting in the queue kept on disk
+    type_label(editor, 'Shelf')
+    answer_print(editor, 'printing')
+    text = 'The label designer was restarted while it printed'
+    answer_queue(editor, [job('waiting', start='start-2'), job('unknown', message=text, start='start-2')])
+    editor.click('#print')
+    editor.wait_for_selector(f'[role=alertdialog]:has-text("{text}")', timeout=15000)
+    assert history(editor) == [['unknown', text, 'waiting']]
 
 
 def test_an_outcome_asked_too_late_is_not_known(editor):  # noqa: F811
@@ -602,7 +614,8 @@ def test_jobs_are_followed_by_the_reads_of_their_line(editor):  # noqa: F811
 
 
 def _title(request):
-    return parse_qs(request.post_data)['title'][0]
+    # The first line of the label printed
+    return json.loads(parse_qs(request.post_data)['text'][0])[0]['text']
 
 
 def test_prints_are_sent_one_after_the_other(editor):  # noqa: F811
@@ -649,7 +662,8 @@ def test_prints_are_sent_in_order_per_printer(editor):  # noqa: F811
         editor.evaluate("""async () => {
             const core = await import('/static/designer/core.js');
             const on = path => Object.assign({}, core.S.printer, { path });
-            const job = title => ({ title, design: core.S.edit.design, values: {}, copies: 1 });
+            // Sent with their names
+            const job = title => ({ title, name: title, design: core.S.edit.design, values: {}, copies: 1 });
             window.sent = [core.printJob(job('A1'), null, on('file:///dev/usb/lp8')), core.printJob(job('A2'), null, on('file:///dev/usb/lp8')),
                 core.printJob(job('B1'), null, on('file:///dev/usb/lp9'))];
         }""")

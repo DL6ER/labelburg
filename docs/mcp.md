@@ -117,3 +117,7 @@ Their connectors connect from the cloud of Anthropic or OpenAI, which cannot rea
 Like the label designer, the endpoint answers only requests for the names of the home network and those of `HOSTS`, also in `Origin`, see [Host names](../README.md#host-names). That protects against DNS rebinding: a website that points its own name at your server cannot use it. Other names go into `HOSTS`, e.g., `HOSTS=labels.example.com`, or `.example.com` for all its subdomains. `MCP_HOSTS`, its former name, still works. With `TRUSTED_HOSTS` set, it answers exactly its names.
 
 Behind a [reverse proxy](reverse-proxy.md) the endpoint is below the path of the label designer, e.g. `https://labels.example.com/labels/mcp`.
+
+## Token
+
+With `MCP_TOKEN` set, the endpoint answers only requests with `Authorization: Bearer <token>`, others get 401. Clients that take headers send it, e.g. Claude Code with `--header "Authorization: Bearer <token>"`. Home Assistant 2026.12 and newer sends the token an app gives in its discovery. The previews below `/mcp/preview.png` need none: their address holds what they show, and the chat of an assistant loads them as images.

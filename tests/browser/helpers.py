@@ -1,6 +1,7 @@
 """Helpers shared by the browser tests."""
 
 import io
+from urllib.request import Request, urlopen
 
 from PIL import Image
 
@@ -11,6 +12,12 @@ def png(width=200, height=100) -> bytes:
     out = io.BytesIO()
     Image.new('L', (width, height), 'black').save(out, format='PNG')
     return out.getvalue()
+
+
+def clear_printed(server):
+    """The labels printed in other tests are no longer listed."""
+    with urlopen(Request(f'{server}/labeldesigner/api/history/clear', data=b'', method='POST')) as r:
+        assert r.status == 200
 
 
 def with_tape(printer: dict, default: str = '62') -> dict:

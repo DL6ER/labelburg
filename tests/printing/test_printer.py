@@ -291,6 +291,7 @@ def test_printer_without_status_answer_stays_listed(client, monkeypatch):
     (ConnectionRefusedError(errno.ECONNREFUSED, 'Connection refused'), 'The printer refuses the connection'),
     (OSError(errno.EHOSTUNREACH, 'No route to host'), 'The printer cannot be reached'),
     (backends.NoLibusb('No backend available'), 'Printers on usb:// need libusb, please install it'),
+    (devices.NoBluetoothLe('no L2CAP addresses of Bluetooth LE'), 'Printers on Bluetooth LE need Python 3.14 or newer'),
     # Other errors only in the log, they may show paths of the server
     (ValueError('Unexpected status in /app/instance'), 'The printer does not answer the status query, the log of the server names the reason'),
 ])
@@ -306,7 +307,7 @@ def test_print_error_of_the_printer_is_reported(client, monkeypatch):
         self.responses.append(bytes(packet))
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', replace_media)
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: Replace media error'))
+    assert (response.status_code, outcome(client, response)) == (200, ('failed', 'The printer reports: The loaded labels do not fit the job'))
 
 
 def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monkeypatch):
@@ -321,12 +322,12 @@ def test_error_of_a_job_is_told_until_it_is_cleared_at_the_printer(client, monke
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', refused)
     monkeypatch.setattr(usb, 'get_status', functools.partial(usb.get_status, timeout=0.1))
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
+    assert outcome(client, response) == ('failed', 'The printer reports: The loaded labels do not fit the job')
     status = client.get('/labeldesigner/api/printer_status').get_json()
-    assert (status['errors'], status['media_width']) == (['Replace media error, clear it at the printer'], 62)
+    assert (status['errors'], status['media_width']) == (['The loaded labels do not fit the job. Clear the error at the printer'], 62)
     # The next job too, asked for its tape the printer answers with the error it holds
     response = client.post('/labeldesigner/api/print', data=EXAMPLE_FORMDATA)
-    assert outcome(client, response) == ('failed', 'The printer reports: Replace media error')
+    assert outcome(client, response) == ('failed', 'The printer reports: The loaded labels do not fit the job')
     # Cleared, asked again once the request it held counts as lost
     monkeypatch.setattr(ExclusiveUsbPrinter, 'write', lambda self, data: self.responses.append(_status_packet(0x00)))
     monkeypatch.setattr(usb, 'ASK_AGAIN', 0)
@@ -544,7 +545,8 @@ def test_an_answer_after_the_wait_is_told_next_time(client, monkeypatch):
 
 
 def test_printer_that_cannot_be_asked_is_told_with_a_fixed_message():
-    errors = [TimeoutError(), backends.NoLibusb('No backend available'), RuntimeError('/app/instance/secret.json is gone')]
+    errors = [TimeoutError(), backends.NoLibusb('No backend available'), devices.NoBluetoothLe('no L2CAP addresses of Bluetooth LE'),
+              RuntimeError('/app/instance/secret.json is gone')]
     errors += [OSError(number, os.strerror(number)) for numbers, _ in devices._UNANSWERED for number in numbers]
     for told in [devices.not_sent(error) for error in errors] + [printer.BUSY]:
         assert refusals.message(routes.PrinterUnreachable(told), refusals.PRINT_FAILED) == told
