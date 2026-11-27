@@ -12,7 +12,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 |---|---|---|
 | Brother | PT-E550W\*, PT-P700, PT-P710BT (USB, Bluetooth), PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
 | Brother | PT-P900, PT-P900W, PT-P910BT (USB, Bluetooth), PT-P950NW | TZe tapes 18 and 36 mm wide |
-| Brother | PT-D410 (USB), PT-D460BT, PT-D610BT, PT-E310BT, PT-E560BT (USB, Bluetooth) | TZe tapes 6 to 18 mm wide, cut by hand, on the PT-D610BT and PT-E560BT up to 24 mm wide and cut after each label |
+| Brother | PT-D410, PT-D460BT (USB, Bluetooth), PT-D610BT (USB, Bluetooth), PT-E310BT (USB, Bluetooth), PT-E560BT (USB, Bluetooth) | TZe tapes 6 to 18 mm wide, cut by hand, on the PT-D610BT and PT-E560BT up to 24 mm wide and cut after each label |
 | Brother | QL-500, QL-550, QL-560\*, QL-570, QL-580N, QL-600, QL-650TD, QL-700\*, QL-710W, QL-720NW | up to 62 mm wide |
 | Brother | QL-800, QL-810W\*, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100\*, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
@@ -243,7 +243,7 @@ Pull requests are welcome: [fork the repository](https://github.com/DL6ER/labelb
 
 ## Credits and license
 
-Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_web`](https://github.com/pklaus/brother_ql_web). It carries the printer code of [`pklaus/brother_ql`](https://github.com/pklaus/brother_ql) and its fork [`matmair/brother_ql-inventree`](https://github.com/matmair/brother_ql-inventree), both GPLv3, in its Brother driver, with the jobs of the PT-D and PT-E models after [`ptouch-print`](https://github.com/probonopd/ptouch-print) by Dominic Radermacher, GPLv3, and builds on improvements from [`tbnobody/brother_ql_web`](https://github.com/tbnobody/brother_ql_web), [`dersimn/brother_ql_web`](https://github.com/dersimn/brother_ql_web) and [`davidramiro/brother_ql_web`](https://github.com/davidramiro/brother_ql_web), for which we are grateful. Brother, P-touch and PUQU are trademarks of their owners, Labelburg is not affiliated with them.
+Labelburg, called brother_ql_web until v3.0.0, is a fork of [`pklaus/brother_ql_web`](https://github.com/pklaus/brother_ql_web). It carries the printer code of [`pklaus/brother_ql`](https://github.com/pklaus/brother_ql) and its fork [`matmair/brother_ql-inventree`](https://github.com/matmair/brother_ql-inventree), both GPLv3, in its Brother driver, with the jobs of the PT-D410, PT-D460BT, PT-D610BT, PT-E310BT and PT-E560BT after [`ptouch-print`](https://github.com/probonopd/ptouch-print) by Dominic Radermacher, GPLv3, and builds on improvements from [`tbnobody/brother_ql_web`](https://github.com/tbnobody/brother_ql_web), [`dersimn/brother_ql_web`](https://github.com/dersimn/brother_ql_web) and [`davidramiro/brother_ql_web`](https://github.com/davidramiro/brother_ql_web), for which we are grateful. Brother, P-touch and PUQU are trademarks of their owners, Labelburg is not affiliated with them.
 
 It is published under the terms of the GPLv3, see [LICENSE](./LICENSE). It includes software of third parties under other licenses:
 
