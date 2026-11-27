@@ -2,13 +2,15 @@
 place of the Bluetooth LE connection, and printing and status through the label
 designer."""
 import json
+import struct
 
 import pytest
 
-from app.labeldesigner.drivers import devices, progress, puqu
+from app.labeldesigner.drivers import devices, progress, puqu, transports
 from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
 from tests.helpers import make_client, outcome
+from tests.printing.test_niimbot_ble import LePrinter, uuid16
 
 DEVICE = 'bt://CD:AC:BB:0F:CB:36'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '60'}])
@@ -289,3 +291,83 @@ def test_printer_that_took_too_long_once_is_asked_again(client, monkeypatch):
     for _ in range(2):
         assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The printer does not answer']
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize('name, found', [('P1L-243561(BLE)', True), ('Q00-Q233117996(BLE)', True), ('Q1-12345', False),
+                                         ('AQ20-12345', False), ('B1-H123', False), ('Q100', False)])
+def test_found_on_bluetooth_le_by_name(name, found):
+    device = {'address': 'CD:AC:BB:0F:CB:36', 'name': name, 'le': True, 'services': []}
+    assert puqu.DRIVER.found_on_bluetooth(device) == (('bt://CD:AC:BB:0F:CB:36', 'PUQU/Q00') if found else None)
+
+
+def test_an_address_with_a_channel_is_reached_over_rfcomm(monkeypatch):
+    class Rfcomm(FakePrinter):
+        closed = False
+
+        def close(self):
+            self.closed = True
+    printer, asked = Rfcomm(), []
+    monkeypatch.setattr(transports, 'rfcomm', lambda device, channel: asked.append((device, channel)) or printer)
+    with protocol.connect(f'{DEVICE}/2') as s:
+        s.sendall(bytes(400))
+    assert asked == [(f'{DEVICE}/2', 2)]
+    assert [len(data) for data in printer.sent] == [400]
+    assert printer.closed
+
+
+@pytest.mark.parametrize('device, kept', [(DEVICE, True), (f'{DEVICE}/2', False)])
+def test_only_a_printer_on_bluetooth_le_keeps_its_connection(device, kept):
+    assert puqu.DRIVER.keeps_connection(device, 'PUQU/Q00') == kept
+
+
+def test_a_report_told_meanwhile_is_not_taken_as_the_answer(monkeypatch):
+    class Told(FakePrinter):
+        # What was told is read before the answer to the query
+        def __init__(self):
+            super().__init__([reply()])
+            self.waiting = [reply(protocol.COVER_OPEN)]
+
+        def sendall(self, data):
+            self.sent.append(data)
+            if data == protocol.STATE_QUERY:
+                self.waiting.append(self.answers[0])
+
+        def recv(self, size):
+            return self.waiting.pop(0) if self.waiting else b''
+    printer = Told()
+    monkeypatch.setattr(protocol, 'connect', printer)
+    monkeypatch.setattr(protocol, 'DRAIN_WAIT', 0.05)
+    assert protocol.get_state(DEVICE) == reply()
+
+
+class LePuqu(LePrinter):
+    """A Q00 on Bluetooth LE: written to ae01, answering with the
+    notifications of ae02, both declared with 16-bit UUIDs."""
+
+    def __init__(self):
+        super().__init__(None, value=0x000f, mtu=247)
+        self.declarations = [(0x0002, 0x20, 0x0003, uuid16(0x2a05)), (0x000c, 0x04, 0x000d, uuid16(0xae01)),
+                             (0x000e, 0x10, 0x000f, uuid16(0xae02))]
+
+    def send(self, pdu):
+        if pdu[0] != 0x52:
+            return super().send(pdu)
+        self.sent.append(pdu)
+        assert struct.unpack_from('<H', pdu, 1)[0] == 0x000d
+        if pdu[3:] == protocol.STATE_QUERY and self.notifying:
+            self.incoming.append(bytes([0x1b]) + struct.pack('<H', self.value) + reply())
+        return len(pdu)
+
+
+def test_connection_on_bluetooth_le(monkeypatch):
+    peer = LePuqu()
+    monkeypatch.setattr(transports.socket, 'socket', peer)
+    monkeypatch.setattr(transports, '_kept', {})
+    with protocol.connect(DEVICE) as s:
+        s.sendall(bytes(400))
+        s.sendall(protocol.STATE_QUERY)
+        assert protocol._answer(s) == [reply()]
+    # Written to ae01 in pieces of 180 bytes, the query on its own
+    assert [len(pdu) - 3 for pdu in peer.sent if pdu[0] == 0x52] == [180, 180, 40, 8]
+    # Given back, kept for the next use
+    assert not transports._kept[devices.lock_key(DEVICE)].busy
