@@ -76,6 +76,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(niimbot, '_told_models', {})
+    monkeypatch.setattr(niimbot, '_told_ids', {})
     monkeypatch.setattr(niimbot, '_to_ask', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
 
@@ -395,7 +396,9 @@ def beat(lid=1, battery=3):
     return (0xdd, bytes.fromhex('101f0069006932460000')[:8] + bytes([lid, battery]))
 
 
-@pytest.mark.parametrize('battery, low, percent', [(0, True, 0), (1, True, 25), (2, False, 50), (4, False, 100)])
+# More than 4 is a percentage as niimbluelib reads it (packet_parser.ts:274-276)
+@pytest.mark.parametrize('battery, low, percent', [(0, True, 0), (1, True, 25), (2, False, 50), (4, False, 100),
+                                                   (20, True, 20), (87, False, 87)])
 def test_status_tells_the_battery_in_percent(client, fake, monkeypatch, battery, low, percent):
     monkeypatch.setitem(REPLIES, 0xdc, beat(battery=battery))
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]

@@ -58,6 +58,7 @@ def answered(monkeypatch):
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(niimbot, '_told_models', {})
+    monkeypatch.setattr(niimbot, '_told_ids', {})
     monkeypatch.setattr(niimbot, '_to_ask', set())
     monkeypatch.setattr(devices, 'looked', 0.0)
 
@@ -79,7 +80,11 @@ def fake(monkeypatch):
 
 
 def told(monkeypatch, model_id):
+    """The printer tells model_id, and a heartbeat of 10 bytes with its lid
+    closed as niimbluelib reads one of that model ID."""
     monkeypatch.setitem(REPLIES, 0x40, (0x48, struct.pack('>H', model_id)))
+    lid = 1 if model_id in models.INVERTED_LID else 0
+    monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes.fromhex('101f006900693246') + bytes([lid, 4])))
 
 
 def niimbluelib_packet(command, data):
@@ -100,7 +105,9 @@ def test_models_are_those_of_niimbluelib():
 
 def test_models_printed_are_those_of_the_sequences_labelburg_has():
     assert niimbot.MODELS == ('Niimbot/D110_M', 'Niimbot/B1', 'Niimbot/B21_C2B', 'Niimbot/D101', 'Niimbot/N1',
-                              'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H', 'Niimbot/M2_H')
+                              'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H', 'Niimbot/M2_H', 'Niimbot/B21',
+                              'Niimbot/B21_L2B', 'Niimbot/B21S', 'Niimbot/B21S_C2B', 'Niimbot/D110', 'Niimbot/D11',
+                              'Niimbot/D11S', 'Niimbot/H1S', 'Niimbot/B18', 'Niimbot/B3S')
     # Only the D110_M is paired, only these two need the RFID tag of their
     # roll and keep the packets they printed with
     assert [model.name for model in models.PRINTED if 'classic' in model.connections] == ['Niimbot/D110_M']
@@ -112,7 +119,11 @@ def test_models_are_shown_by_their_plain_names():
     assert {model: drivers.base.shown(model) for model in niimbot.MODELS} == {
         'Niimbot/D110_M': 'Niimbot D110_M', 'Niimbot/B1': 'Niimbot B1', 'Niimbot/B21_C2B': 'Niimbot B21 C2B',
         'Niimbot/D101': 'Niimbot D101', 'Niimbot/N1': 'Niimbot N1', 'Niimbot/M2_H': 'Niimbot M2-H',
-        'Niimbot/B1_PRO': 'Niimbot B1 Pro', 'Niimbot/B21_PRO': 'Niimbot B21 Pro', 'Niimbot/D11_H': 'Niimbot D11-H'}
+        'Niimbot/B1_PRO': 'Niimbot B1 Pro', 'Niimbot/B21_PRO': 'Niimbot B21 Pro', 'Niimbot/D11_H': 'Niimbot D11-H',
+        'Niimbot/B21': 'Niimbot B21', 'Niimbot/B21_L2B': 'Niimbot B21 L2B', 'Niimbot/B21S': 'Niimbot B21S',
+        'Niimbot/B21S_C2B': 'Niimbot B21S C2B', 'Niimbot/D110': 'Niimbot D110', 'Niimbot/D11': 'Niimbot D11',
+        'Niimbot/D11S': 'Niimbot D11S', 'Niimbot/H1S': 'Niimbot H1S', 'Niimbot/B18': 'Niimbot B18',
+        'Niimbot/B3S': 'Niimbot B3S'}
     assert niimbot.DRIVER.capabilities('Niimbot/B1_PRO')['model_shown'] == 'B1 Pro'
 
 
@@ -148,10 +159,11 @@ def test_models_that_take_the_same_label_share_its_size():
     # The same paper of the same dots at the same dpi is one label size
     labels = [(label.tape_size, label.form_factor, label.pieces, label.dots_total, label.dots_printable,
                label_dpi(label.identifier, False)) for label in niimbot.LABELS]
-    assert len(labels) == len(set(labels)) == 38
+    assert len(labels) == len(set(labels)) == 43
     sizes = {label.identifier: label for label in niimbot.LABELS}
     assert sizes['niimbot50x30-b1pro'].models == ('Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/M2_H')
-    assert sizes['niimbot50x30'].models == ('Niimbot/B1', 'Niimbot/B21_C2B')
+    assert sizes['niimbot50x30'].models == ('Niimbot/B1', 'Niimbot/B21_C2B', 'Niimbot/B21', 'Niimbot/B21_L2B',
+                                            'Niimbot/B21S', 'Niimbot/B21S_C2B')
 
 
 @pytest.mark.parametrize('label_size, model, on', [
@@ -172,14 +184,28 @@ def test_printer_is_known_by_its_model_id(fake, monkeypatch, model_id, model):
     assert message in refusals.MESSAGES and 0x01 not in fake.commands
 
 
-@pytest.mark.parametrize('model_id, model', [(768, 'B21'), (777, 'B21S'), (776, 'B21S C2B'), (512, 'D11'), (514, 'D11S'),
-                                             (3584, 'B18'), (262, 'B3S'), (2305, 'D110'), (769, 'B21 L2B')])
-def test_printer_of_a_sequence_labelburg_lacks_is_not_printed_on(fake, monkeypatch, model_id, model):
+@pytest.fixture
+def unprintable(monkeypatch):
+    """A model of a print task Labelburg lacks, as niimbluelib may list one."""
+    model = models.Model('Niimbot/K3', 'K3', (4864,), 203, 640, (1, 5, 3), 'k3')
+    monkeypatch.setitem(models.BY_ID, 4864, model)
+    return model
+
+
+@pytest.mark.parametrize('model_id, model', [(768, 'B21'), (777, 'B21S'), (512, 'D11'), (2305, 'D110'), (769, 'B21 L2B')])
+def test_printer_of_another_model_is_not_printed_on(fake, monkeypatch, model_id, model):
     told(monkeypatch, model_id)
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/D110_M', label_size='niimbot12x40')
     message = niimbot.DRIVER.send(queue, [[bytes(96)]])
-    assert message == f'This printer is a Niimbot {model}, Labelburg cannot print on it yet'
+    assert message == f'This printer is a Niimbot {model}, choose that model for it'
     assert message in refusals.MESSAGES and 0x21 not in fake.commands
+
+
+def test_printer_of_a_sequence_labelburg_lacks_is_not_printed_on(fake, monkeypatch, unprintable):
+    told(monkeypatch, 4864)
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/D110_M', label_size='niimbot12x40')
+    assert niimbot.DRIVER.send(queue, [[bytes(96)]]) == 'This printer is a Niimbot K3, Labelburg cannot print on it yet'
+    assert 0x21 not in fake.commands
 
 
 @pytest.mark.parametrize('answer, model', [(b'\x03', 'B21'), (b'\x02', 'D11'), (b'\x0e', 'B18'), (b'\x01', 'B3S')])
@@ -187,7 +213,7 @@ def test_model_id_of_one_byte_is_its_high_byte(fake, monkeypatch, answer, model)
     # niimbluelib, src/packets/packet_parser.ts:164-173 parsePrinterInfoModelIdResponse
     monkeypatch.setitem(REPLIES, 0x40, (0x48, answer))
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1', label_size='niimbot50x30')
-    assert niimbot.DRIVER.send(queue, [[bytes(384)]]) == f'This printer is a Niimbot {model}, Labelburg cannot print on it yet'
+    assert niimbot.DRIVER.send(queue, [[bytes(384)]]) == f'This printer is a Niimbot {model}, choose that model for it'
     assert 0x21 not in fake.commands
 
 
@@ -323,7 +349,8 @@ def test_new_models_tell_the_error_of_a_print_status_of_10_bytes(fake, monkeypat
     monkeypatch.setattr(protocol, 'PRINT_WAIT', 0.2)
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1_PRO', label_size='niimbot50x30-b1pro')
     assert niimbot.DRIVER.send(queue, [[b'\x01' * 576] * 2]) == 'The cover of the printer is open'
-    assert 0xf3 not in fake.commands
+    # Ended as niimbluelib's example ends a failed task
+    assert fake.commands[-1] == 0xf3 and fake.commands.count(0xf3) == 1
 
 
 def test_d110_m_and_b1_keep_their_packets(fake, monkeypatch):
@@ -380,7 +407,8 @@ def test_models_on_bluetooth_le(model, le):
 
 @pytest.mark.parametrize('name, model', [('B21_PRO-L123456789', 'Niimbot/B21_PRO'), ('D11_H-H123456789', 'Niimbot/D11_H'),
                                          ('M2-H-A123', 'Niimbot/M2_H'), ('D101-G123', 'Niimbot/D101'),
-                                         ('B1-G123', 'Niimbot/B1'), ('D110-G123', None), ('B21S-C123', None)])
+                                         ('B1-G123', 'Niimbot/B1'), ('D110-G123', 'Niimbot/D110'),
+                                         ('B21S-C123', 'Niimbot/B21S'), ('K3-G123', None)])
 def test_name_on_bluetooth_le_is_a_first_guess(name, model):
     found = niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': name, 'le': True,
                                                'services': [protocol.NIIMBOT_SERVICE]})
@@ -449,13 +477,13 @@ def test_printer_found_by_niimbots_service_alone_is_the_model_found_while_it_tel
     assert fake.packets.count(model_id) == 2
 
 
-def test_printer_on_bluetooth_le_of_a_model_labelburg_cannot_print_on(fake, monkeypatch):
-    # A D110 without a name, asked no more
-    told(monkeypatch, 2304)
+def test_printer_on_bluetooth_le_of_a_model_labelburg_cannot_print_on(fake, monkeypatch, unprintable):
+    # One without a name, asked no more
+    told(monkeypatch, 4864)
     found('')
     for _ in range(2):
         state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)
-        assert state['errors'] == ['This printer is a Niimbot D110, Labelburg cannot print on it yet']
+        assert state['errors'] == ['This printer is a Niimbot K3, Labelburg cannot print on it yet']
     assert fake.commands == [0x40]
 
 
@@ -469,8 +497,9 @@ def test_printer_set_up_by_its_address_is_not_asked_for_its_model(fake, model):
 def test_device_id_names_a_model_as_niimbluelib_writes_it():
     assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:B1 Pro;') == 'Niimbot/B1_PRO'
     assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:D11-H;') == 'Niimbot/D11_H'
+    assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:B21S;') == 'Niimbot/B21S'
     # Not one it prints on
-    assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:B21S;') is None
+    assert niimbot.DRIVER.model_in('MFG:NIIMBOT;CMD:ESC;MDL:K3;') is None
 
 
 @pytest.fixture
@@ -489,8 +518,8 @@ def test_serial_port_on_usb_tells_its_model_id(fake, monkeypatch, serial_port):
     assert fake.commands.count(0x40) == 1
 
 
-def test_serial_port_on_usb_of_a_model_labelburg_cannot_print_on_is_none(fake, monkeypatch, serial_port):
-    told(monkeypatch, 768)
+def test_serial_port_on_usb_of_a_model_labelburg_cannot_print_on_is_none(fake, monkeypatch, serial_port, unprintable):
+    told(monkeypatch, 4864)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
 
 
