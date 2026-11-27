@@ -383,6 +383,22 @@ def test_print_places_orientation_and_cable_flag_with_the_size(network, monkeypa
     assert (size, orientation) == ('29x90', LabelOrientation.STANDARD) and width > height
 
 
+@pytest.mark.parametrize('margins, placed', [
+    # Tight on 62 mm tape is tight on the 29 mm wide labels, 306 dots
+    ((12, 12, 18, 18), (8, 8, 5, 5)),
+    # Margins of no preset stay as they are
+    ((30, 30, 30, 30), (30, 30, 30, 30)),
+])
+def test_label_placed_on_the_tape_keeps_its_margin_preset(network, monkeypatch, margins, placed):
+    seen = []
+    monkeypatch.setattr(PrinterQueue, 'add_label_to_queue', lambda self, label, high_res=False, fast=False: seen.append(label._label_margin))
+    monkeypatch.setattr(PrinterQueue, 'process_queue', lambda self: '')
+    sides = dict(zip(('margin_top', 'margin_bottom', 'margin_left', 'margin_right'), map(str, margins)))
+    assert printed(network, '62', **sides).status_code == 200
+    # Left, right, top, bottom
+    assert seen == [placed]
+
+
 def test_label_on_the_tape_stays_where_it_is(network, monkeypatch):
     seen = queued(monkeypatch)
     assert printed(network, '29x90', orientation='rotated').status_code == 200

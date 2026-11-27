@@ -61,6 +61,13 @@ _unanswered = {}
 # When the label designer last asked to look for printers. Printers that beep
 # at each connection are asked only then and when printing.
 looked = 0.0
+# The printers, by lock key, whose drivers close the connection after each
+# print and status query instead of keeping it, as their settings say
+saving_energy: frozenset = frozenset()
+
+
+def saves_energy(device: str) -> bool:
+    return lock_key(device) in saving_energy
 
 
 def status_type(errors: list) -> str:
@@ -328,6 +335,11 @@ _UNANSWERED = (
 )
 NO_LIBUSB = 'Printers on usb:// need libusb, please install it'
 NOT_PAIRED = 'Pair the printer with this computer first'
+NO_LE = 'Printers on Bluetooth LE need Python 3.14 or newer'
+
+
+class NoBluetoothLe(OSError):
+    """Python before 3.14 has no L2CAP addresses of Bluetooth LE."""
 NOT_SENT = 'Could not send the label to the printer'
 NOT_SENT_LOGGED = f'{NOT_SENT}, the log of the server names the reason'
 
@@ -342,6 +354,8 @@ def unanswered_reason(error: Exception) -> str:
         return NO_LIBUSB
     if isinstance(error, NotPaired):
         return NOT_PAIRED
+    if isinstance(error, NoBluetoothLe):
+        return NO_LE
     if isinstance(error, reach.NotAllowed):
         return reach.NOT_ALLOWED
     for numbers, text in _UNANSWERED:
@@ -360,7 +374,7 @@ def not_sent(error: Exception) -> str:
 
 def not_sent_messages() -> tuple[str, ...]:
     """Every text not_sent() gives, for the fixed messages of refusals.py."""
-    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NOT_PAIRED, reach.NOT_ALLOWED])
+    reasons = dict.fromkeys([text for _, text in _UNANSWERED] + [NO_LIBUSB, NOT_PAIRED, NO_LE, reach.NOT_ALLOWED])
     return (*(f'{NOT_SENT}: {reason}' for reason in reasons), NOT_SENT_LOGGED)
 
 
@@ -387,6 +401,7 @@ def failed_printer_state(device_specifier: str, error: Exception, model: str = '
         'media_length': known.get('media_length', 0),
         'media_type': known.get('media_type'),
         'red_roll': known.get('red_roll'),
+        'colors': known.get('colors') or {},
         'errors': [unanswered(error)],
         'status_type': FAILED_STATUS_TYPE,
         'phase_type': 'Unknown',

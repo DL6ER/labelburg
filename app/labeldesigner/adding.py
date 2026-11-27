@@ -1,10 +1,10 @@
 """Printers the search does not find, added in the Settings, e.g. one another
 device shares over USB/IP or a network printer elsewhere. Before a printer is
 added, it is asked what it is: over USB/IP for its device ID, on the network
-over SNMP and IPP. Nothing goes to the port it prints on before it is known
-as a printer of a model this server prints on, as a laser printer prints
-whatever arrives there. Where its address may be is up to ADD_PRINTERS, see
-drivers/reach.py."""
+over SNMP and IPP, a host typed alone over USB/IP first. Nothing goes to the
+port it prints on before it is known as a printer of a model this server
+prints on, as a laser printer prints whatever arrives there. Where its
+address may be is up to ADD_PRINTERS, see drivers/reach.py."""
 
 import errno
 import http.client
@@ -27,7 +27,7 @@ IDENTITY = ('printer-make-and-model', 'printer-device-id')
 # The fields of a device ID that are told, not its serial number
 FIELDS = ('MFG', 'MDL', 'CMD', 'CLS', 'DES')
 
-NOT_AN_ADDRESS = 'Give the address of the printer, e.g., usbip://192.168.1.50, tcp://192.168.1.60 or vc500w://192.168.1.70'
+NOT_AN_ADDRESS = 'Give the address of the printer, e.g., 192.168.1.50'
 BLUETOOTH = 'Printers on Bluetooth cannot be added here, name them in PRINTERS'
 PRINT_PORT = 'Printers take jobs on this port, give the port of USB/IP, 3240 unless it was changed'
 OFF = 'Adding printers is switched off on this server (ADD_PRINTERS)'
@@ -89,6 +89,16 @@ def address_of(text: str) -> str:
     return address
 
 
+def shared_at(text: str) -> str | None:
+    """usbip://<host> for a host typed alone without a port, e.g.
+    192.168.1.50, which may share a printer over USB/IP. None for others."""
+    host = str(text or '').strip()
+    if '://' in host or host.startswith('/'):
+        return None
+    match = usbip.ADDRESS.fullmatch(f'usbip://{host}')
+    return f'usbip://{host}' if match and not match['port'] and not match['busid'] else None
+
+
 def name_of(text: str, taken) -> str:
     """The name a printer is added with, empty for none. ValueError for one
     PRINTERS would refuse or another printer has, of the names taken."""
@@ -132,13 +142,15 @@ def identify(text: str, mode: str, keep: bool = False) -> dict:
     """What answers at the address: its kind (usbip, network or usb), model,
     the fields of its device ID, its state as its status tells it once it is
     known, and its address as kept, which on the network follows the model,
-    vc500w:// for a VC-500W. ValueError with a plain refusal where the mode
-    does not allow the address or no printer this server prints on answers.
-    A printer shared over USB/IP is let go again unless keep, or it was
+    vc500w:// for a VC-500W. A host alone is asked over USB/IP first, then on
+    the network. ValueError with a plain refusal where the mode does not
+    allow the address or no printer this server prints on answers. A
+    printer shared over USB/IP is let go again unless keep, or it was
     imported before."""
     if mode not in ('local', 'any'):
         raise ValueError(OFF)
     address = address_of(text)
+    shared = shared_at(text)
     host = host_of(address)
     if host is not None and (reason := reach.refusal(host, mode)):
         raise ValueError(_REFUSALS[reason])
@@ -148,9 +160,21 @@ def identify(text: str, mode: str, keep: bool = False) -> dict:
         with reach.checking(mode):
             if usbip.is_address(address):
                 return _shared(address, keep)
-            if host is not None:
+            if host is None:
+                return _on_usb(address)
+            if shared is None:
                 return _on_network(address, host)
-            return _on_usb(address)
+            try:
+                return _shared(shared, keep)
+            except ValueError as e:
+                told = e
+            try:
+                return _on_network(address, host)
+            except ValueError:
+                # What a host that answers over USB/IP tells is closer to what was meant
+                if str(told) == NO_ANSWER:
+                    raise
+                raise told from None
     except reach.NotAllowed as e:
         raise ValueError(_REFUSALS[e.reason]) from e
 

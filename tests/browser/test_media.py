@@ -126,6 +126,22 @@ def test_a_code_fitted_to_the_label_grows_from_its_size(media):
     assert media.input_value('#ltb [data-csizein]') == design(media, 'qrcode_size')
 
 
+def test_a_code_too_small_to_scan_is_said_until_it_grows(media):
+    media.set_viewport_size({'width': 1600, 'height': 924})
+    type_label(media, 'Box 7')
+    changed(media, lambda: media.click('#addCode'))
+    assert 'Everything fits' in media.inner_text('#fits')
+    # Dots of 2 dots of the printer are too small
+    request, _ = changed(media, lambda: (media.fill('#ltb [data-csizein]', '2'), media.press('#ltb [data-csizein]', 'Enter')))
+    assert (request['image_fit'], request['qrcode_size']) == ('0', '2')
+    # Of a size set, shorter text would not make it larger
+    assert media.inner_text('#fits').strip() == 'This code may be too small to scan. Make it larger.'
+    request, _ = changed(media, lambda: media.click('#ltb [data-csize="1"]'))
+    assert request['qrcode_size'] == '3'
+    assert 'Everything fits' in media.inner_text('#fits')
+    assert 'too small' not in media.inner_text('#fits')
+
+
 def test_add_an_image_and_change_its_colors_and_size(media):
     type_label(media, 'Shelf 3')
     with media.expect_file_chooser() as chooser:

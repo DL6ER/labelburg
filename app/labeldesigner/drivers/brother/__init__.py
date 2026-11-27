@@ -141,6 +141,16 @@ class BrotherRaster(Driver):
     def resolution_problem(self, model, high_res):
         return resolution_problem(model, high_res)
 
+    def feed_kind(self, model, label_size):
+        # The QL-500 takes no cut commands
+        if not MODELS[model].cutting:
+            return ''
+        label = tables.BY_ID.get(label_size)
+        return 'cut_label' if label and label.form_factor in (FormFactor.DIE_CUT, FormFactor.ROUND_DIE_CUT) else 'cut'
+
+    def feed_job(self, queue):
+        return raster.feed(queue) if self.feed_kind(queue.model, queue.label_size) else None
+
     def status(self, device, model, unconfirmed=False):
         if device.startswith('tcp://'):
             return network.query_network_status(device, model, label_printers_only=unconfirmed)

@@ -65,7 +65,9 @@ MODELS = {model.identifier: model for model in (
     # ESC i A, and Brother's driver turns its status while printing off.
     Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=False,
           status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
-    Model('PT-P900W', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x69),
+    # "o" is 6Fh, not the 69h of the PT-P900 reference; Brother's index links it as 6F30
+    # https://support.brother.com/g/s/es/dev/en/command/reference/index.html
+    Model('PT-P900W', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x6F),
     Model('PT-P950NW', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x70),
     # After Brother's raster command reference of the PT-P900 series: model
     # code 78h, it sends its status while printing only when told so

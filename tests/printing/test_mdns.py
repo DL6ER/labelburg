@@ -96,3 +96,37 @@ def test_printers_that_announce_themselves_are_found_at_a_local_address(monkeypa
                  'txt': {'ty': 'Brother QL-810W'}}]
     monkeypatch.setattr(printer.mdns, 'discover', lambda: services)
     assert printer._discovered_label_printers() == ([(found, 'QL-810W')] if found else [])
+
+
+VC500W = {'name': 'Brother VC-500W._ipp._tcp.local', 'service': '_ipp._tcp.local', 'address': '192.168.1.70',
+          'addresses': ['192.168.1.70'], 'port': 631, 'txt': {'ty': 'print', 'product': '(Brother VC-500W)'}}
+
+
+def test_a_printer_found_before_is_kept_while_it_misses_a_round(monkeypatch):
+    monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', True)
+    monkeypatch.setattr(printer, '_discovered', None)
+    monkeypatch.setattr(printer, 'DISCOVERY_INTERVAL', 0)
+    rounds = iter([[VC500W], [], []])
+    monkeypatch.setattr(printer.mdns, 'discover', lambda: next(rounds))
+    found = [('vc500w://192.168.1.70', 'VC-500W')]
+    assert printer._discovered_label_printers() == found
+    # Busy with a label, it does not answer the next round
+    assert printer._discovered_label_printers() == found
+    # Not found for longer, it is gone
+    monkeypatch.setattr(printer, 'FOUND_KEPT', 0)
+    assert printer._discovered_label_printers() == []
+
+
+def test_a_printer_another_search_dropped_meanwhile_is_dropped_once(monkeypatch):
+    # Two status requests may search at once, the other one dropped it first
+    class Meanwhile(dict):
+        def items(self):
+            seen = list(super().items())
+            self.clear()
+            return seen
+    monkeypatch.setattr(printer, '_found', Meanwhile({'vc500w://192.168.1.70': (0.0, ('vc500w://192.168.1.70', 'VC-500W'))}))
+    monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', True)
+    monkeypatch.setattr(printer, '_discovered', None)
+    monkeypatch.setattr(printer, 'FOUND_KEPT', 0)
+    monkeypatch.setattr(printer.mdns, 'discover', lambda: [])
+    assert printer._discovered_label_printers() == []

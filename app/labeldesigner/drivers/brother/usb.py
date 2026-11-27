@@ -7,7 +7,7 @@ import time
 
 from .. import devices, progress
 from ..backends import open_printer
-from .status import HEADER, LENGTH, StatusError, parse_status
+from .status import HEADER, KEEPS_JOB, LENGTH, SAY_WHAT_TO_DO, StatusError, parse_status, plain_errors
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 # slowest printers, about 10 mm/s, at least STATUS_WAIT seconds.
 STATUS_WAIT = 10
 SLOWEST_PRINT_SPEED = 10
+# How long a job waits for an error to be fixed after which the printer
+# prints it, e.g. the cover to be closed
+KEPT_WAIT = 600
 # A job is written in pieces: pyusb gives up on a single write after 15 s,
 # a long label that the printer prints while it receives it takes longer
 WRITE_CHUNK = 16384
@@ -43,6 +46,9 @@ _asked: dict[str, float] = {}
 # The printers whose outstanding request was answered only by the retry
 # after it, e.g. a QL-560: that answer is their status meanwhile
 _retry_answered: set[str] = set()
+# After an error a printer holds, e.g. a QL-1100, which answers no status
+# request until it is cleared
+CLEAR_AT_PRINTER = 'Clear the error at the printer'
 
 
 def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
@@ -71,7 +77,7 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
         job_wait = sum(STATUS_WAIT + length / SLOWEST_PRINT_SPEED for length in page_lengths)
         give_up = time.monotonic() + job_wait
         deadline = min(time.monotonic() + page_wait, give_up)
-        printing = False
+        printing = held = False
         while time.monotonic() < deadline:
             states, received = _status_messages(received + (printer.read(32) or b''))
             if not states:
@@ -93,7 +99,16 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
                 if state['errors']:
                     # The status the printer holds, see query_status()
                     devices.status_cache[devices.lock_key(device_specifier)] = state
-                    return info
+                    if not _keeps_job(state):
+                        return info
+                    if not held:
+                        held = True
+                        give_up = time.monotonic() + KEPT_WAIT + job_wait
+                        progress.waiting(device_specifier, ', '.join(plain_errors(state['errors'])))
+                    continue
+                if held:
+                    held = False
+                    progress.waiting(device_specifier, None)
                 if state['status_type'] == 'Printing completed':
                     info['confirmed'] += 1
                     printing = False
@@ -107,7 +122,7 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
                 if state['status_type'] == 'Phase change':
                     # "Printing" before each page, "waiting to receive" after it
                     info['ready_for_next_job'] = state['phase_type'] == 'Waiting to receive'
-            deadline = min(time.monotonic() + page_wait, give_up)
+            deadline = give_up if held else min(time.monotonic() + page_wait, give_up)
             progress.printed(device_specifier, info['confirmed'])
             info['did_print'] = info['confirmed'] >= info['pages']
             if info['did_print'] and info['ready_for_next_job']:
@@ -240,7 +255,10 @@ def print_failure(info: dict) -> str:
     printer while printing."""
     state = info.get('printer_state') or {}
     if state.get('errors'):
-        return 'The printer reports: ' + ', '.join(state['errors'])
+        told = 'The printer reports: ' + ', '.join(plain_errors(state['errors']))
+        if _keeps_job(state):
+            told += '. ' + ', '.join(dict.fromkeys(KEEPS_JOB[error] for error in state['errors']))
+        return told
     if 0 < info.get('confirmed', 0) < info.get('pages', 0):
         return f"The printer confirmed {info['confirmed']} of {info['pages']} labels, check whether the others were printed"
     if info.get('did_print'):
@@ -248,6 +266,12 @@ def print_failure(info: dict) -> str:
     if state:
         return f"The printer did not confirm that the label was printed (last status: {state.get('status_type')}, {state.get('phase_type')})"
     return 'The printer did not answer after receiving the label, check whether it was printed'
+
+
+def _keeps_job(state: dict) -> bool:
+    """Whether the printer keeps the job through the errors of the state
+    and prints it once they are fixed, see KEEPS_JOB."""
+    return bool(state['errors']) and all(error in KEEPS_JOB for error in state['errors'])
 
 
 def get_printer(device_specifier: str):
@@ -339,12 +363,8 @@ def get_status(printer, timeout: float = 2.0, key: str | None = None):
 
 def _release(printer):
     """Close the printer handle right away, also when the status query failed
-    and a traceback still references the printer. The backend closes the
-    handle again when the object is garbage collected, which would close an
-    unrelated file if the descriptor number was reused in the meantime, so
-    that second close is turned into a no-op."""
+    and a traceback still references the printer."""
     printer.dispose()
-    printer.dispose = lambda: None
 
 
 def _held_error(key: str) -> dict | None:
@@ -352,9 +372,17 @@ def _held_error(key: str) -> dict | None:
     holds: a QL-1100 answers no status request until the error is cleared at
     the printer."""
     known = devices.status_cache.get(key, {})
-    if known.get('status_type') != 'Error occurred' or not known.get('errors'):
+    if not known.get('errors'):
         return None
-    return dict(known, errors=[f"{', '.join(known['errors'])}, clear it at the printer"])
+    plain = plain_errors(known['errors'])
+    hint = [] if SAY_WHAT_TO_DO.issuperset(plain) else [CLEAR_AT_PRINTER]
+    # Also an error told along with a phase change, e.g. printing
+    return dict(known, status_type='Error occurred', errors=['. '.join([', '.join(plain), *hint])])
+
+
+def _shown(state: dict) -> dict:
+    """A copy of a status with its errors in plain words, see plain_errors()."""
+    return dict(state, errors=plain_errors(state.get('errors', [])))
 
 
 def _outstanding(key: str | None) -> bool:
@@ -386,7 +414,7 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
                 if held is not None:
                     return held
                 if key in _retry_answered and _outstanding(key) and key in devices.status_cache:
-                    return dict(devices.status_cache[key])
+                    return _shown(devices.status_cache[key])
                 raise
             except OSError:
                 _switched_off(key)
@@ -395,7 +423,7 @@ def query_status(device_specifier: str, default_model: str = 'Unknown') -> dict:
                 # Release the device before giving up the lock
                 _release(printer)
             devices.status_cache[key] = state
-            return dict(state)
+            return _shown(state)
     logger.debug('Printer %s is busy, returning last known status', device_specifier)
     # Model and media from the last query, but the state of a running job:
     # errors or the idle state from before the job no longer apply

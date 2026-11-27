@@ -659,7 +659,7 @@ def test_usb_read_waits_no_longer_than_its_time(monkeypatch):
     printer = backends.KernelPrinter.__new__(backends.KernelPrinter)
     printer.dev = read_end
     monkeypatch.setattr(transports.backends, 'open_printer', lambda device: printer)
-    usb = protocol.UsbSocket('/dev/usb/lp0')
+    usb = transports.UsbLink('/dev/usb/lp0')
     usb.settimeout(0.1)
     outcome = []
 

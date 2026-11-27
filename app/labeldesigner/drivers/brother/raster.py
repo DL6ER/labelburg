@@ -2,6 +2,7 @@
 Philipp Klaus."""
 
 import logging
+import math
 
 from PIL import Image, ImageChops, ImageOps
 
@@ -9,8 +10,8 @@ from ...label import LabelContent, LabelOrientation, LabelType
 from .. import devices
 from ..labels import FormFactor
 from .commands import Raster, RasterError
-from .labels import BY_ID
-from .models import TUBE_TOO_LONG, length_problem, tube_lines
+from .labels import BY_ID, PTOUCH_LABELS
+from .models import MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, TUBE_TOO_LONG, length_problem, tube_lines
 from .status import TUBES
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,24 @@ def render(queue, entries, keep=None) -> Raster:
 def on_tube(device: str) -> bool:
     """Whether the printer holds heat-shrink tube, as its last status tells."""
     return devices.status_cache.get(devices.lock_key(device or ''), {}).get('media_type') in TUBES
+
+
+def feed(queue) -> Raster:
+    """An empty label cut after it: one whole die-cut label, else the
+    shortest the tape takes. Not chain printed, so that a P-touch printer
+    cuts it, also after the last label of a chain."""
+    raster = Raster(queue.model)
+    label = BY_ID[queue.label_size]
+    if label.form_factor in (FormFactor.DIE_CUT, FormFactor.ROUND_DIE_CUT):
+        size = label.dots_printable
+    else:
+        shortest = MIN_PTOUCH_PRINT_LENGTH if label.identifier in PTOUCH_LABELS else MIN_PRINT_LENGTH
+        size = (label.dots_printable[0], math.ceil(shortest * raster.spec.dpi / 25.4))
+    convert(raster, [Image.new('L', size, 255)], queue.label_size, red='red' in queue.label_size, compress=raster.ptouch,
+            autocut=True, cut_every=1, half_cut=False, chain=False)
+    raster.page_lengths.append(size[1] / raster.spec.dpi * 25.4)
+    raster.data = bytes(raster.data)
+    return raster
 
 
 def _add_job(queue, raster, job):

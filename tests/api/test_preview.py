@@ -7,7 +7,11 @@ import pytest
 from PIL import Image
 from flask.testing import FlaskClient
 
+from app.labeldesigner import drivers
+from app.labeldesigner.drivers import devices, usbip
+from app.labeldesigner.drivers.brother.status import parse_status
 from tests.helpers import EXAMPLE_FORMDATA, make_client, TEXT, verify_image
+from tests.printing.test_tape_colors import ptouch_status
 
 
 class TestLabelDesignerAPI:
@@ -165,3 +169,58 @@ def test_the_preview_tells_the_colors_the_tape_prints_otherwise(tmp_path, label_
     header = response.headers.get('X-Label-Colors')
     assert (json.loads(header) if header else None) == told
 
+
+
+SHARED = 'usbip://192.0.2.30/1-1'
+# A label the PT-P750W does not print, the PT-E550W does
+LONG = {'label_size': 'pt24', 'label_length': '1500', 'high_res': '0',
+        'text': json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'Cable', 'size': '40'}])}
+
+
+@pytest.fixture
+def unasked(monkeypatch):
+    """Fails a test that asks a printer for its model."""
+    def asked(*args, **kwargs):
+        raise AssertionError('The printer was asked for its model')
+    monkeypatch.setattr(drivers, 'resolve', asked)
+    monkeypatch.setattr(usbip, 'connect', asked)
+    monkeypatch.setattr(devices, 'usb_device_id', asked)
+    # A network printer named by its address, as if the search found it
+    monkeypatch.setattr('app.labeldesigner.routes.found_devices', lambda: {'tcp://192.0.2.10', 'tcp://192.0.2.11'})
+
+
+def too_long(client, **values) -> str:
+    response = client.post('/labeldesigner/api/preview', data={**LONG, **values})
+    assert response.status_code == 200, response.get_json()
+    return response.headers.get('X-Label-Warning', '')
+
+
+def test_a_preview_takes_the_model_of_a_listed_printer(tmp_path, unasked):
+    client = make_client(tmp_path)
+    client.application.config['PRINTERS'] = [('PT-P750W', SHARED, 'Desk')]
+    # Its last status names another one, the listed one counts as in the status of the printers
+    devices.status_cache[devices.lock_key(SHARED)] = parse_status(ptouch_status(0x01, 0x08, model=0x66))
+    for values in ({'printer': SHARED}, {'printer': 'Desk'}, {}):
+        assert too_long(client, **values).endswith('Labels on the PT-P750W can be at most 1000 mm long.')
+    assert too_long(client, printer=SHARED, model='PT-E550W') == ''
+
+
+def test_a_preview_takes_the_model_the_printer_told_last(tmp_path, unasked):
+    client = make_client(tmp_path, printer=SHARED, model='PT-E550W')
+    for printer in ('tcp://192.0.2.10', SHARED):
+        devices.status_cache[devices.lock_key(printer)] = parse_status(ptouch_status(0x01, 0x08))
+        assert too_long(client, printer=printer).endswith('Labels on the PT-P750W can be at most 1000 mm long.')
+
+
+def test_a_preview_takes_the_configured_model_where_the_printer_told_none(tmp_path, unasked):
+    client = make_client(tmp_path, printer=SHARED, model='PT-P750W')
+    for values in ({'printer': SHARED}, {}):
+        assert too_long(client, **values).endswith('Labels on the PT-P750W can be at most 1000 mm long.')
+
+
+def test_a_printer_nothing_tells_the_model_of_is_asked(tmp_path, unasked, monkeypatch):
+    asked = []
+    monkeypatch.setattr(drivers, 'resolve', lambda device, model: asked.append(device) or (drivers.for_model('PT-P750W'), 'PT-P750W'))
+    client = make_client(tmp_path)
+    assert too_long(client, printer='tcp://192.0.2.11').endswith('Labels on the PT-P750W can be at most 1000 mm long.')
+    assert asked == ['tcp://192.0.2.11']

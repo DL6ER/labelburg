@@ -5,10 +5,32 @@ import socket
 
 import pytest
 
-from app.labeldesigner import print_queue, printer, printer_settings
+from app.labeldesigner import bluetooth, print_queue, print_store, printer, printer_settings
 from app.labeldesigner.drivers import backends, brother, devices, usbip
 from app.labeldesigner.drivers.brother import usb
+from app.labeldesigner.drivers import escpos as escpos_driver
 from app.labeldesigner.drivers.escpos import protocol as escpos
+
+
+LABELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'labels')
+
+
+@pytest.fixture(scope='session', autouse=True)
+def no_print_store():
+    """Print jobs and printed labels are kept on disk only where a test opens
+    the store, never in the labels of the working tree."""
+    kept = [os.path.join(LABELS, name) for name in (print_store.QUEUE, print_store.HISTORY)]
+    before = [os.path.exists(path) for path in kept]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(print_store, 'ENABLED', False)
+        yield
+    assert [os.path.exists(path) for path in kept] == before, 'A test kept print jobs in the labels of the working tree'
+
+
+@pytest.fixture(autouse=True)
+def print_store_elsewhere(tmp_path, monkeypatch):
+    # Also where a test switches it on without a folder of its own
+    monkeypatch.setattr(print_store, 'FOLDER', str(tmp_path / 'print-store'))
 
 
 @pytest.fixture(autouse=True)
@@ -75,13 +97,17 @@ def printer_output(tmp_path, monkeypatch):
 def no_known_printers(monkeypatch):
     # What one test found stays out of the next
     monkeypatch.setattr(printer, '_cached_printers', [])
+    monkeypatch.setattr(printer, '_found', {})
     monkeypatch.setattr(printer, '_cached_hints', [])
     monkeypatch.setattr(printer, '_last_scan_ts', 0)
     monkeypatch.setattr(printer, '_last_states', {})
     monkeypatch.setattr(printer, '_status_queries', {})
     monkeypatch.setattr(devices, 'status_cache', {})
+    monkeypatch.setattr(devices, 'saving_energy', frozenset())
     monkeypatch.setattr(devices, '_unreached', {})
+    monkeypatch.setattr(escpos_driver, '_told', {})
     monkeypatch.setattr(devices, '_unanswered', {})
+    monkeypatch.setattr(bluetooth, 'heard_by', {})
 
 
 @pytest.fixture(autouse=True)
