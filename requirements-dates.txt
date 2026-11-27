@@ -1,0 +1,3 @@
+# Writing the names of months and weekdays, tools/date_names.py; pinned so
+# that the same CLDR data gives the same names
+babel==2.18.0

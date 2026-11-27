@@ -7,12 +7,13 @@ import {
     $, $$, esc, icon, clone, debounce, toast, storeQuiet, S, C, L, sizeName, placed, fitsTape, allTags, hasTag, tagsOf,
     savedItem, demoItem, itemDesign, thumbUrl, drawThumb, preview, defaults, blanksOf, fieldType, blankChoices, valuesNow,
     printJob, entryName, saveLabel, loadSaved, postJSON, post, openLayer, closeLayer, templateOf, dateFormat, baseDesign, setWide, originOf, savedNow,
-    printedSub, NO_IMAGE, sheetNote, untold
+    sheetNote, untold, loadPrinted, keptSub, printKeptAgain, announceKept, keptLabel, IMAGE_GONE, blankRequest
 } from './core.js';
 import { perCopyOf } from './media.js';
 
 let ctx = null;
-const G = { cat: 'saved', fitsOnly: true, typed: '', typedCat: false, sel: null };
+// printed: the labels printed as the server lists them, null where it keeps none
+const G = { cat: 'saved', fitsOnly: true, typed: '', typedCat: false, sel: null, printed: [] };
 
 // When a saved label was saved, e.g. "today, 14:05", "Nov 3"
 function savedWhen(mtime) {
@@ -123,6 +124,15 @@ export function openTemplates(cat) {
     typed.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) printFirstLook(); } });
     drawTemplates();
     loadSaved().then(changed => { if (changed) drawTemplates(); });
+    loadKept();
+}
+async function loadKept() {
+    try {
+        const told = await loadPrinted();
+        G.printed = told.enabled ? told.entries : null;
+    } catch (e) { return; }
+    if (G.cat === 'printed' && !G.printed) G.cat = 'saved';
+    drawTemplates();
 }
 
 function drawTemplates() {
@@ -136,7 +146,7 @@ function drawTemplates() {
     nav.innerHTML = (G.typedCat ? `<button type="button" class="on" data-cat="typed"><span>For your text</span></button>` : '')
         + btn('saved', 'Your labels', S.saved.length)
         + allTags().map(t => btn('tag:' + t, t, S.saved.filter(s => hasTag(s, t)).length, ' tag')).join('')
-        + btn('printed', 'Printed', printedItems().length)
+        + (G.printed ? btn('printed', 'Printed', G.printed.length) : '')
         + '<div class="nav-h">Ready-made</div>' + btn('all', 'All', counted(demos))
         + S.demos.map(c => btn(c.id, c.name, counted(demos.filter(d => d.cat === c.id)))).join('');
     $$('[data-cat]', nav).forEach(b => b.onclick = () => {
@@ -167,52 +177,93 @@ function gridItems() {
     return items.slice(0, 240);
 }
 
-// The labels printed in this browser, newest first, as Settings list them
-const printedItems = () => S.history.filter(h => h.state !== 'printing').slice(0, 60)
-    .map(h => ({ kind: 'printed', id: h.id, title: entryName(h), size: h.design.label_size, sub: printedSub(h), design: h.design, values: Object.assign({}, h.values), entry: h }));
+// The labels printed, newest first, as Settings list them
+const printedItems = () => (G.printed || []).map(h => ({ kind: 'printed', id: h.id, title: h.title, sub: keptSub(h), entry: h }));
 
 // Saved labels and those with the text typed are drawn here, ready-made
-// ones as typed come from the server, printed ones with their values
+// ones as typed and printed ones come from the server
 const typedThumb = item => (design, values) => applyTyped(item, clone(design), values);
-const printedThumb = item => design => ({ design, values: item.values });
 let shownItems = [];
 function drawGrid() {
     const grid = $('#tplGrid');
     if (!grid) return;
     if ($('#tplNav [data-cat="typed"]') ? !G.typedCat : G.typedCat) { drawTemplates(); return; }
     const items = shownItems = gridItems(), typed = typedLines().length > 0;
-    grid.innerHTML = items.length ? items.map((it, i) => `<button type="button" class="thumb${G.sel && G.sel.kind === it.kind && G.sel.id === it.id ? ' sel' : ''}" data-i="${esc(i)}"><span class="bed">${it.kind === 'demo' && !typed ? `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">` : `<img alt="" data-thumb="${esc(i)}">`}</span>
+    const shot = (it, i) => it.kind === 'printed' ? (it.entry.preview ? `<img loading="lazy" alt="" src="${esc(it.entry.preview)}">` : '')
+        : it.kind === 'demo' && !typed ? `<img loading="lazy" alt="" src="${esc(thumbUrl(it))}">` : `<img alt="" data-thumb="${esc(i)}">`;
+    grid.innerHTML = items.length ? items.map((it, i) => `<button type="button" class="thumb${G.sel && G.sel.kind === it.kind && G.sel.id === it.id ? ' sel' : ''}" data-i="${esc(i)}"><span class="bed">${shot(it, i)}</span>
         <b>${esc(it.title)}</b><small>${esc(it.kind === 'saved' ? savedSub(it) : placed(it.size) ? 'Made for ' + sizeName(it.size) : it.sub || '')}</small></button>`).join('')
         : `<p class="muted pad">${G.typedCat ? 'No template matches the text.' : G.cat === 'saved' ? 'Labels you save show up here.' : G.cat === 'printed' ? 'Labels you print show up here.' : 'No labels here.'}</p>`;
     grid.scrollTop = 0;
-    $$('[data-thumb]', grid).forEach(img => { const it = items[+img.dataset.thumb]; drawThumb(img, it, it.kind === 'printed' ? printedThumb(it) : typed ? typedThumb(it) : undefined); });
+    $$('[data-thumb]', grid).forEach(img => { const it = items[+img.dataset.thumb]; drawThumb(img, it, typed ? typedThumb(it) : undefined); });
     $$('[data-i]', grid).forEach(b => b.onclick = () => showDetail(items[+b.dataset.i]));
 }
 
 // --- A label of the gallery ---------------------------------------------------------
 
 const RESULT = { printed: 'Printed', failed: 'Not printed', unknown: 'Maybe not printed' };
-async function showDetail(item, values = null) {
+function selectItem(item) {
     const box = $('#tplDetail');
-    if (!box) return;
+    if (!box) return null;
     G.sel = item;
     $$('#tplGrid .thumb').forEach(b => b.classList.toggle('sel', shownItems[+b.dataset.i] === item));
     $('.tpl').classList.add('has-detail');
     box.hidden = false;
+    return box;
+}
+const copiesHTML = n => `<span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(n)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>`;
+const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
+const printedDone = (entry, kept) => { announceKept(entry, kept); loadKept(); };
+// The question of printing again in the panel, Templates stay open
+function askHere(same, next, choose) {
+    const box = $('#tplAsk');
+    if (!box) { choose(null); return; }
+    box.innerHTML = `<button class="btn primary" type="button" id="againSame">${esc(same)}</button><button class="btn" type="button" id="againNext">${esc(next)}</button>
+        <button class="btn ghost sm" type="button" id="againNot">Cancel</button>`;
+    box.hidden = false;
+    const answer = asBefore => { box.hidden = true; box.innerHTML = ''; choose(asBefore); };
+    $('#againSame').onclick = () => answer(true);
+    $('#againNext').onclick = () => answer(false);
+    $('#againNot').onclick = () => answer(null);
+    $('#againSame').focus();
+}
+// A picture of another program printed, as it was printed: printed again
+function showPrinted(item) {
+    const box = selectItem(item), h = item.entry;
+    if (!box) return;
+    box.innerHTML = `<div class="dialog-h"><h3>${esc(h.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div>
+        <div class="tpl-shot">${h.preview ? `<img alt="Preview" id="tplShot" src="${esc(h.preview)}">` : ''}</div>
+        <p class="muted">${esc(item.sub)}</p>
+        <div class="tpl-print">${copiesHTML(h.copies || 1)}<button class="btn primary" type="button" id="tplPrint"${h.again ? '' : ` disabled title="${esc(IMAGE_GONE)}"`}>${icon('refresh')}Print again</button></div>`;
+    $('[data-unsel]', box).onclick = hideDetail;
+    $$('[data-cp]', box).forEach(b => b.onclick = () => { const c = $('#tplCopies'); c.value = Math.min(100, Math.max(1, (parseInt(c.value, 10) || 1) + +b.dataset.cp)); });
+    $('#tplPrint').onclick = () => printKeptAgain(h, printedDone, { copies: copiesNow() });
+}
+async function showDetail(item, values = null) {
+    if (item.kind === 'printed' && !item.entry.open) { showPrinted(item); return; }
+    const box = selectItem(item);
+    if (!box) return;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(item.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div><p class="muted">Loading...</p>`;
     $('[data-unsel]', box).onclick = hideDetail;
     let design;
-    try { design = clone(await itemDesign(item)); } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+    try {
+        // A label printed comes as it was printed, with the values of its blanks
+        if (item.kind === 'printed' && !item.opened) item.opened = await keptLabel(item.entry);
+        design = clone(item.kind === 'printed' ? item.opened.design : await itemDesign(item));
+    } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
     if (G.sel !== item) return;
     const starts = defaults({ design });
-    const work = applyTyped(item, design, values || item.values || Object.assign({}, starts));
+    // A label printed shows the days its date blanks showed as it printed
+    const printedDates = item.kind === 'printed' ? item.opened.printedDates : {};
+    const work = applyTyped(item, design, values || item.values || Object.assign({}, starts, printedDates));
     const blanks = blanksOf(work.design), saved = item.kind === 'saved', before = item.kind === 'printed' ? item.entry : null;
     box.innerHTML = `<div class="dialog-h"><h3>${esc(item.title)}</h3><span class="sp"></span><button class="iconbtn" type="button" data-unsel aria-label="Close">${icon('x', '')}</button></div>
         <div class="tpl-shot"><img alt="Preview" id="tplShot"></div>
         ${placed(work.design.label_size) ? `<p class="mnote">${icon('warn')}<span>Made for ${esc(sizeName(work.design.label_size))}, prints on the ${esc(sizeName(S.tape))}</span></p>` : ''}
         ${blanks.length ? `<div class="tpl-fields" id="tplFields">${blanks.map((b, i) => blankField({ design: work.design }, b, work.values[b], i)).join('')}</div>` : ''}
-        <div class="tpl-print"><span class="az"><button type="button" class="azb" data-cp="-1" aria-label="One copy less">${icon('minus', '')}</button><input class="anum num" id="tplCopies" value="${esc(before ? before.copies : 1)}" inputmode="numeric" aria-label="Copies"><button type="button" class="azb" data-cp="1" aria-label="One copy more">${icon('plus', '')}</button></span>
-            <button class="btn primary" type="button" id="tplPrint"${before && before.noImage ? ` disabled title="${esc(NO_IMAGE)}"` : ''}>${icon('printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        <div class="tpl-print">${copiesHTML(before ? before.copies || 1 : 1)}
+            <button class="btn primary" type="button" id="tplPrint"${before && !before.again ? ` disabled title="${esc(IMAGE_GONE)}"` : ''}>${icon(before ? 'refresh' : 'printer')}${before ? 'Print again' : blanks.length ? 'Fill in and print' : 'Print'}</button></div>
+        ${before ? '<div class="tpl-ask" id="tplAsk" role="group" aria-label="Print again" hidden></div>' : ''}
         <p class="mnote sheetnote" id="tplSheet" hidden></p>
         <div class="tpl-acts">
             <button class="btn soft" type="button" id="tplOpen">${icon('type')}Open in the editor</button>
@@ -222,12 +273,14 @@ async function showDetail(item, values = null) {
         </div>
         <div id="tplMore"></div>`;
     $('[data-unsel]', box).onclick = hideDetail;
-    const copiesNow = () => Math.min(100, Math.max(1, parseInt($('#tplCopies').value, 10) || 1));
     // Only the answer to the last preview asked is shown, earlier ones may come later
     let asked = 0;
+    // A label printed is shown as "Same date" prints it, at the time it
+    // printed, its dates written as they were
+    const shown = () => before ? Object.assign({}, work.design, { timestamp: String(item.opened.printedFor) }, item.opened.dates) : work.design;
     const shot = () => {
         const mine = ++asked;
-        return perCopyOf(work.design).then(n => preview(work.design, work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
+        return perCopyOf(work.design).then(n => preview(shown(), work.values, copiesNow(), n)).then(p => shotDone(p, mine), () => { });
     };
     const shotDone = (p, mine) => {
         const img = $('#tplShot'), note = $('#tplSheet');
@@ -251,15 +304,23 @@ async function showDetail(item, values = null) {
     const printOnce = async accepted => {
         const copies = copiesNow();
         const now = valuesNow(work.values, starts, { design: work.design });
+        // Printed again by the server with the values and copies set here
+        if (before) {
+            // A day as printed follows the date the question chooses, one typed is printed as typed
+            const blanks = blankRequest(work.design, now).blanks;
+            for (const [name, day] of Object.entries(printedDates)) if (now[name] === day) delete blanks[name];
+            const opts = { copies, blanks, design: work.design, ask: askHere, accepted };
+            await printKeptAgain(before, printedDone, opts);
+            return;
+        }
         const first = $$('#tplFields [data-blank]').find(inp => fieldType({ design: work.design }, inp.dataset.blank) === 'text');
         const typed = first && first.value;
-        const entry = await printJob({ title: before ? before.title : item.title, design: work.design, values: now, copies, source: before ? before.source : { kind: item.kind, id: item.id } }, null, undefined, () => {
+        const entry = await printJob({ title: item.title, design: work.design, values: now, copies, source: { kind: item.kind, id: item.id } }, null, undefined, () => {
             accepted();
             // Ready for the next one: the first text blank is emptied, unless typed into meanwhile
             if (saved && first && first.isConnected && first.value === typed) { first.value = ''; work.values[first.dataset.blank] = ''; first.focus(); later(); }
         });
         if (!untold(entry)) toast(entry.state === 'printed' ? `${RESULT.printed} ${copies === 1 ? '1 label' : copies + ' labels'}: ${entryName(entry)}` : `${RESULT[entry.state]}: ${entry.message}`, null, 6000);
-        if (G.cat === 'printed') drawTemplates();
     };
     $$('#tplFields [data-blank]').forEach(inp => {
         inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => { work.values[inp.dataset.blank] = inp.value; later(); });
@@ -284,9 +345,12 @@ async function showDetail(item, values = null) {
             } catch (e) { toast(e.message); return; }
         }
         closeLayer(true);
-        // A label printed before is the label it was printed from
-        const origin = before ? (before.source && before.source.kind === 'saved' ? before.source : null) : originOf(open.kind, open.id, open.mtime);
-        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : before ? before.title : item.title, design, values: work.values, origin });
+        // A label printed opens as the saved label it was printed from, its
+        // days as printed following the day again
+        const origin = before ? item.opened.origin : originOf(open.kind, open.id, open.mtime);
+        const values = Object.assign({}, work.values);
+        for (const [name, day] of Object.entries(printedDates)) if (values[name] === day) values[name] = starts[name];
+        ctx.openEditor({ title: item.kind === 'look' ? typedLines()[0] || item.title : item.title, design, values, origin });
     };
     if (saved) {
         $('#tplLinks').onclick = () => linksPanel(item, work.design);
@@ -338,7 +402,7 @@ function linksPanel(item, design) {
         try { await navigator.clipboard.writeText($('#tplLink').value); toast('Link copied'); } catch (e) { $('#tplLink').select(); toast('Press Ctrl C to copy'); }
     };
     $('#tplPrintSticker').onclick = async () => {
-        const entry = await printJob({ title: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
+        const entry = await printJob({ title: item.title + ' sticker', name: item.title + ' sticker', design: sticker, values: {}, copies: 1, source: { kind: 'sticker', id: item.id } });
         if (!untold(entry)) toast(entry.state === 'printed' ? 'Printed the sticker' : `${RESULT[entry.state]}: ${entry.message}`);
     };
 }

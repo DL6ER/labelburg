@@ -14,7 +14,7 @@ from app.labeldesigner import ipp, printer
 from app.labeldesigner.drivers import devices, reach
 from app.labeldesigner.drivers.brother import network
 from app.labeldesigner.drivers.brother import usb
-from tests.helpers import Answering, outcome, within
+from tests.helpers import Answering, make_client, outcome, within
 from tests.printing.test_reach import names  # noqa: F401
 
 FIXTURES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'fixtures', 'ipp')
@@ -325,6 +325,18 @@ def test_announced_label_printers_are_detected(fake_printer, monkeypatch):
     status = app.test_client().get('/labeldesigner/api/printer_status').get_json()
     assert [(p['path'], p['model']) for p in status['printers']] == [('tcp://127.0.0.1', 'QL-810W'), ('simulation', 'QL-800')]
     assert status['printers'][0]['media_width'] == 62
+
+
+def test_a_request_without_a_model_takes_the_one_the_search_found(fake_printer, monkeypatch, tmp_path):
+    fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
+    monkeypatch.setattr(printer, 'NETWORK_DISCOVERY', True)
+    monkeypatch.setattr(printer, '_discovered', None)
+    monkeypatch.setattr(printer.mdns, 'discover', lambda: [_announced('127.0.0.1', '_ipp._tcp.local', 631, 'QL-810W')])
+    client = make_client(tmp_path, empty_repo=True, model='QL-700', printer='?')
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['path'] == 'tcp://127.0.0.1'
+    # Red and black tape: the QL-810W takes it, the QL-700 configured does not
+    answer = client.post('/labeldesigner/api/settings', data={'printer': 'tcp://127.0.0.1', 'label_size': '62red'})
+    assert (answer.status_code, answer.get_json().get('settings')) == (200, {'label_size': '62red'})
 
 
 def test_arp_candidate_that_is_no_label_printer_is_dropped(fake_printer, monkeypatch, tmp_path):

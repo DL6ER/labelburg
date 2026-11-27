@@ -27,6 +27,15 @@ def nothing_watched(monkeypatch):
     monkeypatch.setattr(reach, '_watched', {})
 
 
+@pytest.fixture(autouse=True)
+def no_usbip_here(monkeypatch):
+    """A host alone is asked over USB/IP first, never at a usbipd of the
+    computer running the tests."""
+    with socket.socket() as unused:
+        unused.bind(('127.0.0.1', 0))
+        monkeypatch.setattr(usbip, 'PORT', unused.getsockname()[1])
+
+
 @pytest.fixture
 def host():
     shared = FakeHost(SharedDevice())
@@ -40,9 +49,9 @@ def connections(monkeypatch):
     ports = []
     real = reach.create_connection
 
-    def recorded(address, timeout, source_address=None):
+    def recorded(address, timeout, *args, **kwargs):
         ports.append(address[1])
-        return real(address, timeout, source_address)
+        return real(address, timeout, *args, **kwargs)
     monkeypatch.setattr(reach, 'create_connection', recorded)
     return ports
 
@@ -123,6 +132,20 @@ def test_addresses_refused(typed, refusal):
     assert str(refused.value) == refusal
 
 
+@pytest.mark.parametrize('typed, shared', [
+    ('192.168.1.50', 'usbip://192.168.1.50'),
+    (' Printer-Pi ', 'usbip://Printer-Pi'),
+    ('[fd00::5]', 'usbip://[fd00::5]'),
+    ('192.168.1.60:9100', None),
+    ('tcp://192.168.1.60', None),
+    ('usbip://192.168.1.50/1-1', None),
+    ('vc500w://192.168.1.70', None),
+    ('/dev/usb/lp1', None),
+])
+def test_hosts_alone_may_share_a_printer(typed, shared):
+    assert adding.shared_at(typed) == shared
+
+
 def test_hosts_of_addresses():
     assert adding.host_of('usbip://Printer-Pi:3241/1-1') == 'printer-pi'
     assert adding.host_of('usbip://[fd00::5]') == 'fd00::5'
@@ -143,6 +166,23 @@ def test_shared_printer_is_known_by_its_device_id(host):
     # Let go again, the server keeps only the printers it uses
     assert let_go(host.devices[0])
     assert usbip.key(host.address()) not in usbip._printers
+
+
+def test_shared_zpl_printer_is_known_by_its_device_id():
+    from app.labeldesigner.drivers.zpl import protocol as zpl
+    from tests.printing.test_zpl import DATAMAX_HS
+    device = SharedDevice(product=0x106E, device_id='MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;')
+    shared = FakeHost(device)
+    try:
+        def answer():
+            while data := device.printer.recv(65536):
+                if data == zpl.HOST_STATUS:
+                    device.printer.sendall(DATAMAX_HS)
+        threading.Thread(target=answer, daemon=True).start()
+        found = adding.identify(shared.address(), 'local')
+        assert (found['kind'], found['model'], found['state']['errors']) == ('usbip', 'Zebra/ZPL', [])
+    finally:
+        shared.close()
 
 
 def test_shared_printer_to_be_added_is_kept(host):
@@ -188,12 +228,69 @@ def test_shared_printer_another_computer_uses(host):
     assert str(refused.value) == adding.SHARED_BUSY
 
 
-def test_nothing_answers():
+def test_nothing_answers(connections):
     with socket.create_server(('127.0.0.1', 0)) as closed:
         address = f'usbip://127.0.0.1:{closed.getsockname()[1]}'
     with pytest.raises(ValueError) as refused:
         adding.identify(address, 'local')
     assert str(refused.value) == adding.NO_ANSWER
+    # A printer given on USB/IP is not looked for on the network
+    assert network.IPP_PORT not in connections
+
+
+def test_host_alone_that_shares_a_printer(host, monkeypatch):
+    FakeQL(host.devices[0])
+    monkeypatch.setattr(usbip, 'PORT', host.port)
+    found = adding.identify('127.0.0.1', 'local')
+    assert (found['address'], found['kind'], found['model']) == ('usbip://127.0.0.1', 'usbip', 'QL-1100')
+    assert let_go(host.devices[0])
+
+
+@pytest.fixture
+def no_network_printer(monkeypatch):
+    with socket.socket() as unused:
+        unused.bind(('127.0.0.1', 0))
+        port = unused.getsockname()[1]
+    monkeypatch.setattr(network, 'IPP_PORT', port)
+    monkeypatch.setattr(network, 'SNMP_PORT', port)
+    monkeypatch.setattr(network, '_snmp_unavailable', {})
+
+
+def test_host_alone_that_shares_no_printer_is_told_so(monkeypatch, no_network_printer):
+    shared = FakeHost(SharedDevice(interfaces=((8, 80),)))
+    monkeypatch.setattr(usbip, 'PORT', shared.port)
+    try:
+        with pytest.raises(ValueError) as refused:
+            adding.identify('127.0.0.1', 'local')
+        assert str(refused.value) == adding.NOT_SHARED
+    finally:
+        shared.close()
+
+
+def test_host_alone_that_does_not_speak_usbip_is_asked_on_the_network(fake_printer, monkeypatch):  # noqa: F811
+    fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
+    with socket.create_server(('127.0.0.1', 0)) as other:
+        monkeypatch.setattr(usbip, 'PORT', other.getsockname()[1])
+
+        def answer():
+            while True:
+                try:
+                    connection = other.accept()[0]
+                except OSError:
+                    return
+                with connection:
+                    connection.recv(1024)
+                    connection.sendall(b'HTTP/1.1 400 Bad Request\r\n\r\n')
+        threading.Thread(target=answer, daemon=True).start()
+        found = adding.identify('127.0.0.1', 'local')
+    assert (found['address'], found['model']) == ('tcp://127.0.0.1', 'QL-810W')
+
+
+def test_host_alone_without_usbip_is_asked_on_the_network(fake_printer, connections):  # noqa: F811
+    fake_printer['body'] = fixture('ql810w-ready-62x29.bin')
+    found = adding.identify('127.0.0.1', 'local')
+    assert (found['address'], found['kind'], found['model']) == ('tcp://127.0.0.1', 'network', 'QL-810W')
+    assert connections[0] == usbip.PORT and 9100 not in connections
 
 
 @pytest.mark.parametrize('resolved, mode, refusal', [
@@ -232,7 +329,8 @@ def test_network_printer_known_over_ipp(fake_printer, connections):  # noqa: F81
     found = adding.identify('tcp://127.0.0.1', 'local')
     assert (found['address'], found['kind'], found['model']) == ('tcp://127.0.0.1', 'network', 'QL-810W')
     assert (found['state']['media_width'], found['state']['media_length']) == (62, 29)
-    assert 9100 not in connections
+    # Given as a network printer, not asked over USB/IP
+    assert 9100 not in connections and usbip.PORT not in connections
 
 
 def test_network_printer_of_another_kind_gets_nothing(fake_printer, connections):  # noqa: F811
@@ -307,7 +405,7 @@ def test_identity_is_asked_for_over_ipp():
     assert request['requested-attributes'] == ['printer-make-and-model', 'printer-device-id']
 
 
-@pytest.mark.parametrize('device_id', [LASER, 'MFG:Zebra Technologies;CMD:ZPL;MDL:GK420t;CLS:PRINTER;'])
+@pytest.mark.parametrize('device_id', [LASER])
 def test_shared_device_refused_for_adding_is_let_go(device_id):
     device = SharedDevice(device_id=device_id)
     shared = FakeHost(device)

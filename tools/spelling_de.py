@@ -12,9 +12,10 @@ import sys
 DEMOS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'app', 'labeldesigner', 'demos')
 # Correct, but not in the dictionary: technical terms, compound words and
 # abbreviations, also in capitals
-KNOWN = {'AED', 'ASN', 'Brandfördernd', 'Chili', 'Dampflok', 'Defibrillator', 'Grocy', 'Homebox', 'Ibuprofen', 'Inventaretikett', 'Labelburg', 'mg', 'Minze',
-         'ml', 'Nr', 'Olivenöl', 'Oxidationsmittel', 'Paperless', 'Patchfeld', 'Pesto', 'Planierraupe', 'QR', 'Rack', 'Reagenz', 'Regaletikett', 'Rutschgefahr',
-         'Umweltgefährlich', 'Verbandkasten'}
+KNOWN = {'ABS', 'AED', 'ASA', 'ASN', 'Brandfördernd', 'Chili', 'Dampflok', 'Defibrillator', 'Filamentspule', 'Grocy', 'Hack', 'Hähnchenbrust',
+         'Hähnchenflügel', 'Hähnchenschenkel', 'Homebox', 'Ibuprofen', 'Inventaretikett', 'Kabeljau', 'Labelburg', 'mg', 'Minze', 'ml', 'Nr',
+         'Olivenöl', 'Oxidationsmittel', 'PA', 'Paperless', 'Patchfeld', 'Pesto', 'PETG', 'PLA', 'Planierraupe', 'Putenbrust', 'Putenhack', 'QR',
+         'Rack', 'Reagenz', 'Regaletikett', 'Rinderhack', 'Rutschgefahr', 'Schweinehack', 'TPU', 'Umweltgefährlich', 'Verbandkasten'}
 
 
 def label_words():
@@ -22,7 +23,9 @@ def label_words():
     for path in sorted(glob.glob(os.path.join(DEMOS, '*', '*-de.json'))):
         with open(path, encoding='utf-8') as fh:
             label = json.load(fh)
-        text = '\n'.join([label['title']] + [line['text'] for line in label['text']])
+        # The choices of blanks are printed as well, e.g. the rooms of a moving box
+        choices = [str(choice) for field in label.get('fields', {}).values() for choice in field.get('choices', [])]
+        text = '\n'.join([label['title']] + [line['text'] for line in label['text']] + choices)
         # A word broken over two lines, e.g. "Notruf-" and "telefon"
         text = re.sub(r'-\n(?=[a-zäöüß])', '', text)
         # Templates like {{datetime:%d.%m.%Y}}

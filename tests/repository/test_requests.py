@@ -7,7 +7,7 @@ import os
 import pytest
 
 from tests.helpers import make_client, outcome
-from tests.repository.helpers import BLANK_LABEL, SAVE_URL, TEXT
+from tests.repository.helpers import BLANK_LABEL, SAVE_URL, TEXT, _png_b64
 
 
 def test_repository_save_requires_json_and_name(tmp_path):
@@ -214,6 +214,62 @@ def test_a_name_that_names_no_file_is_not_found(tmp_path, name):
         response = getattr(client, method)(f'/labeldesigner/api/repository/{url}', query_string={'name': name})
         assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
     assert os.path.isdir(client.application.config['LABEL_REPOSITORY_DIR'])
+
+
+@pytest.mark.parametrize('title, filename', [('Frozen on', 'Frozen_on.json'), ('Eggs & milk', 'Eggs_milk.json')])
+def test_a_saved_label_is_found_by_the_name_it_is_saved_under(tmp_path, title, filename):
+    # As the label designer saves it: a file name without spaces and "&",
+    # the title as typed, e.g. in Home Assistant
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.post(SAVE_URL, json={'name': filename, 'title': title, 'label_size': '62', 'text': TEXT}).status_code == 200
+    for name in (title, filename.removesuffix('.json'), filename):
+        assert client.get('/labeldesigner/api/repository/load', query_string={'name': name}).get_json()['title'] == title
+        assert client.get('/labeldesigner/api/repository/preview', query_string={'name': name}).status_code == 200
+        assert outcome(client, client.post('/labeldesigner/api/repository/print', json={'name': name})) == ('printed', '')
+    assert client.post('/labeldesigner/api/repository/delete', json={'name': filename}).status_code == 200
+    assert os.listdir(client.application.config['LABEL_REPOSITORY_DIR']) == []
+
+
+@pytest.mark.parametrize('name', ['Box', 'Box_2', 'Box_2.json'])
+def test_a_delete_takes_the_exact_file_name_only(tmp_path, name):
+    # Several labels may have the same title
+    client = make_client(tmp_path, empty_repo=True)
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    for filename in ('Box_1.json', 'Box_2.json'):
+        assert client.post(SAVE_URL, json={'name': filename, 'title': 'Box', 'label_size': '62', 'text': TEXT}).status_code == 200
+    response = client.post('/labeldesigner/api/repository/delete', json={'name': name})
+    if name == 'Box_2.json':
+        assert response.status_code == 200
+        assert os.listdir(repo) == ['Box_1.json']
+    else:
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+        assert sorted(os.listdir(repo)) == ['Box_1.json', 'Box_2.json']
+
+
+def test_a_name_finds_the_file_of_that_name_before_a_title(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    assert client.post(SAVE_URL, json={'name': 'Jam.json', 'title': 'Jam', 'label_size': '62', 'text': TEXT}).status_code == 200
+    assert client.post(SAVE_URL, json={'name': 'Another.json', 'title': 'Jam.json', 'label_size': '62', 'text': TEXT}).status_code == 200
+    assert client.get('/labeldesigner/api/repository/load', query_string={'name': 'Jam.json'}).get_json()['name'] == 'Jam.json'
+
+
+@pytest.mark.parametrize('name', ['../Outside', 'Outside', 'Shelf_image.png', 'Shelf_image', '.Hidden', 'Hidden', ' '])
+def test_a_name_finds_only_saved_labels(tmp_path, name):
+    # Neither files outside the folder of the labels, their images nor hidden
+    # files, e.g. the printer settings
+    client = make_client(tmp_path, empty_repo=True)
+    repo = client.application.config['LABEL_REPOSITORY_DIR']
+    with open(tmp_path / 'Outside.json', 'w', encoding='utf-8') as f:
+        json.dump({'title': 'Outside', 'label_size': '62', 'text': TEXT}, f)
+    with open(os.path.join(repo, '.Hidden.json'), 'w', encoding='utf-8') as f:
+        json.dump({'title': 'Hidden', 'label_size': '62', 'text': TEXT}, f)
+    body = {'name': 'Shelf.json', 'title': '', 'label_size': '62', 'text': TEXT, 'print_type': 'image', 'image_data': _png_b64('red'),
+            'image_mime': 'image/png'}
+    assert client.post(SAVE_URL, json=body).status_code == 200
+    for method, url in (('get', 'load'), ('get', 'preview'), ('post', 'print')):
+        response = getattr(client, method)(f'/labeldesigner/api/repository/{url}', query_string={'name': name})
+        assert (response.status_code, response.get_json()) == (404, {'success': False, 'message': 'Not found'})
+    assert sorted(os.listdir(repo)) == ['.Hidden.json', 'Shelf.json', 'Shelf_image.png']
 
 
 @pytest.mark.parametrize('body', [{'name': ['Shelf.json']}, {'name': {'a': 1}}])

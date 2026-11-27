@@ -7,7 +7,8 @@ from PIL import Image
 
 from app.labeldesigner import refusals
 from app.labeldesigner.drivers.brother.commands import Raster
-from app.labeldesigner.drivers.brother.raster import convert
+from app.labeldesigner.drivers.brother.raster import _add_job, convert
+from app.labeldesigner.printer import PrinterQueue
 
 TUBE_TOO_LONG = 'Labels on heat-shrink tube can be at most 500 mm long'
 
@@ -34,6 +35,21 @@ def test_pt_p900_series_prints_normally_without_bit_6_nor_media_type(model):
     convert(raster, [Image.new('1', (454, 4), 1)], 'pt36', rotate=0, half_cut=False)
     assert expanded_modes(raster.data) == [0x08]
     assert b'\x1b\x69\x7a\xcc\x00\x24\x00\x04\x00\x00\x00\x00\x00' in raster.data
+
+
+@pytest.mark.parametrize('model, counts, cuts', [
+    # ESC i A counts 1 to 99 labels (p. 34): cut after 99, and after the last without chain printing (p. 33)
+    ('PT-E550W', [99] * 150, [0x40] * 150),
+    # Its reference has no ESC i A: only the last page is told to cut
+    ('PT-P700', [], [0x00] * 149 + [0x40]),
+])
+def test_cut_once_after_more_labels_than_esc_i_a_counts(model, counts, cuts):
+    raster = Raster(model)
+    job = {'settings': (0, False, False, False), 'images': [Image.new('1', (70, 2), 1)] * 150, 'cuts': [False] * 150}
+    _add_job(PrinterQueue(model, 'file:///dev/usb/lp0', 'pt12'), raster, job)
+    assert [raster.data[at + 3] for at in range(len(raster.data)) if raster.data.startswith(b'\x1b\x69\x41', at)] == counts
+    assert [raster.data[at + 3] for at in range(len(raster.data)) if raster.data.startswith(b'\x1b\x69\x4d', at)] == cuts
+    assert expanded_modes(raster.data) == [0x0c if model == 'PT-E550W' else 0x08] * 150
 
 
 def test_pt_p700_is_not_told_to_half_cut():

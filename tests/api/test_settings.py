@@ -379,3 +379,20 @@ def test_the_tape_a_printer_reported_is_named_for_the_model_it_prints_with(tmp_p
         monkeypatch.setattr('app.labeldesigner.routes.device_state', lambda device, model: dict(state))
         assert client.post('/labeldesigner/api/print', data={'text': text}).status_code == 200
     assert jobs == ['pt24', 'pt12', 'pt18']
+
+
+def test_saving_energy_is_a_setting_of_printers_that_keep_their_connection(tmp_path):
+    client = make_client(tmp_path, empty_repo=True)
+    b1 = {'printer': 'bt://00:00:5E:00:53:01', 'model': 'Niimbot/B1'}
+    r = client.post(URL, data={**b1, 'save_energy': '1'})
+    assert (r.get_json()['success'], r.get_json()['settings']) == (True, {'save_energy': '1'})
+    assert client.post(URL, data={**b1, 'save_energy': 'yes'}).status_code == 400
+    assert client.post(URL, data={'printer': 'tcp://a', 'save_energy': '1'}).status_code == 400
+    assert client.post(URL, data={**b1, 'save_energy': ''}).get_json()['settings'] == {}
+
+
+def test_the_printers_that_save_energy_are_found_where_they_were_last_seen():
+    data = {'printers': {'serial:Niimbot/B1/A1': {'save_energy': '1'}, 'bt://00:00:5e:00:53:02': {'save_energy': '1'},
+                         'serial:Niimbot/B1/A3': {'save_energy': '0'}, 'serial:Niimbot/B1/A4': {'save_energy': '1'}},
+            'seen': {'bt://00:00:5e:00:53:01': 'serial:Niimbot/B1/A1', 'bt://00:00:5e:00:53:03': 'serial:Niimbot/B1/A3'}}
+    assert printer_settings.saving_energy(data) == {'bt://00:00:5e:00:53:01', 'bt://00:00:5e:00:53:02'}

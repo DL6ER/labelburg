@@ -21,7 +21,7 @@ from PIL import Image
 from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import brother, devices, transports
 from app.labeldesigner.drivers.brother.commands import Raster
-from app.labeldesigner.drivers.brother.raster import convert
+from app.labeldesigner.drivers.brother.raster import _add_job, convert
 from app.labeldesigner.drivers.brother.status import parse_status
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_bluetooth import Management, found
@@ -103,12 +103,13 @@ def test_pt_p710bt_cuts_after_each_page_told_to_cut(cut_every, cuts):
 
 
 def test_pt_p710bt_cuts_after_the_last_of_more_than_255_labels():
-    # Cut after every 255 labels as ESC i A counts them, and after the last
+    # Cut once at the end, also after more labels than ESC i A counts
     raster = Raster('PT-P710BT')
-    convert(raster, [Image.new('1', (70, 2), 1)] * 300, 'pt12', rotate=0, cut_every=255)
+    job = {'settings': (0, False, False, False), 'images': [Image.new('1', (70, 2), 1)] * 300, 'cuts': [False] * 300}
+    _add_job(printer.PrinterQueue('PT-P710BT', DEVICE, 'pt12'), raster, job)
     cuts = [raster.data[at + 3] for at in _found(raster.data, b'\x1b\x69\x4d')]
-    assert len(cuts) == 300 and [i for i, flag in enumerate(cuts) if flag == 0x40] == [254, 299]
-    assert set(cuts) == {0x00, 0x40}
+    assert len(cuts) == 300 and [i for i, flag in enumerate(cuts) if flag == 0x40] == [299]
+    assert b'\x1b\x69\x41' not in raster.data
 
 
 def test_pt_p750w_still_counts_the_labels_it_cuts_after():
@@ -362,6 +363,20 @@ def test_status_on_bluetooth_is_asked_at_most_every_30_s(tmp_path, brother_on_bl
     assert asked(60) == 4 and len(fake.jobs) == 1
 
 
+def test_status_while_a_job_holds_the_printer_is_not_an_answer(brother_on_bluetooth, clock, monkeypatch):
+    # The first status query after the job asks the printer
+    fake = brother_on_bluetooth()
+    monkeypatch.setattr(devices, 'STATUS_LOCK_TIMEOUT', 0.05)
+    start = clock[0]
+    drivers.BROTHER.status(DEVICE, 'PT-P710BT')
+    clock[0] = start + 31
+    with devices.device_lock(DEVICE):
+        assert drivers.BROTHER.status(DEVICE, 'PT-P710BT')['status_type'] == devices.BUSY_STATUS_TYPE
+    clock[0] = start + 32
+    assert drivers.BROTHER.status(DEVICE, 'PT-P710BT')['status_type'] != devices.BUSY_STATUS_TYPE
+    assert fake.requests == 2
+
+
 def test_pt_p710bt_is_not_followed_on_bluetooth():
     assert drivers.BROTHER.followed(DEVICE, 'PT-P710BT') is False
     assert drivers.BROTHER.followed('usb://0x04f9:0x20af', 'PT-P710BT') is True
@@ -372,10 +387,14 @@ def test_printer_that_is_not_paired_says_so(tmp_path, brother_on_bluetooth, cloc
     # Authentication Failure, PIN or Key Missing: the kernel's EACCES and EBADE
     fake = brother_on_bluetooth(refused=error)
     client = make_client(tmp_path, model='PT-P710BT', printer=DEVICE)
-    for _ in range(2):
+    # Paged once, not again every 30 s, until the label designer looks for printers
+    for at in (0, 1, 31, 300):
+        clock[0] += at
         state = client.get(STATUS).get_json()['printers'][0]
         assert (state['model'], state['errors']) == ('PT-P710BT', ['Pair the printer with this computer first'])
     assert len(fake.addresses) == 1
+    client.get(STATUS + '?look=1')
+    assert len(fake.addresses) == 2
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
     message = 'Could not send the label to the printer: Pair the printer with this computer first'
     assert outcome(client, response) == ('failed', message) and message in refusals.MESSAGES

@@ -14,31 +14,39 @@ from tests.helpers import make_client
 NIIMBOT = bytes.fromhex('e7810a7173ae499d8c15faa9aef0c3f2')[::-1]
 B1 = '00:00:5E:00:53:01'
 OTHER = '00:00:5E:00:53:02'
+# Powered, with Bluetooth LE
+ON = 1 << 0 | 1 << 9
+
+
+def adapter(index):
+    return f'00:00:5E:00:53:{0xf0 + index:02X}'
 
 
 def event(code, index, params=b''):
     return struct.pack('<HHH', code, index, len(params)) + params
 
 
-def found(address, kind=1, name='', services=(), raw=b''):
-    """A Device Found event, the advertising data with a name and services,
-    or raw as it is."""
+def found(address, kind=1, name='', services=(), raw=b'', index=0, rssi=-60):
+    """A Device Found event on adapter index, the advertising data with a
+    name and services, or raw as it is."""
     data = raw
     if name:
         data += bytes([len(name) + 1, 0x09]) + name.encode()
     if services:
         data += bytes([16 * len(services) + 1, 0x07]) + b''.join(services)
-    params = bytes.fromhex(address.replace(':', ''))[::-1] + bytes([kind]) + struct.pack('<bIH', -60, 0, len(data)) + data
-    return event(0x0012, 0, params)
+    params = bytes.fromhex(address.replace(':', ''))[::-1] + bytes([kind]) + struct.pack('<bIH', rssi, 0, len(data)) + data
+    return event(0x0012, index, params)
 
 
 class Management:
-    """The kernel's management channel as a socket: one controller, a search
-    that finds the devices given and then stops."""
+    """The kernel's management channel as a socket: the controllers given,
+    their settings, a search on each that finds the devices given and then
+    stops. start_status for all controllers or by index."""
 
-    def __init__(self, devices_found=(), start_status=0, controllers=(0,)):
+    def __init__(self, devices_found=(), start_status=0, controllers=(0,), settings=None):
         self.sent, self.incoming = [], []
         self.devices_found, self.start_status, self.controllers = list(devices_found), start_status, controllers
+        self.settings = settings or {}
 
     def __call__(self, family, kind, proto):
         assert (family, kind, proto) == (socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
@@ -62,13 +70,18 @@ class Management:
         if op == 0x0003:
             params = struct.pack('<HBH', op, 0, len(self.controllers)) + struct.pack(f'<{len(self.controllers)}H', *self.controllers)
             self.incoming.append(event(0x0001, 0xffff, params))
+        elif op == 0x0004:
+            address = bytes.fromhex(adapter(index).replace(':', ''))[::-1]
+            info = address + bytes([9]) + struct.pack('<HII', 2, ON, self.settings.get(index, ON)) + bytes(263)
+            self.incoming.append(event(0x0001, index, struct.pack('<HB', op, 0) + info))
         elif op == 0x0023:
-            if self.start_status:
-                self.incoming.append(event(0x0002, index, struct.pack('<HB', op, self.start_status)))
+            status = self.start_status.get(index, 0) if isinstance(self.start_status, dict) else self.start_status
+            if status:
+                self.incoming.append(event(0x0002, index, struct.pack('<HB', op, status)))
                 return len(data)
             self.incoming.append(event(0x0013, index, bytes([data[6], 1])))
             self.incoming.append(event(0x0001, index, struct.pack('<HB', op, 0) + data[6:7]))
-            self.incoming.extend(self.devices_found)
+            self.incoming.extend(found_ for found_ in self.devices_found if struct.unpack_from('<H', found_, 2)[0] == index)
             self.incoming.append(event(0x0013, index, bytes([data[6], 0])))
         return len(data)
 
@@ -91,7 +104,46 @@ def test_devices_on_bluetooth_le_are_found_with_their_names_and_services(managem
     assert bluetooth.discover(1) == [{'address': B1, 'name': 'B1-TEST0001', 'le': True, 'services': [NIIMBOT]},
                                      {'address': OTHER, 'name': '', 'le': True, 'services': []}]
     # Only LE, public and random addresses, and stopped again
-    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x06'), (0x0024, b'\x06')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0004, b''), (0x0023, b'\x06'), (0x0024, b'\x06')]
+
+
+def test_every_adapter_is_searched_and_a_printer_reached_through_the_one_that_heard_it_best(management):
+    # The kernel lists the adapter added last first, e.g. one on USB/IP
+    # far from the printer
+    fake = management([found(B1, name='B1-TEST0001', index=1, rssi=-90), found(B1, name='B1-TEST0001', index=0, rssi=-50),
+                       found(OTHER, index=1)], controllers=(1, 0))
+    assert {device['address'] for device in bluetooth.discover(1)} == {B1, OTHER}
+    assert sorted(index for op, index, _ in fake.sent if op == 0x0023) == [0, 1]
+    assert sorted(index for op, index, _ in fake.sent if op == 0x0024) == [0, 1]
+    assert (bluetooth.adapter_for(B1), bluetooth.adapter_for(OTHER)) == (adapter(0), adapter(1))
+
+
+def test_an_adapter_switched_off_or_without_bluetooth_le_is_not_searched(management):
+    fake = management([found(B1, name='B1-TEST0001', index=0)], controllers=(2, 1, 0), settings={1: 1 << 9, 2: 1 << 0})
+    assert [device['address'] for device in bluetooth.discover(1)] == [B1]
+    assert [index for op, index, _ in fake.sent if op == 0x0023] == [0]
+
+
+def test_an_adapter_refusing_the_search_leaves_the_others(management):
+    management([found(B1, name='B1-TEST0001', index=0)], controllers=(1, 0), start_status={1: 0x0a})
+    assert [device['address'] for device in bluetooth.discover(1)] == [B1]
+    assert bluetooth.adapter_for(B1) == adapter(0)
+
+
+def test_a_printer_not_heard_by_a_search_is_reached_through_any_adapter(management):
+    management([found(OTHER, index=0)])
+    bluetooth.discover(1)
+    assert bluetooth.adapter_for(B1) == socket.BDADDR_ANY
+    # An address as set up, in lower case
+    assert bluetooth.adapter_for(OTHER.lower()) == adapter(0)
+
+
+def test_a_printer_not_heard_again_keeps_its_adapter(management):
+    management([found(B1, name='B1-TEST0001', index=1)], controllers=(1,))
+    bluetooth.discover(1)
+    management([found(OTHER, index=0)])
+    bluetooth.discover(1)
+    assert bluetooth.adapter_for(B1) == adapter(1)
 
 
 def test_a_malformed_advertisement_of_another_device_still_finds_the_b1(management):
