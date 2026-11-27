@@ -85,10 +85,12 @@ def _add_job(queue, raster, job):
     options = {}
     if raster.ptouch:
         # Cut after every label, or with cut_once after the last one, the
-        # printer half cuts between them. ESC i A counts up to 255 labels.
+        # printer half cuts between them. ESC i A counts up to cut_every
+        # labels of the model, a printer without it is told to cut the last.
         # Chain printing: the last label stays in the printer, the next job
         # cuts it off and saves the tape fed before it.
-        options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(len(job['images']), 255),
+        labels = len(job['images'])
+        options = {'autocut': queue.cut != 'none', 'cut_every': 1 if all(job['cuts']) else min(labels, raster.spec.cut_every or labels),
                    'half_cut': queue.half_cut, 'chain': queue.chain}
     # Unless printing fast, the printer gives priority to print quality. A
     # QL-810W printed a 29 x 90 mm label in 3.0 s instead of 1.8 s with it, a
@@ -188,9 +190,8 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             # series prints at high resolution on laminated tape, told as 09h.
             raster.add_media_and_quality(im.size[1], 0x09 if dpi_600 else None, tape[0], 0, hq)
         if cut:
-            # A printer without ESC i A cuts after each page told to cut, the
-            # last one also after more labels than ESC i A counts
-            raster.add_autocut(autocut and (raster.spec.cut_every or (i + 1) % cut_every == 0 or i == len(images) - 1))
+            # A printer without ESC i A cuts after each page told to cut
+            raster.add_autocut(autocut and (raster.spec.cut_every > 0 or (i + 1) % cut_every == 0 or i == len(images) - 1))
             if autocut:
                 raster.add_cut_every(cut_every)
         raster.add_expanded_mode(cut, dpi_600, red, half_cut, chain)

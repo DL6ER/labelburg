@@ -8,8 +8,8 @@ from dataclasses import dataclass
 class Model:
     """A printer model: the bytes of a raster line across its print head, the
     dots its print is moved further off the right edge, the commands it takes
-    (mode setting, cutting, cutting after a number of labels, expanded mode,
-    compression), whether it is told to send its status while printing,
+    (mode setting, cutting, cutting after up to cut_every labels, expanded
+    mode, compression), whether it is told to send its status while printing,
     whether it prints red, the zero bytes that clear its command buffer, and
     the codes it gives in its status (series and model). Its longest label
     has max_length_dots lines at dpi. It prints speed mm/s, as Brother's
@@ -22,7 +22,7 @@ class Model:
     additional_offset_r: int = 0
     mode_setting: bool = True
     cutting: bool = True
-    cut_every: bool = True
+    cut_every: int = 255
     expanded_mode: bool = True
     compression_support: bool = True
     status_notification: bool = False
@@ -57,13 +57,16 @@ MODELS = {model.identifier: model for model in (
     # Model codes after Brother's raster command reference of the PT-E550W,
     # PT-P750W and PT-P710BT: 66h is the PT-E550W, 68h the PT-P750W. TZe
     # tape is at most 1000 mm long there and in that of the PT-P900 series.
+    # ESC i A counts 1 to 99 labels there, 1 to 255 in that of the PT-P900 series.
     # https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
-    Model('PT-E550W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x66),
-    Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x67),
-    Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, series_code=0x30, model_code=0x68),
+    Model('PT-E550W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=99, series_code=0x30, model_code=0x66),
+    # The reference of the PT-P700 has no ESC i A
+    # https://download.brother.com/welcome/docp000771/cv_pth500p700e500_eng_raster_111.pdf
+    Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0, series_code=0x30, model_code=0x67),
+    Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=99, series_code=0x30, model_code=0x68),
     # The same reference names no model code of the PT-P710BT. It takes no
     # ESC i A, and Brother's driver turns its status while printing off.
-    Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=False,
+    Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0,
           status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
     # "o" is 6Fh, not the 69h of the PT-P900 reference; Brother's index links it as 6F30
     # https://support.brother.com/g/s/es/dev/en/command/reference/index.html

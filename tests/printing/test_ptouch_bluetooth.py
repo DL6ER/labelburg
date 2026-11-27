@@ -21,7 +21,7 @@ from PIL import Image
 from app.labeldesigner import bluetooth, drivers, printer, refusals
 from app.labeldesigner.drivers import brother, devices, transports
 from app.labeldesigner.drivers.brother.commands import Raster
-from app.labeldesigner.drivers.brother.raster import convert
+from app.labeldesigner.drivers.brother.raster import _add_job, convert
 from app.labeldesigner.drivers.brother.status import parse_status
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_bluetooth import Management, found
@@ -103,12 +103,13 @@ def test_pt_p710bt_cuts_after_each_page_told_to_cut(cut_every, cuts):
 
 
 def test_pt_p710bt_cuts_after_the_last_of_more_than_255_labels():
-    # Cut after every 255 labels as ESC i A counts them, and after the last
+    # Cut once at the end, also after more labels than ESC i A counts
     raster = Raster('PT-P710BT')
-    convert(raster, [Image.new('1', (70, 2), 1)] * 300, 'pt12', rotate=0, cut_every=255)
+    job = {'settings': (0, False, False, False), 'images': [Image.new('1', (70, 2), 1)] * 300, 'cuts': [False] * 300}
+    _add_job(printer.PrinterQueue('PT-P710BT', DEVICE, 'pt12'), raster, job)
     cuts = [raster.data[at + 3] for at in _found(raster.data, b'\x1b\x69\x4d')]
-    assert len(cuts) == 300 and [i for i, flag in enumerate(cuts) if flag == 0x40] == [254, 299]
-    assert set(cuts) == {0x00, 0x40}
+    assert len(cuts) == 300 and [i for i, flag in enumerate(cuts) if flag == 0x40] == [299]
+    assert b'\x1b\x69\x41' not in raster.data
 
 
 def test_pt_p750w_still_counts_the_labels_it_cuts_after():
