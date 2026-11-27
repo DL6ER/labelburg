@@ -16,7 +16,7 @@ from tests.printing.test_niimbot import REPLIES, TEXT, FakePrinter, data_of
 
 DEVICE = 'bt://00:00:5E:00:53:21'
 
-# niimbluelib at 35110a716c960448ee17a9270e4c3a131149866f: the id, dpi,
+# niimbluelib at 0c9d33d447bc7ba612f04fa41b2f7bbd0ddd8117: the id, dpi,
 # printheadPixels, densityMin, densityMax and densityDefault of
 # src/printer_models.ts, the print task of src/print_tasks/index.ts
 NIIMBLUELIB = {
@@ -42,7 +42,10 @@ NIIMBLUELIB = {
 }
 # The printheads https://printers.niim.blue/hardware/ marks verified where
 # they differ from printheadPixels: NIIMBOT-B1_Pro/, niimbot-b21_pro/,
-# niimbot-m2h/ and niimbot-d11_h/. The D110_M printed on 120.
+# niimbot-m2h/ and niimbot-d11_h/. niimbluelib counts the dots of a row by
+# the width the printer tells (AbstractPrintTask.ts:153-156), 576 by a B21
+# Pro and a B1 Pro (src/test/virtual-client.test.ts:85, 132, 338). The
+# D110_M printed on 120.
 HEADS = {'B1_PRO': 576, 'B21_PRO': 576, 'M2_H': 576, 'D11_H': 144, 'D110_M': 120}
 
 
@@ -85,10 +88,10 @@ def niimbluelib_packet(command, data):
 
 
 def test_models_are_those_of_niimbluelib():
-    table = {model.short: (model.ids, model.dpi, model.counted, *model.density, model.sequence) for model in models.MODELS}
+    table = {model.short: (model.ids, model.dpi, model.dots, *model.density, model.sequence) for model in models.MODELS}
+    listed = {short: (ids, dpi, HEADS.get(short, pixels), *rest) for short, (ids, dpi, pixels, *rest) in NIIMBLUELIB.items()}
     # The D110_M keeps the sequence it printed with
-    assert table == dict(NIIMBLUELIB, D110_M=((2320,), 203, 96, 1, 5, 3, 'v4'))
-    assert {model.short: model.dots for model in models.MODELS if model.dots != model.counted} == HEADS
+    assert table == dict(listed, D110_M=((2320,), 203, 120, 1, 5, 3, 'v4'))
 
 
 def test_models_printed_are_those_of_the_sequences_labelburg_has():
@@ -177,7 +180,7 @@ def test_model_id_of_one_byte_is_its_high_byte(fake, monkeypatch, answer, model)
 
 
 def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch):
-    # niimbluelib at 35110a71, src/print_tasks/D110MV4PrintTask.ts, the
+    # niimbluelib at 0c9d33d4, src/print_tasks/D110MV4PrintTask.ts, the
     # packets of src/packets/packet_generator.ts, the commands of
     # src/packets/commands.ts. Two empty rows, one of 3 dots, 351 black.
     told(monkeypatch, 4097)
@@ -188,10 +191,10 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1_PRO', label_size='niimbot50x30-b1pro')
     assert niimbot.DRIVER.send(queue, [rows]) == ''
     p = niimbluelib_packet
-    # The rows of 576 dots are 72 bytes, more than the thirds of 23 bytes of
-    # printheadPixels 567 (utils.ts:105-106): the dots counted together as
-    # 0, low, high byte (utils.ts:151-152)
-    black = bytes([0, 0x40, 0x02])
+    # The rows of 576 dots are 72 bytes, the thirds of 24 bytes of the
+    # printhead of 576 dots it tells (utils.ts:98-99), their dots counted
+    # in each
+    black = bytes([192, 192, 192])
     assert fake.packets[3:] == [
         # D110MV4PrintTask.ts:20 setLabelType, packet_generator.ts:113, 0x23 commands.ts:36, WithGaps
         p(0x23, [1]),
@@ -209,7 +212,7 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
         p(0x84, [0, 0, 2]),
         # packet_generator.ts:442-450 printBitmapRowIndexed :276-290 for 6
         # dots or less, their places (image_encoder.ts:247-255)
-        p(0x83, [0, 2, 0, 3, 0, 1, 0, 10, 1, 44, 2, 58]),
+        p(0x83, [0, 2, 1, 1, 1, 1, 0, 10, 1, 44, 2, 58]),
         # packet_generator.ts:454-460 printBitmapRow :254-263; equal rows end
         # after row 199 (image_encoder.ts:225-229)
         p(0x85, [0, 3, *black, 197] + [0xff] * 72),
@@ -225,7 +228,7 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
 
 
 def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
-    # niimbluelib at 35110a71, src/print_tasks/B1PrintTask.ts. One row of 2
+    # niimbluelib at 0c9d33d4, src/print_tasks/B1PrintTask.ts. One row of 2
     # dots, 319 black, 12 mm across.
     told(monkeypatch, 2560)
     monkeypatch.setitem(REPLIES, 0x03, (0x04, b'\x01'))
@@ -233,7 +236,7 @@ def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/D101', label_size='niimbot12x40')
     assert niimbot.DRIVER.send(queue, [rows]) == ''
     p = niimbluelib_packet
-    # 12 bytes fit into thirds of 8 of printheadPixels 192 (utils.ts:105-106)
+    # 12 bytes fit into thirds of 8 of printheadPixels 192 (utils.ts:98-99)
     assert fake.packets[3:] == [
         # B1PrintTask.ts:11 setDensity, densityDefault printer_models.ts:493
         p(0x21, [2]),

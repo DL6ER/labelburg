@@ -521,10 +521,9 @@ class Niimbot(Driver):
                     return state['errors'][0]
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
                 known = models.BY_NAME[model]
-                head = known.counted if known.exact else known.dots
                 progress.counting(device)
                 for i, rows in enumerate(job):
-                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], head, known.exact)
+                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], known.dots, known.exact)
                     progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:
