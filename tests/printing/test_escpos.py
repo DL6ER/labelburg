@@ -803,6 +803,18 @@ def test_epson_swapped_for_a_clone_at_the_same_address(client, fake, clock, told
     assert printer.sent.count(protocol.INIT) == 1
 
 
+def test_epson_without_a_cutter_swapped_for_a_clone_at_the_same_address(client, fake, told):
+    told('MFG:EPSON;CMD:ESC/POS;MDL:TM-P20;')
+    printer = fake(answers=named(b'TM-P20'))
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (state['caps'], state['feed']) == ({'lead_mm': 9.4, 'cutter': False}, 'paper')
+    # The clone cuts, as it tells no model of its own
+    told(CLONE)
+    printer.answers = {}
+    state = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    assert (state['device_name'], state.get('caps'), state['feed']) == ('POS-58', None, 'cut_paper')
+
+
 def test_clone_that_cannot_be_reached_keeps_its_name(client, fake, told, monkeypatch):
     import errno
     told(CLONE)

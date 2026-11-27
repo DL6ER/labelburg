@@ -70,7 +70,7 @@ NEVER_WHY = 'The paper would stay inside the printer until it is cut'
 NAMES = {label.identifier: f'{label.tape_size[0]} mm receipt paper' for label in LABELS}
 
 
-# What each printer told of itself, by its lock key: its model name and
+# What each printer told of itself, by _answer_key(): its model name and
 # whether it has an autocutter, None where it did not tell
 _told: dict[str, tuple[str | None, bool | None]] = {}
 
@@ -88,9 +88,9 @@ def label_rows(label, label_size: str) -> tuple[Image.Image, list[bytes], int]:
 
 
 def _answer_key(device: str) -> str:
-    """The key protocol.get_errors() notes a printer by: its lock key and its
-    device ID, so that another printer at the same address, e.g. a clone
-    plugged in at /dev/usb/lp0 where an Epson was, is asked afresh."""
+    """The key protocol.get_errors() and _told note a printer by: its lock
+    key and its device ID, so that another printer at the same address, e.g.
+    a clone plugged in at /dev/usb/lp0 where an Epson was, is asked afresh."""
     return f'{devices.lock_key(device)} {devices.known_device_id(device)}'.rstrip()
 
 
@@ -167,7 +167,7 @@ class Escpos(Driver):
                     model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def device_capabilities(self, device, model):
-        name, autocutter = _told.get(devices.lock_key(device), (None, None))
+        name, autocutter = _told.get(_answer_key(device), (None, None))
         if name is None:
             return {}
         own = {}
@@ -197,9 +197,9 @@ class Escpos(Driver):
                 state.update({'errors': [], 'status_type': devices.BUSY_STATUS_TYPE, 'phase_type': 'Printing state'})
                 return state
             with protocol.connect(device) as c:
-                errors = _problems(c, _answer_key(device))
+                errors = _problems(c, answer_key := _answer_key(device))
                 if errors is not None:
-                    _note_model(c, key)
+                    _note_model(c, answer_key)
         if errors is None:
             return state
         state['errors'] = errors
