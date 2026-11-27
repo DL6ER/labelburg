@@ -366,10 +366,14 @@ def test_printer_that_is_not_paired_says_so(tmp_path, brother_on_bluetooth, cloc
     # Authentication Failure, PIN or Key Missing: the kernel's EACCES and EBADE
     fake = brother_on_bluetooth(refused=error)
     client = make_client(tmp_path, model='PT-P710BT', printer=DEVICE)
-    for _ in range(2):
+    # Paged once, not again every 30 s, until the label designer looks for printers
+    for at in (0, 1, 31, 300):
+        clock[0] += at
         state = client.get(STATUS).get_json()['printers'][0]
         assert (state['model'], state['errors']) == ('PT-P710BT', ['Pair the printer with this computer first'])
     assert len(fake.addresses) == 1
+    client.get(STATUS + '?look=1')
+    assert len(fake.addresses) == 2
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
     message = 'Could not send the label to the printer: Pair the printer with this computer first'
     assert outcome(client, response) == ('failed', message) and message in refusals.MESSAGES

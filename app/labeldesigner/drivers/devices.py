@@ -95,8 +95,8 @@ NOT_FOUND = (errno.EHOSTDOWN, errno.EHOSTUNREACH)
 
 
 def note_answer(device_specifier: str, error: Exception | None = None):
-    """Note that the printer answered, or that it was not found."""
-    if error is not None and getattr(error, 'errno', None) in NOT_FOUND:
+    """Note that the printer answered, or that it was not found or not paired."""
+    if error is not None and (getattr(error, 'errno', None) in NOT_FOUND or isinstance(error, NotPaired)):
         _unanswered[lock_key(device_specifier)] = error
     else:
         _unanswered.pop(lock_key(device_specifier), None)
