@@ -12,8 +12,8 @@ from .. import devices, progress, usbip
 from ..base import Driver
 from ..labels import Color, FormFactor
 from . import labels as tables, names, network, raster, usb
-from .models import (HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES, QUALITY_SLOWER,
-                     RED_SPEED, TUBE_TOO_LONG, UNNAMED_ON_BLUETOOTH, UNUSED_CUTTERS, length_problem, longest_label,
+from .models import (AUTO_CUTTERS, HALF_CUTTERS, MIN_PRINT_LENGTH, MIN_PTOUCH_PRINT_LENGTH, MODELS, PTOUCH_BESIDES, QL_BESIDES,
+                     QUALITY_SLOWER, RED_SPEED, TUBE_TOO_LONG, UNNAMED_ON_BLUETOOTH, length_problem, longest_label,
                      resolution_problem, tube_lines)
 
 logger = logging.getLogger(__name__)
@@ -141,12 +141,12 @@ class BrotherRaster(Driver):
         ptouch = model.startswith('PT-')
         # The QL-500 takes no cut commands, its labels are cut with a lever
         cutting = MODELS[model].cutting
-        unused = model in UNUSED_CUTTERS
+        each = model in AUTO_CUTTERS
         # The PT-D460BT family is told no print quality
         qualities = ['quality'] if MODELS[model].d460bt_family else ['fast', 'quality', 'high']
         return dict(super().capabilities(model), qualities=qualities,
-                    high_res=not resolution_problem(model, True), cutter=cutting, manual_cutter=not cutting,
-                    cutter_unused=unused, half_cut=model in HALF_CUTTERS, chain=ptouch and cutting, feed_waste=ptouch,
+                    high_res=not resolution_problem(model, True), cutter=cutting or each, manual_cutter=not (cutting or each),
+                    cuts_each=each, half_cut=model in HALF_CUTTERS, chain=ptouch and cutting, feed_waste=ptouch,
                     # The top of a label leaves a QL or P-touch printer first
                     leaves_turned=True)
 

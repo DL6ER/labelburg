@@ -12,7 +12,7 @@ Design and print labels 100% offline. With Labelburg you design labels in your w
 |---|---|---|
 | Brother | PT-E550W\*, PT-P700, PT-P710BT (USB, Bluetooth), PT-P750W | TZe tapes 6 to 24 mm wide: laminated, non-laminated and fabric (iron-on) tapes, and heat-shrink tubes in compatible cassettes |
 | Brother | PT-P900, PT-P900W, PT-P910BT (USB, Bluetooth), PT-P950NW | TZe tapes 18 and 36 mm wide |
-| Brother | PT-D410 (USB), PT-D460BT, PT-D610BT, PT-E310BT, PT-E560BT (USB, Bluetooth) | TZe tapes 6 to 18 mm wide, up to 24 mm on the PT-D610BT and PT-E560BT, cut by hand |
+| Brother | PT-D410 (USB), PT-D460BT, PT-D610BT, PT-E310BT, PT-E560BT (USB, Bluetooth) | TZe tapes 6 to 18 mm wide, cut by hand, on the PT-D610BT and PT-E560BT up to 24 mm wide and cut after each label |
 | Brother | QL-500, QL-550, QL-560\*, QL-570, QL-580N, QL-600, QL-650TD, QL-700\*, QL-710W, QL-720NW | up to 62 mm wide |
 | Brother | QL-800, QL-810W\*, QL-820NWB | up to 62 mm wide, also black/red |
 | Brother | QL-1050, QL-1060N, QL-1100\*, QL-1110NWB, QL-1115NWB | up to 103 mm wide, e.g. 4 x 6 in shipping labels |
@@ -148,7 +148,7 @@ services:
       - PRINTER_PRINTER=file:///dev/usb/lp0
 ```
 
-The PT-D410, PT-D460BT, PT-D610BT, PT-E310BT and PT-E560BT, for which Brother publishes no command reference, get the jobs [ptouch-print](https://github.com/probonopd/ptouch-print) sends them. They are known on USB by their product IDs `0x20df`, `0x20e0`, `0x20e1`, `0x2201` and `0x2203`, take labels of at most 300 mm (PT-D) or 999 mm (PT-E) and are not told to cut.
+The PT-D410, PT-D460BT, PT-D610BT, PT-E310BT and PT-E560BT, for which Brother publishes no command reference, get the jobs [ptouch-print](https://github.com/probonopd/ptouch-print) sends them. They are known on USB by their product IDs `0x20df`, `0x20e0`, `0x20e1`, `0x2201` and `0x2203`, take labels of at most 300 mm (PT-D) or 999 mm (PT-E) and are not told to cut: the automatic cutter of the PT-D610BT and PT-E560BT cuts after each label, the others are cut by hand.
 
 Address each printer in one way only (e.g. always `file:///dev/usb/lp0`). Two addresses of the same printer are not recognized as one, and their jobs could get in each other's way.
 

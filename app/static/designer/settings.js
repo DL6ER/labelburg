@@ -199,8 +199,8 @@ async function feed(p) {
 
 function cuttingHTML(p) {
     const caps = printerCaps(p), c = printerCut(p);
-    const hint = cutText(c, caps);
-    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span>${hint ? `<small class="muted">${esc(hint)}</small>` : ''}${feedHTML(p)}</div>`;
+    if (noCutter(caps)) return `<div class="set-stack"><span class="set-val">${caps.manual_cutter ? 'Cut by hand' : 'Torn off'}</span><small class="muted">${esc(cutText(c, caps))}</small>${feedHTML(p)}</div>`;
+    if (caps.cuts_each) return `<div class="set-stack"><span class="set-val">After each label</span>${feedHTML(p)}</div>`;
     const cuts = CUTS.map(([v, n]) => [v, v === 'last' ? 'After the last' : n, v === 'none' ? neverWhy(caps) : '']);
     const chainWhy = c.cut === 'none' ? 'Always on when not cutting, else the printer cuts after the last label' : '';
     const checks = (caps.half_cut ? `<label class="set-check"><input type="checkbox" data-k="half_cut"${halfOf(c, caps) ? ' checked' : ''}>Half cut between labels</label>` : '')

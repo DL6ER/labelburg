@@ -1164,6 +1164,7 @@ export function renderAdvanced() {
             ${endless ? `<span class="k">Cable flag</span><span class="row"><button type="button" class="auto${flagOn(d) ? ' on' : ''}" data-flag aria-pressed="${flagOn(d)}">${flagOn(d) ? 'On' : 'Off'}</button>${flagOn(d) ? `<input class="in num" type="number" min="1" max="50" step="0.5" data-cable value="${esc(d.cable_diameter)}" placeholder="6.5" aria-label="Diameter of the cable in mm"><small>mm cable</small>` : ''}</span>
                 ${flagOn(d) ? '<span class="k"></span><small class="muted fnote" id="flagHint">Place the cable on the triangles, fold both ends together and press them firmly.</small>' : ''}` : ''}
             <span class="k">Cutting</span><span class="row cutrow">${noCutter(caps) ? `<small>${esc(noCutterWhy(caps))}</small>`
+                : caps.cuts_each ? '<small>After each label</small>'
                 : own ? `<select class="in" data-cut aria-label="Cutting of this label"><option value="">Like the printer: ${esc(cutShort(pc, printerCaps()).toLowerCase())}</option>${CUTS.map(([v, n]) => `<option value="${esc(v)}"${d.cut === v ? ' selected' : ''}${v === 'none' && neverWhy(caps) ? ' disabled' : ''}>${esc(n)}</option>`).join('')}</select>`
                 : `<small>Like the printer</small><button type="button" class="custom" data-cutchange>Change</button>`}</span>
             ${cutsHTML(d, caps)}

@@ -120,8 +120,10 @@ QUALITY_SLOWER = 1.7
 
 # P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
 HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
-# Automatic cutters not told to cut, ptouch-print sends their family no cut command
-UNUSED_CUTTERS = ('PT-D610BT', 'PT-E560BT')
+# Automatic cutters of the PT-D460BT family after Brother's product pages.
+# They cut after each label: ptouch-print's chain command, which is to "Skip
+# final feed of label and any automatic cut", is not sent.
+AUTO_CUTTERS = ('PT-D610BT', 'PT-E560BT')
 # Not found on Bluetooth by name, Brother's guides name none
 UNNAMED_ON_BLUETOOTH = ('PT-E310BT', 'PT-E560BT')
 
