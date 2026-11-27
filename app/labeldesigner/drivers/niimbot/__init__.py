@@ -152,22 +152,29 @@ def _rolls(model: str) -> list[Label]:
 
 
 def _labels() -> tuple[Label, ...]:
-    """The labels of every model: one of the same dots at the same dpi is
-    shared, the D110_M and the B1 name them, another one is named by its
-    model, e.g. niimbot50x30-b1pro."""
+    """The labels of every model. A model takes the label of a model before
+    it that is the same paper of the same dots at the same dpi, else its
+    own, named by its size alone on the D110_M and the B1, with the model on
+    the others, e.g. niimbot50x30-b1pro of the B1 Pro, also the B21 Pro's
+    and the M2-H's."""
     labels: dict[str, Label] = {}
     for model in models.PRINTED:
         for label in _rolls(model.name):
-            shared = labels.get(label.identifier)
-            if shared is None:
-                labels[label.identifier] = label
-            elif ((shared.dots_total, shared.dots_printable) == (label.dots_total, label.dots_printable)
-                  and models.BY_NAME[shared.models[0]].dpi == model.dpi):
-                labels[label.identifier] = replace(shared, models=shared.models + (model.name,))
-            else:
-                identifier = f"{label.identifier}-{model.short.lower().replace('_', '')}"
-                labels[identifier] = replace(label, identifier=identifier)
+            shared = next((known for known in labels.values() if _same(known, label)), None)
+            if shared is not None:
+                labels[shared.identifier] = replace(shared, models=shared.models + (model.name,))
+                continue
+            if label.identifier in labels:
+                label = replace(label, identifier=f"{label.identifier}-{model.short.lower().replace('_', '')}")
+            labels[label.identifier] = label
     return tuple(labels.values())
+
+
+def _same(a: Label, b: Label) -> bool:
+    """Whether two labels are the same paper of the same dots at the same dpi."""
+    return ((a.tape_size, a.form_factor, a.pieces, a.dots_total, a.dots_printable)
+            == (b.tape_size, b.form_factor, b.pieces, b.dots_total, b.dots_printable)
+            and models.BY_NAME[a.models[0]].dpi == models.BY_NAME[b.models[0]].dpi)
 
 
 def _name(label: Label) -> str:

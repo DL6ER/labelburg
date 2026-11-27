@@ -100,7 +100,7 @@ def test_models_are_those_of_niimbluelib():
 
 def test_models_printed_are_those_of_the_sequences_labelburg_has():
     assert niimbot.MODELS == ('Niimbot/D110_M', 'Niimbot/B1', 'Niimbot/B21_C2B', 'Niimbot/D101', 'Niimbot/N1',
-                              'Niimbot/M2_H', 'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H')
+                              'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H', 'Niimbot/M2_H')
     # Only the D110_M is paired, only these two need the RFID tag of their
     # roll and keep the packets they printed with
     assert [model.name for model in models.PRINTED if 'classic' in model.connections] == ['Niimbot/D110_M']
@@ -133,12 +133,10 @@ def test_labels_that_differ_are_named_by_their_model():
     sizes = {label.identifier: label for label in niimbot.LABELS}
     # 50 mm at 300 dpi, on 48 mm of the printhead
     assert (sizes['niimbot50x30-b1pro'].dots_total, sizes['niimbot50x30-b1pro'].dots_printable) == ((591, 354), (576, 354))
-    assert sizes['niimbot50x30-b21pro'].dots_printable == (576, 354)
-    assert sizes['niimbot50x30-b1pro'].models == ('Niimbot/B1_PRO',)
     assert sizes['niimbot15x50-n1'].dots_printable == (96, 400)
     assert sizes['niimbot12x40-d11h'].dots_printable == (142, 472)
     assert sizes['niimbot14x40-d11h'].dots_printable == (144, 472)
-    assert sizes['niimbotd50-m2h'].dots_printable == (576, 591)
+    assert sizes['niimbotd50-b1pro'].dots_printable == (576, 591)
     # Pages of several labels on the B1 only
     assert {label.models for label in niimbot.LABELS if label.pieces != (1, 1, 0)} == {('Niimbot/B1',)}
     assert niimbot.NAMES['niimbot50x30-b1pro'] == niimbot.NAMES['niimbot50x30'] == '50 x 30 mm die-cut (Niimbot)'
@@ -146,9 +144,19 @@ def test_labels_that_differ_are_named_by_their_model():
     assert (label_dpi('niimbot50x30-b1pro', False), label_dpi('niimbot50x30', False)) == (300, 203)
 
 
+def test_models_that_take_the_same_label_share_its_size():
+    # The same paper of the same dots at the same dpi is one label size
+    labels = [(label.tape_size, label.form_factor, label.pieces, label.dots_total, label.dots_printable,
+               label_dpi(label.identifier, False)) for label in niimbot.LABELS]
+    assert len(labels) == len(set(labels)) == 38
+    sizes = {label.identifier: label for label in niimbot.LABELS}
+    assert sizes['niimbot50x30-b1pro'].models == ('Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/M2_H')
+    assert sizes['niimbot50x30'].models == ('Niimbot/B1', 'Niimbot/B21_C2B')
+
+
 @pytest.mark.parametrize('label_size, model, on', [
     ('niimbot50x30', 'Niimbot/B1_PRO', 'niimbot50x30-b1pro'), ('niimbot50x30-b1pro', 'Niimbot/B1', 'niimbot50x30'),
-    ('niimbot50x30-b1pro', 'Niimbot/M2_H', 'niimbot50x30-m2h'), ('niimbotd50', 'Niimbot/B21_PRO', 'niimbotd50-b21pro'),
+    ('niimbot50x30-b1pro', 'Niimbot/M2_H', 'niimbot50x30-b1pro'), ('niimbotd50', 'Niimbot/B21_PRO', 'niimbotd50-b1pro'),
     ('niimbot15x8-2x3', 'Niimbot/D11_H', 'niimbot15x8-2x3'), ('niimbot14x40', 'Niimbot/D11_H', 'niimbot14x40-d11h'),
     ('niimbot50x30', 'Niimbot/B21_C2B', 'niimbot50x30')])
 def test_label_made_for_another_model_goes_on_the_same_roll(label_size, model, on):
@@ -515,9 +523,9 @@ def test_b21_pro_prints_through_the_label_designer(tmp_path, fake, monkeypatch):
     client = make_client(tmp_path, model='Niimbot/B21_PRO', printer=DEVICE)
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     # Its roll of 50 x 30 mm, at 300 dpi
-    assert (printer_['model'], printer_['errors'], printer_['label_size']) == ('Niimbot/B21_PRO', [], 'niimbot50x30-b21pro')
+    assert (printer_['model'], printer_['errors'], printer_['label_size']) == ('Niimbot/B21_PRO', [], 'niimbot50x30-b1pro')
     response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'niimbot50x30-b21pro', 'print_type': 'text', 'text': TEXT})
+        'label_size': 'niimbot50x30-b1pro', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', '')
     size = struct.unpack('>HH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:4])
     assert size == (354, 576)

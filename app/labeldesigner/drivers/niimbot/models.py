@@ -50,14 +50,14 @@ MODELS = (
     Model('Niimbot/B21_C2B', 'B21 C2B', (771, 775), 203, 384, (1, 5, 3), B1),  # :306
     Model('Niimbot/D101', 'D101', (2560,), 203, 192, (1, 3, 2), B1),  # :493
     Model('Niimbot/N1', 'N1', (3586,), 203, 96, (1, 3, 2), B1),  # :790
-    # :746, 576 dots at WIKI niimbot-m2h/
-    Model('Niimbot/M2_H', 'M2-H', (4608,), 300, 576, (1, 5, 3), B1),
     # :185, 576 dots at WIKI NIIMBOT-B1_Pro/
     Model('Niimbot/B1_PRO', 'B1 Pro', (4097,), 300, 576, (1, 5, 3), D110M_V4),
     # :295, 576 dots at WIKI niimbot-b21_pro/
     Model('Niimbot/B21_PRO', 'B21 Pro', (785,), 300, 576, (1, 5, 3), D110M_V4),
     # :515, 144 dots at WIKI niimbot-d11_h/
     Model('Niimbot/D11_H', 'D11-H', (528,), 300, 144, (1, 5, 3), D110M_V4),
+    # :746, 576 dots at WIKI niimbot-m2h/
+    Model('Niimbot/M2_H', 'M2-H', (4608,), 300, 576, (1, 5, 3), B1),
     # Print sequences Labelburg does not have
     Model('Niimbot/B21', 'B21', (768,), 203, 384, (1, 5, 3), 'b21_v1'),  # :284
     Model('Niimbot/B21_L2B', 'B21 L2B', (769,), 203, 384, (1, 5, 3), 'b21_l2b'),  # :317
