@@ -2,6 +2,7 @@
 from, their labels, their packets against the fake printer of
 test_niimbot.py, and how a printer is known by its model ID."""
 import struct
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -71,6 +72,9 @@ def fake(monkeypatch):
         return c
     monkeypatch.setattr(protocol, 'connect', connect)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
+    monkeypatch.setattr(protocol, 'STATUS_POLL', 0.01)
+    # Page 1, printed and fed out, 4 bytes as niimbluelib reads at least
+    monkeypatch.setitem(REPLIES, 0xa3, (0xb3, struct.pack('>HBB', 1, 100, 100)))
     return printer
 
 
@@ -258,6 +262,60 @@ def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
         p(0xa3, [1]),
         # AbstractPrintTask.ts:158 printEnd, protocol.ts:449-451
         p(0xf3, [1])]
+
+
+class _Timed(FakePrinter):
+    """The printer of test_niimbot.py, when each write came."""
+
+    def __init__(self):
+        super().__init__()
+        self.times = []
+
+    def sendall(self, data):
+        self.times.append(time.monotonic())
+        super().sendall(data)
+
+
+@pytest.mark.parametrize('model_id, model, label_size, rows', [
+    (2560, 'Niimbot/D101', 'niimbot12x40', [b'\x01' * 96] * 3 + [bytes(96)] * 2),
+    (4097, 'Niimbot/B1_PRO', 'niimbot50x30-b1pro', [b'\x01' * 576] * 3 + [bytes(576)] * 2)])
+def test_new_models_get_each_packet_on_its_own_after_niimbluelibs_gap(fake, monkeypatch, model_id, model, label_size, rows):
+    printer = _Timed()
+
+    def connect(device, le=False):
+        c = protocol.Connection.__new__(protocol.Connection)
+        c.s, c.received = printer, b''
+        return c
+    monkeypatch.setattr(protocol, 'connect', connect)
+    told(monkeypatch, model_id)
+    monkeypatch.setitem(REPLIES, 0x03, (0x04, b'\x01'))
+    queue = SimpleNamespace(device_specifier=DEVICE, model=model, label_size=label_size)
+    assert niimbot.DRIVER.send(queue, [rows]) == ''
+    sent = printer.times[printer.commands.index(0x21):]
+    assert len(sent) == len(printer.commands[printer.commands.index(0x21):])
+    assert min(b - a for a, b in zip(sent, sent[1:])) >= protocol.PACKET_GAP
+
+
+@pytest.mark.parametrize('model_id, model, label_size, width', [
+    (2560, 'Niimbot/D101', 'niimbot12x40', 96), (4097, 'Niimbot/B1_PRO', 'niimbot50x30-b1pro', 576)])
+def test_new_models_print_whatever_their_answers_say_as_niimbluelib(fake, monkeypatch, model_id, model, label_size, width):
+    # niimbluelib's sendAll() waits for each answer without judging it
+    told(monkeypatch, model_id)
+    for command in (0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xf3):
+        monkeypatch.setitem(REPLIES, command, (protocol.ANSWERS[command], b'\x00'))
+    queue = SimpleNamespace(device_specifier=DEVICE, model=model, label_size=label_size)
+    assert niimbot.DRIVER.send(queue, [[b'\x01' * width] * 2]) == ''
+    assert fake.commands.count(0x21) == 1
+
+
+def test_new_models_tell_the_error_of_a_print_status_of_10_bytes(fake, monkeypatch):
+    # Page 0, 0 % printed and fed, then the error 1, the cover open
+    told(monkeypatch, 4097)
+    monkeypatch.setitem(REPLIES, 0xa3, (0xb3, bytes([0, 0, 0, 0, 0, 0, 1, 0, 0, 0])))
+    monkeypatch.setattr(protocol, 'PRINT_WAIT', 0.2)
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1_PRO', label_size='niimbot50x30-b1pro')
+    assert niimbot.DRIVER.send(queue, [[b'\x01' * 576] * 2]) == 'The cover of the printer is open'
+    assert 0xf3 not in fake.commands
 
 
 def test_d110_m_and_b1_keep_their_packets(fake, monkeypatch):

@@ -32,6 +32,15 @@ START_POLL = 0.1
 DENSITY = 3
 # Label type when the roll has no RFID tag: labels with gaps
 WITH_GAPS = 1
+# niimbluelib's print tasks wait PACKET_GAP seconds before each packet
+# (packetIntervalMs, src/client/abstract_client.ts:39), up to PAGE_WAIT for
+# each answer within a page and ask every STATUS_POLL seconds how many pages
+# were printed (src/print_tasks/AbstractPrintTask.ts:54-56)
+PACKET_GAP = 0.01
+PAGE_WAIT = 10
+STATUS_POLL = 0.3
+# The answer to each packet of those tasks, by niimbluelib's commandsMap
+ANSWERS = {0x01: 0x02, 0x03: 0x04, 0x13: 0x14, 0x21: 0x31, 0x23: 0x33, 0xa3: 0xb3, 0xe3: 0xe4, 0xf3: 0xf4}
 
 ERROR = 0xdb
 # Byte 8 of the heartbeat of a D110_M: 1 with the lid closed, with a roll
@@ -281,23 +290,19 @@ def print_label(c: Connection, rows: list[bytes], label_type: int, sequence: str
                 head: int | None = None, exact: bool = False):
     """Print one label, rows of dots across the printhead of head dots: a
     job of one page, then the printer is asked every PAGE_POLL seconds how
-    many pages it printed. V4 as hass-niimbot prints one, B1 and D110M_V4
-    as niimbluelib's print tasks of those names. exact:
-    the rows as niimbluelib sends them, see image_packets()."""
-    height, width = len(rows), len(rows[0])
+    many pages it printed. V4 as hass-niimbot prints one, B1 as
+    niimbluelib's B1PrintTask with the packets the B1 printed with. exact:
+    as niimbluelib's print task of the sequence, see _task()."""
     if head is None:
         head = B1_HEAD if sequence == B1 else HEAD
-    if sequence == D110M_V4:
-        c.ok(0x23, bytes([label_type]), 0x33)
+    if exact:
+        return _task(c, rows, label_type, sequence, density, head)
+    height, width = len(rows), len(rows[0])
     _set_density(c, density)
-    if sequence != D110M_V4:
-        c.ok(0x23, bytes([label_type]), 0x33)
+    c.ok(0x23, bytes([label_type]), 0x33)
     try:
         if sequence == B1:
             c.ok(0x01, struct.pack('>H5B', 1, 0, 0, 0, 0, 0), 0x02)
-        elif sequence == D110M_V4:
-            # At speed 1, niimbluelib's default
-            c.ok(0x01, struct.pack('>H7B', 1, 0, 0, 0, 0, 0, 1, 0), 0x02)
         else:
             c.ok(0x01, struct.pack('>H7B', 1, 0, 0, 0, 0, 0, 0, 0), 0x02)
     except NiimbotError as e:
@@ -308,20 +313,12 @@ def print_label(c: Connection, rows: list[bytes], label_type: int, sequence: str
     if sequence == B1:
         c.ok(0x03, b'\x01', 0x04)
         c.ok(0x13, struct.pack('>HHH', height, width, 1), 0x14)
-    elif sequence == D110M_V4:
-        # Not waited for, as a B21_PRO leaves the first packet after the
-        # start unanswered on Bluetooth
-        c.send(packet(0xa3, b'\x01'))
-        c.ok(0x13, struct.pack('>HHHHBBBH', height, width, 1, 0, 0, 0, 0, 0), 0x14)
+        # In one write, over USB/IP each write waits for the host
+        c.send(b''.join(row_packets(rows, head)))
     else:
         c.send(packet(0xdc, b'\x01'))
         c.ok(0x13, struct.pack('>HHHHB', height, width, 1, 0, 0), 0x14)
-    packets = image_packets(rows, head) if exact else row_packets(rows, head)
-    if sequence == B1:
-        # In one write, over USB/IP each write waits for the host
-        c.send(b''.join(packets))
-    else:
-        for data in packets:
+        for data in row_packets(rows, head):
             c.send(data)
     c.ok(0xe3, b'\x01', 0xe4)
     deadline = time.monotonic() + PRINT_WAIT
@@ -332,9 +329,70 @@ def print_label(c: Connection, rows: list[bytes], label_type: int, sequence: str
         if time.monotonic() > deadline:
             raise NotPrinted('the label was not printed')
     c.ok(0xf3, b'\x01', 0xf4)
+
+
+def _task(c: Connection, rows: list[bytes], label_type: int, sequence: str, density: int, head: int):
+    """Print one label as niimbluelib's B1PrintTask.ts or D110MV4PrintTask.ts
+    does: each packet PACKET_GAP seconds after the one before, its answer
+    waited for but not judged, the rows as niimbluelib sends them (see
+    image_packets()), then the pages printed polled, see _until_printed()."""
+    height, width = len(rows), len(rows[0])
+    if sequence == D110M_V4:
+        _request(c, 0x23, bytes([label_type]))
+        _request(c, 0x21, bytes([density]))
+        # At speed 1, niimbluelib's default
+        _request(c, 0x01, struct.pack('>H7B', 1, 0, 0, 0, 0, 0, 1, 0))
+        # Not waited for, as a B21_PRO leaves the first packet after the
+        # start unanswered on Bluetooth
+        _send(c, packet(0xa3, b'\x01'))
+        _request(c, 0x13, struct.pack('>HHHHBBBH', height, width, 1, 0, 0, 0, 0, 0), PAGE_WAIT)
+    else:
+        _request(c, 0x21, bytes([density]))
+        _request(c, 0x23, bytes([label_type]))
+        _request(c, 0x01, struct.pack('>H5B', 1, 0, 0, 0, 0, 0))
+        _request(c, 0x03, wait=PAGE_WAIT)
+        _request(c, 0x13, struct.pack('>HHH', height, width, 1), PAGE_WAIT)
+    for data in image_packets(rows, head):
+        _send(c, data)
+    _request(c, 0xe3, wait=PAGE_WAIT)
+    _until_printed(c)
+    _request(c, 0xf3)
     if sequence == D110M_V4:
         # Not waited for, a B21_PRO drops the packet after the end
-        c.send(packet(0xdc, b'\x01'))
+        _send(c, packet(0xdc, b'\x01'))
+
+
+def _send(c: Connection, data: bytes):
+    time.sleep(PACKET_GAP)
+    c.send(data)
+
+
+def _request(c: Connection, command: int, data: bytes = b'\x01', wait: float | None = None) -> bytes:
+    """A packet of niimbluelib's print tasks and the answer to it."""
+    time.sleep(PACKET_GAP)
+    return c.ask(command, data, ANSWERS[command], wait=wait)
+
+
+def _until_printed(c: Connection):
+    """waitUntilPrintFinishedByStatusPoll(): every STATUS_POLL seconds how
+    many pages were printed, each asked twice at most (getPrintStatus(2)),
+    until one was. The error an answer of 10 bytes tells is raised
+    (packet_parser.ts:119-134, protocol.ts:298-307)."""
+    deadline = time.monotonic() + PRINT_WAIT
+    while True:
+        time.sleep(STATUS_POLL)
+        try:
+            data = _request(c, 0xa3)
+        except NiimbotError:
+            data = _request(c, 0xa3)
+        if len(data) < 4:
+            raise NiimbotError(f'print status {data.hex()}')
+        if len(data) == 10 and data[6]:
+            raise NiimbotError(f'print error 0x{data[6]:02x}', data[6])
+        if struct.unpack('>H', data[:2])[0] >= 1:
+            return
+        if time.monotonic() > deadline:
+            raise NotPrinted('the label was not printed')
 
 
 def _set_density(c: Connection, density: int):
