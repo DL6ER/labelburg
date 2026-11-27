@@ -123,6 +123,8 @@ def test_known_by_their_usb_product_id(tmp_path, monkeypatch, model):
     (tmp_path / 'lp1-idProduct').write_text(f'{product:04x}\n')
     assert drivers.resolve('/dev/usb/lp1', 'QL-800') == (drivers.BROTHER, model)
     assert drivers.resolve('file:///dev/usb/lp1', 'QL-800') == (drivers.BROTHER, model)
+    # Only printers of usblp, not e.g. a parallel port of the same name
+    assert devices.usb_ids('/dev/lp1') is None
     # Not a device of another maker, nor one usblp does not tell
     assert drivers.resolve(f'usb://0x1234:0x{product:04x}', 'QL-800') == (drivers.BROTHER, 'QL-800')
     assert drivers.resolve('/dev/usb/lp2', 'QL-800') == (drivers.BROTHER, 'QL-800')
@@ -252,8 +254,12 @@ def test_the_reply_to_the_job_comes_after_those_owed(monkeypatch, owed, messages
 def test_no_reply_to_the_job_within_the_wait_counts_as_printed(monkeypatch):
     monkeypatch.setattr(brother.usb, 'JOB_REPLY_WAIT', 0.1)
     monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    before = {'model': 'PT-D460BT', 'media_width': 12, 'errors': []}
+    monkeypatch.setitem(devices.status_cache, devices.lock_key('/dev/usb/lp0'), before)
     info = brother.usb.send_job(JOB, '/dev/usb/lp0', [2.0], confirmed=False)
     assert (info['did_print'], info['ready_for_next_job'], info['printer_state']) == (True, True, None)
+    # Its last status stays, there is none in place of it
+    assert devices.status_cache[devices.lock_key('/dev/usb/lp0')] is before
 
 
 def test_the_printer_is_held_while_it_prints(tmp_path, monkeypatch):
@@ -262,12 +268,14 @@ def test_the_printer_is_held_while_it_prints(tmp_path, monkeypatch):
 
     def sleep(seconds):
         with devices.device_lock('/dev/usb/lp0', timeout=0) as acquired:
-            held.append((seconds > 1, acquired, progress.state('/dev/usb/lp0')['labels']))
+            state = progress.state('/dev/usb/lp0')
+            # Not which label it prints, the printer does not tell
+            held.append((seconds > 1, acquired, state['labels'], 'label' in state))
     monkeypatch.setattr(progress, 'time', types.SimpleNamespace(monotonic=time.monotonic, sleep=sleep))
     monkeypatch.setattr(progress, '_factors', {})
     monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x00)))
     client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
     assert outcome(client, response) == ('printed', '')
-    assert held == [(True, False, 1)] and progress._factors == {}
+    assert held == [(True, False, 1, False)] and progress._factors == {}
     assert not progress.running('/dev/usb/lp0')
