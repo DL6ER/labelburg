@@ -139,7 +139,10 @@ def label_size_for(model: str | None, label_size: str) -> str:
     if not takes or label_size in takes:
         return label_size
     plain = re.sub(r'\s|mm', '', str(label_size).lower()).replace('×', 'x')
-    found = [size for size in takes if size == plain or (size.endswith(plain) and size[:-len(plain)].isalpha())]
+    # Of any model, e.g. zpl100x30, then the same paper of this one, zpl300-100x30
+    named = {tape.same_paper(label.identifier, model) for label in LABELS
+             if label.identifier == plain or (label.identifier.endswith(plain) and label.identifier[:-len(plain)].isalpha())}
+    found = [size for size in takes if size in named]
     if len(found) != 1 and model is None:
         raise ToolError(f'Label size {label_size} is one of {", ".join(found)}, give the printer' if found
                         else f'No label size {label_size}, give the printer to find out its sizes')
