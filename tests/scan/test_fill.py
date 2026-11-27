@@ -58,31 +58,28 @@ def test_refusals():
 
 
 def test_advice_names_the_label_and_its_blanks():
-    assert scan.advice(scan.NO_BLANKS, 'Box', []) == (
-        'Open "Box" in the editor, type [code where the code goes, choose Blank "code" and save the label.')
-    assert scan.advice(scan.SEVERAL_BLANKS, 'Envelope', ['Name', 'Address']) == (
-        'Open "Envelope" in the editor, click the blank "Name", change its name to code and save the label. '
-        'Contact codes, e.g., from a business card, fill "Name" and "Address" as they are.')
-    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Room', 'Shelf', 'Name']) == (
-        'Open "Shelf" in the editor, click the blank "Room", change its name to code and save the label. '
-        'Contact codes, e.g., from a business card, fill "Name" as it is.')
-    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Room', 'Shelf']) == (
-        'Open "Shelf" in the editor, click the blank "Room", change its name to code and save the label.')
+    assert scan.advice(scan.NO_BLANKS, 'Box', []) == 'In the editor, add the blank code to "Box".'
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Room', 'Shelf']) == 'In the editor, rename the blank "Room" of "Shelf" to code.'
+    # Not one a contact fills, unless all of them are
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Shelf', ['Name', 'Room', 'Shelf']) == 'In the editor, rename the blank "Room" of "Shelf" to code.'
+    assert scan.advice(scan.SEVERAL_BLANKS, 'Envelope', ['Name', 'Address']) == 'In the editor, rename the blank "Name" of "Envelope" to code.'
     assert scan.advice(scan.NO_CONTACT_MATCH, 'Shelf', ['Room', 'Shelf', 'Box']) == (
-        'Open "Shelf" in the editor, click the blank "Room" and change its name to Name, click the blank "Shelf" and '
-        'change its name to Address, and save the label. Contacts fill the blanks Name, Address, Company, Phone and Email.')
-    assert scan.advice(scan.NO_CONTACT_MATCH, 'Room', ['Room']) == (
-        'Open "Room" in the editor, click the blank "Room" and change its name to Name, and save the label. '
-        'Contacts fill the blanks Name, Address, Company, Phone and Email.')
-    for problem in (scan.NOTHING_SCANNED, scan.WRONG_LAYOUT, scan.INCOMPLETE, 'Text is too long'):
+        'In the editor, rename the blanks "Room" to Name and "Shelf" to Address in "Shelf".')
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Room', ['Room']) == 'In the editor, rename the blank "Room" to Name in "Room".'
+    assert scan.advice(scan.WRONG_LAYOUT, 'Box', ['code']) == 'Set the scanner to the layout of this computer with a code from its manual.'
+    for problem in (scan.NOTHING_SCANNED, scan.INCOMPLETE, scan.NOT_TEXT, 'Text is too long'):
         assert scan.advice(problem, 'Box', ['code']) is None
+
+
+def test_hints_and_messages_are_one_short_sentence():
+    hints = [scan.advice(problem, 'Shelf', ['Room', 'Shelf']) for problem in scan.MESSAGES]
+    for text in [*scan.MESSAGES, *filter(None, hints)]:
+        assert '. ' not in text and len(text.split()) <= 16, text
 
 
 def test_advice_for_a_contact_renames_only_blanks_a_contact_does_not_fill():
     assert scan.advice(scan.NO_CONTACT_MATCH, 'Envelope', ['Name', 'Address']) is None
-    assert scan.advice(scan.NO_CONTACT_MATCH, 'Envelope', ['Name', 'Room']) == (
-        'Open "Envelope" in the editor, click the blank "Room" and change its name to Address, and save the label. '
-        'Contacts fill the blanks Name, Address, Company, Phone and Email.')
+    assert scan.advice(scan.NO_CONTACT_MATCH, 'Envelope', ['Name', 'Room']) == 'In the editor, rename the blank "Room" to Address in "Envelope".'
 
 
 def test_a_vcard_without_its_line_breaks_is_read():
@@ -103,7 +100,7 @@ def test_a_vcard_cut_in_parts_is_refused():
     for text in (head, tail, ' begin:vcard\nFN:Erika Muster'):
         with pytest.raises(ValueError, match=re.escape(scan.INCOMPLETE)):
             scan.fill_blanks(['code'], {}, text)
-    assert scan.INCOMPLETE in scan.MESSAGES and scan.INCOMPLETE == 'The code came in incomplete. Scan it again.'
+    assert scan.INCOMPLETE in scan.MESSAGES and scan.INCOMPLETE == 'The code came in incomplete, scan it again'
     assert refusals.message(ValueError(scan.INCOMPLETE), 'x') == scan.INCOMPLETE
 
 
@@ -166,3 +163,25 @@ def test_wrong_layout_prefixes():
     for text in ('http>&&a', 'HTTPÖ--a', 'BEGIN>VCARD', 'beginÖvcard', 'MECARD>N', 'mecardÖN'):
         assert scan.wrong_layout(text)
     assert not scan.wrong_layout('A https>&&')
+
+
+def test_a_code_of_the_longest_text_fits():
+    assert scan.fill_blanks(['code'], {}, 'x' * 10_000) == {'code': 'x' * 10_000}
+
+
+@pytest.mark.parametrize('lines, contact', [
+    # The first of several numbers and the company without its department
+    (['TEL:+49 30 111', 'TEL:+49 30 222', 'ORG:Muster GmbH;Einkauf'], {'phone': '+49 30 111', 'organization': 'Muster GmbH'}),
+    # A separator escaped belongs to the value, \n is a line break
+    (['N:Muster\\;Jr;Erika'], {'last_name': 'Muster;Jr', 'first_name': 'Erika', 'name': 'Erika Muster;Jr'}),
+    (['ADR:;;Hauptstr. 1\\nHinterhaus;Berlin;;10115;'], {'street': 'Hauptstr. 1\nHinterhaus', 'city': 'Berlin', 'postcode': '10115',
+                                                       'address': 'Hauptstr. 1\nHinterhaus\n10115 Berlin'}),
+])
+def test_vcard_details_as_written(lines, contact):
+    told = scan.read_contact('\n'.join(['BEGIN:VCARD', 'VERSION:3.0', *lines, 'END:VCARD']))
+    assert {key: told.get(key) for key in contact} == contact
+
+
+def test_mecard_address_without_commas_is_the_street():
+    assert scan.read_contact('MECARD:N:Muster,Erika;ADR:Hauptstr. 1 Berlin;;')['address'] == 'Hauptstr. 1 Berlin'
+

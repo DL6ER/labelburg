@@ -63,6 +63,12 @@ def test_scan_prints_the_label_with_the_code(printed):
     assert Image.open(io.BytesIO(base64.b64decode(result['image']))).format == 'PNG'
 
 
+def test_a_number_of_json_is_the_code_it_writes(printed):
+    # E.g. an EAN a script sends as a number
+    response = _scan(printed, name='Box.json', code=4006381333931)
+    assert response.status_code == 200 and response.get_json()['filled'] == {'code': '4006381333931'}
+
+
 def test_preview_only_prints_nothing(printed):
     response = _scan(printed, name='Box.json', code='A-17', preview_only='1')
     assert response.status_code == 200
@@ -104,6 +110,19 @@ def test_request_fields_do_not_fill_blanks_of_the_preview(printed, monkeypatch):
     assert made == [{'Room': 'Stored', 'code': 'A-17'}]
 
 
+def test_preview_only_shows_the_label_as_it_prints(printed):
+    # On the tape in the printer, in color where it prints in color
+    def shown(**body):
+        result = _scan(printed, name='Box.json', code='A-17', **body).get_json()
+        return Image.open(io.BytesIO(base64.b64decode(result['image'])))
+    preview, made = shown(preview_only='1'), shown()
+    assert (preview.size, preview.mode) == (made.size, made.mode)
+    _save(printed, name='Red.json', label_size='62red', print_type='text', code_text='',
+          text=[{'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:code}}', 'color': 'red'}])
+    preview = Image.open(io.BytesIO(base64.b64decode(_scan(printed, name='Red.json', code='A-17', preview_only='1').get_json()['image'])))
+    assert preview.mode != 'L'
+
+
 def test_preview_only_is_read_like_other_flags(printed):
     for value in (0, '0', None):
         assert _scan(printed, name='Box.json', code='A-17', preview_only=value).get_json()['printed'] is True
@@ -133,12 +152,13 @@ def test_refusals_are_sent_as_they_are(printed):
         {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:a}}'}, {'font': 'DejaVu Sans,Book', 'size': '40', 'text': '{{blank:b}}'}])
     for body, message in (({'name': 'None.json', 'code': 'x'}, scan.NO_BLANKS), ({'name': 'Two.json', 'code': 'x'}, scan.SEVERAL_BLANKS),
                           ({'name': 'Box.json', 'code': 'https>&&example.org'}, scan.WRONG_LAYOUT), ({'name': 'Box.json', 'code': '  '}, scan.NOTHING_SCANNED),
-                          ({'name': 'Box.json', 'code': ['x']}, scan.NOTHING_SCANNED), ({'name': 'Box.json'}, scan.NOTHING_SCANNED),
+                          ({'name': 'Box.json', 'code': ['x']}, scan.NOT_TEXT), ({'name': 'Box.json', 'code': True}, scan.NOT_TEXT),
+                          ({'name': 'Box.json', 'code': 1.5}, scan.NOT_TEXT), ({'name': 'Box.json'}, scan.NOTHING_SCANNED),
                           ({'name': 'Box.json', 'code': 'BEGIN:VCARD\nFN:Erika Muster'}, scan.INCOMPLETE),
                           ({'name': 'Box.json', 'code': 'TEL:+49 228 1234\nEND:VCARD'}, scan.INCOMPLETE)):
         response = _scan(printed, **body)
         assert (response.status_code, response.get_json()['message']) == (400, message)
-        assert ('hint' in response.get_json()) == (message in (scan.NO_BLANKS, scan.SEVERAL_BLANKS))
+        assert ('hint' in response.get_json()) == (message in (scan.NO_BLANKS, scan.SEVERAL_BLANKS, scan.WRONG_LAYOUT))
     response = _scan(printed, name='Gone', code='x')
     assert (response.status_code, response.get_json()['message']) == (404, 'Not found')
     response = _scan(printed, code='x')

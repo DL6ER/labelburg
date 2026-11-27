@@ -6,11 +6,11 @@ const WASM = new URL('./vendor/zxing-wasm/zxing_reader.wasm', import.meta.url).h
 // These kinds of codes; EAN-14 and GTIN, drawn like an EAN-13 with 14 digits, are not read
 const FORMATS = ['QRCode', 'MicroQRCode', 'RMQRCode', 'DataMatrix', 'Aztec', 'PDF417', 'EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128', 'Code39', 'PZN', 'ITF', 'Codabar'];
 
-export const REFUSED = 'The browser did not allow the camera. Allow it in the address bar and try again.';
-export const NO_CAMERA = 'No camera found.';
-export const NOT_STARTED = 'The camera could not be started. Close other apps that use it and try again.';
-export const NO_READER = 'The code reader could not be loaded. Load the page again and try again.';
-export const ENDED = 'The camera stopped. Press "Use the camera" to start it again.';
+export const REFUSED = 'The browser did not allow the camera, allow it in the address bar';
+export const NO_CAMERA = 'No camera found';
+export const NOT_STARTED = 'The camera could not be started, close other apps that use it';
+export const NO_READER = 'The code reader could not be loaded, load the page again';
+export const ENDED = 'The camera stopped, press "Use the camera" to start it again';
 
 export const cameraBlocked = () => !isSecureContext || !navigator.mediaDevices;
 
@@ -29,8 +29,10 @@ export async function decode(source) {
     try {
         const { readBarcodes } = await zxing();
         const image = source instanceof ImageData ? source : source.getContext('2d').getImageData(0, 0, source.width, source.height);
-        const [found] = await readBarcodes(image, { formats: FORMATS, maxNumberOfSymbols: 1 });
-        return found && found.text ? found.text : null;
+        // As scanners type them, e.g. a GS1 code without brackets around its numbers
+        const [found] = await readBarcodes(image, { formats: FORMATS, maxNumberOfSymbols: 1, textMode: 'Plain' });
+        const text = found && found.text ? found.text.replace(/\x1d/g, '') : '';
+        return text || null;
     } catch (e) {
         // Tried again the next time the camera is switched on
         reader = null;

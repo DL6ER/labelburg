@@ -146,7 +146,7 @@ def test_decode_reads_a_qr_and_a_datamatrix(camera_station, server):
     (lambda: barcode_png('ean13', '400638133393'), '4006381333931'),
     (lambda: barcode_png('ean8', '9638507'), '96385074'),
     (lambda: barcode_png('isbn13', '978316148410'), '9783161484100'),
-    (lambda: barcode_png('gs1_128', '0101234567890128'), '(01)01234567890128'),
+    (lambda: barcode_png('gs1_128', '0101234567890128'), '0101234567890128'),
     # Drawn in the shape of an EAN-13 with 14 digits, which no reader takes
     (lambda: barcode_png('ean14', '1234567890123'), None),
     (lambda: barcode_png('gtin', '4006381333931'), None),
@@ -289,7 +289,7 @@ def test_a_camera_that_ends_says_so(camera_station):
     page.click('#scanCamera')
     station.wait_for(1)
     page.evaluate("() => window.cameraTracks[0].dispatchEvent(new Event('ended'))")
-    page.wait_for_selector('#scanCamNote:has-text("The camera stopped. Press \\"Use the camera\\" to start it again.")')
+    page.wait_for_selector('#scanCamNote:has-text("The camera stopped, press \\"Use the camera\\" to start it again")')
     page.wait_for_selector('#scanCamera:has-text("Use the camera")')
     assert not page.locator('#scanCam video').is_visible()
 
@@ -297,7 +297,7 @@ def test_a_camera_that_ends_says_so(camera_station):
 def test_a_picture_that_does_not_play_says_so(camera_station):
     page, station, _ = camera_station(init="HTMLMediaElement.prototype.play = () => Promise.reject(new DOMException('No', 'NotAllowedError'));")
     page.click('#scanCamera')
-    page.wait_for_selector('#scanCamNote:has-text("The camera could not be started. Close other apps that use it and try again.")')
+    page.wait_for_selector('#scanCamNote:has-text("The camera could not be started, close other apps that use it")')
     page.wait_for_selector('#scanCamera:has-text("Use the camera")')
     assert ended(page) == ['ended']
     assert not page.locator('#scanCam video').is_visible()
@@ -306,7 +306,7 @@ def test_a_picture_that_does_not_play_says_so(camera_station):
 def test_a_reader_that_does_not_load_says_so(camera_station):
     page, station, loaded = camera_station(before=lambda page: page.route('**/zxing_reader.wasm', lambda route: route.fulfill(status=404, body='')))
     page.click('#scanCamera')
-    page.wait_for_selector('#scanCamNote:has-text("The code reader could not be loaded. Load the page again and try again.")')
+    page.wait_for_selector('#scanCamNote:has-text("The code reader could not be loaded, load the page again")')
     page.wait_for_selector('#scanCamera:has-text("Use the camera")')
     assert ended(page) == ['ended']
     assert station.none_for(300) == 0
@@ -355,8 +355,8 @@ def test_camera_stopped_before_it_answers_stays_off(camera_station):
 
 
 @pytest.mark.parametrize('error, message', [
-    ('NotAllowedError', 'The browser did not allow the camera. Allow it in the address bar and try again.'),
-    ('NotFoundError', 'No camera found.'),
+    ('NotAllowedError', 'The browser did not allow the camera, allow it in the address bar'),
+    ('NotFoundError', 'No camera found'),
 ])
 def test_camera_refused_or_missing_says_so(camera_station, error, message):
     page, station, _ = camera_station(init=f"window.cameraFails = '{error}';")
@@ -376,7 +376,7 @@ def test_insecure_page_explains_the_camera(camera_station, server):
     page.get_by_role('button', name='Use the camera').click()
     note = page.locator('#scanCamNote')
     note.wait_for()
-    assert note.inner_text() == 'The camera works only over a secure address (https). The guide shows how to set one up.'
+    assert note.inner_text() == 'The camera needs a secure address (https), see the guide'
     assert note.locator('a').get_attribute('href') == 'https://github.com/DL6ER/labelburg/blob/master/docs/reverse-proxy.md'
     assert page.evaluate('() => window.cameraAsked') == 0
     assert not page.locator('#scanCam video').is_visible()

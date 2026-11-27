@@ -3021,7 +3021,7 @@
             }
           },
           "400": {
-            "description": "The request was refused, `message` says why: no name, nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, a scanner with another keyboard layout, a value of the request that is invalid, or a label that cannot be printed or previewed as asked.",
+            "description": "The request was refused, `message` says why: no name, nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, a scanner with another keyboard layout, a code that came in incomplete, is not text or is too long, a value of the request that is invalid, or a label that cannot be printed or previewed as asked.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3034,7 +3034,7 @@
                       "properties": {
                         "hint": {
                           "type": "string",
-                          "description": "Where the label does not fit the code: what to change in it, with its name and blanks, e.g., `Open \"Envelope\" in the editor, click the blank \"Name\", change its name to code and save the label.`"
+                          "description": "What to change in the label, with its name and blanks, or at the scanner, e.g., `In the editor, rename the blank \"Room\" of \"Shelf\" to code.`"
                         }
                       }
                     }
@@ -3950,8 +3950,8 @@
             "description": "File name of the saved label, e.g. `Box.json`."
           },
           "code": {
-            "type": "string",
-            "description": "The scanned text, a text and no list or number."
+            "type": ["string", "integer"],
+            "description": "The scanned text; a whole number in JSON is read as its digits, e.g. an EAN."
           },
           "printer": {
             "type": "string",

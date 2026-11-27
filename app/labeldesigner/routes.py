@@ -976,7 +976,9 @@ PREVIEW_SIZE = 240
 MAX_TITLE_LENGTH = 200
 # Codes that hold more than a name, e.g., a password or a contact: they name
 # no job, a Wi-Fi code by its network alone
-HELD_CODES = re.compile(r'\s*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
+HELD_CODES = re.compile(r'[\s\ufeff]*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
+# Such a code after other text, e.g. of a blank, at the start of a word
+HELD_WITHIN = re.compile(r'(?<![^\s\ufeff])\ufeff*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
 WIFI_FIELD = re.compile(r'([A-Za-z]+):((?:\\.|[^\\;])*);')
 # Where a job comes from as a request may tell it, the routes name the others
 TOLD_SOURCES = ('designer', 'mcp')
@@ -1163,7 +1165,8 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', 
     code = str(getattr(drawn.label, 'code_text', '') or '') if drawn else ''
     # Nor do the lines such a code holds, also one that took the lines
     whole = code or '\n'.join(texts)
-    held = set(whole.splitlines()) if HELD_CODES.match(whole) else set()
+    start = HELD_WITHIN.search(whole)
+    held = set(whole[start.start():].splitlines()) if start else set()
     lines = [line for text in texts for line in _naming(text).splitlines() if line not in held]
     # Icons are drawn with fonts of their own, a title shows them as boxes
     lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
@@ -1177,12 +1180,14 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', 
 
 def _naming(text: str) -> str:
     """text as it may name a job: of a Wi-Fi code its network, of another
-    of HELD_CODES nothing."""
+    of HELD_CODES nothing, of a text with one after it the text before it."""
     if not HELD_CODES.match(text):
-        return text
-    if text.lstrip()[:5].upper() != 'WIFI:':
+        held = HELD_WITHIN.search(text)
+        return text[:held.start()] if held else text
+    text = re.sub(r'^[\s\ufeff]+', '', text)
+    if text[:5].upper() != 'WIFI:':
         return ''
-    fields = {key.upper(): value for key, value in WIFI_FIELD.findall(text.lstrip()[5:])}
+    fields = {key.upper(): value for key, value in WIFI_FIELD.findall(text[5:])}
     return re.sub(r'\\(.)', r'\1', fields.get('S', ''))
 
 
@@ -1373,7 +1378,7 @@ def scan_print():
     def respond(data, image_bytes):
         try:
             preview_only = _whole_or(_requested('preview_only'), 0) != 0
-            filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), code if isinstance(code, str) else '')
+            filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), scan.code_text(code))
         except ValueError as e:
             _log_refused_request('Scan', e)
             message = refusals.message(e, refusals.INVALID_INPUT)
