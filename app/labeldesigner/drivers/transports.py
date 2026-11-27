@@ -12,6 +12,7 @@ import struct
 import threading
 import time
 
+from .. import bluetooth
 from . import backends, devices
 
 # Connecting took about 4 s for a PUQU Q00, also with the printer close by
@@ -117,7 +118,6 @@ class SerialLink:
         try:
             mode = termios.tcgetattr(self.fd)
             tty.cfmakeraw(mode)
-            mode[tty.IFLAG] &= ~(termios.IXOFF | termios.IXANY)
             mode[tty.CFLAG] &= ~(termios.CSTOPB | getattr(termios, 'CRTSCTS', 0))
             mode[tty.CFLAG] |= termios.CREAD | termios.CLOCAL
             mode[tty.ISPEED] = mode[tty.OSPEED] = termios.B115200
@@ -174,7 +174,7 @@ ATT_MTU = 247
 CLIENT_CONFIGURATION = 0x2902
 # The connection is kept: the B1 beeps when one opens and when it closes, not
 # at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
-# app can connect to the printer.
+# app can connect to the printer, and after each use where it saves energy.
 KEEP_LE = 60
 
 
@@ -188,6 +188,8 @@ class LeLink:
     def __init__(self, device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer):
         mac, _ = bt_address(device, 0)
         self.error, self.no_answer = error, no_answer
+        if not hasattr(socket, 'BDADDR_LE_PUBLIC'):
+            raise devices.NoBluetoothLe('Python before 3.14 opens no L2CAP connection of Bluetooth LE')
         self.s = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP)
         self.s.settimeout(CONNECT_WAIT)
         self.mtu, self.unread = 23, b''
@@ -195,7 +197,7 @@ class LeLink:
         # it is closed unused
         self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
         try:
-            self.s.bind((socket.BDADDR_ANY, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
+            self.s.bind((bluetooth.adapter_for(mac), 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
             with devices.bluetooth_turn:
                 try:
                     self.s.connect((mac, 0, ATT_CID, socket.BDADDR_LE_PUBLIC))
@@ -344,7 +346,7 @@ def release_le(device: str, s: LeLink):
     key = devices.lock_key(device)
     with _kept_lock:
         s.busy, s.used = False, time.monotonic()
-        if not s.broken:
+        if not s.broken and not devices.saves_energy(device):
             if s.timer is None:
                 s.timer = _closing(key, s, KEEP_LE)
             return

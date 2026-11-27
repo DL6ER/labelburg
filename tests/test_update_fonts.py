@@ -52,6 +52,10 @@ def registry(tmp_path, monkeypatch):
         url = f"https://registry.npmjs.org/{name}/-/{name.split('/')[1]}-1.2.3.tgz"
         urls[url] = data
         lock['packages'][f'node_modules/{name}'] = {'version': '1.2.3', 'resolved': url, 'integrity': integrity(data)}
+    downloads = {'emoji/Emoji.ttf': b'emoji font', 'emoji/OFL.txt': b'emoji license'}
+    monkeypatch.setattr(update_fonts, 'DOWNLOADS', {
+        path: (f'https://example.com/{path}', hashlib.sha256(data).hexdigest()) for path, data in downloads.items()})
+    urls.update({f'https://example.com/{path}': data for path, data in downloads.items()})
     fetched = []
 
     def urlopen(url, timeout):
@@ -80,8 +84,10 @@ def test_files_of_the_locked_versions_written(registry):
     assert (static / 'mdi/LICENSE').read_bytes() == b'mdi license'
     assert json.loads((static / 'mdi/icons.json').read_text()) == {
         'version': '1.2.3', 'icons': {'account': 'F0004', 'lightbulb': 'F0335'}}
+    assert (static / 'emoji/Emoji.ttf').read_bytes() == b'emoji font'
+    assert (static / 'emoji/OFL.txt').read_bytes() == b'emoji license'
     assert sorted(path.relative_to(static).as_posix() for path in static.rglob('*') if path.is_file()) == sorted(
-        ['mdi/materialdesignicons-webfont.ttf', 'mdi/LICENSE', 'mdi/icons.json'])
+        ['mdi/materialdesignicons-webfont.ttf', 'mdi/LICENSE', 'mdi/icons.json', 'emoji/Emoji.ttf', 'emoji/OFL.txt'])
 
 
 def test_check_names_the_files_that_differ(registry, capsys):
@@ -118,6 +124,23 @@ def test_package_only_from_the_npm_registry(registry):
     with pytest.raises(ValueError, match='npm registry'):
         registry.run()
     assert package['resolved'] not in registry.fetched
+
+
+def test_download_not_matching_its_checksum_is_refused(registry, monkeypatch):
+    url, _ = update_fonts.DOWNLOADS['emoji/Emoji.ttf']
+    monkeypatch.setitem(update_fonts.DOWNLOADS, 'emoji/Emoji.ttf', (url, hashlib.sha256(b'another font').hexdigest()))
+    with pytest.raises(ValueError, match='SHA-256'):
+        registry.run()
+    assert not (registry.static / 'emoji').exists()
+
+
+def test_the_emoji_font_in_the_repository_is_the_one_downloaded():
+    static = os.path.join(os.path.dirname(__file__), '..', 'app', 'static')
+    assert sorted(update_fonts.DOWNLOADS) == ['emoji/NotoEmoji.ttf', 'emoji/OFL.txt']
+    for path, (url, sha256) in update_fonts.DOWNLOADS.items():
+        assert url.startswith('https://raw.githubusercontent.com/google/fonts/')
+        with open(os.path.join(static, path), 'rb') as f:
+            assert hashlib.sha256(f.read()).hexdigest() == sha256
 
 
 def test_lock_file_names_the_versions_in_the_repository():

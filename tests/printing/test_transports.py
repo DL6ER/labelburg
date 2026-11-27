@@ -54,6 +54,27 @@ def test_serial_port_is_raw_at_115200_baud_8n1(pty):
         link.close()
 
 
+def test_serial_port_set_up_otherwise_before_is_set_back_to_8n1(pty):
+    # e.g. by another program: two stop bits and flow control
+    device, _ = pty
+    fd = os.open(device.removeprefix('serial://'), os.O_RDWR | os.O_NOCTTY)
+    try:
+        mode = termios.tcgetattr(fd)
+        mode[0] |= termios.IXOFF | termios.IXANY
+        mode[2] |= termios.CSTOPB | termios.CRTSCTS
+        termios.tcsetattr(fd, termios.TCSANOW, mode)
+        before = termios.tcgetattr(fd)
+        assert before[0] & termios.IXOFF and before[0] & termios.IXANY and before[2] & termios.CSTOPB and before[2] & termios.CRTSCTS
+    finally:
+        os.close(fd)
+    link = transports.SerialLink(device)
+    try:
+        iflag, _, cflag = termios.tcgetattr(link.fd)[:3]
+        assert not cflag & (termios.CSTOPB | termios.CRTSCTS) and not iflag & (termios.IXOFF | termios.IXANY)
+    finally:
+        link.close()
+
+
 def test_serial_port_sends_and_receives_bytes_as_they_are(pty):
     device, printer_end = pty
     link = transports.SerialLink(device)
@@ -208,6 +229,53 @@ def test_serial_port_on_usb_that_refuses_its_setup_is_used_as_it_is(pyusb, monke
     printer_.dispose()
 
 
+def test_serial_port_on_usb_gives_back_the_interfaces_the_kernel_did_not_take_yet(pyusb, monkeypatch):
+    # cdc_acm may take one back together with the other
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    device = SerialDevice(0x0001)
+    attach = device.attach_kernel_driver
+
+    def taken(interface):
+        if interface == 0:
+            raise USBError('Resource busy')
+        attach(interface)
+    device.attach_kernel_driver = taken
+    pyusb.append(device)
+    backends.open_printer('usb://0x3513:0x0001').dispose()
+    assert device.calls[-1] == ('attach', 1)
+
+
+class Unconfigured(SerialDevice):
+    """A serial port on USB no configuration is set on yet, so no driver of
+    the kernel holds it and its interfaces cannot be asked."""
+
+    configured = False
+
+    def is_kernel_driver_active(self, interface):
+        if not self.configured:
+            raise USBError('Entity not found')
+        return super().is_kernel_driver_active(interface)
+
+    def set_configuration(self):
+        self.configured = True
+        super().set_configuration()
+
+    def get_active_configuration(self):
+        if not self.configured:
+            raise USBError('Entity not found')
+        return self
+
+
+def test_serial_port_on_usb_not_configured_yet_is_set_up(pyusb, monkeypatch):
+    monkeypatch.setattr(niimbot.DRIVER, 'usb_serial_ids', ((0x3513, 0x0001),))
+    device = Unconfigured(0x0001, reads=[b'ok'], bound=())
+    pyusb.append(device)
+    printer_ = backends.open_printer('usb://0x3513:0x0001')
+    assert printer_.read() == b'ok'
+    printer_.dispose()
+    assert device.calls == ['configure', 'dispose']
+
+
 def test_serial_port_on_usb_no_driver_lists_is_no_printer(pyusb):
     # As before: only devices with a printer interface are printed on
     assert not any(ids[0] == 0x1234 for driver in drivers.DRIVERS for ids in driver.usb_serial_ids)
@@ -333,7 +401,9 @@ def test_printer_on_classic_bluetooth_takes_a_stream_of_bytes(rfcomm):
     printer_.write(b'\x1b@job')
     assert theirs.recv(64) == b'\x1b@job'
     # Nothing to read is told at once, an answer as it came
+    started = time.monotonic()
     assert printer_.read(32) == b''
+    assert time.monotonic() - started < 0.5
     theirs.sendall(b'status')
     deadline = time.monotonic() + 2
     while not (answer := printer_.read(32)) and time.monotonic() < deadline:
@@ -392,6 +462,26 @@ def test_printer_on_bluetooth_of_unknown_model_is_not_asked(tmp_path, off):
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer=DEVICE, model='Unknown'))
     assert (response.status_code, response.get_json()['message']) == (400, refusals.UNKNOWN_MODEL)
     assert off.tries == 0
+
+
+@pytest.mark.parametrize('device', ['usbip://192.0.2.7/1-1', '/dev/usb/lp_brother'])
+def test_printer_of_unknown_model_elsewhere_is_asked_for_its_model(tmp_path, monkeypatch, device):
+    # On USB/IP or a port named by udev, the fallback driver may well be the
+    # one of the printer: it is asked as before
+    asked = []
+    # Its device ID names no model, e.g. it did not answer
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device_: '')
+    driver = drivers.resolve(device, 'Unknown')[0]
+
+    def status(self, device_, model):
+        asked.append(device_)
+        raise OSError(errno.EHOSTUNREACH, 'No route to host')
+    monkeypatch.setattr(type(driver), 'status', status)
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = device
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, printer=device, model='Unknown'))
+    assert response.get_json()['message'] != refusals.UNKNOWN_MODEL
+    assert asked == [device]
 
 
 @pytest.fixture
@@ -612,7 +702,7 @@ def test_classic_search_finds_devices_with_their_class(management):
     assert devices_found[both] == {'address': both, 'name': 'Phone', 'le': True, 'services': [],
                                    'classic': True, 'device_class': 0x5a020c}
     # Classic Bluetooth and LE, and stopped again
-    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0004, b''), (0x0023, b'\x07'), (0x0024, b'\x07')]
 
 
 class LeOnly(Management):
@@ -633,9 +723,36 @@ def test_search_on_an_adapter_without_classic_bluetooth_still_finds_le(monkeypat
     monkeypatch.setattr(bluetooth.socket, 'socket', fake)
     monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
     assert [(d['address'], d['name']) for d in bluetooth.discover(5, classic=True)] == [(MAC, 'B1-TEST0001')]
-    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0023, b'\x07'), (0x0023, b'\x06'), (0x0024, b'\x06')]
+    assert [(op, params) for op, _, params in fake.sent] == [(0x0003, b''), (0x0004, b''), (0x0023, b'\x07'), (0x0023, b'\x06'), (0x0024, b'\x06')]
     # As long as a search of LE alone
     assert waits[-1] <= 5
+
+
+class OneLeOnly(Management):
+    """Two adapters, of which the first listed has no classic Bluetooth."""
+
+    def send(self, data):
+        op, index, _ = struct.unpack_from('<HHH', data)
+        if op == 0x0023 and index == 1 and data[6] != 0x06:
+            self.sent.append((op, index, data[6:]))
+            self.incoming.append(event(0x0002, index, struct.pack('<HB', op, 0x0c)))
+            return len(data)
+        return super().send(data)
+
+
+def test_classic_search_goes_on_on_the_adapter_that_has_it(monkeypatch):
+    classic = '00:00:5E:00:53:0A'
+    fake = OneLeOnly([found(MAC, name='B1-TEST0001', index=1), found(classic, kind=0, name='PT-P710BT0001', index=0)],
+                     controllers=(1, 0))
+    waits = []
+    monkeypatch.setattr(bluetooth.socket, 'socket', fake)
+    monkeypatch.setattr(bluetooth.select, 'select', lambda r, w, x, t=None: waits.append(t) or (r if fake.incoming else [], [], []))
+    assert {d['address'] for d in bluetooth.discover(5, classic=True)} == {MAC, classic}
+    started = [(index, params) for op, index, params in fake.sent if op == 0x0023]
+    assert sorted(started) == [(0, b'\x07'), (1, b'\x06'), (1, b'\x07')]
+    assert sorted((index, params) for op, index, params in fake.sent if op == 0x0024) == [(0, b'\x07'), (1, b'\x06')]
+    # As long as the kernel searches both on the other one
+    assert min(waits) > 5
 
 
 @pytest.mark.parametrize('classic, longest', [(True, 11), (False, 5)])
@@ -712,3 +829,27 @@ def test_classic_bluetooth_is_searched_only_when_looking_for_printers(searches, 
     # Not at the first detection, which runs without being asked for
     assert search() is False
     assert search(look=True) is True and kinds == [False, True]
+
+
+class KeptLink:
+    """What release_le() takes of a link it keeps."""
+
+    def __init__(self):
+        self.busy, self.used, self.broken, self.timer, self.closed = True, 0.0, False, None, 0
+
+    def close(self):
+        self.closed += 1
+
+
+def test_a_kept_bluetooth_link_is_closed_after_each_use_where_the_printer_saves_energy(monkeypatch):
+    saving, other = 'bt://00:00:5E:00:53:01', 'bt://00:00:5E:00:53:02'
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(saving)}))
+    monkeypatch.setattr(transports, '_kept', {})
+    links = {device: KeptLink() for device in (saving, other)}
+    for device, link in links.items():
+        transports._kept[devices.lock_key(device)] = link
+        transports.release_le(device, link)
+    # The other one is kept until it was unused for KEEP_LE seconds
+    links[other].timer.cancel()
+    assert (links[saving].closed, links[other].closed) == (1, 0)
+    assert list(transports._kept) == [devices.lock_key(other)]

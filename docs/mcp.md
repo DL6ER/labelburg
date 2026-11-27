@@ -28,7 +28,7 @@ Printing makes paper, so both print tools:
 
 - need the number of labels and print at most `MCP_MAX_COUNT` (default 10) per call, counting each label, not the calls,
 - need the printer, and take the label size it has loaded, else the one set in its printer settings. Where neither tells or it may have several loaded, they print nothing and tell the assistant to ask the user. A label size given is refused if the printer has another one loaded or set,
-- check every label before the first is printed, and print none where one is refused or the label designer warns about it, e.g. text cut off, a blank the label does not have or a date blank without a date. A font that is not installed is the exception: the label prints with the fallback font, as in the label designer, and the result says so,
+- check every label before the first is printed, and print none where one is refused or the label designer warns about it, e.g. text cut off, a blank the label does not have or a date blank without a date. A font that is not installed is the exception: the label prints with the fallback font, as in the label designer, and the result says so. A code that may be too small to scan prints only with `small_code_ok`, which the assistant sets after the user was told and still wants the print,
 - count each page of a saved PDF as a label,
 - return the image of what they added to the queue, and its address.
 
@@ -117,3 +117,7 @@ Their connectors connect from the cloud of Anthropic or OpenAI, which cannot rea
 Like the label designer, the endpoint answers only requests for the names of the home network and those of `HOSTS`, also in `Origin`, see [Host names](../README.md#host-names). That protects against DNS rebinding: a website that points its own name at your server cannot use it. Other names go into `HOSTS`, e.g., `HOSTS=labels.example.com`, or `.example.com` for all its subdomains. `MCP_HOSTS`, its former name, still works. With `TRUSTED_HOSTS` set, it answers exactly its names.
 
 Behind a [reverse proxy](reverse-proxy.md) the endpoint is below the path of the label designer, e.g. `https://labels.example.com/labels/mcp`.
+
+## Token
+
+With `MCP_TOKEN` set, the endpoint answers only requests with `Authorization: Bearer <token>`, others get 401. Clients that take headers send it, e.g. Claude Code with `--header "Authorization: Bearer <token>"`. Home Assistant 2026.12 and newer sends the token an app gives in its discovery. The previews below `/mcp/preview.png` need none: their address holds what they show, and the chat of an assistant loads them as images.

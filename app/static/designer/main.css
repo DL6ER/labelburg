@@ -36,6 +36,8 @@
     --bad: #b42318;
     --bad-soft: #fde8e6;
     --label-red: #c8102e;
+    --under-clear: transparent;
+    --under-clear-light: #3a3f45;
     --scrim: rgba(17, 19, 21, .32);
     --sh: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 28px rgba(16, 24, 40, .08);
     --sh-pop: 0 18px 40px rgba(16, 24, 40, .16);
@@ -47,7 +49,7 @@
         --page: #111315; --surface: #1b1e21; --surface-2: #23272b; --stage: #0f1113; --dots: #2b3035;
         --ink: #f2f3f4; --on-ink: #111315; --ink-2: #d9dcdf; --muted: #9aa3ac; --line: #2e3338; --line-2: #3a4046;
         --select: #7ea2ff; --select-soft: #1f2c4a; --ok: #5cc277; --warn: #e2b04f; --warn-soft: rgba(226, 176, 79, .14);
-        --bad: #f0857a; --bad-soft: rgba(240, 133, 122, .14); --scrim: rgba(0, 0, 0, .55);
+        --bad: #f0857a; --bad-soft: rgba(240, 133, 122, .14); --scrim: rgba(0, 0, 0, .55); --under-clear: #e9ebef; --under-clear-light: transparent;
         --sh: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .35); --sh-pop: 0 18px 40px rgba(0, 0, 0, .5);
         color-scheme: dark;
     }
@@ -56,7 +58,7 @@
     --page: #111315; --surface: #1b1e21; --surface-2: #23272b; --stage: #0f1113; --dots: #2b3035;
     --ink: #f2f3f4; --on-ink: #111315; --ink-2: #d9dcdf; --muted: #9aa3ac; --line: #2e3338; --line-2: #3a4046;
     --select: #7ea2ff; --select-soft: #1f2c4a; --ok: #5cc277; --warn: #e2b04f; --warn-soft: rgba(226, 176, 79, .14);
-    --bad: #f0857a; --bad-soft: rgba(240, 133, 122, .14); --scrim: rgba(0, 0, 0, .55);
+    --bad: #f0857a; --bad-soft: rgba(240, 133, 122, .14); --scrim: rgba(0, 0, 0, .55); --under-clear: #e9ebef; --under-clear-light: transparent;
     --sh: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .35); --sh-pop: 0 18px 40px rgba(0, 0, 0, .5);
     color-scheme: dark;
 }
@@ -95,7 +97,7 @@ small, .small { font-size: 12px; }
 .kbd { font-size: 11px; color: var(--muted); border: 1px solid var(--line-2); border-radius: 6px; padding: 0 5px; background: var(--surface); }
 .pchip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 6px 12px; font-size: 13px; white-space: nowrap; max-width: 260px; }
 .pchip b { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-.pchip small { color: var(--muted); }
+.pchip small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 .pchip:hover { border-color: var(--line-2); }
 .d { width: 8px; height: 8px; border-radius: 50%; background: #22a356; box-shadow: 0 0 0 3px #22a35622; flex: none; }
 .d.off { background: #9aa3ac; box-shadow: 0 0 0 3px #9aa3ac22; }
@@ -176,7 +178,7 @@ small, .small { font-size: 12px; }
 .tapenote { margin: 2px 0 0; display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--warn); }
 .tapenote .custom { padding: 0; font-size: 12.5px; }
 .labelbox { position: relative; display: flex; flex-direction: column; align-items: center; }
-.paper { position: relative; order: 1; background: #fff; border-radius: 4px; box-shadow: 0 10px 24px rgba(16, 24, 40, .12), 0 1px 0 rgba(0, 0, 0, .04); line-height: 0; z-index: 1; }
+.paper { position: relative; order: 1; background: var(--tape, #fff); border-radius: 4px; box-shadow: 0 10px 24px rgba(16, 24, 40, .12), 0 1px 0 rgba(0, 0, 0, .04); line-height: 0; z-index: 1; }
 .paper img.dots { image-rendering: pixelated; }
 .paper img { display: block; border-radius: 4px; transition: opacity .15s; }
 .labelbox.empty .paper img { opacity: 0; }
@@ -184,6 +186,11 @@ small, .small { font-size: 12px; }
 .spin { position: absolute; right: -28px; top: -24px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--select); opacity: 0; transition: opacity .2s; }
 .labelbox.busy .spin { opacity: 1; animation: spin .8s linear infinite; transition-delay: .25s; }
 @keyframes spin { to { transform: rotate(360deg); } }
+/* Tape in its colors has an edge, e.g. black tape on the dark stage. Clear
+   tape shows the stage, behind print that would vanish on it a backdrop. */
+.labelbox.taped .paper, .labelbox.taped .lead { box-shadow: 0 0 0 1px var(--line-2), 0 10px 24px rgba(16, 24, 40, .12); }
+.labelbox.clear .paper, .labelbox.clear .lead { background: var(--under-clear); }
+.labelbox.clear.light-ink .paper, .labelbox.clear.light-ink .lead { background: var(--under-clear-light); }
 /* The printer: its body with the state light, its
    name and the slot the label comes out of, below the label where the top
    leaves first, above it where the bottom does, beside labels along the tape */
@@ -209,7 +216,7 @@ small, .small { font-size: 12px; }
 .side .vslot .mouth { left: auto; right: 4px; top: 50%; transform: translateY(-50%); width: 6px; height: calc(100% - 8px); }
 .side.back .vslot { order: 3; margin: 0 0 0 -8px; border-radius: 6px 14px 14px 6px; background: linear-gradient(270deg, #4b525a, #2a2e33); }
 .side.back .vslot .mouth { right: auto; left: 4px; }
-.lead { order: 0; background: #fff; border-radius: 4px 4px 0 0; border-bottom: 1px dashed rgba(0, 0, 0, .18); box-shadow: 0 10px 24px rgba(16, 24, 40, .12); }
+.lead { order: 0; background: var(--tape, #fff); border-radius: 4px 4px 0 0; border-bottom: 1px dashed rgba(0, 0, 0, .18); box-shadow: 0 10px 24px rgba(16, 24, 40, .12); }
 .from-top .lead { order: 2; border-radius: 0 0 4px 4px; border-bottom: 0; border-top: 1px dashed rgba(0, 0, 0, .18); }
 .side .lead { order: 2; border-radius: 0 4px 4px 0; border-bottom: 0; border-left: 1px dashed rgba(0, 0, 0, .18); }
 .side.back .lead { order: 0; border-radius: 4px 0 0 4px; border-left: 0; border-right: 1px dashed rgba(0, 0, 0, .18); }
@@ -357,6 +364,7 @@ input.anum::placeholder { color: var(--select); opacity: 1; font-weight: 600; }
 .sw { width: 15px; height: 15px; border-radius: 50%; display: inline-block; flex: none; }
 .sw.red { background: var(--label-red); }
 .line-menu { width: 280px; }
+.line-menu [data-lsv] { min-width: 54px; }
 /* The font menu: families in their own fonts, weight and width below */
 .font-menu { position: fixed; z-index: 30; width: 320px; max-height: 560px; display: flex; flex-direction: column; gap: 6px; padding: 8px; overflow: auto; overscroll-behavior: contain; }
 .fm-search { display: flex; align-items: center; gap: 8px; flex: none; padding: 0 10px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
@@ -490,7 +498,8 @@ textarea.in { width: 100%; resize: vertical; }
 
 /* Overlays */
 .layer { position: fixed; inset: 0; z-index: 40; }
-.layer.center, .layer.top { background: var(--scrim); display: grid; place-items: center; padding: 16px; }
+/* One column as wide as the layer: dialogs take the width they set, not that of their content */
+.layer.center, .layer.top { background: var(--scrim); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; }
 .layer.top { place-items: start center; padding-top: 12vh; }
 .pop-card { position: fixed; width: 360px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--sh-pop); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .pp h4 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -565,6 +574,11 @@ textarea.in { width: 100%; resize: vertical; }
 .tpl-print { display: flex; gap: 8px; align-items: center; }
 .tpl-print .btn.primary { flex: 1; justify-content: center; }
 .tpl-acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.tpl-ask { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+/* Side by side where they fit, else each a line of its own */
+.tpl-ask .btn { flex: 1 1 auto; justify-content: center; }
+.tpl-ask .ghost { flex-basis: 100%; }
+.tpl-ask[hidden] { display: none; }
 .tpl-panel { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .tpl-panel .row { flex-wrap: nowrap; }
 .tpl-panel .row .in { flex: 1; min-width: 0; }

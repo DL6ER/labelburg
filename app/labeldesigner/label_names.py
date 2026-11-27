@@ -3,9 +3,11 @@ print them. Each driver (drivers/) has the label sizes of its printers."""
 
 import math
 
+from flask import current_app
+
 from .drivers.labels import Label
 
-from . import drivers
+from . import drivers, sheets
 from .drivers import LABELS, MODELS
 from .drivers.base import shown
 
@@ -122,3 +124,22 @@ def label_length_problems() -> list[str]:
     """Every message a length of an endless label is refused with."""
     return list(dict.fromkeys(problem for label in LABELS if length_limits(label)
                               for length in (0, math.inf) if (problem := label_length_problem(label, length))))
+
+
+# The margin presets of the label designer, as parts of the normal margins
+MARGIN_PRESETS = {'none': 0, 'tight': .5, 'normal': 1, 'large': 2}
+MARGIN_SIDES = ('top', 'bottom', 'left', 'right')
+
+
+def margin_presets(label: Label, margins: tuple) -> dict[str, tuple]:
+    """The margins (top, bottom, left, right) of each preset on a label of
+    the size: margins are those of 62 mm wide labels, others get them in
+    proportion to their width, of a page of several labels to one of them."""
+    scale = sheets.piece(label).dots_printable[0] / SIZES['62'].dots_printable[0]
+    return {name: tuple(math.floor(margin * part * scale + .5) for margin in margins) for name, part in MARGIN_PRESETS.items()}
+
+
+def configured_margins(label: Label) -> dict[str, tuple]:
+    """The margin presets on a label of the size, of the margins configured
+    for 62 mm wide labels."""
+    return margin_presets(label, tuple(current_app.config[f'LABEL_DEFAULT_MARGIN_{side.upper()}'] for side in MARGIN_SIDES))

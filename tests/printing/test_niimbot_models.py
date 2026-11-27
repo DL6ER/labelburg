@@ -2,6 +2,7 @@
 from, their labels, their packets against the fake printer of
 test_niimbot.py, and how a printer is known by its model ID."""
 import struct
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -16,7 +17,7 @@ from tests.printing.test_niimbot import REPLIES, TEXT, FakePrinter, data_of
 
 DEVICE = 'bt://00:00:5E:00:53:21'
 
-# niimbluelib at 35110a716c960448ee17a9270e4c3a131149866f: the id, dpi,
+# niimbluelib at 0c9d33d447bc7ba612f04fa41b2f7bbd0ddd8117: the id, dpi,
 # printheadPixels, densityMin, densityMax and densityDefault of
 # src/printer_models.ts, the print task of src/print_tasks/index.ts
 NIIMBLUELIB = {
@@ -42,7 +43,10 @@ NIIMBLUELIB = {
 }
 # The printheads https://printers.niim.blue/hardware/ marks verified where
 # they differ from printheadPixels: NIIMBOT-B1_Pro/, niimbot-b21_pro/,
-# niimbot-m2h/ and niimbot-d11_h/. The D110_M printed on 120.
+# niimbot-m2h/ and niimbot-d11_h/. niimbluelib counts the dots of a row by
+# the width the printer tells (AbstractPrintTask.ts:153-156), 576 by a B21
+# Pro and a B1 Pro (src/test/virtual-client.test.ts:85, 132, 338). The
+# D110_M printed on 120.
 HEADS = {'B1_PRO': 576, 'B21_PRO': 576, 'M2_H': 576, 'D11_H': 144, 'D110_M': 120}
 
 
@@ -69,6 +73,9 @@ def fake(monkeypatch):
         return c
     monkeypatch.setattr(protocol, 'connect', connect)
     monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
+    monkeypatch.setattr(protocol, 'STATUS_POLL', 0.01)
+    # Page 1, printed and fed out, 4 bytes as niimbluelib reads at least
+    monkeypatch.setitem(REPLIES, 0xa3, (0xb3, struct.pack('>HBB', 1, 100, 100)))
     return printer
 
 
@@ -86,15 +93,15 @@ def niimbluelib_packet(command, data):
 
 
 def test_models_are_those_of_niimbluelib():
-    table = {model.short: (model.ids, model.dpi, model.counted, *model.density, model.sequence) for model in models.MODELS}
+    table = {model.short: (model.ids, model.dpi, model.dots, *model.density, model.sequence) for model in models.MODELS}
+    listed = {short: (ids, dpi, HEADS.get(short, pixels), *rest) for short, (ids, dpi, pixels, *rest) in NIIMBLUELIB.items()}
     # The D110_M keeps the sequence it printed with
-    assert table == dict(NIIMBLUELIB, D110_M=((2320,), 203, 96, 1, 5, 3, 'v4'))
-    assert {model.short: model.dots for model in models.MODELS if model.dots != model.counted} == HEADS
+    assert table == dict(listed, D110_M=((2320,), 203, 120, 1, 5, 3, 'v4'))
 
 
 def test_models_printed_are_those_of_the_sequences_labelburg_has():
     assert niimbot.MODELS == ('Niimbot/D110_M', 'Niimbot/B1', 'Niimbot/B21_C2B', 'Niimbot/D101', 'Niimbot/N1',
-                              'Niimbot/M2_H', 'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H', 'Niimbot/B21',
+                              'Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/D11_H', 'Niimbot/M2_H', 'Niimbot/B21',
                               'Niimbot/B21_L2B', 'Niimbot/B21S', 'Niimbot/B21S_C2B', 'Niimbot/D110', 'Niimbot/D11',
                               'Niimbot/D11S', 'Niimbot/H1S', 'Niimbot/B18', 'Niimbot/B3S')
     # Only the D110_M is paired, only these two need the RFID tag of their
@@ -119,10 +126,10 @@ def test_models_are_shown_by_their_plain_names():
 @pytest.mark.parametrize('label_size, model, shared', [
     # The same dots on the same rolls
     ('niimbot50x30', 'Niimbot/B21_C2B', True), ('niimbotd50', 'Niimbot/B21_C2B', True),
-    ('niimbot15x8-2x3', 'Niimbot/B21_C2B', True), ('niimbot12x40', 'Niimbot/D101', True),
+    ('niimbot12x40', 'Niimbot/D101', True),
     ('niimbot15x50', 'Niimbot/D101', True), ('niimbot12x40', 'Niimbot/N1', True),
-    # 15 mm on a printhead of 12, or at 300 dpi
-    ('niimbot15x50', 'Niimbot/N1', False), ('niimbot50x30', 'Niimbot/B1_PRO', False),
+    # 15 mm on a printhead of 12, or at 300 dpi; pages of several labels on the B1 only
+    ('niimbot15x8-2x3', 'Niimbot/B21_C2B', False), ('niimbot15x50', 'Niimbot/N1', False), ('niimbot50x30', 'Niimbot/B1_PRO', False),
     ('niimbot12x40', 'Niimbot/D11_H', False)])
 def test_labels_of_a_model_are_those_of_the_b1_or_d110_m_where_they_are_the_same(label_size, model, shared):
     sizes = {label.identifier: label for label in niimbot.LABELS}
@@ -133,22 +140,31 @@ def test_labels_that_differ_are_named_by_their_model():
     sizes = {label.identifier: label for label in niimbot.LABELS}
     # 50 mm at 300 dpi, on 48 mm of the printhead
     assert (sizes['niimbot50x30-b1pro'].dots_total, sizes['niimbot50x30-b1pro'].dots_printable) == ((591, 354), (576, 354))
-    assert sizes['niimbot50x30-b21pro'].dots_printable == (576, 354)
-    assert sizes['niimbot50x30-b1pro'].models == ('Niimbot/B1_PRO',)
     assert sizes['niimbot15x50-n1'].dots_printable == (96, 400)
     assert sizes['niimbot12x40-d11h'].dots_printable == (142, 472)
     assert sizes['niimbot14x40-d11h'].dots_printable == (144, 472)
-    assert sizes['niimbotd50-m2h'].dots_printable == (576, 591)
-    # Pages of several labels as on the B1 only
-    assert not any(label.pieces != (1, 1, 0) and label.models[0] != 'Niimbot/B1' for label in niimbot.LABELS)
+    assert sizes['niimbotd50-b1pro'].dots_printable == (576, 591)
+    # Pages of several labels on the B1 only
+    assert {label.models for label in niimbot.LABELS if label.pieces != (1, 1, 0)} == {('Niimbot/B1',)}
     assert niimbot.NAMES['niimbot50x30-b1pro'] == niimbot.NAMES['niimbot50x30'] == '50 x 30 mm die-cut (Niimbot)'
     # Made at the dpi of their printer
     assert (label_dpi('niimbot50x30-b1pro', False), label_dpi('niimbot50x30', False)) == (300, 203)
 
 
+def test_models_that_take_the_same_label_share_its_size():
+    # The same paper of the same dots at the same dpi is one label size
+    labels = [(label.tape_size, label.form_factor, label.pieces, label.dots_total, label.dots_printable,
+               label_dpi(label.identifier, False)) for label in niimbot.LABELS]
+    assert len(labels) == len(set(labels)) == 43
+    sizes = {label.identifier: label for label in niimbot.LABELS}
+    assert sizes['niimbot50x30-b1pro'].models == ('Niimbot/B1_PRO', 'Niimbot/B21_PRO', 'Niimbot/M2_H')
+    assert sizes['niimbot50x30'].models == ('Niimbot/B1', 'Niimbot/B21_C2B', 'Niimbot/B21', 'Niimbot/B21_L2B',
+                                            'Niimbot/B21S', 'Niimbot/B21S_C2B')
+
+
 @pytest.mark.parametrize('label_size, model, on', [
     ('niimbot50x30', 'Niimbot/B1_PRO', 'niimbot50x30-b1pro'), ('niimbot50x30-b1pro', 'Niimbot/B1', 'niimbot50x30'),
-    ('niimbot50x30-b1pro', 'Niimbot/M2_H', 'niimbot50x30-m2h'), ('niimbotd50', 'Niimbot/B21_PRO', 'niimbotd50-b21pro'),
+    ('niimbot50x30-b1pro', 'Niimbot/M2_H', 'niimbot50x30-b1pro'), ('niimbotd50', 'Niimbot/B21_PRO', 'niimbotd50-b1pro'),
     ('niimbot15x8-2x3', 'Niimbot/D11_H', 'niimbot15x8-2x3'), ('niimbot14x40', 'Niimbot/D11_H', 'niimbot14x40-d11h'),
     ('niimbot50x30', 'Niimbot/B21_C2B', 'niimbot50x30')])
 def test_label_made_for_another_model_goes_on_the_same_roll(label_size, model, on):
@@ -167,7 +183,7 @@ def test_printer_is_known_by_its_model_id(fake, monkeypatch, model_id, model):
 @pytest.fixture
 def unprintable(monkeypatch):
     """A model of a print task Labelburg lacks, as niimbluelib may list one."""
-    model = models.Model('Niimbot/K3', 'K3', (4864,), 203, 640, 640, (1, 5, 3), 'k3')
+    model = models.Model('Niimbot/K3', 'K3', (4864,), 203, 640, (1, 5, 3), 'k3')
     monkeypatch.setitem(models.BY_ID, 4864, model)
     return model
 
@@ -188,8 +204,17 @@ def test_printer_of_a_sequence_labelburg_lacks_is_not_printed_on(fake, monkeypat
     assert 0x21 not in fake.commands
 
 
+@pytest.mark.parametrize('answer, model', [(b'\x03', 'B21'), (b'\x02', 'D11'), (b'\x0e', 'B18'), (b'\x01', 'B3S')])
+def test_model_id_of_one_byte_is_its_high_byte(fake, monkeypatch, answer, model):
+    # niimbluelib, src/packets/packet_parser.ts:164-173 parsePrinterInfoModelIdResponse
+    monkeypatch.setitem(REPLIES, 0x40, (0x48, answer))
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1', label_size='niimbot50x30')
+    assert niimbot.DRIVER.send(queue, [[bytes(384)]]) == f'This printer is a Niimbot {model}, choose that model for it'
+    assert 0x21 not in fake.commands
+
+
 def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch):
-    # niimbluelib at 35110a71, src/print_tasks/D110MV4PrintTask.ts, the
+    # niimbluelib at 0c9d33d4, src/print_tasks/D110MV4PrintTask.ts, the
     # packets of src/packets/packet_generator.ts, the commands of
     # src/packets/commands.ts. Two empty rows, one of 3 dots, 351 black.
     told(monkeypatch, 4097)
@@ -200,10 +225,10 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1_PRO', label_size='niimbot50x30-b1pro')
     assert niimbot.DRIVER.send(queue, [rows]) == ''
     p = niimbluelib_packet
-    # The rows of 576 dots are 72 bytes, more than the thirds of 23 bytes of
-    # printheadPixels 567 (utils.ts:105-106): the dots counted together as
-    # 0, low, high byte (utils.ts:151-152)
-    black = bytes([0, 0x40, 0x02])
+    # The rows of 576 dots are 72 bytes, the thirds of 24 bytes of the
+    # printhead of 576 dots it tells (utils.ts:98-99), their dots counted
+    # in each
+    black = bytes([192, 192, 192])
     assert fake.packets[3:] == [
         # D110MV4PrintTask.ts:20 setLabelType, packet_generator.ts:113, 0x23 commands.ts:36, WithGaps
         p(0x23, [1]),
@@ -221,7 +246,7 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
         p(0x84, [0, 0, 2]),
         # packet_generator.ts:442-450 printBitmapRowIndexed :276-290 for 6
         # dots or less, their places (image_encoder.ts:247-255)
-        p(0x83, [0, 2, 0, 3, 0, 1, 0, 10, 1, 44, 2, 58]),
+        p(0x83, [0, 2, 1, 1, 1, 1, 0, 10, 1, 44, 2, 58]),
         # packet_generator.ts:454-460 printBitmapRow :254-263; equal rows end
         # after row 199 (image_encoder.ts:225-229)
         p(0x85, [0, 3, *black, 197] + [0xff] * 72),
@@ -237,7 +262,7 @@ def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch
 
 
 def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
-    # niimbluelib at 35110a71, src/print_tasks/B1PrintTask.ts. One row of 2
+    # niimbluelib at 0c9d33d4, src/print_tasks/B1PrintTask.ts. One row of 2
     # dots, 319 black, 12 mm across.
     told(monkeypatch, 2560)
     monkeypatch.setitem(REPLIES, 0x03, (0x04, b'\x01'))
@@ -245,7 +270,7 @@ def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
     queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/D101', label_size='niimbot12x40')
     assert niimbot.DRIVER.send(queue, [rows]) == ''
     p = niimbluelib_packet
-    # 12 bytes fit into thirds of 8 of printheadPixels 192 (utils.ts:105-106)
+    # 12 bytes fit into thirds of 8 of printheadPixels 192 (utils.ts:98-99)
     assert fake.packets[3:] == [
         # B1PrintTask.ts:11 setDensity, densityDefault printer_models.ts:493
         p(0x21, [2]),
@@ -269,6 +294,61 @@ def test_d101_gets_the_packets_of_niimbluelibs_b1_task(fake, monkeypatch):
         p(0xf3, [1])]
 
 
+class _Timed(FakePrinter):
+    """The printer of test_niimbot.py, when each write came."""
+
+    def __init__(self):
+        super().__init__()
+        self.times = []
+
+    def sendall(self, data):
+        self.times.append(time.monotonic())
+        super().sendall(data)
+
+
+@pytest.mark.parametrize('model_id, model, label_size, rows', [
+    (2560, 'Niimbot/D101', 'niimbot12x40', [b'\x01' * 96] * 3 + [bytes(96)] * 2),
+    (4097, 'Niimbot/B1_PRO', 'niimbot50x30-b1pro', [b'\x01' * 576] * 3 + [bytes(576)] * 2)])
+def test_new_models_get_each_packet_on_its_own_after_niimbluelibs_gap(fake, monkeypatch, model_id, model, label_size, rows):
+    printer = _Timed()
+
+    def connect(device, le=False):
+        c = protocol.Connection.__new__(protocol.Connection)
+        c.s, c.received = printer, b''
+        return c
+    monkeypatch.setattr(protocol, 'connect', connect)
+    told(monkeypatch, model_id)
+    monkeypatch.setitem(REPLIES, 0x03, (0x04, b'\x01'))
+    queue = SimpleNamespace(device_specifier=DEVICE, model=model, label_size=label_size)
+    assert niimbot.DRIVER.send(queue, [rows]) == ''
+    sent = printer.times[printer.commands.index(0x21):]
+    assert len(sent) == len(printer.commands[printer.commands.index(0x21):])
+    assert min(b - a for a, b in zip(sent, sent[1:])) >= protocol.PACKET_GAP
+
+
+@pytest.mark.parametrize('model_id, model, label_size, width', [
+    (2560, 'Niimbot/D101', 'niimbot12x40', 96), (4097, 'Niimbot/B1_PRO', 'niimbot50x30-b1pro', 576)])
+def test_new_models_print_whatever_their_answers_say_as_niimbluelib(fake, monkeypatch, model_id, model, label_size, width):
+    # niimbluelib's sendAll() waits for each answer without judging it
+    told(monkeypatch, model_id)
+    for command in (0x21, 0x23, 0x01, 0x03, 0x13, 0xe3, 0xf3):
+        monkeypatch.setitem(REPLIES, command, (protocol.ANSWERS[command], b'\x00'))
+    queue = SimpleNamespace(device_specifier=DEVICE, model=model, label_size=label_size)
+    assert niimbot.DRIVER.send(queue, [[b'\x01' * width] * 2]) == ''
+    assert fake.commands.count(0x21) == 1
+
+
+def test_new_models_tell_the_error_of_a_print_status_of_10_bytes(fake, monkeypatch):
+    # Page 0, 0 % printed and fed, then the error 1, the cover open
+    told(monkeypatch, 4097)
+    monkeypatch.setitem(REPLIES, 0xa3, (0xb3, bytes([0, 0, 0, 0, 0, 0, 1, 0, 0, 0])))
+    monkeypatch.setattr(protocol, 'PRINT_WAIT', 0.2)
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1_PRO', label_size='niimbot50x30-b1pro')
+    assert niimbot.DRIVER.send(queue, [[b'\x01' * 576] * 2]) == 'The cover of the printer is open'
+    # Ended as niimbluelib's example ends a failed task
+    assert fake.commands[-1] == 0xf3 and fake.commands.count(0xf3) == 1
+
+
 def test_d110_m_and_b1_keep_their_packets(fake, monkeypatch):
     # The D110_M with the sequence of hass-niimbot, its rows counted for 120
     # dots, without a heartbeat after the end
@@ -278,6 +358,14 @@ def test_d110_m_and_b1_keep_their_packets(fake, monkeypatch):
     assert [c for c in fake.commands if c not in (0x84, 0x85)][3:] == [0x21, 0x23, 0x01, 0xdc, 0x13, 0xe3, 0xa3, 0xf3]
     assert (packets[0x01], packets[0x13]) == (bytes([0, 1] + [0] * 7), struct.pack('>HHHHB', 8, 96, 1, 0, 0))
     assert packets[0x85][:6] == struct.pack('>H3BB', 0, 40, 40, 16, 8)
+
+
+def test_rows_of_up_to_6_dots_are_sent_by_their_places():
+    # niimbluelib's packet_generator.ts:442, more as bitmap
+    six, seven = ([1] * n + [0] * (96 - n) for n in (6, 7))
+    by_places, bitmap = protocol.image_packets([six, seven], 96)
+    assert by_places == protocol.packet(0x83, bytes([0, 0, 6, 0, 0, 1]) + struct.pack('>6H', *range(6)))
+    assert bitmap[2] == 0x85
 
 
 def test_rows_fit_into_three_thirds_or_are_counted_together():
@@ -367,19 +455,22 @@ def test_b21_pro_found_by_its_name_is_asked_once(fake, monkeypatch):
     assert fake.packets == [p(0x40, [0x08]), p(0xdc, [1]), p(0x1a, [1]), p(0xdc, [1]), p(0x1a, [1])]
 
 
-def test_printer_found_by_niimbots_service_alone_is_no_b1_until_it_says_so(fake, monkeypatch):
+def test_printer_found_by_niimbots_service_alone_is_the_model_found_while_it_tells_none(fake, monkeypatch):
+    # A B1 that leaves its model ID unanswered, asked for it again
+    # STATUS_LOST seconds later
     assert found('') == (DEVICE, 'Niimbot/B1')
     monkeypatch.delitem(REPLIES, 0x40)
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
-    with pytest.raises(protocol.NoAnswer):
-        niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')
-    assert 0xdc not in fake.commands
-    # It answers once looked for again
-    told(monkeypatch, 4096)
     monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
-    monkeypatch.setattr(devices, '_unanswered', {})
-    monkeypatch.setattr(devices, 'looked', 1e12)
-    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')['model'] == 'Niimbot/B1'
+    for _ in range(2):
+        state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)
+        assert (state['model'], state['errors']) == ('Niimbot/B1', [])
+    model_id = niimbluelib_packet(0x40, [0x08])
+    assert fake.packets.count(model_id) == 1 and fake.commands.count(0xdc) == 2
+    told(monkeypatch, 4097)
+    monkeypatch.setattr(niimbot, 'STATUS_LOST', 0)
+    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)['model'] == 'Niimbot/B1_PRO'
+    assert fake.packets.count(model_id) == 2
 
 
 def test_printer_on_bluetooth_le_of_a_model_labelburg_cannot_print_on(fake, monkeypatch, unprintable):
@@ -433,7 +524,8 @@ def test_serial_port_on_usb_that_did_not_tell_its_model_is_asked_when_looking(fa
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') is None
-    assert fake.commands.count(0x40) == 1
+    # Not even looked at again
+    assert fake.commands.count(0x40) == 1 and serial_port == ['usb://0x3513:0x0003']
     told(monkeypatch, 785)
     monkeypatch.setattr(devices, 'looked', 1e12)
     assert niimbot.DRIVER.model_of('usb://0x3513:0x0003', '') == 'Niimbot/B21_PRO'
@@ -465,9 +557,9 @@ def test_b21_pro_prints_through_the_label_designer(tmp_path, fake, monkeypatch):
     client = make_client(tmp_path, model='Niimbot/B21_PRO', printer=DEVICE)
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
     # Its roll of 50 x 30 mm, at 300 dpi
-    assert (printer_['model'], printer_['errors'], printer_['label_size']) == ('Niimbot/B21_PRO', [], 'niimbot50x30-b21pro')
+    assert (printer_['model'], printer_['errors'], printer_['label_size']) == ('Niimbot/B21_PRO', [], 'niimbot50x30-b1pro')
     response = client.post('/labeldesigner/api/print', data={
-        'label_size': 'niimbot50x30-b21pro', 'print_type': 'text', 'text': TEXT})
+        'label_size': 'niimbot50x30-b1pro', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', '')
     size = struct.unpack('>HH', data_of(next(p for p in fake.packets if p[2] == 0x13))[:4])
     assert size == (354, 576)

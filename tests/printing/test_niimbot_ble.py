@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from app.labeldesigner import bluetooth
 from app.labeldesigner.drivers import devices, niimbot, transports
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client, outcome
@@ -141,7 +142,8 @@ def le(monkeypatch):
 
 @pytest.fixture
 def b1(tmp_path, monkeypatch):
-    client = make_client(tmp_path)
+    # Its settings are kept in a folder of its own
+    client = make_client(tmp_path, empty_repo=True)
     client.application.config['PRINTER_PRINTER'] = DEVICE
     client.application.config['PRINTER_MODEL'] = 'Niimbot/B1'
     for command, reply in B1_REPLIES.items():
@@ -156,6 +158,25 @@ def test_b1_on_bluetooth_answers_over_bluetooth_le(b1, le):
     assert le.addresses == [(MAC, 0, 4, socket.BDADDR_LE_PUBLIC)]
     # Asked without a beep, the label designer follows it closely
     assert printer_['follow'] is True
+
+
+@pytest.mark.parametrize('heard_by, adapter', [({}, socket.BDADDR_ANY), ({MAC: '00:00:5E:00:53:F0'}, '00:00:5E:00:53:F0')])
+def test_b1_is_reached_through_the_adapter_that_heard_it(b1, le, monkeypatch, heard_by, adapter):
+    # Any adapter where no search heard it, e.g. set up by its address
+    monkeypatch.setattr(bluetooth, 'heard_by', heard_by)
+    b1.get(STATUS)
+    assert le.bound == (adapter, 0, 4, socket.BDADDR_LE_PUBLIC)
+
+
+def test_b1_on_bluetooth_le_tells_it_needs_python_3_14(b1, le, monkeypatch):
+    # Before Python 3.14 an L2CAP address has no address type
+    monkeypatch.delattr(protocol.socket, 'BDADDR_LE_PUBLIC')
+    needs = 'Printers on Bluetooth LE need Python 3.14 or newer'
+    assert b1.get(STATUS).get_json()['printers'][0]['errors'] == [needs]
+    response = b1.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(b1, response) == ('failed', f'Could not send the label to the printer: {needs}')
+    assert le.made == []
 
 
 def test_the_printers_mtu_request_is_answered(b1, le):
@@ -251,6 +272,41 @@ def test_b1_on_bluetooth_switched_off_is_told_as_a_d110_m(tmp_path, le):
     assert said['Niimbot/B1'] == said['Niimbot/D110_M'] != []
 
 
+def test_a_b1_that_saves_energy_is_connected_only_while_it_is_asked(b1, le):
+    answer = b1.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'})
+    assert answer.get_json()['settings']['save_energy'] == '1'
+    printer_ = b1.get(STATUS).get_json()['printers'][0]
+    # Closed right after it was asked, not followed every 2 s: each
+    # connection beeps
+    assert le.closed == len(le.addresses) == 1
+    assert (printer_['can_save_energy'], printer_['follow']) == (True, False)
+    response = b1.post('/labeldesigner/api/print', data={'label_size': 'niimbot50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(b1, response) == ('printed', '')
+    assert le.closed == len(le.addresses) == 2 and transports._kept == {}
+
+
+def test_a_b1_that_saves_energy_no_more_keeps_its_connection_again(b1, le):
+    b1.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'})
+    b1.get(STATUS)
+    b1.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '0'})
+    printer_ = b1.get(STATUS + '?printer=' + DEVICE).get_json()['printers'][0]
+    assert printer_['follow'] is True
+    b1.get(STATUS + '?printer=' + DEVICE)
+    assert (len(le.addresses), le.closed) == (2, 1)
+
+
+def test_a_b1_that_saves_energy_tells_its_last_state_between_prints(b1, le):
+    # As one on classic Bluetooth: asked again when the label designer
+    # looks for printers
+    b1.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'})
+    b1.get(STATUS)
+    b1.get(STATUS)
+    b1.get(STATUS + '?printer=' + DEVICE)
+    assert len(le.addresses) == 1
+    b1.get(STATUS + '?look=1')
+    assert len(le.addresses) == 2
+
+
 @pytest.mark.parametrize('model, device, follow', [
     ('Niimbot/B1', DEVICE, True), ('Niimbot/D110_M', DEVICE, False), ('Niimbot/B1', 'usbip://192.0.2.7/1-4.1.3', True),
     ('QL-800', 'file:///dev/usb/lp0', True), ('QL-800', 'usb://0x04f9:0x209b', True), ('QL-800', '/dev/usb/lp1', True),
@@ -291,3 +347,11 @@ def test_b1_out_of_reach_on_bluetooth_le_is_left_alone_until_looked_for(b1, le):
     assert le.tries == 1 and errors == [devices.unanswered_reason(OSError(errno.EHOSTDOWN, 'Host is down'))]
     b1.get(STATUS + '?look=1')
     assert le.tries == 2
+
+
+@pytest.mark.parametrize('model, device, offered', [
+    ('Niimbot/B1', DEVICE, True), ('Niimbot/B1', '/dev/usb/lp0', False), ('Niimbot/D110_M', DEVICE, False),
+    ('QL-800', 'tcp://192.0.2.9', False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False)])
+def test_only_printers_whose_connection_is_kept_save_energy(model, device, offered):
+    from app.labeldesigner import drivers
+    assert drivers.for_model(model).keeps_connection(device, model) is offered

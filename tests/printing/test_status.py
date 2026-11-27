@@ -224,7 +224,20 @@ def test_error_told_unasked_is_held(held, told):
                 sent.append(error)
                 held.unread = bytes(error)
         held.write = writing
-    assert usb.query_status('file:///dev/usb/lp0')['errors'] == ['Replace media error, clear it at the printer']
+    assert usb.query_status('file:///dev/usb/lp0')['errors'] == ['The loaded labels do not fit the job. Clear the error at the printer']
+
+
+@pytest.mark.parametrize('bits, shown', [
+    (0x10, 'The cover is open'),
+    (0x11, 'The loaded labels do not fit the job, The cover is open. Clear the error at the printer'),
+])
+def test_held_error_tells_to_clear_it_only_where_needed(held, bits, shown):
+    # The cover error goes away once the cover is closed
+    from app.labeldesigner.drivers.brother import usb
+    error = bytearray(make_status_packet(62, kind=0x02))
+    error[9] = bits
+    held.gaps, held.unread = False, bytes(error)
+    assert usb.query_status('file:///dev/usb/lp0')['errors'] == [shown]
 
 
 @pytest.mark.parametrize('cleared', ['before', 'while the request waits'])
@@ -296,7 +309,7 @@ def test_status_query_waits_for_the_replies_it_is_owed(held, lost_at_once):
 
 
 DEVICE, KEY = 'file:///dev/usb/lp0', '/dev/usb/lp0'
-HELD = ['Replace media error, clear it at the printer']
+HELD = ['The loaded labels do not fit the job. Clear the error at the printer']
 
 
 @pytest.fixture
@@ -422,10 +435,12 @@ def test_printer_answering_only_after_esc_at_polled_for_a_minute(monkeypatch):
     assert len([at for at, data in printer.writes if data.endswith(b'\x1b\x40')]) == 3
 
 
-@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W')])
+@pytest.mark.parametrize('code, model', [(0x66, 'PT-E550W'), (0x67, 'PT-P700'), (0x68, 'PT-P750W'), (0x6F, 'PT-P900W'),
+                                         (0x70, 'PT-P950NW'), (0x69, 'Unknown')])
 def test_ptouch_models_are_told_apart(code, model):
     # brother_ql gave the PT-E550W the code of the PT-P750W, a PT-E550W was
-    # an unknown printer and a PT-P750W was taken for a PT-E550W
+    # an unknown printer and a PT-P750W was taken for a PT-E550W. The
+    # PT-P900W is "o" (6Fh), not the 69h its reference prints next to it.
     from app.labeldesigner.drivers.brother.usb import get_status
     packet = bytearray(make_status_packet())
     packet[3], packet[4] = 0x30, code
@@ -462,3 +477,47 @@ def _with(frame: bytes, index: int, value: int) -> bytes:
 def test_color_of_the_roll(frame, red_roll):
     from app.labeldesigner.drivers.brother.usb import get_status
     assert get_status(FakeSlowPrinter(empty_reads=0, response=frame))['red_roll'] is red_roll
+
+
+class FakeErrorPrinter(FakeSlowPrinter):
+    """Printer that answers a status request with an error, released once."""
+
+    def __init__(self, response: bytes):
+        super().__init__(empty_reads=0, response=response)
+
+    def dispose(self):
+        pass
+
+
+def _raw_names():
+    from app.labeldesigner.drivers.brother import status
+    return [*status.ERRORS_1.values(), *status.ERRORS_2.values()]
+
+
+@pytest.mark.parametrize('byte, bit', [(byte, bit) for byte in (8, 9) for bit in range(8)])
+def test_every_error_of_a_usb_printer_is_told_in_plain_words(monkeypatch, byte, bit):
+    # The names of Brother's reference, e.g. "Cover opened while printing
+    # (Except QL-500)", are not for the label designer
+    from app.labeldesigner.drivers import devices
+    from app.labeldesigner.drivers.brother import status, usb
+    packet = bytearray(make_status_packet(62))
+    packet[byte] = 1 << bit
+    monkeypatch.setattr(devices, 'status_cache', {})
+    monkeypatch.setattr(usb, 'get_printer', lambda device: FakeErrorPrinter(bytes(packet)))
+    told = usb.query_status('file:///dev/usb/lp0')['errors']
+    failure = usb.print_failure({'printer_state': status.parse_status(bytes(packet))})
+    held = dict(status.parse_status(bytes(packet)), status_type='Error occurred')
+    devices.status_cache['/dev/usb/lp0'] = held
+    held_told = usb._held_error('/dev/usb/lp0')['errors']
+    plain = status.ERROR_MESSAGES[(status.ERRORS_1 if byte == 8 else status.ERRORS_2)[bit]]
+    assert told == [plain]
+    kept = status.KEEPS_JOB.get((status.ERRORS_1 if byte == 8 else status.ERRORS_2)[bit])
+    assert failure == f'The printer reports: {plain}' + (f'. {kept}' if kept else '')
+    assert held_told == [plain if plain in status.SAY_WHAT_TO_DO else f'{plain}. {usb.CLEAR_AT_PRINTER}']
+    assert not any(name in text for name in _raw_names() for text in (*told, failure, *held_told))
+
+
+def test_every_error_has_its_own_words():
+    from app.labeldesigner.drivers.brother import status
+    assert sorted(status.ERROR_MESSAGES) == sorted(_raw_names())
+    assert status.plain_errors(['Something new']) == [status.UNKNOWN_ERROR]
