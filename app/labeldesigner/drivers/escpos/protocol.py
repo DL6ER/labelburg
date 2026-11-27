@@ -203,9 +203,10 @@ def connect(device: str) -> Connection:
 
 
 def get_errors(c: Connection, key: str | None = None) -> list[str]:
-    """What the printer tells is wrong. With key, the printer's lock key, a
-    request it leaves unanswered counts as outstanding for ASK_AGAIN s, in
-    which it is asked again only once anything came from it."""
+    """What the printer tells is wrong. With key, the printer's lock key and
+    device ID as the driver's _answer_key() gives them, a request it leaves
+    unanswered counts as outstanding for ASK_AGAIN s, in which it is asked
+    again only once anything came from it."""
     if key in _asked and time.monotonic() - _asked[key] < ASK_AGAIN and not c.came():
         raise EscposError('no answer to the status request')
     sent = time.monotonic()
