@@ -197,7 +197,7 @@ def test_an_error_in_the_reply_to_the_job_is_shown(tmp_path, monkeypatch):
     monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x01)))
     client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
     response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
-    assert outcome(client, response) == ('failed', 'The printer reports: No media when printing')
+    assert outcome(client, response) == ('failed', 'The printer reports: There are no labels in the printer')
 
 
 def test_other_brother_printers_still_wait_until_printed(tmp_path, monkeypatch):

@@ -116,7 +116,7 @@ def test_a_zpl_printer_feeds_one_label_and_changes_no_setting():
 def test_a_ql_printer_gets_it_through_the_label_designer(tmp_path, monkeypatch):
     without_status(monkeypatch)
     sent = []
-    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths: sent.append((data, device, page_lengths))
+    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths, confirmed=True: sent.append((data, device, page_lengths))
                         or {'did_print': True, 'ready_for_next_job': True})
     client = make_client(tmp_path, empty_repo=True, model='QL-700', printer=DEVICE)
     assert outcome(client, client.post(FEED)) == ('printed', '')
@@ -128,7 +128,7 @@ def test_a_ql_printer_gets_it_through_the_label_designer(tmp_path, monkeypatch):
 def test_a_ptouch_printer_set_to_chain_printing_gets_the_cut(tmp_path, monkeypatch):
     without_status(monkeypatch)
     sent = []
-    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths: sent.append(data)
+    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths, confirmed=True: sent.append(data)
                         or {'did_print': True, 'ready_for_next_job': True})
     client = make_client(tmp_path, empty_repo=True, model='PT-P750W', printer=DEVICE)
     client.post('/labeldesigner/api/settings', data={'label_size': 'pt12', 'cut': 'none', 'chain': '1'})
