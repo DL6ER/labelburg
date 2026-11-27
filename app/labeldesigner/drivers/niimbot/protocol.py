@@ -50,10 +50,6 @@ ANSWERS = {0x01: 0x02, 0x03: 0x04, 0x13: 0x14, 0x15: 0x16, 0x20: 0x30, 0x21: 0x3
 ERROR = 0xdb
 # niimbluelib's In_NotSupported, an answer it takes as an error too
 NOT_SUPPORTED = 0x00
-# Bytes 9 to 12 of the 13 a B1 answers: lid (1 open), battery, paper (1 none)
-# and whether it read the RFID tag of the roll, e.g. 1f f7 00 61 00 61 00 00
-# 4f 00 04 00 01 closed with a roll, 20 17 00 54 00 54 00 00 4f 01 04 01 00
-# open, 20 17 00 85 00 85 00 00 4f 00 04 01 00 closed without a roll.
 
 
 class NiimbotError(Exception):
