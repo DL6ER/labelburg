@@ -120,10 +120,11 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
 
     alone = raster.spec.d460bt_family
     if alone:
-        # As ptouch-print begins: invalidate, initialize, ask for the status
-        raster.add_invalidate()
-        raster.add_initialize()
-        raster.add_status_information()
+        # As ptouch-print begins, once a job: an ESC @ between labels would end the one printing
+        if not raster.data:
+            raster.add_invalidate()
+            raster.add_initialize()
+            raster.add_status_information()
     else:
         raster.add_switch_mode()
         raster.add_invalidate()

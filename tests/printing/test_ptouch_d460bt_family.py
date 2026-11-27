@@ -14,7 +14,8 @@ from PIL import Image
 from app.labeldesigner import drivers, printer, refusals
 from app.labeldesigner.drivers import brother, devices, progress
 from app.labeldesigner.drivers.brother.commands import Raster
-from app.labeldesigner.drivers.brother.raster import convert
+from app.labeldesigner.drivers.brother.raster import convert, render
+from app.labeldesigner.enums import LabelContent, LabelOrientation, LabelType
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_ptouch_bluetooth import (DEVICE, MAC, PRINT, STATUS, UNNAMED, UsbBrother, brother_on_bluetooth,  # noqa: F401
                                                   rows, told)
@@ -56,6 +57,26 @@ def test_job_is_what_ptouch_print_sends(model):
                   + b'\x1a')
     # Invalidate with 100 bytes, initialize, status request (libptouch.c 207-215, 352; ptouch-print.c 728-731)
     assert raster.data == bytes(100) + b'\x1b\x40' + b'\x1b\x69\x53' + page_bytes * 2
+
+
+class _Label:
+    label_type, label_orientation = LabelType.ENDLESS_LABEL, LabelOrientation.STANDARD
+
+    def __init__(self, content: LabelContent):
+        self.label_content = content
+
+    def generate(self):
+        return Image.new('1', (70, 3), 1)
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_labels_of_different_settings_are_initialized_once(model):
+    # One dithered, one not: converted apart, still one job begun once
+    entries = [{'label': _Label(content), 'high_res': False, 'fast': False, 'cut': True}
+               for content in (LabelContent.IMAGE_BW, LabelContent.IMAGE_GRAYSCALE)]
+    data = render(printer.PrinterQueue(model, '/dev/usb/lp0', 'pt12'), entries).data
+    assert data.startswith(bytes(100) + b'\x1b\x40\x1b\x69\x53' + MODES[model])
+    assert (data.count(b'\x1b\x40'), data.count(b'\x1b\x69\x53'), data.count(MODES[model])) == (1, 1, 2)
 
 
 @pytest.mark.parametrize('model', FAMILY)
