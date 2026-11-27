@@ -25,7 +25,7 @@ from werkzeug.exceptions import HTTPException
 from . import drivers
 from .drivers import DEVICE_PATTERNS, devices, progress, reach, resolution_problem, usbip
 from .drivers.devices import flock_within, look_again
-from .printer import BUSY, DEMO_NAME, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, get_ptr_status, is_simulation, status_of_printer
+from .printer import BUSY, DEMO_NAME, NO_FEED, Drawn, PrinterQueue, configured_printers, device_state, found_devices, found_model, get_ptr_status, is_simulation, status_of_printer
 from .drivers.labels import FormFactor
 from .cable_flag import CABLE_FLAG_REFUSED, cable_diameter, wrap_dots
 from .dates import LANGUAGES as DATE_LANGUAGES
@@ -1819,6 +1819,8 @@ def _described(told: list[dict]):
         printer['colors'] = printer.get('colors') or {}
         # Asked by the label designer every 2 s where that costs nothing
         printer['follow'] = drivers.for_model(model).followed(printer.get('path') or '', model)
+        # Its connection can be closed after each use, see the setting save_energy
+        printer['can_save_energy'] = drivers.for_model(model).keeps_connection(printer.get('path') or '', model)
         printer['settings'] = printer_settings.of_printer(kept, printer.get('path', ''))
         # What the printer told of itself beyond its model, e.g. no cutter
         if model in drivers.MODELS and (own := drivers.for_model(model).device_capabilities(printer.get('path') or '', model)):
@@ -1875,7 +1877,7 @@ def _kept_settings(changing: bool = False) -> dict:
         with open(os.path.join(_get_repo_dir(), printer_settings.FILE), encoding='utf-8') as fh:
             content = fh.read()
     except FileNotFoundError:
-        return {'printers': {}}
+        content = ''
     except UnicodeDecodeError:
         content = None
     except OSError as e:
@@ -1885,7 +1887,9 @@ def _kept_settings(changing: bool = False) -> dict:
         return {'printers': {}}
     if changing and (content is None or not printer_settings.readable(content)):
         raise printer_settings.Broken()
-    return printer_settings.parsed(content or '')
+    data = printer_settings.parsed(content or '')
+    devices.saving_energy = printer_settings.saving_energy(data)
+    return data
 
 
 def _broken():
@@ -1959,7 +1963,7 @@ def printer_settings_route():
             return jsonify(printer_settings.of_printer(_kept_settings(), _printer(*requested)[0]))
         # Checked against the model the prints use
         device, model = _resolved_printer(*requested)
-        changes = printer_settings.checked(values, model, is_simulation(device))
+        changes = printer_settings.checked(values, model, is_simulation(device), drivers.for_model(model).keeps_connection(device, model))
         repo = _get_repo_dir()
         with _saving(repo):
             data = printer_settings.changed(_kept_settings(changing=True), device, changes)
@@ -1968,6 +1972,7 @@ def printer_settings_route():
                 data = printer_settings.fitted(data, device, model, current_app.config['LABEL_DEFAULT_SIZE'])
             _write_atomically(os.path.join(repo, printer_settings.FILE),
                               json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8'))
+            devices.saving_energy = printer_settings.saving_energy(data)
     except LabelsBusy:
         return _busy()
     except printer_settings.Broken:
@@ -2844,8 +2849,9 @@ def _printer(requested_device, requested_model, ask: bool = False, shown: bool =
     elif quiet and (known := _known_model(device, printers, configured, model)):
         model = known
     else:
-        # The model a printer tells, e.g. in its device ID, else the configured one
-        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), model))[1]
+        # The model a printer tells, e.g. in its device ID, else the one it
+        # is listed or was found with, else the configured one
+        model = drivers.resolve(device, next((m for m, d, _ in printers if d == device), None) or found_model(device) or model)[1]
     if ask and model == 'Unknown' and not is_simulation(device):
         model = _told_model(device)
     if model not in MODELS:

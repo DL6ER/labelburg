@@ -151,6 +151,13 @@ class Driver:
                 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False}
 
+    def keeps_connection(self, device: str, model: str) -> bool:
+        """Whether the driver keeps its connection to the printer between
+        uses, e.g. transports.kept_le() on Bluetooth LE. Its setting
+        save_energy closes it after each print and status query instead,
+        see devices.saves_energy()."""
+        return False
+
     def device_capabilities(self, device: str, model: str) -> dict:
         """What the printer at device told of itself that differs from the
         capabilities() of its model, e.g. that it has no cutter, empty where

@@ -235,6 +235,8 @@ function cardHTML(p, i) {
                 <small class="muted">The end that comes out first, e.g. to stick labels on as they come out. The test label shows it.</small></div>
             ${capsOf(p.model).calibration ? `<span class="k">Position</span><div class="set-stack">${calibrationHTML(p)}
                 <small class="muted">Labels that come out off to one side are lined up with a calibration label.</small></div>` : ''}
+            ${p.can_save_energy ? `<span class="k">Bluetooth</span><div class="set-stack"><label class="set-check"><input type="checkbox" data-k="save_energy"${(p.settings || {}).save_energy === '1' ? ' checked' : ''}>Save energy</label>
+                <small class="muted">Connects only to print or to check the printer. It may beep more often.</small></div>` : ''}
         </div>
         ${same.length ? `<p class="set-foot muted small">${esc(same.join(', '))} ${same.length > 1 ? 'are' : 'is'} the same device and ${same.length > 1 ? 'share' : 'shares'} these settings.</p>` : ''}
     </section>`;

@@ -61,6 +61,13 @@ _unanswered = {}
 # When the label designer last asked to look for printers. Printers that beep
 # at each connection are asked only then and when printing.
 looked = 0.0
+# The printers, by lock key, whose drivers close the connection after each
+# print and status query instead of keeping it, as their settings say
+saving_energy: frozenset = frozenset()
+
+
+def saves_energy(device: str) -> bool:
+    return lock_key(device) in saving_energy
 
 
 def status_type(errors: list) -> str:

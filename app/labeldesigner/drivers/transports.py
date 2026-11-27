@@ -166,7 +166,7 @@ ATT_MTU = 247
 CLIENT_CONFIGURATION = 0x2902
 # The connection is kept: the B1 beeps when one opens and when it closes, not
 # at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
-# app can connect to the printer.
+# app can connect to the printer, and after each use where it saves energy.
 KEEP_LE = 60
 
 
@@ -338,7 +338,7 @@ def release_le(device: str, s: LeLink):
     key = devices.lock_key(device)
     with _kept_lock:
         s.busy, s.used = False, time.monotonic()
-        if not s.broken:
+        if not s.broken and not devices.saves_energy(device):
             if s.timer is None:
                 s.timer = _closing(key, s, KEEP_LE)
             return
