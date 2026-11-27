@@ -1,11 +1,13 @@
 import os
 import struct
 import unittest
-from app.fonts import WIDTHS, Fonts, FontNotFound, font_names
+from app import fonts as fonts_module
+from app.fonts import EMOJI_FONT_PATH, WIDTHS, Fonts, FontNotFound, font_names, has_glyphs
 import json
 import logging
 
 import pytest
+from PIL import ImageFont
 
 
 def read_testfile(file_path, data):
@@ -83,10 +85,10 @@ def test_only_the_font_folder_without_system_fonts(monkeypatch):
     assert scanned == ['/opt/myfonts']
 
 
-def sfnt(records, tables=(b'name',), os2=None):
+def sfnt(records, tables=(b'name',), os2=None, cmap=None):
     """A font file with only a table directory and a name table of the given
-    (platform, encoding, name ID, bytes) records, and an OS/2 table where
-    given"""
+    (platform, encoding, name ID, bytes) records, and an OS/2 and a cmap
+    table where given"""
     strings = b''.join(raw for *_, raw in records)
     name = struct.pack('>HHH', 0, len(records), 6 + 12 * len(records))
     start = 0
@@ -97,6 +99,8 @@ def sfnt(records, tables=(b'name',), os2=None):
     data = {tag: name if tag == b'name' else b'' for tag in tables}
     if os2 is not None:
         data[b'OS/2'] = os2
+    if cmap is not None:
+        data[b'cmap'] = cmap
     offset, directory, body = 12 + 16 * len(data), b'', b''
     for tag, table in data.items():
         directory += struct.pack('>4sIII', tag, 0, offset + len(body), len(table))
@@ -158,6 +162,100 @@ def test_broken_fonts_are_left_out(tmp_path):
     (tmp_path / 'good.otf').write_bytes(sfnt([win(1, 'Good'), win(2, 'Regular')]))
     fonts = Fonts(logging.getLogger('TestFonts'), additional_path=str(tmp_path), system_fonts=False)
     assert fonts.fonts == {'Good': {'Regular': str(tmp_path / 'good.otf')}}
+
+
+def cmap(*subtables):
+    """A cmap table of the given (platform, encoding, subtable) records"""
+    head, body = struct.pack('>HH', 0, len(subtables)), b''
+    for platform, encoding, subtable in subtables:
+        head += struct.pack('>HHI', platform, encoding, 4 + 8 * len(subtables) + len(body))
+        body += subtable
+    return head + body
+
+
+def format4(*segments):
+    """A format 4 subtable of (first, last, glyphs) segments, glyphs the
+    delta to the first glyph or a list of glyphs, and the final segment"""
+    segments = [*segments, (0xFFFF, 0xFFFF, 1)]
+    count = len(segments)
+    ends, starts, deltas, offsets, glyphs = b'', b'', b'', b'', b''
+    for i, (first, last, mapped) in enumerate(segments):
+        ends += struct.pack('>H', last)
+        starts += struct.pack('>H', first)
+        if isinstance(mapped, list):
+            deltas += struct.pack('>H', 0)
+            offsets += struct.pack('>H', 2 * (count - i) + len(glyphs))
+            glyphs += struct.pack(f'>{len(mapped)}H', *mapped)
+        else:
+            deltas += struct.pack('>H', mapped % 0x10000)
+            offsets += struct.pack('>H', 0)
+    arrays = ends + b'\0\0' + starts + deltas + offsets + glyphs
+    return struct.pack('>7H', 4, 14 + len(arrays), 0, 2 * count, 0, 0, 0) + arrays
+
+
+def format12(*groups):
+    """A format 12 subtable of (first, last, first glyph) groups"""
+    return struct.pack('>HHIII', 12, 0, 16 + 12 * len(groups), 0, len(groups)) + b''.join(
+        struct.pack('>III', *group) for group in groups)
+
+
+def test_a_font_has_the_glyphs_its_cmap_maps(tmp_path):
+    path = tmp_path / 'font.ttf'
+    # A to C and a to c, b and U+0100 mapped to the missing glyph
+    path.write_bytes(sfnt([], cmap=cmap((3, 1, format4((0x41, 0x43, 10), (0x61, 0x63, [5, 0, 7]), (0x100, 0x100, -0x100))))))
+    assert has_glyphs(str(path), 'ABCac') and has_glyphs(str(path), '')
+    for text in ('b', 'D', 'Ab', '\u0100', '\U0001F600'):
+        assert not has_glyphs(str(path), text)
+
+
+def test_the_cmap_of_all_unicode_comes_first(tmp_path):
+    path = tmp_path / 'font.ttf'
+    path.write_bytes(sfnt([], cmap=cmap((3, 1, format4((0x41, 0x41, 1))),
+                                        (3, 10, format12((0x41, 0x42, 3), (0x1F600, 0x1F601, 0))))))
+    assert has_glyphs(str(path), 'AB\U0001F601')
+    # Mapped to the missing glyph
+    assert not has_glyphs(str(path), '\U0001F600')
+
+
+@pytest.mark.parametrize('table', [None, b'', cmap((1, 0, format4((0x41, 0x41, 1)))), cmap((3, 1, b'\0\4'))])
+def test_a_font_without_a_readable_cmap_is_taken_to_have_every_glyph(tmp_path, table):
+    # It draws what it can, as without fallback fonts
+    path = tmp_path / 'font.ttf'
+    path.write_bytes(sfnt([], cmap=table))
+    assert has_glyphs(str(path), 'A\U0001F600')
+
+
+@pytest.mark.parametrize('font, first, last', [('DejaVu Sans,Book', 0x2000, 0x27BF), ('Noto Sans,Symbols 2', 0x2B00, 0x2BFF),
+                                                ('FreeSerif,Regular', 0x2600, 0x26FF), (None, 0x1F300, 0x1F64F)])
+def test_the_glyphs_are_those_freetype_draws(font, first, last):
+    path = Fonts(logging.getLogger('TestFonts')).get_path(font) if font else EMOJI_FONT_PATH
+    drawn = ImageFont.truetype(path, 20, layout_engine=ImageFont.Layout.BASIC)
+
+    def mask(char):
+        mask = drawn.getmask(char)
+        return mask.size, bytes(mask)
+    missing = mask('\U0010fffd')
+    for code in range(first, last + 1):
+        assert has_glyphs(path, chr(code)) == (mask(chr(code)) != missing), hex(code)
+
+
+def test_the_emoji_font_has_emoji_and_what_joins_them():
+    assert has_glyphs(EMOJI_FONT_PATH, '\U0001F525\u200d\ufe0f\U0001F1E9\U0001F3FB')
+    assert not has_glyphs(EMOJI_FONT_PATH, '\u2713')
+
+
+def test_the_fallback_fonts():
+    # Symbols of the fonts installed first, then the emoji font
+    fonts = Fonts(logging.getLogger('TestFonts'))
+    assert fonts.fallbacks() == tuple(fonts.get_path(font) for font in (
+        'DejaVu Sans,Book', 'Noto Sans,Symbols 2', 'Noto Sans,Symbols', 'Noto Sans,Math', 'FreeSerif,Regular')) + (EMOJI_FONT_PATH,)
+    assert Fonts(logging.getLogger('TestFonts'), system_fonts=False).fallbacks() == (EMOJI_FONT_PATH,)
+
+
+def test_a_fallback_font_that_cannot_be_read_is_left_out(tmp_path, monkeypatch):
+    (tmp_path / 'a.ttf').write_bytes(sfnt([win(1, 'FreeSerif'), win(2, 'Regular')]))
+    monkeypatch.setattr(fonts_module, 'EMOJI_FONT_PATH', str(tmp_path / 'missing.ttf'))
+    assert Fonts(logging.getLogger('TestFonts'), additional_path=str(tmp_path), system_fonts=False).fallbacks() == ()
 
 
 def families(fonts=None) -> dict:

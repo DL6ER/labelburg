@@ -106,10 +106,15 @@ def _told(c, device: str) -> models.Model | None:
     return told
 
 
+def _kept(device: str, model: str) -> bool:
+    """Whether the connection to a printer on bt:// is kept, see
+    transports.KEEP_LE: over Bluetooth LE, unless it saves energy."""
+    return device.startswith('bt://') and _over_le(model) and not devices.saves_energy(device)
+
+
 def _beeps(device: str, model: str) -> bool:
-    """Whether each status query beeps, a new connection over classic
-    Bluetooth."""
-    return device.startswith('bt://') and not _over_le(model)
+    """Whether each status query beeps, a new connection over Bluetooth."""
+    return device.startswith('bt://') and not _kept(device, model)
 
 
 def _dots(mm: float, dpi: int) -> int:
@@ -320,6 +325,9 @@ class Niimbot(Driver):
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
                     calibration=model == 'Niimbot/B1', model_shown=self.shown_as.get(model, model).split('/')[-1])
 
+    def keeps_connection(self, device, model):
+        return device.startswith('bt://') and _over_le(model)
+
     def calibration_kind(self, model, label_size):
         size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
         if model != 'Niimbot/B1' or size is None:
@@ -359,7 +367,7 @@ class Niimbot(Driver):
 
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
-        return (device.startswith('bt://') and _over_le(model)) or super().followed(device, model)
+        return _kept(device, model) or super().followed(device, model)
 
     def followed_status(self, device, model):
         return self.status(device, model, fresh=True)
@@ -375,7 +383,7 @@ class Niimbot(Driver):
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
         # asked every time, it tells another roll or a lost connection so.
-        if (device.startswith('bt://') and not (fresh and _over_le(model)) and cached and not cached.get('errors')
+        if (device.startswith('bt://') and not (fresh and _kept(device, model)) and cached and not cached.get('errors')
                 and _asked.get(device, -1) >= devices.looked):
             return dict(cached)
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:

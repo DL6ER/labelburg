@@ -13,7 +13,9 @@ from flask.testing import FlaskClient
 from werkzeug.datastructures import FileStorage
 
 from app import create_app
+from config import Config
 from app.labeldesigner import print_queue
+from app.labeldesigner.routes import restore_print_queue
 
 
 UPDATE_IMAGES = False
@@ -60,7 +62,16 @@ def verify_image(response_data: bytes, expected_image_path: str):
 
 def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = None,
                 printer: Union[str, None] = None) -> FlaskClient:
-    app = create_app()
+    config = Config
+    if empty_repo:
+        # point repository to temporary folder, already as the app starts:
+        # it opens the print queue kept there
+        repo_dir = tmp_path / 'label_repo'
+        os.makedirs(repo_dir, exist_ok=True)
+        config = type('EmptyRepo', (Config,), {'LABEL_REPOSITORY_DIR': str(repo_dir)})
+    app = create_app(config)
+    # As the server starts, the jobs left in its queue print
+    restore_print_queue(app)
     # Bind app context
     app.app_context().push()
     app.config['TESTING'] = True
@@ -69,11 +80,6 @@ def make_client(tmp_path, empty_repo: bool = False, model: Union[str, None] = No
         app.config['PRINTER_MODEL'] = model
     if printer:
         app.config['PRINTER_PRINTER'] = printer
-    if empty_repo:
-        # point repository to temporary folder
-        repo_dir = tmp_path / 'label_repo'
-        app.config['LABEL_REPOSITORY_DIR'] = str(repo_dir)
-        os.makedirs(app.config['LABEL_REPOSITORY_DIR'], exist_ok=True)
     return app.test_client()
 
 
@@ -199,3 +205,18 @@ class Answering:
     def close(self):
         self.closed.set()
         self.server.close()
+
+
+def printed_days_ago(job_id: str, days: float):
+    """The label printed of a job kept as printed days ago, e.g. to tell
+    whether it shows another date today."""
+    from app.labeldesigner import print_store
+    path = os.path.join(print_store.history_folder(), print_store.HISTORY_FILE)
+    with print_store._history_locked():
+        with open(path, encoding='utf-8') as fh:
+            entries = [json.loads(line) for line in fh]
+        for entry in entries:
+            if entry['id'] == job_id:
+                entry['started_at'] = entry.get('started_at', entry['ended_at']) - days * 86400
+        with open(path, 'w', encoding='utf-8') as fh:
+            fh.write(''.join(json.dumps(entry) + '\n' for entry in entries))

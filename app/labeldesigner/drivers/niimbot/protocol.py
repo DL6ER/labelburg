@@ -141,7 +141,6 @@ def image_packets(rows: list[bytes], head: int) -> list[bytes]:
 NIIMBOT_CHARACTERISTIC = bytes.fromhex('bef8d6c99c214c9eb632bd58c1009f9f')[::-1]
 # The service of that characteristic, as a printer may advertise it
 NIIMBOT_SERVICE = bytes.fromhex('e7810a7173ae499d8c15faa9aef0c3f2')[::-1]
-UsbSocket = transports.UsbLink
 
 
 class Connection:

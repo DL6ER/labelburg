@@ -14,6 +14,7 @@ added in the Settings are kept there too, see adding.py."""
 import json
 import re
 
+from .dates import LANGUAGES as DATE_LANGUAGES
 from .drivers import MODELS, devices, for_model
 from .drivers.devices import device_id_fields, lock_key, usb_device_id
 from .label_names import check_cut, check_label_size
@@ -24,7 +25,7 @@ FILE = '.printers.json'
 # The same for every printer
 COMMON = ('quality',)
 # Of each printer
-OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first')
+OWN = ('label_size', 'cut', 'half_cut', 'chain', 'leaves_first', 'save_energy')
 QUALITIES = ('quality', 'high', 'fast')
 CUTS = ('each', 'last', 'none')
 ENDS = ('top', 'bottom')
@@ -39,8 +40,9 @@ NAMED_BY = {'cut': ('cut', 'cut_once'), 'half_cut': ('cut', 'cut_once', 'half_cu
 DEMO_MODEL = 'demo_model'
 DEMO = 'simulation'
 
-SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1) and '
-                    'leaves_first (top or bottom) of a printer, demo_model (a supported model) of the demo printer '
+SETTINGS_MESSAGE = ('settings are label_size, cut (each, last or none), half_cut and chain (0 or 1), '
+                    'leaves_first (top or bottom) and save_energy (0 or 1, where the connection is kept) of a printer, '
+                    'demo_model (a supported model) of the demo printer '
                     'simulation, and quality (quality, high or fast), an empty value removes one')
 TOO_MANY_PRINTERS = f'Settings are kept for at most {MAX_PRINTERS} printers'
 # The printers added in the Settings, each with its address, model and name
@@ -145,9 +147,19 @@ def of_printer(data: dict, device: str) -> dict:
             **{name: own[name] for name in OWN if isinstance(own, dict) and name in own}}
 
 
-def checked(changes: dict, model: str, demo: bool = False) -> dict:
+def saving_energy(data: dict) -> frozenset:
+    """The devices, by lock key, of the printers set to save energy, each
+    where it was last seen."""
+    on = {printer for printer, own in data['printers'].items() if isinstance(own, dict) and own.get('save_energy') == '1'}
+    seen = data['seen'] if isinstance(data.get('seen'), dict) else {}
+    return frozenset({device for device, printer in seen.items() if printer in on}
+                     | {printer for printer in on if not printer.startswith(('usb:', 'serial:'))})
+
+
+def checked(changes: dict, model: str, demo: bool = False, keeps_connection: bool = False) -> dict:
     """The changes as kept, ValueError for one the printer model cannot take.
-    The demo printer takes a model too, the others are checked for it."""
+    The demo printer takes a model too, the others are checked for it. Only
+    a printer whose connection is kept saves energy."""
     named = COMMON + OWN + ((DEMO_MODEL,) if demo else ())
     if not changes or any(name not in named or not isinstance(value, str) for name, value in changes.items()):
         raise ValueError(SETTINGS_MESSAGE)
@@ -166,6 +178,9 @@ def checked(changes: dict, model: str, demo: bool = False) -> dict:
             check_cut(value, model)
         elif name in ('half_cut', 'chain'):
             if value not in ('0', '1'):
+                raise ValueError(SETTINGS_MESSAGE)
+        elif name == 'save_energy':
+            if value not in ('0', '1') or (value == '1' and not keeps_connection):
                 raise ValueError(SETTINGS_MESSAGE)
         elif name == 'leaves_first':
             if value not in ENDS:
@@ -237,12 +252,15 @@ def for_printing(kept: dict, model: str, values: dict) -> dict:
 
 
 # Of the labels, not of a printer
-LABEL_SETTINGS = ('date_format', 'collate', 'font_family')
+LABEL_SETTINGS = ('date_format', 'date_language', 'collate', 'font_family', 'history')
 # Those the label designer offers, e.g. 2026-11-01 or 01.11.2026
 DATE_FORMATS = ('%Y-%m-%d', '%d.%m.%Y', '%d/%m/%Y', '%m/%d/%Y')
+_LANGUAGE_CODES = sorted(DATE_LANGUAGES)
 LABEL_SETTINGS_MESSAGE = ('label settings are date_format (%Y-%m-%d, %d.%m.%Y, %d/%m/%Y or %m/%d/%Y), '
-                          'collate (0 or 1) and font_family (a font family of the server or of the font menu of the label designer), '
-                          'an empty value removes one')
+                          f'date_language ({", ".join(_LANGUAGE_CODES[:-1])} or {_LANGUAGE_CODES[-1]}, '
+                          'the language of the names of months and weekdays, English without one), '
+                          'collate (0 or 1), font_family (a font family of the server or of the font menu of the label designer) '
+                          'and history (0 or 1), an empty value removes one')
 
 
 def _label_setting(name: str, value, families) -> bool:
@@ -251,7 +269,9 @@ def _label_setting(name: str, value, families) -> bool:
         return False
     if name == 'date_format':
         return value in DATE_FORMATS
-    if name == 'collate':
+    if name == 'date_language':
+        return value in DATE_LANGUAGES
+    if name in ('collate', 'history'):
         return value in ('0', '1')
     return value in families
 

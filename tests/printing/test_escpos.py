@@ -20,8 +20,11 @@ QUIET = 0x12
 
 
 class FakePrinter:
-    def __init__(self, offline=QUIET, paper=QUIET):
-        self.sent, self.replies = b'', {protocol.OFFLINE: offline, protocol.PAPER: paper}
+    """answers: what it answers GS I requests with, by request, none if left
+    out, as a clone that does not know them."""
+
+    def __init__(self, offline=QUIET, paper=QUIET, answers=None):
+        self.sent, self.replies, self.answers = b'', {protocol.OFFLINE: offline, protocol.PAPER: paper}, answers or {}
 
     def __call__(self, device):
         return self
@@ -38,6 +41,12 @@ class FakePrinter:
     def ask(self, request):
         self.write(request)
         return self.replies[request]
+
+    def answer(self, request, done):
+        self.write(request)
+        if request not in self.answers or not done(self.answers[request]):
+            raise protocol.EscposError('no answer to the request')
+        return self.answers[request]
 
 
 @pytest.fixture
@@ -64,7 +73,7 @@ def test_raster_in_bands():
 
 def test_job_cuts_where_asked():
     rows = [b'\x80']
-    assert protocol.job([(False, rows, 1), (True, rows, 1)]) == b'\x1b@' + protocol.raster(rows, 1) * 2 + b'\x1dVA\x00'
+    assert protocol.job([(False, rows, 1), (True, rows, 1)]) == b'\x1b@\x1ba\x01' + protocol.raster(rows, 1) * 2 + b'\x1dVA\x00'
 
 
 def test_answer_kept_from_before_is_not_taken_for_the_status(monkeypatch):
@@ -234,7 +243,8 @@ def test_printer_whose_answer_came_late_is_asked_again(silent):
         escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')
     silent.unread, silent.answering = bytes([QUIET]), True
     assert escpos.DRIVER.status(SHARED, 'Epson/ESC-POS')['errors'] == []
-    assert [data for _, data in silent.writes] == [protocol.OFFLINE, protocol.OFFLINE, protocol.PAPER]
+    # Once it answered, also its model name
+    assert [data for _, data in silent.writes] == [protocol.OFFLINE, protocol.OFFLINE, protocol.PAPER, protocol.MODEL_NAME]
 
 
 def test_job_does_not_wait_for_an_outstanding_request(silent):
@@ -599,3 +609,103 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     response = client.post('/labeldesigner/api/print', data={'printer': 'Till', 'print_type': 'text', 'text': TEXT})
     assert outcome(client, response) == ('printed', ''), response.get_json()
     assert printed_on == [(size, dots // 8)]
+
+
+def named(name: bytes, autocutter=None) -> dict:
+    """The answers of an Epson printer that tells its model name, and its
+    type ID where given."""
+    answers = {protocol.MODEL_NAME: b'\x5f' + name + b'\x00'}
+    if autocutter is not None:
+        answers[protocol.TYPE_ID] = bytes([0x02 if autocutter else 0x00])
+    return answers
+
+
+def test_model_name_and_type_id_as_the_printer_sends_them():
+    ours, printer = socket.socketpair()
+    c = protocol.Connection.__new__(protocol.Connection)
+    c.dev = ours.fileno()
+
+    def answer():
+        assert printer.recv(3) == protocol.MODEL_NAME
+        # In two pieces, after a status byte asked before
+        printer.sendall(bytes([QUIET]) + b'\x5fTM-')
+        printer.sendall(b'P60II\x00')
+        assert printer.recv(3) == protocol.TYPE_ID
+        # Bits 4 and 7 tell a status byte from the type ID
+        printer.sendall(bytes([QUIET, 0x02]))
+    thread = threading.Thread(target=answer)
+    thread.start()
+    assert protocol.model_name(c) == 'TM-P60II'
+    assert protocol.has_autocutter(c) is True
+    thread.join()
+    ours.close(), printer.close()
+
+
+def test_printer_that_tells_nothing(monkeypatch):
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    ours, printer = socket.socketpair()
+    c = protocol.Connection.__new__(protocol.Connection)
+    c.dev = ours.fileno()
+    assert (protocol.model_name(c), protocol.has_autocutter(c)) == (None, None)
+    ours.close(), printer.close()
+
+
+
+@pytest.mark.parametrize('ask, late', [(protocol.model_name, b'\x5fTM-T20II\x00'), (protocol.has_autocutter, b'\x02')])
+def test_answer_after_its_time_is_not_taken_for_the_status(monkeypatch, ask, late):
+    monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.1)
+    ours, printer = socket.socketpair()
+    c = protocol.Connection.__new__(protocol.Connection)
+    c.dev = ours.fileno()
+    assert ask(c) is None
+    printer.sendall(late)
+
+    def answer():
+        asked = b''
+        while not asked.endswith(protocol.PAPER):
+            asked += printer.recv(64)
+        printer.sendall(bytes([QUIET]))
+    thread = threading.Thread(target=answer)
+    thread.start()
+    assert c.ask(protocol.PAPER) == QUIET
+    thread.join()
+    ours.close(), printer.close()
+
+
+@pytest.mark.parametrize('answers, caps, feed', [
+    # The distance from head to cutter after Epson, 1.5 mm more as on a TM-T20II
+    (named(b'TM-T20II'), {'lead_mm': 12}, 'cut_paper'),
+    (named(b'TM-T88V'), {'lead_mm': 16.5}, 'cut_paper'),
+    # No cutter, the cut feeds the paper to the tear bar
+    (named(b'TM-P20'), {'lead_mm': 9.4, 'cutter': False}, 'paper'),
+    # The peeler models of a TM-P60II have none, the others have one
+    (named(b'TM-P60II', autocutter=False), {'lead_mm': 7.9, 'cutter': False}, 'paper'),
+    (named(b'TM-P60II', autocutter=True), {'lead_mm': 7.9}, 'cut_paper'),
+    # Its type ID says none on every TM-P80, it is not asked
+    (named(b'TM-P80', autocutter=False), {'lead_mm': 9.3}, 'cut_paper'),
+    # Models Epson gives no distance of, other makers' and clones as before
+    (named(b'TM-m30II'), None, 'cut_paper'),
+    (named(b'XP-58'), None, 'cut_paper'),
+    ({}, None, 'cut_paper'),
+])
+def test_printer_tells_its_model(client, fake, answers, caps, feed):
+    printer = fake(answers=answers)
+    for _ in range(2):
+        printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+        assert (printer_.get('caps'), printer_['feed']) == (caps, feed)
+    # Asked once, the type ID only of models whose model name tells nothing of it
+    assert printer.sent.count(protocol.MODEL_NAME) == 1
+    assert printer.sent.count(protocol.TYPE_ID) == (1 if answers.get(protocol.MODEL_NAME, b'').startswith(b'\x5fTM-P60') else 0)
+
+
+def test_printer_without_a_cutter_feeds_its_paper_to_the_tear_bar(client, fake):
+    printer = fake(answers=named(b'TM-P20'))
+    client.get('/labeldesigner/api/printer_status')
+    response = client.post('/labeldesigner/api/feed')
+    assert outcome(client, response) == ('printed', '')
+    assert printer.sent.endswith(protocol.INIT + protocol.CENTER + protocol.CUT)
+    assert client.get(f"/labeldesigner/api/queue/{response.get_json()['job']}").get_json()['title'] == 'Feed paper'
+    # As the label designer sends it: the last label fed to the tear bar
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'escpos58', 'print_type': 'text', 'text': TEXT, 'cut': 'last'})
+    assert outcome(client, response) == ('printed', '')
+    assert printer.sent.endswith(protocol.CUT)

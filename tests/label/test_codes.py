@@ -10,6 +10,7 @@ import pytest
 from PIL import Image
 from flask.testing import FlaskClient
 
+from app.labeldesigner import codes
 from app.labeldesigner.codes import CHECK_DIGIT_CODES
 from app.labeldesigner.routes import create_label_from_request
 
@@ -147,6 +148,14 @@ def test_isbn10_and_issn_print_as_the_ean13_of_books_and_magazines(tmp_path, bar
         assert response.status_code == 200, response.get_json()
         return pixels(response.data)
     assert preview(barcode_type, number) == preview('EAN13', ean)
+
+
+@pytest.mark.parametrize('barcode_type', ['code39', 'Code39'])
+def test_code39_has_no_check_character(barcode_type):
+    # Scanners pass the optional check character on as part of the code
+    code = codes.barcode_class(barcode_type)('LABEL-39')
+    assert code.get_fullcode() == 'LABEL-39'
+    assert code.build() == barcode.get_barcode_class('code39')('LABEL-39', add_checksum=False).build()
 
 
 @pytest.mark.parametrize('barcode_type, code, message', [
