@@ -9,7 +9,7 @@ import time
 import pytest
 
 from app.labeldesigner import bluetooth
-from app.labeldesigner.drivers import devices, niimbot
+from app.labeldesigner.drivers import devices, niimbot, transports
 from app.labeldesigner.drivers.niimbot import protocol
 from tests.helpers import make_client, outcome
 from tests.printing.test_niimbot import B1_CLOSED, B1_REPLIES, REPLIES, TEXT, FakePrinter
@@ -120,7 +120,7 @@ class LePrinter:
 
 @pytest.fixture(autouse=True)
 def answered(monkeypatch):
-    monkeypatch.setattr(protocol, '_kept', {})
+    monkeypatch.setattr(transports, '_kept', {})
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
     monkeypatch.setattr(niimbot, '_asked', {})
@@ -216,7 +216,7 @@ def test_b1_on_bluetooth_keeps_its_connection_for_the_designer_following_it(b1, 
 def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le, monkeypatch):
     # A label designer left open in the background asks every 20 s; that
     # keeps the B1 neither connected nor beeping
-    monkeypatch.setattr(protocol, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:
@@ -227,7 +227,7 @@ def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le
 
 def test_kept_connection_is_closed_unused(b1, le, monkeypatch):
     # Then the phone app can connect to the printer
-    monkeypatch.setattr(protocol, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:
