@@ -76,6 +76,44 @@ class RfcommPrinter(backends.Printer):
         self.s.close()
 
 
+class RfcommLink:
+    """A kept connection over classic Bluetooth to bt://<MAC>[/<channel>],
+    on channel where it names none, read and written like a socket. Broken
+    once the printer closed it or it dropped, e.g. as the printer switched
+    itself off."""
+
+    def __init__(self, device: str, channel: int):
+        self.s = rfcomm(device, channel)
+        self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
+
+    def settimeout(self, timeout: float):
+        self.s.settimeout(timeout)
+
+    def sendall(self, data: bytes):
+        try:
+            self.s.sendall(data)
+        except TimeoutError:
+            raise
+        except OSError:
+            self.broken = True
+            raise
+
+    def recv(self, size: int) -> bytes:
+        try:
+            data = self.s.recv(size)
+        except TimeoutError:
+            raise
+        except OSError:
+            self.broken = True
+            raise
+        if not data:
+            self.broken = True
+        return data
+
+    def close(self):
+        self.s.close()
+
+
 class UsbLink:
     """A printer on USB or shared over USB/IP, read and written like a
     socket, e.g. a Niimbot B1, which takes the same packets there as on
@@ -319,14 +357,14 @@ class LeLink:
 
 
 # The connections kept, by device
-_kept: dict[str, LeLink] = {}
+_kept: dict[str, LeLink | RfcommLink] = {}
 _kept_lock = threading.Lock()
 
 
-def kept_le(device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer) -> LeLink:
-    """The kept connection to a printer on Bluetooth LE, opened as LeLink if
-    there is none or it dropped. The driver lets one user at a time have it
-    and gives it back with release_le()."""
+def _kept_link(device: str, opened):
+    """The kept connection to a printer, opened() if there is none or it
+    dropped. The driver lets one user at a time have it and gives it back
+    with release()."""
     key = devices.lock_key(device)
     with _kept_lock:
         s = _kept.pop(key, None)
@@ -335,23 +373,39 @@ def kept_le(device: str, characteristic: bytes, notify: bytes | None = None, *, 
             return s
     if s is not None:
         s.close()
-    s = LeLink(device, characteristic, notify, error=error, no_answer=no_answer)
+    s = opened()
     with _kept_lock:
         _kept[key], s.busy = s, True
     return s
 
 
-def release_le(device: str, s: LeLink):
+def kept_le(device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer) -> LeLink:
+    """The kept connection to a printer on Bluetooth LE, see LeLink."""
+    return _kept_link(device, lambda: LeLink(device, characteristic, notify, error=error, no_answer=no_answer))
+
+
+def kept_rfcomm(device: str, channel: int) -> RfcommLink:
+    """The kept connection to a printer on classic Bluetooth, see RfcommLink."""
+    return _kept_link(device, lambda: RfcommLink(device, channel))
+
+
+def release(device: str, s: LeLink | RfcommLink, keep: float | None):
+    """Give a kept connection back, closed after keep seconds unused, kept
+    until it drops where None."""
     key = devices.lock_key(device)
     with _kept_lock:
         s.busy, s.used = False, time.monotonic()
         if not s.broken:
-            if s.timer is None:
-                s.timer = _closing(key, s, KEEP_LE)
+            if s.timer is None and keep is not None:
+                s.timer = _closing(key, s, keep)
             return
         if _kept.get(key) is s:
             del _kept[key]
     s.close()
+
+
+def release_le(device: str, s: LeLink):
+    release(device, s, KEEP_LE)
 
 
 def _closing(key: str, s: LeLink, after: float) -> threading.Timer:
