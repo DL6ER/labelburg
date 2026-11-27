@@ -658,6 +658,7 @@ def test_default_paper_of_the_other_model(tmp_path, monkeypatch, default, size, 
     # Impact printers, which print no raster images, as LPrint lists them
     ('MFG:EPSON;MDL:TM-U220;CMD:ESC/POS;', None),
     ('MFG:EPSON;MDL:TM-U220II;CMD:ESC/POS;', None),
+    # and one it does not list
     ('MFG:EPSON;CMD:ESC/POS;MDL:TM-U295;', None),
     ('MFG:Printer;MDL:Thermal Printer;CMD:XPP,XL;', None)])
 def test_model_in_device_ids(device_id, model):
