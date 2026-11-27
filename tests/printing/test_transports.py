@@ -278,10 +278,89 @@ def test_serial_port_on_usb_not_configured_yet_is_set_up(pyusb, monkeypatch):
 
 def test_serial_port_on_usb_no_driver_lists_is_no_printer(pyusb):
     # As before: only devices with a printer interface are printed on
-    assert all(driver.usb_serial_ids == () for driver in drivers.DRIVERS)
-    pyusb.append(SerialDevice(0x0001))
+    assert not any(ids[0] == 0x1234 for driver in drivers.DRIVERS for ids in driver.usb_serial_ids)
+    pyusb.append(SerialDevice(0x0001, vendor=0x1234))
     with pytest.raises(FileNotFoundError):
-        backends.open_printer('usb://0x3513:0x0001')
+        backends.open_printer('usb://0x1234:0x0001')
+
+
+def test_niimbot_without_a_printer_interface_is_reached_through_its_serial_interface(pyusb):
+    # Any of its products: niimbluelib names none
+    device = SerialDevice(0x0003, reads=[b'\x55\x55'])
+    pyusb.append(device)
+    printer_ = backends.open_printer('usb://0x3513:0x0003')
+    assert isinstance(printer_, backends.UsbSerialPrinter) and printer_.read() == b'\x55\x55'
+    printer_.dispose()
+
+
+def _with_printer_interface(device):
+    """The device with a printer interface in place of its serial one, as a B1."""
+    device.data = types.SimpleNamespace(bInterfaceClass=7, bInterfaceNumber=0, endpoints=[Endpoint(0x81), Endpoint(0x02)])
+    device.control = types.SimpleNamespace(bInterfaceClass=0xff, bInterfaceNumber=1, endpoints=[])
+    return device
+
+
+def test_niimbot_with_a_printer_interface_is_reached_through_it(pyusb):
+    pyusb.append(_with_printer_interface(SerialDevice(0x0002)))
+    printer_ = backends.open_printer('usb://0x3513:0x0002')
+    assert type(printer_) is backends.UsbPrinter
+    printer_.dispose()
+
+
+@pytest.fixture
+def sysfs(tmp_path, monkeypatch):
+    """Linux's list of USB devices and its device files, empty."""
+    monkeypatch.setattr(backends, 'USB_DEVICES', str(tmp_path / 'sys'))
+    monkeypatch.setattr(backends, 'DEV', str(tmp_path / 'dev'))
+    (tmp_path / 'dev').mkdir()
+    return tmp_path
+
+
+def _on_bus(device):
+    """The device at bus 1, port 4, its serial port ttyACM0 to Linux."""
+    device.bus, device.port_numbers = 1, [4]
+    return device
+
+
+def test_serial_port_on_usb_is_reached_through_the_kernels_tty(pyusb, sysfs, pty):
+    # Another program on the port is not cut off from it
+    port, printer_end = pty
+    device = _on_bus(SerialDevice(0x0003))
+    pyusb.append(device)
+    (sysfs / 'sys' / '1-4:1.0' / 'tty' / 'ttyACM0').mkdir(parents=True)
+    os.symlink(port.removeprefix('serial://'), sysfs / 'dev' / 'ttyACM0')
+    link = transports.usb_link('usb://0x3513:0x0003')
+    try:
+        assert isinstance(link, transports.SerialLink)
+        link.sendall(b'\x55\x55')
+        assert os.read(printer_end, 16) == b'\x55\x55'
+    finally:
+        link.close()
+    assert device.calls == [] and device.bound == {0, 1}
+
+
+def test_serial_port_on_usb_without_its_tty_is_taken_from_the_kernel(pyusb, sysfs):
+    # e.g. in a container given /dev/bus/usb only
+    device = _on_bus(SerialDevice(0x0003))
+    pyusb.append(device)
+    (sysfs / 'sys' / '1-4:1.0' / 'tty' / 'ttyACM0').mkdir(parents=True)
+    link = transports.usb_link('usb://0x3513:0x0003')
+    assert isinstance(link, transports.UsbLink) and isinstance(link.printer, backends.UsbSerialPrinter)
+    link.close()
+    assert device.calls[:2] == [('detach', 0), ('detach', 1)]
+
+
+def test_printer_on_its_printer_interface_has_no_tty(pyusb, sysfs):
+    pyusb.append(_on_bus(_with_printer_interface(SerialDevice(0x0002))))
+    assert backends.serial_tty('usb://0x3513:0x0002') is None and not backends.is_serial_port('usb://0x3513:0x0002')
+
+
+def test_niimbot_that_is_a_serial_port_on_usb_is_found(pyusb, monkeypatch):
+    monkeypatch.setattr(backends, '_shared_bus_ids', set)
+    # The kernel's serial driver holds it, it is taken from it to print
+    pyusb.extend([SerialDevice(0x0003), SerialDevice(0x0001, vendor=0x1234), _with_printer_interface(SerialDevice(0x0002, bound=()))])
+    found, _ = backends.found_printers()
+    assert sorted(found) == [('usb://0x3513:0x0002/TEST0001', ''), ('usb://0x3513:0x0003/TEST0001', '')]
 
 
 class Peer:

@@ -79,7 +79,8 @@ class Driver:
     # Whether it prints on printers another device shares over USB/IP
     takes_usbip: bool = True
     # (vendor, product) of its printers on USB that are reached through their
-    # serial interface, not a printer interface, see backends.UsbSerialPrinter
+    # serial interface, not a printer interface, see backends.UsbSerialPrinter;
+    # (vendor, None) for any of the vendor without a printer interface
     usb_serial_ids: tuple = ()
     # Its printers on Bluetooth by their names and services, with their models,
     # and whether they are on Bluetooth LE or classic, see found_on_bluetooth()

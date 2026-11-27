@@ -1,6 +1,7 @@
-"""The Niimbot D110_M and B1, thermal printers for die-cut labels on
-Bluetooth, the B1 also on USB (protocol.py). They have no cutter, the labels
-are torn off. Not the D110, which niimbluelib prints with other commands."""
+"""Niimbot thermal printers for die-cut labels on Bluetooth and USB
+(protocol.py): the D110_M, the B1 and the models niimbluelib prints with the
+same commands, see models.py. They have no cutter, the labels are torn off.
+Other models, e.g. the D110, are refused by the model ID they tell."""
 
 import logging
 import re
@@ -9,25 +10,21 @@ from dataclasses import replace
 
 from PIL import Image
 
-from .. import bitmap, devices, progress
-from ..base import Driver, network_status, shown
+from .. import backends, bitmap, devices, progress
+from ..base import Driver, network_status
 from ..labels import FormFactor, Label
-from . import calibration, protocol
+from . import calibration, models, protocol
 
 logger = logging.getLogger(__name__)
 
-MODELS = ('Niimbot/D110_M', 'Niimbot/B1')
+MODELS = tuple(model.name for model in models.PRINTED)
 DOTS_PER_MM = 8
 # mm/s as sellers give it, and the seconds a label takes besides, to set up
 # its job and to tell that it printed it
 SPEED = 30
 BESIDES = 2.0
-# The dots across the printhead and the print sequence of each model
-HEADS = {'Niimbot/D110_M': protocol.HEAD, 'Niimbot/B1': protocol.B1_HEAD}
-SEQUENCES = {'Niimbot/D110_M': protocol.V4, 'Niimbot/B1': protocol.B1}
-# The models by the model ID they tell, which the print sequence and the
-# printhead have to fit
-MODEL_IDS = {2320: 'Niimbot/D110_M', 4096: 'Niimbot/B1'}
+# The dots across the printhead of each model
+HEADS = {model.name: model.dots for model in models.PRINTED}
 # A B1 prints 0.25 mm right of the middle of a tightly seated roll and starts
 # 0.1 to 0.5 mm before the top edge of a label, by roll: its rows are moved
 # left by 0.25 mm and down by 0.25 mm
@@ -37,7 +34,8 @@ B1_FEED = 2
 # Width x length in mm of the rolls sold for the D11 and D110 printers,
 # e.g. T12*40 for 12 x 40 mm. Only 12 x 40 mm was printed on.
 SIZES = ((12, 22), (12, 40), (14, 22), (14, 40), (14, 60), (15, 30), (15, 50))
-# Those sold for the B1, which it prints on 48 mm of
+# Those sold for the B1, which it prints on 48 mm of. The other models
+# take those of the D11 or the B1 by the width of their printhead.
 B1_SIZES = ((40, 20), (40, 30), (40, 80), (50, 30), (50, 50), (50, 70), (50, 80))
 # Round labels, by their diameter in mm
 B1_ROUND = (50,)
@@ -66,6 +64,20 @@ _asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
+# The models printers on Bluetooth LE and serial ports on USB told by their
+# model ID, by device, and when they were asked. One that told none is asked
+# again once the label designer looks for printers, on Bluetooth LE also
+# STATUS_LOST seconds later.
+_told_models: dict[str, tuple[models.Model | None, float]] = {}
+# Printers found on Bluetooth LE whose name is no B1's, e.g. by Niimbot's
+# service alone without a name: their model is the one they tell, the one
+# found while they tell none
+_to_ask: set[str] = set()
+# The models whose name on Bluetooth LE was seen on a printer, B1-<serial>;
+# the others' are guesses
+NAMES_SEEN = {'Niimbot/B1'}
+# Printers on Bluetooth LE, the others paired
+_LE = {model.name for model in models.PRINTED if 'le' in model.connections}
 # One status question per printer is outstanding at most: the polls after one
 # went unanswered read whether its answer came, for OWED_WAIT seconds, and
 # tell the last state meanwhile. After STATUS_LOST seconds it counts as lost:
@@ -79,9 +91,23 @@ _owed: dict[str, tuple[str, float, bool]] = {}
 
 
 def _over_le(model: str) -> bool:
-    """Whether a printer on bt:// is reached over Bluetooth LE: the B1
-    speaks only that, the D110_M classic Bluetooth."""
-    return model == 'Niimbot/B1'
+    """Whether a printer on bt:// is reached over Bluetooth LE, as niimbluelib
+    reaches them; the D110_M over classic Bluetooth."""
+    return model in _LE
+
+
+def _told(c, device: str, again: float | None = None) -> models.Model | None:
+    """The model the printer tells by its model ID, asked once per device,
+    None for none or one niimbluelib does not list. One that told none is
+    asked again once the label designer looks for printers, or again
+    seconds later."""
+    key = devices.lock_key(device)
+    known = _told_models.get(key)
+    if known and (known[0] or (known[1] >= devices.looked and (again is None or time.monotonic() - known[1] < again))):
+        return known[0]
+    told = models.BY_ID.get(protocol.model_id(c))
+    _told_models[key] = (told, time.monotonic())
+    return told
 
 
 def _kept(device: str, model: str) -> bool:
@@ -95,8 +121,13 @@ def _beeps(device: str, model: str) -> bool:
     return device.startswith('bt://') and not _kept(device, model)
 
 
+def _dots(mm: float, dpi: int) -> int:
+    return round(mm * DOTS_PER_MM) if dpi == protocol.DPI else round(mm * dpi / 25.4)
+
+
 def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
-    dots = (width * DOTS_PER_MM, length * DOTS_PER_MM)
+    dpi = models.BY_NAME[model].dpi
+    dots = (_dots(width, dpi), _dots(length, dpi))
     printable = (min(dots[0], HEADS[model]), dots[1])
     identifier = f'niimbotd{width}' if form == FormFactor.ROUND_DIE_CUT else f'niimbot{width}x{length}'
     return Label(identifier, (width, length), form, dots, printable, 0, models=(model,))
@@ -106,6 +137,44 @@ def _page(width: int, length: int, across: int, along: int, gap: float, model: s
     """The page of a roll of several labels, named by one of them."""
     page = _label(across * width + (across - 1) * gap, along * length, model)
     return replace(page, identifier=f'niimbot{width}x{length}-{across}x{along}', pieces=(across, along, gap))
+
+
+def _rolls(model: str) -> list[Label]:
+    """The labels of the rolls a model takes: those of the D11 on a
+    printhead up to 25 mm wide, else those of the B1, its pages of several
+    labels on the B1 only, the only model they were printed on."""
+    dpi = models.BY_NAME[model].dpi
+    if HEADS[model] / dpi * 25.4 <= 25:
+        return [_label(width, length, model) for width, length in SIZES]
+    return ([_label(width, length, model) for width, length in B1_SIZES]
+            + [_label(d, d, model, FormFactor.ROUND_DIE_CUT) for d in B1_ROUND]
+            + [_page(*page, model) for page in B1_PAGES if model == 'Niimbot/B1'])
+
+
+def _labels() -> tuple[Label, ...]:
+    """The labels of every model. A model takes the label of a model before
+    it that is the same paper of the same dots at the same dpi, else its
+    own, named by its size alone on the D110_M and the B1, with the model on
+    the others, e.g. niimbot50x30-b1pro of the B1 Pro, also the B21 Pro's
+    and the M2-H's."""
+    labels: dict[str, Label] = {}
+    for model in models.PRINTED:
+        for label in _rolls(model.name):
+            shared = next((known for known in labels.values() if _same(known, label)), None)
+            if shared is not None:
+                labels[shared.identifier] = replace(shared, models=shared.models + (model.name,))
+                continue
+            if label.identifier in labels:
+                label = replace(label, identifier=f"{label.identifier}-{model.short.lower().replace('_', '')}")
+            labels[label.identifier] = label
+    return tuple(labels.values())
+
+
+def _same(a: Label, b: Label) -> bool:
+    """Whether two labels are the same paper of the same dots at the same dpi."""
+    return ((a.tape_size, a.form_factor, a.pieces, a.dots_total, a.dots_printable)
+            == (b.tape_size, b.form_factor, b.pieces, b.dots_total, b.dots_printable)
+            and models.BY_NAME[a.models[0]].dpi == models.BY_NAME[b.models[0]].dpi)
 
 
 def _name(label: Label) -> str:
@@ -118,11 +187,29 @@ def _name(label: Label) -> str:
     return f'{width} x {length} mm die-cut (Niimbot)'
 
 
-LABELS = (tuple(_label(width, length, 'Niimbot/D110_M') for width, length in SIZES)
-          + tuple(_label(width, length, 'Niimbot/B1') for width, length in B1_SIZES)
-          + tuple(_label(d, d, 'Niimbot/B1', FormFactor.ROUND_DIE_CUT) for d in B1_ROUND)
-          + tuple(_page(*page, 'Niimbot/B1') for page in B1_PAGES))
+LABELS = _labels()
 NAMES = {label.identifier: _name(label) for label in LABELS}
+
+
+def _bluetooth_name(model: models.Model) -> re.Pattern:
+    """The name a model is guessed to advertise on Bluetooth LE, B1-<serial>
+    as a B1, the parts of a name like B21_PRO also apart."""
+    return re.compile(r'[_ -]?'.join(map(re.escape, model.short.split('_'))) + '-.*', re.IGNORECASE | re.DOTALL)
+
+
+REFUSALS = (tuple(models.other_model(model) for model in models.PRINTED)
+            + tuple(models.cannot_print(model) for model in models.MODELS if model not in models.PRINTED))
+# The names of the models where they differ from their ids, e.g. B1 Pro
+SHOWN_AS = {model.name: f'Niimbot/{model.shown}' for model in models.PRINTED if model.shown != model.short}
+BLUETOOTH_NAMES = {_bluetooth_name(model): model.name for model in models.PRINTED if model.name in _LE}
+
+
+class _Job(list):
+    """The rows of each label, and the dots per mm along the paper."""
+
+    def __init__(self, rows=(), per_mm: float = DOTS_PER_MM):
+        super().__init__(rows)
+        self.per_mm = per_mm
 
 
 def centered(dots: bytes, head: int, shift: int = 0) -> bytes:
@@ -142,10 +229,13 @@ def placed(img: Image.Image, head: int, shift: int, feed: int) -> list[bytes]:
     return (empty + rows)[:len(rows)] if feed >= 0 else (rows + empty)[abs(feed):]
 
 
-def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0)) -> tuple[Image.Image, list[bytes]]:
-    """A label as the printer prints it: rows across the printhead, as wide
-    as the label, black is printed. offset: mm the printer's labels are
-    moved right and down, a B1 only."""
+def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0),
+               model: str | None = None) -> tuple[Image.Image, list[bytes]]:
+    """A label as the printer of the model prints it, the first of the label
+    size if None: rows across the printhead, black is printed. On a B1 rows
+    across all of it, moved by offset, mm the printer's labels are moved
+    right and down; on the others as wide as the label in whole bytes, as
+    niimbluelib sends them."""
     img = label.generate()
     # The label designer draws labels longer than wide lying, e.g. 12 x 40
     # mm as 320 x 96 dots; turned as by the other drivers, their end leaves
@@ -155,10 +245,11 @@ def label_rows(label, label_size: str, offset: tuple[float, float] = (0.0, 0.0))
     if img.width != across:
         img = img.rotate(90, expand=True)
     img = bitmap.black_and_white(img, label)
-    if size.models == ('Niimbot/B1',):
+    if (model or size.models[0]) == 'Niimbot/B1':
         return img, placed(img, protocol.B1_HEAD, B1_SHIFT - round(offset[0] * DOTS_PER_MM),
                            B1_FEED + round(offset[1] * DOTS_PER_MM))
-    return img, [row[:protocol.HEAD] for row in bitmap.dot_rows(img)]
+    width = -(-across // 8) * 8
+    return img, [(row + bytes(width))[:width] for row in bitmap.dot_rows(img)]
 
 
 class Niimbot(Driver):
@@ -166,42 +257,84 @@ class Niimbot(Driver):
     models = MODELS
     labels = LABELS
     label_names = NAMES
+    shown_as = SHOWN_AS
     # bt://<MAC>[/<RFCOMM channel>], a B1 also on USB: usblp on Linux, else
     # through PyUSB, e.g. usb://0x3513:0x0002
     device_patterns = (re.compile(r'bt://([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}(/\d+)?'),
                        re.compile(r'(file://)?/dev/usb/lp\w+'),
                        re.compile(r'usb://0x3513:0x[0-9a-fA-F]{4}(/[A-Za-z0-9_-]+)?'))
     errors = (OSError, protocol.NiimbotError)
-    refusals = (calibration.KIND_MESSAGE,)
-    # Over Bluetooth LE only the B1 prints. It tells its name, B1-<serial>,
-    # or Niimbot's service where it leaves the name out.
-    bluetooth_names = {re.compile(r'B1-.*', re.IGNORECASE | re.DOTALL): 'Niimbot/B1'}
+    refusals = (calibration.KIND_MESSAGE, *REFUSALS)
+    # The models on Bluetooth LE by their names, a printer that leaves its
+    # name out by Niimbot's service, as a B1 does
+    bluetooth_names = BLUETOOTH_NAMES
     bluetooth_services = {protocol.NIIMBOT_SERVICE: 'Niimbot/B1'}
+    # Those that are a serial port on USB, which tell their model by its ID
+    usb_serial_ids = ((0x3513, None),)
 
     def model_of(self, device, device_id=None):
         if device_id is None:
             device_id = devices.usb_device_id(device) if isinstance(device, str) else ''
-        return self.model_in(device_id)
+        return self.model_in(device_id) or (None if device_id else self._model_told(device))
 
     def model_in(self, device_id):
-        # MFG:NIIMBOT;CMD:ESC;MDL: B1; on USB, also shared over USB/IP
+        # MFG:NIIMBOT;CMD:ESC;MDL: B1; on USB, also shared over USB/IP. Other
+        # models as niimbluelib names them, e.g. B1 Pro as B1_PRO.
         fields = devices.device_id_fields(device_id)
-        model = f"Niimbot/{fields.get('MDL', '').strip()}"
+        name = fields.get('MDL', '').strip().upper().replace('-', '_').replace(' ', '_')
+        model = f'Niimbot/{name}'
         return model if fields.get('MFG', '').strip().upper() == 'NIIMBOT' and model in MODELS else None
+
+    def _model_told(self, device) -> str | None:
+        """The model a serial port on USB tells by its model ID, None for
+        another device or a model Labelburg cannot print on."""
+        if not (isinstance(device, str) and device.lower().startswith('usb://0x3513:')):
+            return None
+        known = _told_models.get(devices.lock_key(device))
+        if known and (known[0] or known[1] >= devices.looked):
+            return known[0].name if known[0] in models.PRINTED else None
+        # Not a printer on its printer interface, e.g. a B1 that usblp holds
+        if not backends.is_serial_port(device):
+            return None
+        # Never in between the packets of a job or a status query
+        with devices.device_lock(device, timeout=0) as acquired:
+            if not acquired:
+                return None
+            try:
+                with protocol.connect(device) as c:
+                    told = _told(c, device)
+            except Exception:
+                # Also no PyUSB backend, e.g. no libusb
+                logger.debug('No model ID of %s', device, exc_info=True)
+                return None
+        return told.name if told in models.PRINTED else None
 
     def fits(self, label, model):
         return label in LABELS and model in label.models
 
+    def label_for(self, label_size, model):
+        # The same roll of another model, e.g. niimbot50x30-b1pro for niimbot50x30
+        made = next((label for label in LABELS if label.identifier == label_size), None)
+        if made is None or model in made.models:
+            return label_size
+        paper = (made.tape_size, made.form_factor, made.pieces)
+        return next((label.identifier for label in LABELS
+                     if model in label.models and (label.tape_size, label.form_factor, label.pieces) == paper), label_size)
+
     def dpi(self, high_res):
         return protocol.DPI
 
+    def label_dpi(self, label):
+        dpi = models.BY_NAME[label.models[0]].dpi
+        return dpi, dpi
+
     def resolution_problem(self, model, high_res):
-        return f'The {model} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
+        return f'The {self.shown_as.get(model, model)} cannot print at 600 dpi, turn off 600 dpi printing' if high_res else ''
 
     def capabilities(self, model):
         # The labels are torn off, their top leaves it first
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True,
-                    calibration=model == 'Niimbot/B1')
+                    calibration=model == 'Niimbot/B1', model_shown=self.shown_as.get(model, model).split('/')[-1])
 
     def keeps_connection(self, device, model):
         return device.startswith('bt://') and _over_le(model)
@@ -232,9 +365,16 @@ class Niimbot(Driver):
     def found_on_bluetooth(self, device):
         # Other models advertise the service too: it counts only without a name
         name = device.get('name')
-        if name and not any(re.fullmatch(pattern, name) for pattern in self.bluetooth_names):
+        named = {model for pattern, model in self.bluetooth_names.items() if re.fullmatch(pattern, name or '')}
+        if name and not named:
             return None
-        return super().found_on_bluetooth(device)
+        found = super().found_on_bluetooth(device)
+        # One whose name is a guess is asked for its model, see _status()
+        if found and not (len(named) == 1 and named <= NAMES_SEEN):
+            _to_ask.add(devices.lock_key(found[0]))
+        elif found:
+            _to_ask.discard(devices.lock_key(found[0]))
+        return found
 
     def followed(self, device, model):
         # Its kept connection over Bluetooth LE costs nothing either
@@ -248,6 +388,9 @@ class Niimbot(Driver):
 
     def _status(self, device, model, fresh):
         cached = devices.status_cache.get(devices.lock_key(device))
+        known = _told_models.get(devices.lock_key(device))
+        if devices.lock_key(device) in _to_ask and known and known[0] and known[0] not in models.PRINTED:
+            return self._refused(device, model, known[0])
         # Also asked while it cannot print, so that the error goes once the
         # lid is closed; it beeps every status query only then. On USB it is
         # asked every time, it tells another roll or a lost connection so.
@@ -258,11 +401,26 @@ class Niimbot(Driver):
             if not acquired:
                 return devices.busy_state(device, network_status(device, model))
             with protocol.connect(device, _over_le(model)) as c:
+                # Its name was a guess: the model it tells is used
+                if devices.lock_key(device) in _to_ask:
+                    named = _told(c, device, STATUS_LOST)
+                    if named is not None:
+                        if named not in models.PRINTED:
+                            return self._refused(device, model, named)
+                        model = named.name
                 told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])
                 serial = self._serial(c, device, model)
         return self._keep(device, model, told['heartbeat'], told['roll'], serial)
+
+    def _refused(self, device, model, told: models.Model) -> dict:
+        """The state of a printer of a model Labelburg cannot print on."""
+        state = network_status(device, model)
+        state.update({'media_type': 'Die-cut labels', 'errors': [models.cannot_print(told)]})
+        state['status_type'] = devices.status_type(state['errors'])
+        devices.status_cache[devices.lock_key(device)] = state
+        return state
 
     def _asked(self, c, device, model) -> dict | None:
         """The heartbeat and the roll the printer tells, None where a
@@ -306,8 +464,9 @@ class Niimbot(Driver):
         state = network_status(device, model)
         state.update({'media_type': 'Die-cut labels', 'phase_type': 'Waiting to receive'})
         state['errors'] = protocol.errors(beat)
-        # A D110_M neither parks nor prints a roll without its tag
-        if roll is None and not state['errors']:
+        # A D110_M neither parks nor prints a roll without its tag, the
+        # models that need one refuse to print without it
+        if roll is None and not state['errors'] and getattr(models.BY_NAME.get(model), 'needs_tag', True):
             state['errors'] = ['No Niimbot roll with its RFID tag is in the printer']
         state['status_type'] = devices.status_type(state['errors'])
         # It tells 0 to 4, shown as a percentage, low at 1 of 4 or less
@@ -334,12 +493,13 @@ class Niimbot(Driver):
         return SPEED, BESIDES
 
     def label_lengths(self, job):
-        return [len(rows) / DOTS_PER_MM for rows in job]
+        return [len(rows) / getattr(job, 'per_mm', DOTS_PER_MM) for rows in job]
 
     def render(self, queue, entries, keep=None):
-        job = []
+        dpi = models.BY_NAME[queue.model].dpi if queue.model in models.BY_NAME else protocol.DPI
+        job = _Job(per_mm=DOTS_PER_MM if dpi == protocol.DPI else dpi / 25.4)
         for i, entry in enumerate(entries):
-            img, rows = label_rows(entry['label'], queue.label_size, queue.offset)
+            img, rows = label_rows(entry['label'], queue.label_size, queue.offset, queue.model)
             if keep:
                 keep(img, f'niimbot_{i}')
             job.append(rows)
@@ -356,9 +516,9 @@ class Niimbot(Driver):
         _owed.pop(device, None)
         try:
             with protocol.connect(device, _over_le(model)) as c:
-                told = MODEL_IDS.get(protocol.model_id(c), model)
-                if told != model:
-                    return f'This printer is a {shown(told)}, choose that model for it'
+                told = models.BY_ID.get(protocol.model_id(c))
+                if told is not None and told.name != model:
+                    return models.other_model(told) if told in models.PRINTED else models.cannot_print(told)
                 # What the status keeps is updated, e.g. another roll
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
@@ -367,9 +527,10 @@ class Niimbot(Driver):
                     devices.note_answer(device)
                     return state['errors'][0]
                 label_type = loaded['type'] if loaded else protocol.WITH_GAPS
+                known = models.BY_NAME[model]
                 progress.counting(device)
                 for i, rows in enumerate(job):
-                    protocol.print_label(c, rows, label_type, SEQUENCES[model])
+                    protocol.print_label(c, rows, label_type, known.sequence, known.density[2], known.dots, known.exact)
                     progress.printed(device, i + 1)
             devices.note_answer(device)
         except protocol.NiimbotError as e:

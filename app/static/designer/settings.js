@@ -128,9 +128,12 @@ function modelHTML(p) {
     Object.keys(C.models).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
         .forEach(m => groups.set(C.models[m].vendor, [...(groups.get(C.models[m].vendor) || []), m]));
     const chosen = kept(p).demo_model || p.model;
+    // The name the server shows, the id where two models of a maker share one
+    const shown = m => C.models[m].model_shown || m.split('/').pop();
+    const name = (m, models) => models.some(o => o !== m && shown(o) === shown(m)) ? m.split('/').pop() : shown(m);
     return `<div class="set-stack"><select class="in set-sel" data-k="demo_model" aria-label="Model of ${esc(printerLabel(p))}">${[...groups]
         .sort(([a], [b]) => a.localeCompare(b, 'en')).map(([vendor, models]) => `<optgroup label="${esc(vendor)}">${models.map(m =>
-            `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(m.split('/').pop())}</option>`).join('')}</optgroup>`).join('')}</select>
+            `<option value="${esc(m)}"${m === chosen ? ' selected' : ''}>${esc(name(m, models))}</option>`).join('')}</optgroup>`).join('')}</select>
         <small class="muted">Try the label designer as with this printer: labels are made for it, nothing is printed.</small></div>`;
 }
 

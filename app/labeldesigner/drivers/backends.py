@@ -6,6 +6,7 @@ and on classic Bluetooth (bt://<MAC>, see transports.RfcommPrinter)."""
 
 import ctypes.util
 import errno
+import glob
 import logging
 import os
 import re
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # The devices Linux shares over USB/IP, by their bus IDs
 USBIP_HOST = '/sys/bus/usb/drivers/usbip-host'
+# The USB devices and their interfaces as Linux lists them, and its device files
+USB_DEVICES = '/sys/bus/usb/devices'
+DEV = '/dev'
 # Reads of what came before a status request at most, one per late answer
 # over USB/IP: a printer that keeps sending must not hold the query and lock
 DISCARD_READS = 100
@@ -221,16 +225,19 @@ class UsbipPrinter(Printer):
         usbip.release(self.dev)
 
 
+def _has_interface(usb, device, interface_class: int) -> bool:
+    if device.bDeviceClass == interface_class:
+        return True
+    return any(usb.util.find_descriptor(config, bInterfaceClass=interface_class) is not None for config in device)
+
+
 def _usb_printers(usb, vendor: int | None = None, interface_class: int = 7):
     """The devices with a printer interface (class 7), or one of
     interface_class, of a maker or all."""
-    def is_printer(device):
-        if device.bDeviceClass == interface_class:
-            return True
-        return any(usb.util.find_descriptor(config, bInterfaceClass=interface_class) is not None for config in device)
     maker = {} if vendor is None else {'idVendor': vendor}
     try:
-        return usb.core.find(find_all=True, custom_match=is_printer, backend=_libusb(), **maker)
+        return usb.core.find(find_all=True, custom_match=lambda device: _has_interface(usb, device, interface_class),
+                             backend=_libusb(), **maker)
     except usb.core.NoBackendError as e:
         raise NoLibusb(str(e)) from e
 
@@ -298,13 +305,16 @@ def _bus_id(device) -> str:
 def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
     """usb://<vendor>:<product>[/<serial>] and the IEEE 1284 device ID of the
     printers PyUSB finds that no driver of the kernel holds: on Linux usblp
-    holds them as /dev/usb/lp<N>, on macOS none does. Then the bus IDs of
-    those Linux shares over USB/IP, which are left to the computers using
-    them that way."""
+    holds them as /dev/usb/lp<N>, on macOS none does. Serial ports a driver
+    prints on are taken from the kernel's driver, see Driver.usb_serial_ids.
+    Then the bus IDs of those Linux shares over USB/IP, which are left to
+    the computers using them that way."""
     try:
         import usb.core
         import usb.util
         printers = list(_usb_printers(usb))
+        ports = [device for device in _usb_printers(usb, interface_class=0x0A)
+                 if _serial_listed((device.idVendor, device.idProduct), _has_interface(usb, device, 7))]
     except NoLibusb:
         # The printer list tells it
         raise
@@ -313,13 +323,15 @@ def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
         return [], []
     found, shared = [], []
     usbip_host = _shared_bus_ids()
-    for printer in printers:
+    port_ids = {(device.idVendor, device.idProduct) for device in ports}
+    listed = [(printer, False) for printer in printers if (printer.idVendor, printer.idProduct) not in port_ids]
+    for printer, is_port in listed + [(device, True) for device in ports]:
         # usbip-host holds the device, not its interfaces
         if usbip_host and (bus_id := _bus_id(printer)) in usbip_host:
             shared.append(bus_id)
             continue
         try:
-            if printer.is_kernel_driver_active(0):
+            if not is_port and printer.is_kernel_driver_active(0):
                 continue
         except NotImplementedError:
             pass
@@ -334,7 +346,7 @@ def found_printers() -> tuple[list[tuple[str, str]], list[str]]:
         spec = f'usb://0x{printer.idVendor:04x}:0x{printer.idProduct:04x}'
         if serial and re.fullmatch(r'[A-Za-z0-9_-]+', serial):
             spec += f'/{serial}'
-        found.append((spec, _device_id(usb, printer)))
+        found.append((spec, '' if is_port else _device_id(usb, printer)))
     return found, shared
 
 
@@ -365,15 +377,58 @@ def _serial_number(usb, device) -> str | None:
         return None
 
 
-def _over_serial(device_specifier: str) -> bool:
-    """Whether a driver reaches the printer usb://... through its serial
-    interface, see Driver.usb_serial_ids."""
+def _serial_listed(ids: tuple[int, int], printer_interface: bool) -> bool:
+    """Whether a driver reaches the device of (vendor, product) through its
+    serial interface, see Driver.usb_serial_ids: one it lists, or one of a
+    vendor it lists without a product that has no printer interface."""
     from . import DRIVERS
+    return any(ids in driver.usb_serial_ids or (not printer_interface and (ids[0], None) in driver.usb_serial_ids)
+               for driver in DRIVERS)
+
+
+def _serial_device(usb, device_specifier: str):
+    """The device of usb://... that a driver reaches through its serial
+    interface, see Driver.usb_serial_ids, None for another one."""
     try:
         ids = _ids(device_specifier)
-    except ValueError:
+        device = _find(usb, device_specifier, 0x0A)
+    except (ValueError, FileNotFoundError):
+        return None
+    return device if _serial_listed(ids, _has_interface(usb, device, 7)) else None
+
+
+def is_serial_port(device_specifier: str) -> bool:
+    """Whether a driver reaches the printer usb://... through its serial
+    interface, see Driver.usb_serial_ids."""
+    try:
+        import usb.core
+        import usb.util
+        return _serial_device(usb, device_specifier) is not None
+    except Exception:
+        # Also no PyUSB backend, e.g. no libusb
+        logger.debug('Not looked for %s', device_specifier, exc_info=True)
         return False
-    return any(ids in driver.usb_serial_ids for driver in DRIVERS)
+
+
+def serial_tty(device_specifier: str) -> str | None:
+    """The device file of the kernel's serial port of a printer usb://...
+    that a driver reaches through its serial interface, e.g. /dev/ttyACM0,
+    None where there is none, e.g. in a container without it."""
+    try:
+        import usb.core
+        import usb.util
+        device = _serial_device(usb, device_specifier)
+    except Exception:
+        logger.debug('Not looked for %s', device_specifier, exc_info=True)
+        return None
+    bus_id = _bus_id(device) if device is not None else ''
+    if not bus_id:
+        return None
+    for path in sorted(glob.glob(os.path.join(USB_DEVICES, glob.escape(bus_id) + ':*', 'tty', '*'))):
+        node = os.path.join(DEV, os.path.basename(path))
+        if os.path.exists(node):
+            return node
+    return None
 
 
 def open_printer(device_specifier: str) -> Printer:
@@ -382,9 +437,18 @@ def open_printer(device_specifier: str) -> Printer:
     shared by another device, bt://... on classic Bluetooth, any other
     device through the printer interface of the kernel."""
     if device_specifier.startswith(('usb://', '0x')):
-        if _over_serial(device_specifier):
+        try:
+            ids = _ids(device_specifier)
+        except ValueError:
+            ids = None
+        if ids and _serial_listed(ids, printer_interface=True):
             return UsbSerialPrinter(device_specifier)
-        return UsbPrinter(device_specifier)
+        try:
+            return UsbPrinter(device_specifier)
+        except FileNotFoundError:
+            if ids and _serial_listed(ids, printer_interface=False):
+                return UsbSerialPrinter(device_specifier)
+            raise
     if usbip.is_address(device_specifier):
         return UsbipPrinter(device_specifier)
     if device_specifier.startswith('bt://'):
