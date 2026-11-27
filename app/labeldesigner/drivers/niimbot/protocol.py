@@ -224,11 +224,14 @@ def heartbeat(c: Connection, send: bool = True, wait: float | None = None) -> di
 
 def model_id(c: Connection) -> int | None:
     """The model ID the printer tells, e.g. 4096 for a B1, None if it does
-    not tell."""
+    not tell. One byte is the high byte, e.g. 03 for a B21 (768), as
+    niimbluelib reads it."""
     try:
         data = c.ask(0x40, b'\x08', 0x48)
     except NiimbotError:
         return None
+    if len(data) == 1:
+        return data[0] << 8
     return struct.unpack('>H', data[:2])[0] if len(data) >= 2 else None
 
 

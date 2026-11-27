@@ -167,6 +167,15 @@ def test_printer_of_a_sequence_labelburg_lacks_is_not_printed_on(fake, monkeypat
     assert message in refusals.MESSAGES and 0x21 not in fake.commands
 
 
+@pytest.mark.parametrize('answer, model', [(b'\x03', 'B21'), (b'\x02', 'D11'), (b'\x0e', 'B18'), (b'\x01', 'B3S')])
+def test_model_id_of_one_byte_is_its_high_byte(fake, monkeypatch, answer, model):
+    # niimbluelib, src/packets/packet_parser.ts:164-173 parsePrinterInfoModelIdResponse
+    monkeypatch.setitem(REPLIES, 0x40, (0x48, answer))
+    queue = SimpleNamespace(device_specifier=DEVICE, model='Niimbot/B1', label_size='niimbot50x30')
+    assert niimbot.DRIVER.send(queue, [[bytes(384)]]) == f'This printer is a Niimbot {model}, Labelburg cannot print on it yet'
+    assert 0x21 not in fake.commands
+
+
 def test_b1_pro_gets_the_packets_of_niimbluelibs_d110m_v4_task(fake, monkeypatch):
     # niimbluelib at 35110a71, src/print_tasks/D110MV4PrintTask.ts, the
     # packets of src/packets/packet_generator.ts, the commands of
