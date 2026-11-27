@@ -354,19 +354,22 @@ def test_b21_pro_found_by_its_name_is_asked_once(fake, monkeypatch):
     assert fake.packets == [p(0x40, [0x08]), p(0xdc, [1]), p(0x1a, [1]), p(0xdc, [1]), p(0x1a, [1])]
 
 
-def test_printer_found_by_niimbots_service_alone_is_no_b1_until_it_says_so(fake, monkeypatch):
+def test_printer_found_by_niimbots_service_alone_is_the_model_found_while_it_tells_none(fake, monkeypatch):
+    # A B1 that leaves its model ID unanswered, asked for it again
+    # STATUS_LOST seconds later
     assert found('') == (DEVICE, 'Niimbot/B1')
     monkeypatch.delitem(REPLIES, 0x40)
     monkeypatch.setattr(protocol, 'ANSWER_WAIT', 0.05)
-    with pytest.raises(protocol.NoAnswer):
-        niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')
-    assert 0xdc not in fake.commands
-    # It answers once looked for again
-    told(monkeypatch, 4096)
     monkeypatch.setitem(REPLIES, 0xdc, B1_PRO_HEARTBEAT)
-    monkeypatch.setattr(devices, '_unanswered', {})
-    monkeypatch.setattr(devices, 'looked', 1e12)
-    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')['model'] == 'Niimbot/B1'
+    for _ in range(2):
+        state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)
+        assert (state['model'], state['errors']) == ('Niimbot/B1', [])
+    model_id = niimbluelib_packet(0x40, [0x08])
+    assert fake.packets.count(model_id) == 1 and fake.commands.count(0xdc) == 2
+    told(monkeypatch, 4097)
+    monkeypatch.setattr(niimbot, 'STATUS_LOST', 0)
+    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1', fresh=True)['model'] == 'Niimbot/B1_PRO'
+    assert fake.packets.count(model_id) == 2
 
 
 def test_printer_on_bluetooth_le_of_a_model_labelburg_cannot_print_on(fake, monkeypatch):

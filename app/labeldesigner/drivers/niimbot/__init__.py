@@ -66,10 +66,12 @@ _asked: dict[str, float] = {}
 _no_serial: set[str] = set()
 # The models printers on Bluetooth LE and serial ports on USB told by their
 # model ID, by device, and when they were asked. One that told none is asked
-# again once the label designer looks for printers.
+# again once the label designer looks for printers, on Bluetooth LE also
+# STATUS_LOST seconds later.
 _told_models: dict[str, tuple[models.Model | None, float]] = {}
 # Printers found on Bluetooth LE whose name is no B1's, e.g. by Niimbot's
-# service alone without a name: their model is the one they tell
+# service alone without a name: their model is the one they tell, the one
+# found while they tell none
 _to_ask: set[str] = set()
 # The models whose name on Bluetooth LE was seen on a printer, B1-<serial>;
 # the others' are guesses
@@ -94,12 +96,14 @@ def _over_le(model: str) -> bool:
     return model in _LE
 
 
-def _told(c, device: str) -> models.Model | None:
+def _told(c, device: str, again: float | None = None) -> models.Model | None:
     """The model the printer tells by its model ID, asked once per device,
-    None for none or one niimbluelib does not list."""
+    None for none or one niimbluelib does not list. One that told none is
+    asked again once the label designer looks for printers, or again
+    seconds later."""
     key = devices.lock_key(device)
     known = _told_models.get(key)
-    if known and (known[0] or known[1] >= devices.looked):
+    if known and (known[0] or (known[1] >= devices.looked and (again is None or time.monotonic() - known[1] < again))):
         return known[0]
     told = models.BY_ID.get(protocol.model_id(c))
     _told_models[key] = (told, time.monotonic())
@@ -392,12 +396,11 @@ class Niimbot(Driver):
             with protocol.connect(device, _over_le(model)) as c:
                 # Its name was a guess: the model it tells is used
                 if devices.lock_key(device) in _to_ask:
-                    named = _told(c, device)
-                    if named is None:
-                        raise protocol.NoAnswer('no model ID')
-                    if named not in models.PRINTED:
-                        return self._refused(device, model, named)
-                    model = named.name
+                    named = _told(c, device, STATUS_LOST)
+                    if named is not None:
+                        if named not in models.PRINTED:
+                            return self._refused(device, model, named)
+                        model = named.name
                 told = self._asked(c, device, model)
                 if told is None:
                     return dict(devices.status_cache[devices.lock_key(device)])
