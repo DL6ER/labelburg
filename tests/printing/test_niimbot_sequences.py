@@ -595,6 +595,26 @@ def test_d110_set_up_by_its_address_is_asked_for_its_model_id_for_its_lid(monkey
     assert printer.sent.count(p(0x40, [8])) == 1
 
 
+@pytest.mark.parametrize('answer, model', [(b'\x03', 'B21'), (b'\x02', 'D11'), (b'\x0e', 'B18'), (b'\x01', 'B3S')])
+def test_printer_telling_its_model_id_in_one_byte_is_that_model(monkeypatch, answer, model):
+    # packet_parser.ts:164-173 reads one byte as the high byte of the ID
+    printer = Printer({0x40: p(0x48, answer), 0xdc: B21S_BEAT, 0x1a: p(0x1b, [0])})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': '', 'le': True,
+                                       'services': [protocol.NIIMBOT_SERVICE]})
+    assert niimbot.DRIVER.status(DEVICE, 'Niimbot/B1')['model'] == f'Niimbot/{model}'
+
+
+def test_printer_found_by_its_name_that_tells_no_model_id_is_the_model_found(monkeypatch):
+    printer = Printer({0xdc: B21S_BEAT, 0x1a: p(0x1b, [0])})
+    monkeypatch.setattr(protocol, 'connect', lambda device, le=False: connection(printer))
+    assert niimbot.DRIVER.found_on_bluetooth({'address': '00:00:5E:00:53:21', 'name': 'B21S-C123', 'le': True,
+                                              'services': [protocol.NIIMBOT_SERVICE]}) == (DEVICE, 'Niimbot/B21S')
+    state = niimbot.DRIVER.status(DEVICE, 'Niimbot/B21S')
+    assert (state['model'], state['errors']) == ('Niimbot/B21S', [])
+    assert p(0x40, [8]) in printer.sent
+
+
 def test_lid_of_a_printer_that_told_no_model_id_is_reversed_where_each_of_its_model_is():
     # The D101 has one model ID, on the list of packet_parser.ts:268
     assert [models.lid_inverted(models.BY_NAME[f'Niimbot/{model}'], None) for model in ('D101', 'D110', 'B21')] == [
