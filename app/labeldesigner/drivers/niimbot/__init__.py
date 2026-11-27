@@ -142,13 +142,13 @@ def _page(width: int, length: int, across: int, along: int, gap: float, model: s
 def _rolls(model: str) -> list[Label]:
     """The labels of the rolls a model takes: those of the D11 on a
     printhead up to 25 mm wide, else those of the B1, its pages of several
-    labels at its 8 dots per mm only."""
+    labels on the B1 only, the only model they were printed on."""
     dpi = models.BY_NAME[model].dpi
     if HEADS[model] / dpi * 25.4 <= 25:
         return [_label(width, length, model) for width, length in SIZES]
     return ([_label(width, length, model) for width, length in B1_SIZES]
             + [_label(d, d, model, FormFactor.ROUND_DIE_CUT) for d in B1_ROUND]
-            + [_page(*page, model) for page in B1_PAGES if dpi == protocol.DPI])
+            + [_page(*page, model) for page in B1_PAGES if model == 'Niimbot/B1'])
 
 
 def _labels() -> tuple[Label, ...]:

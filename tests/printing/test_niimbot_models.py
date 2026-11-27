@@ -119,10 +119,10 @@ def test_models_are_shown_by_their_plain_names():
 @pytest.mark.parametrize('label_size, model, shared', [
     # The same dots on the same rolls
     ('niimbot50x30', 'Niimbot/B21_C2B', True), ('niimbotd50', 'Niimbot/B21_C2B', True),
-    ('niimbot15x8-2x3', 'Niimbot/B21_C2B', True), ('niimbot12x40', 'Niimbot/D101', True),
+    ('niimbot12x40', 'Niimbot/D101', True),
     ('niimbot15x50', 'Niimbot/D101', True), ('niimbot12x40', 'Niimbot/N1', True),
-    # 15 mm on a printhead of 12, or at 300 dpi
-    ('niimbot15x50', 'Niimbot/N1', False), ('niimbot50x30', 'Niimbot/B1_PRO', False),
+    # 15 mm on a printhead of 12, or at 300 dpi; pages of several labels on the B1 only
+    ('niimbot15x8-2x3', 'Niimbot/B21_C2B', False), ('niimbot15x50', 'Niimbot/N1', False), ('niimbot50x30', 'Niimbot/B1_PRO', False),
     ('niimbot12x40', 'Niimbot/D11_H', False)])
 def test_labels_of_a_model_are_those_of_the_b1_or_d110_m_where_they_are_the_same(label_size, model, shared):
     sizes = {label.identifier: label for label in niimbot.LABELS}
@@ -139,8 +139,8 @@ def test_labels_that_differ_are_named_by_their_model():
     assert sizes['niimbot12x40-d11h'].dots_printable == (142, 472)
     assert sizes['niimbot14x40-d11h'].dots_printable == (144, 472)
     assert sizes['niimbotd50-m2h'].dots_printable == (576, 591)
-    # Pages of several labels as on the B1 only
-    assert not any(label.pieces != (1, 1, 0) and label.models[0] != 'Niimbot/B1' for label in niimbot.LABELS)
+    # Pages of several labels on the B1 only
+    assert {label.models for label in niimbot.LABELS if label.pieces != (1, 1, 0)} == {('Niimbot/B1',)}
     assert niimbot.NAMES['niimbot50x30-b1pro'] == niimbot.NAMES['niimbot50x30'] == '50 x 30 mm die-cut (Niimbot)'
     # Made at the dpi of their printer
     assert (label_dpi('niimbot50x30-b1pro', False), label_dpi('niimbot50x30', False)) == (300, 203)
