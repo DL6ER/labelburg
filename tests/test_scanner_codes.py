@@ -33,3 +33,24 @@ def test_the_guide_shows_every_code_once():
     with open(os.path.join(ROOT, 'docs', 'scanners.md'), encoding='utf-8') as fh:
         shown = re.findall(r'\]\(scanners/([\w-]+)\.svg\)', fh.read())
     assert sorted(shown) == sorted(scanner_codes.CODES)
+
+
+# The layouts as the DS2208 guide (appendix B) and the C750 manual list them;
+# Turkish is the Q layout on both
+LAYOUTS = {
+    'us': ('N03C0003C10000', '$LAN#EN'),
+    'uk': ('N03C00F3C10000', '$LAN#UK'),
+    'german': ('N03C00A3C10000', '$LAN#GE'),
+    'french': ('N03C0093C10000', '$LAN#FR'),
+    'italian': ('N03C00D3C10000', '$LAN#IT'),
+    'spanish': ('N03C00C3C10000', '$LAN#ES'),
+    'turkish': ('N03C0433C10000', '$LAN#TK'),
+}
+
+
+@pytest.mark.parametrize('layout', LAYOUTS)
+def test_the_layout_codes_are_those_of_the_manuals(layout):
+    zebra, netum = LAYOUTS[layout]
+    assert scanner_codes.CODES[f'zebra-{layout}'] == (zebra, True)
+    assert scanner_codes.CODES[f'netum-{layout}'] == (netum, False)
+

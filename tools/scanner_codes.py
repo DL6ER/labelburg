@@ -24,7 +24,7 @@ CODES = {
     'zebra-french': ('N03C0093C10000', True),
     'zebra-italian': ('N03C00D3C10000', True),
     'zebra-spanish': ('N03C00C3C10000', True),
-    'zebra-turkish': ('N03C0423C10000', True),
+    'zebra-turkish': ('N03C0433C10000', True),
     'netum-factory': ('%#IFSNO$CR', False),
     'netum-keyboard': ('%#IFSNO$2', False),
     'netum-dongle-keyboard': ('$USB#KEY', False),
