@@ -115,18 +115,18 @@ class Connection:
         if not device.startswith('bt://'):
             self.s = transports.UsbLink(device)
             return
+        self.device = device
         if le:
             self.s = transports.kept_le(device, NIIMBOT_CHARACTERISTIC, error=NiimbotError, no_answer=NoAnswer)
-            self.device = device
             return
-        self.s = transports.rfcomm(device, CHANNEL)
+        self.s = transports.kept_rfcomm(device, CHANNEL)
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        if isinstance(self.s, transports.LeLink):
-            transports.release_le(self.device, self.s)
+        if isinstance(self.s, (transports.LeLink, transports.RfcommLink)):
+            transports.release(self.device, self.s)
         else:
             self.s.close()
 

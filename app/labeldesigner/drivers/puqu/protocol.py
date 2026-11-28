@@ -1,7 +1,9 @@
-"""The protocol of the PUQU Q00, also sold as the Reekon P1 Tagger (P1L), over
-Bluetooth SPP (RFCOMM), as https://github.com/MatinxHT/puquprintJS
-(src/protocol.ts) sends it. A label is a header and its rows, run-length
-compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
+"""The protocol of the PUQU Q00, also sold as the Reekon P1 Tagger (P1L), as
+https://github.com/MatinxHT/puquprintJS (src/protocol.ts) sends it: on
+Bluetooth LE written to characteristic ae01 and answered with the
+notifications of ae02, bt://<MAC>, without pairing; on classic Bluetooth
+over RFCOMM, bt://<MAC>/<channel>. A label is a header and its rows,
+run-length compressed. State replies are 8 bytes, 3a .. .. .. .. .. .. 0a."""
 
 import socket
 import time
@@ -11,7 +13,13 @@ from .. import bitmap, progress, transports
 # 8 dots per mm, the printhead is 48 mm wide
 DPI = 203
 HEAD = 384
-# The printers seen so far listen on RFCOMM channel 2
+# 16-bit UUIDs of the characteristics, as the printer tells them
+WRITE = bytes.fromhex('ae01')[::-1]
+NOTIFY = bytes.fromhex('ae02')[::-1]
+# What is written at once, and the pause after it, as puquprintJS writes
+CHUNK = 180
+CHUNK_PAUSE = 0.01
+# The RFCOMM channel the printers seen so far listen on
 CHANNEL = 2
 STATE_QUERY = bytes([0x3a, 0x5a, 0, 0, 0, 0, 0, 0x0a])
 
@@ -30,6 +38,9 @@ ERRORS = {
 ANSWER_WAIT = 3
 PRINT_WAIT = 3
 SECONDS_PER_MM = 0.1
+# What the printer told on its own on a kept connection, e.g. that its
+# cover is open, is read for at most this long before it is asked
+DRAIN_WAIT = 0.2
 # A label that is still printing after that is waited for this long more
 LABEL_WAIT = 10
 # Between the header of a label and its rows, as the app does
@@ -41,11 +52,6 @@ QUIET = 0.8
 
 class PuquError(Exception):
     pass
-
-
-def address(device: str) -> tuple[str, int]:
-    """MAC address and RFCOMM channel of bt://<MAC>[/<channel>]."""
-    return transports.bt_address(device, CHANNEL)
 
 
 def compress(rows: list[bytes]) -> bytes:
@@ -97,10 +103,46 @@ def errors(reply: bytes) -> list[str]:
     return [message for flag, message in ERRORS.items() if flags(reply) & flag]
 
 
-def connect(device: str) -> socket.socket:
-    s = transports.rfcomm(device, CHANNEL)
-    s.settimeout(ANSWER_WAIT)
-    return s
+def over_le(device: str) -> bool:
+    """bt://<MAC> on Bluetooth LE, bt://<MAC>/<channel> on classic Bluetooth."""
+    return '/' not in device[len('bt://'):]
+
+
+class Connection:
+    """A printer on Bluetooth read and written like a socket: its kept
+    connection, on Bluetooth LE written in pieces of CHUNK bytes, else RFCOMM."""
+
+    def __init__(self, device: str):
+        self.device, self.le = device, over_le(device)
+        if self.le:
+            self.s = transports.kept_le(device, WRITE, NOTIFY, error=PuquError, no_answer=PuquError)
+        else:
+            self.s = transports.kept_rfcomm(device, CHANNEL)
+        self.s.settimeout(ANSWER_WAIT)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        transports.release(self.device, self.s)
+
+    def settimeout(self, timeout: float):
+        self.s.settimeout(timeout)
+
+    def sendall(self, data: bytes):
+        if not self.le:
+            self.s.sendall(data)
+            return
+        for i in range(0, len(data), CHUNK):
+            self.s.sendall(data[i:i + CHUNK])
+            time.sleep(CHUNK_PAUSE)
+
+    def recv(self, size: int) -> bytes:
+        return self.s.recv(size)
+
+
+def connect(device: str) -> Connection:
+    return Connection(device)
 
 
 def _read(s: socket.socket) -> bytes:
@@ -110,10 +152,21 @@ def _read(s: socket.socket) -> bytes:
         return b''
 
 
+def _drain(s: socket.socket):
+    """Drop what waits on the connection, e.g. a report the printer sent on
+    its own meanwhile, so that the next reply read is the answer."""
+    s.settimeout(0.01)
+    deadline = time.monotonic() + DRAIN_WAIT
+    while time.monotonic() < deadline and _read(s):
+        pass
+    s.settimeout(ANSWER_WAIT)
+
+
 def get_state(device: str) -> bytes:
     """The state reply of the printer. Raises OSError or PuquError if it
     does not answer."""
     with connect(device) as s:
+        _drain(s)
         s.sendall(STATE_QUERY)
         received, deadline = b'', time.monotonic() + ANSWER_WAIT
         while time.monotonic() < deadline:
@@ -138,6 +191,7 @@ def print_labels(device: str, labels: list[list[bytes]], mm_per_label: list[floa
     The state is asked once per label, after it is printed: the printer
     takes a state query while it prints for a label and feeds an empty one."""
     with connect(device) as s:
+        _drain(s)
         progress.counting(device)
         for i, (rows, length) in enumerate(zip(labels, mm_per_label)):
             header, body = label_parts(rows)

@@ -4356,7 +4356,7 @@
           "save_energy": {
             "type": "string",
             "enum": ["0", "1"],
-            "description": "Of a printer whose connection on Bluetooth is kept between uses, e.g. a Niimbot B1 (`can_save_energy` in its status): `1` connects to it only to print or to ask it and closes the connection right after. It may then beep each time, and the label designer no longer asks it every 2 s. Default: `0`."
+            "description": "Of a printer on Bluetooth, whose connection is kept between uses (`can_save_energy` in its status): `1` connects to it only to print and to look for printers (`look=1` of `/labeldesigner/api/printer_status`) and closes the connection right after; the status queries between tell its last state, and the label designer no longer asks it every 2 s. Default: `0`."
           },
           "quality": {
             "type": "string",

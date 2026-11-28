@@ -1,16 +1,19 @@
 """The PUQU Q00 (also the Reekon P1 Tagger): its protocol against a fake printer in
-place of the RFCOMM socket, and printing and status through the label
+place of the Bluetooth LE connection, and printing and status through the label
 designer."""
 import json
+import socket
+import struct
 
 import pytest
 
-from app.labeldesigner.drivers import devices, progress, puqu
+from app.labeldesigner.drivers import devices, progress, puqu, transports
 from app.labeldesigner.drivers.puqu import protocol
 from app.labeldesigner.label import LabelOrientation
 from tests.helpers import make_client, outcome
+from tests.printing.test_niimbot_ble import LePrinter, uuid16
 
-DEVICE = 'bt://CD:AC:BB:E0:46:4C/2'
+DEVICE = 'bt://CD:AC:BB:0F:CB:36'
 TEXT = json.dumps([{'font': 'DejaVu Sans,Book', 'text': 'OK', 'size': '60'}])
 
 
@@ -105,11 +108,6 @@ def test_state_replies_and_their_errors():
         'The printer has no labels', 'The cover of the printer is open']
     # A low battery still prints
     assert protocol.errors(reply(protocol.LOW_BATTERY)) == []
-
-
-def test_address_and_channel():
-    assert protocol.address('bt://cd:ac:bb:e0:46:4c') == ('CD:AC:BB:E0:46:4C', 2)
-    assert protocol.address('bt://CD:AC:BB:E0:46:4C/1') == ('CD:AC:BB:E0:46:4C', 1)
 
 
 class _Label:
@@ -294,3 +292,136 @@ def test_printer_that_took_too_long_once_is_asked_again(client, monkeypatch):
     for _ in range(2):
         assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The printer does not answer']
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize('name, found', [('P1L-243561(BLE)', True), ('Q00-Q233117996(BLE)', True), ('Q1-12345', False),
+                                         ('AQ20-12345', False), ('B1-H123', False), ('Q100', False)])
+def test_found_on_bluetooth_le_by_name(name, found):
+    device = {'address': 'CD:AC:BB:0F:CB:36', 'name': name, 'le': True, 'services': []}
+    assert puqu.DRIVER.found_on_bluetooth(device) == (('bt://CD:AC:BB:0F:CB:36', 'PUQU/Q00') if found else None)
+
+
+def rfcomm_pair(monkeypatch):
+    """The printer's end of each connection transports.rfcomm() opens."""
+    printers = []
+
+    def opened(device, channel):
+        ours, theirs = socket.socketpair()
+        printers.append((device, channel, theirs))
+        return ours
+    monkeypatch.setattr(transports, 'rfcomm', opened)
+    return printers
+
+
+def test_an_address_with_a_channel_keeps_its_rfcomm_link(monkeypatch):
+    printers = rfcomm_pair(monkeypatch)
+    for _ in range(2):
+        with protocol.connect(f'{DEVICE}/2') as s:
+            s.sendall(bytes(400))
+    assert [(device, channel) for device, channel, _ in printers] == [(f'{DEVICE}/2', 2)]
+    printers[0][2].settimeout(1)
+    assert len(printers[0][2].recv(1000)) == 800
+
+
+def test_an_rfcomm_link_is_closed_after_each_use_where_the_printer_saves_energy(monkeypatch):
+    printers = rfcomm_pair(monkeypatch)
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(f'{DEVICE}/2')}))
+    for _ in range(2):
+        with protocol.connect(f'{DEVICE}/2') as s:
+            s.sendall(bytes(400))
+    assert len(printers) == 2
+    # Closed: the printer reads its end to the close
+    printers[0][2].settimeout(1)
+    assert printers[0][2].recv(1000) and printers[0][2].recv(1000) == b''
+
+
+@pytest.mark.parametrize('device', [DEVICE, f'{DEVICE}/2'])
+def test_a_printer_on_bluetooth_keeps_its_connection_and_is_followed_unless_it_saves_energy(monkeypatch, device):
+    assert puqu.DRIVER.keeps_connection(device, 'PUQU/Q00')
+    assert puqu.DRIVER.followed(device, 'PUQU/Q00')
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(device)}))
+    assert not puqu.DRIVER.followed(device, 'PUQU/Q00')
+
+
+def test_only_the_label_designer_following_it_asks_the_printer(client, fake):
+    printer = fake()
+    status = '/labeldesigner/api/printer_status'
+    client.get(status)
+    # The 20 s refresh of a label designer tells its last answer
+    for _ in range(3):
+        assert client.get(status).get_json()['printers'][0]['errors'] == []
+    assert printer.queries() == 1
+    # The one in front following it asks it
+    client.get(f'{status}?printer={DEVICE}')
+    assert printer.queries() == 2
+
+
+def test_a_printer_that_saves_energy_is_asked_only_when_looking_and_after_printing(tmp_path, fake):
+    # Its settings in a folder of its own, not kept for other tests
+    client = make_client(tmp_path, empty_repo=True, model='PUQU/Q00', printer=DEVICE)
+    printer = fake()
+    assert client.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'}).status_code == 200
+    status = '/labeldesigner/api/printer_status'
+    for query in ('', f'?printer={DEVICE}', f'?printer={DEVICE}'):
+        client.get(status + query)
+    assert printer.queries() == 1
+    client.get(status + '?look=1')
+    assert printer.queries() == 2
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    asked = printer.queries()
+    client.get(f'{status}?printer={DEVICE}')
+    assert printer.queries() == asked + 1
+
+
+def test_a_report_told_meanwhile_is_not_taken_as_the_answer(monkeypatch):
+    class Told(FakePrinter):
+        # What was told is read before the answer to the query
+        def __init__(self):
+            super().__init__([reply()])
+            self.waiting = [reply(protocol.COVER_OPEN)]
+
+        def sendall(self, data):
+            self.sent.append(data)
+            if data == protocol.STATE_QUERY:
+                self.waiting.append(self.answers[0])
+
+        def recv(self, size):
+            return self.waiting.pop(0) if self.waiting else b''
+    printer = Told()
+    monkeypatch.setattr(protocol, 'connect', printer)
+    monkeypatch.setattr(protocol, 'DRAIN_WAIT', 0.05)
+    assert protocol.get_state(DEVICE) == reply()
+
+
+class LePuqu(LePrinter):
+    """A Q00 on Bluetooth LE: written to ae01, answering with the
+    notifications of ae02, both declared with 16-bit UUIDs."""
+
+    def __init__(self):
+        super().__init__(None, value=0x000f, mtu=247)
+        self.declarations = [(0x0002, 0x20, 0x0003, uuid16(0x2a05)), (0x000c, 0x04, 0x000d, uuid16(0xae01)),
+                             (0x000e, 0x10, 0x000f, uuid16(0xae02))]
+
+    def send(self, pdu):
+        if pdu[0] != 0x52:
+            return super().send(pdu)
+        self.sent.append(pdu)
+        assert struct.unpack_from('<H', pdu, 1)[0] == 0x000d
+        if pdu[3:] == protocol.STATE_QUERY and self.notifying:
+            self.incoming.append(bytes([0x1b]) + struct.pack('<H', self.value) + reply())
+        return len(pdu)
+
+
+def test_connection_on_bluetooth_le(monkeypatch):
+    peer = LePuqu()
+    monkeypatch.setattr(transports.socket, 'socket', peer)
+    monkeypatch.setattr(transports, '_kept', {})
+    with protocol.connect(DEVICE) as s:
+        s.sendall(bytes(400))
+        s.sendall(protocol.STATE_QUERY)
+        assert protocol._answer(s) == [reply()]
+    # Written to ae01 in pieces of 180 bytes, the query on its own
+    assert [len(pdu) - 3 for pdu in peer.sent if pdu[0] == 0x52] == [180, 180, 40, 8]
+    # Given back, kept for the next use
+    assert not transports._kept[devices.lock_key(DEVICE)].busy

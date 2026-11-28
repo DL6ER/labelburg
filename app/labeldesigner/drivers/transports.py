@@ -2,7 +2,8 @@
 (RFCOMM), Bluetooth LE, USB and serial ports, read and written like sockets
 by drivers that exchange packets with the printer, and RfcommPrinter, a
 printer on classic Bluetooth as backends.Printer for the drivers that send
-it a stream of bytes."""
+it a stream of bytes. Connections over Bluetooth are kept between uses, see
+KEEP_UNUSED."""
 
 import errno
 import os
@@ -17,6 +18,9 @@ from . import backends, devices
 
 # Connecting took about 4 s for a PUQU Q00, also with the printer close by
 CONNECT_WAIT = 10
+# Reads of what a kept connection received unread at most, a bound for a
+# printer that keeps sending
+DISCARD_READS = 100
 # The channel of an RfcommPrinter whose address names none
 RFCOMM_CHANNEL = 1
 
@@ -51,7 +55,8 @@ class RfcommPrinter(backends.Printer):
     write_timeout = 15.
 
     def __init__(self, device_specifier: str, channel: int = RFCOMM_CHANNEL):
-        self.s = rfcomm(device_specifier, channel)
+        self.device = device_specifier
+        self.s = kept_rfcomm(device_specifier, channel)
 
     def _write(self, data: bytes):
         self.s.settimeout(self.write_timeout)
@@ -65,6 +70,56 @@ class RfcommPrinter(backends.Printer):
             return b''
 
     def _dispose(self):
+        release(self.device, self.s)
+
+
+class RfcommLink:
+    """A kept connection over classic Bluetooth to bt://<MAC>[/<channel>],
+    on channel where it names none, read and written like a socket. Broken
+    once the printer closed it or it dropped, e.g. as the printer switched
+    itself off."""
+
+    def __init__(self, device: str, channel: int):
+        self.s = rfcomm(device, channel)
+        # Dropped; in use; last given back, 0 before; when it is closed unused
+        self.broken, self.busy, self.used, self.timer = False, False, 0.0, None
+
+    def settimeout(self, timeout: float):
+        self.s.settimeout(timeout)
+
+    def sendall(self, data: bytes):
+        try:
+            self.s.sendall(data)
+        except TimeoutError:
+            raise
+        except OSError:
+            self.broken = True
+            raise
+
+    def recv(self, size: int) -> bytes:
+        try:
+            data = self.s.recv(size)
+        except TimeoutError:
+            raise
+        except OSError:
+            self.broken = True
+            raise
+        if not data:
+            self.broken = True
+        return data
+
+    def discard(self):
+        """Drop what the printer sent that was not read, e.g. a late answer,
+        so that it is not taken for the next one."""
+        for _ in range(DISCARD_READS):
+            if self.broken or not select.select([self.s], [], [], 0)[0]:
+                return
+            try:
+                self.broken = not self.s.recv(4096)
+            except OSError:
+                self.broken = True
+
+    def close(self):
         self.s.close()
 
 
@@ -164,10 +219,6 @@ class SerialLink:
 ATT_CID = 4
 ATT_MTU = 247
 CLIENT_CONFIGURATION = 0x2902
-# The connection is kept: the B1 beeps when one opens and when it closes, not
-# at what goes over it. Closed after KEEP_LE seconds unused, so that the phone
-# app can connect to the printer, and after each use where it saves energy.
-KEEP_LE = 60
 
 
 class LeLink:
@@ -311,57 +362,80 @@ class LeLink:
         self.s.close()
 
 
+# Connections over Bluetooth are kept: a Niimbot B1 beeps when one opens and
+# when it closes, not at what goes over it. Closed after KEEP_UNUSED seconds
+# unused, so that the phone app can connect to the printer, and after each
+# use where it saves energy, see devices.saves_energy().
+KEEP_UNUSED = 60
 # The connections kept, by device
-_kept: dict[str, LeLink] = {}
+_kept: dict[str, LeLink | RfcommLink] = {}
 _kept_lock = threading.Lock()
 
 
-def kept_le(device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer) -> LeLink:
-    """The kept connection to a printer on Bluetooth LE, opened as LeLink if
-    there is none or it dropped. The driver lets one user at a time have it
-    and gives it back with release_le()."""
+def _kept_link(device: str, opened, reused=None):
+    """The kept connection to a printer, opened() if there is none or it
+    dropped, reused(link) before one is handed out again. The driver lets
+    one user at a time have it and gives it back with release()."""
     key = devices.lock_key(device)
     with _kept_lock:
         s = _kept.pop(key, None)
+        if s is not None and not s.broken and reused is not None:
+            reused(s)
         if s is not None and not s.broken:
             _kept[key], s.busy = s, True
             return s
     if s is not None:
         s.close()
-    s = LeLink(device, characteristic, notify, error=error, no_answer=no_answer)
+    s = opened()
     with _kept_lock:
         _kept[key], s.busy = s, True
     return s
 
 
-def release_le(device: str, s: LeLink):
+def kept_le(device: str, characteristic: bytes, notify: bytes | None = None, *, error, no_answer) -> LeLink:
+    """The kept connection to a printer on Bluetooth LE, see LeLink."""
+    return _kept_link(device, lambda: LeLink(device, characteristic, notify, error=error, no_answer=no_answer))
+
+
+def kept_rfcomm(device: str, channel: int) -> RfcommLink:
+    """The kept connection to a printer on classic Bluetooth, see
+    RfcommLink, without what it received unread."""
+    return _kept_link(device, lambda: RfcommLink(device, channel), RfcommLink.discard)
+
+
+def release(device: str, s: LeLink | RfcommLink):
+    """Give a kept connection back, see KEEP_UNUSED."""
     key = devices.lock_key(device)
     with _kept_lock:
         s.busy, s.used = False, time.monotonic()
         if not s.broken and not devices.saves_energy(device):
             if s.timer is None:
-                s.timer = _closing(key, s, KEEP_LE)
+                s.timer = _closing(key, s, KEEP_UNUSED)
             return
         if _kept.get(key) is s:
             del _kept[key]
     s.close()
 
 
-def _closing(key: str, s: LeLink, after: float) -> threading.Timer:
+def release_le(device: str, s: LeLink):
+    release(device, s)
+
+
+def _closing(key: str, s: LeLink | RfcommLink, after: float) -> threading.Timer:
     timer = threading.Timer(after, _close_unused, (key, s))
     timer.daemon = True
     timer.start()
     return timer
 
 
-def _close_unused(key: str, s: LeLink):
+def _close_unused(key: str, s: LeLink | RfcommLink):
     with _kept_lock:
         s.timer = None
         if _kept.get(key) is not s:
             return
         unused = time.monotonic() - s.used
-        if s.busy or unused < KEEP_LE:
-            s.timer = _closing(key, s, KEEP_LE if s.busy else KEEP_LE - unused)
+        if s.busy or unused < KEEP_UNUSED:
+            s.timer = _closing(key, s, KEEP_UNUSED if s.busy else KEEP_UNUSED - unused)
             return
         del _kept[key]
     s.close()
