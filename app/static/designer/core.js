@@ -878,11 +878,11 @@ export async function refreshPrinters(look = false) {
 }
 
 // The printer chosen asked alone, where the server says that costs nothing,
-// e.g. one on USB: whether its status changed
+// e.g. one on USB, from a tab in focus: whether its status changed
 let following = false;
 export async function followPrinter() {
     const p = S.printer;
-    if (document.hidden || following || !(p && p.follow)) return false;
+    if (document.hidden || !document.hasFocus() || following || !(p && p.follow)) return false;
     following = true;
     try {
         const asked = { ...settingsSaves };

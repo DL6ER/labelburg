@@ -169,6 +169,32 @@ def test_printers_are_asked_only_from_a_tab_that_is_shown(designer, hidden, ask)
     assert bool(asked) is not hidden
 
 
+@pytest.mark.parametrize('ask', ['poll', 'follow'])
+def test_printers_are_asked_only_from_a_tab_in_focus(designer, ask):
+    # Nor from a window behind another one: the connection to a printer on
+    # Bluetooth closes once no label designer is in front
+    asked = []
+    designer.on('request', lambda request: '/api/printer_status' in request.url and asked.append(request.url))
+    designer.evaluate(f"""() => {{ labelEditor.S.printer.follow = true;
+        document.hasFocus = () => false; return labelEditor.{ask}(); }}""")
+    designer.wait_for_timeout(300)
+    assert asked == []
+
+
+@pytest.mark.parametrize('back', ["window.dispatchEvent(new Event('focus'))",
+                                  "document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))"])
+def test_the_printer_followed_is_asked_at_once_in_focus_again(designer, back):
+    asked = []
+    designer.on('request', lambda request: '/api/printer_status?printer=' in request.url and asked.append(request.url))
+    designer.evaluate('() => { labelEditor.S.printer.follow = true; document.hasFocus = () => false; }')
+    # Not every 2 s meanwhile
+    designer.wait_for_timeout(2500)
+    assert asked == []
+    designer.evaluate(f'() => {{ delete document.hasFocus; {back}; }}')
+    designer.wait_for_timeout(150)
+    assert asked
+
+
 def test_an_unchanged_status_of_the_printer_followed_leaves_the_printers_as_they_are(designer):
     # Drawn anew every 2 s, the list would lose what is focused or hovered
     told = designer.evaluate('() => { labelEditor.S.printer.follow = true; return JSON.parse(JSON.stringify(labelEditor.S.printer)); }')

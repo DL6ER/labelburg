@@ -96,13 +96,14 @@ function shown(before) {
     redrawSettings();
     followQueue();
 }
-// Every 20 s from a tab that is shown: one left in the background keeps no
-// printer busy, e.g. a B1 its Bluetooth connection. Shown again it asks at once.
+// Every 20 s from a tab in focus: one in the background or behind another
+// window keeps no printer busy, e.g. one on Bluetooth its connection. Shown
+// again it asks at once.
 function poll() {
-    if (!document.hidden) refresh();
+    if (!document.hidden && document.hasFocus()) refresh();
 }
-// The printer chosen every 2 s where that costs nothing, e.g. one on USB:
-// another roll or a lost connection shows at once
+// The printer chosen every 2 s where that costs nothing, e.g. one on USB, and
+// once the tab is in focus again: another roll or a lost connection shows at once
 async function follow() {
     const before = tapeState();
     if (await followPrinter()) shown(before);
@@ -444,9 +445,11 @@ async function receiveShared() {
     if (S.edit && S.edit.copies) $('#copies').value = S.edit.copies;
     setInterval(poll, 20000);
     setInterval(follow, 2000);
+    addEventListener('focus', follow);
     // Settings changed in another browser show when coming back
     addEventListener('visibilitychange', async () => {
         if (document.hidden) return;
+        follow();
         refresh();
         loadSaved();
         if (await loadLabelSettings()) { redrawLabelSettings(); printerChanged(); }
