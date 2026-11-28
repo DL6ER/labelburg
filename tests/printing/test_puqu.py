@@ -2,6 +2,7 @@
 place of the Bluetooth LE connection, and printing and status through the label
 designer."""
 import json
+import socket
 import struct
 
 import pytest
@@ -300,24 +301,77 @@ def test_found_on_bluetooth_le_by_name(name, found):
     assert puqu.DRIVER.found_on_bluetooth(device) == (('bt://CD:AC:BB:0F:CB:36', 'PUQU/Q00') if found else None)
 
 
-def test_an_address_with_a_channel_is_reached_over_rfcomm(monkeypatch):
-    class Rfcomm(FakePrinter):
-        closed = False
+def rfcomm_pair(monkeypatch):
+    """The printer's end of each connection transports.rfcomm() opens."""
+    printers = []
 
-        def close(self):
-            self.closed = True
-    printer, asked = Rfcomm(), []
-    monkeypatch.setattr(transports, 'rfcomm', lambda device, channel: asked.append((device, channel)) or printer)
-    with protocol.connect(f'{DEVICE}/2') as s:
-        s.sendall(bytes(400))
-    assert asked == [(f'{DEVICE}/2', 2)]
-    assert [len(data) for data in printer.sent] == [400]
-    assert printer.closed
+    def opened(device, channel):
+        ours, theirs = socket.socketpair()
+        printers.append((device, channel, theirs))
+        return ours
+    monkeypatch.setattr(transports, 'rfcomm', opened)
+    return printers
 
 
-@pytest.mark.parametrize('device, kept', [(DEVICE, True), (f'{DEVICE}/2', False)])
-def test_only_a_printer_on_bluetooth_le_keeps_its_connection(device, kept):
-    assert puqu.DRIVER.keeps_connection(device, 'PUQU/Q00') == kept
+def test_an_address_with_a_channel_keeps_its_rfcomm_link(monkeypatch):
+    printers = rfcomm_pair(monkeypatch)
+    for _ in range(2):
+        with protocol.connect(f'{DEVICE}/2') as s:
+            s.sendall(bytes(400))
+    assert [(device, channel) for device, channel, _ in printers] == [(f'{DEVICE}/2', 2)]
+    printers[0][2].settimeout(1)
+    assert len(printers[0][2].recv(1000)) == 800
+
+
+def test_an_rfcomm_link_is_closed_after_each_use_where_the_printer_saves_energy(monkeypatch):
+    printers = rfcomm_pair(monkeypatch)
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(f'{DEVICE}/2')}))
+    for _ in range(2):
+        with protocol.connect(f'{DEVICE}/2') as s:
+            s.sendall(bytes(400))
+    assert len(printers) == 2
+    # Closed: the printer reads its end to the close
+    printers[0][2].settimeout(1)
+    assert printers[0][2].recv(1000) and printers[0][2].recv(1000) == b''
+
+
+@pytest.mark.parametrize('device', [DEVICE, f'{DEVICE}/2'])
+def test_a_printer_on_bluetooth_keeps_its_connection_and_is_followed_unless_it_saves_energy(monkeypatch, device):
+    assert puqu.DRIVER.keeps_connection(device, 'PUQU/Q00')
+    assert puqu.DRIVER.followed(device, 'PUQU/Q00')
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(device)}))
+    assert not puqu.DRIVER.followed(device, 'PUQU/Q00')
+
+
+def test_only_the_label_designer_following_it_asks_the_printer(client, fake):
+    printer = fake()
+    status = '/labeldesigner/api/printer_status'
+    client.get(status)
+    # The 20 s refresh of a label designer tells its last answer
+    for _ in range(3):
+        assert client.get(status).get_json()['printers'][0]['errors'] == []
+    assert printer.queries() == 1
+    # The one in front following it asks it
+    client.get(f'{status}?printer={DEVICE}')
+    assert printer.queries() == 2
+
+
+def test_a_printer_that_saves_energy_is_asked_only_when_looking_and_after_printing(tmp_path, fake):
+    # Its settings in a folder of its own, not kept for other tests
+    client = make_client(tmp_path, empty_repo=True, model='PUQU/Q00', printer=DEVICE)
+    printer = fake()
+    assert client.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'}).status_code == 200
+    status = '/labeldesigner/api/printer_status'
+    for query in ('', f'?printer={DEVICE}', f'?printer={DEVICE}'):
+        client.get(status + query)
+    assert printer.queries() == 1
+    client.get(status + '?look=1')
+    assert printer.queries() == 2
+    response = client.post('/labeldesigner/api/print', data={'label_size': 'puqu50x30', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    asked = printer.queries()
+    client.get(f'{status}?printer={DEVICE}')
+    assert printer.queries() == asked + 1
 
 
 def test_a_report_told_meanwhile_is_not_taken_as_the_answer(monkeypatch):

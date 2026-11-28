@@ -306,7 +306,7 @@ def test_a_b1_that_saves_energy_tells_its_last_state_between_prints(b1, le):
 @pytest.mark.parametrize('model, device, follow', [
     ('Niimbot/B1', DEVICE, True), ('Niimbot/D110_M', DEVICE, True), ('Niimbot/B1', 'usbip://192.0.2.7/1-4.1.3', True),
     ('QL-800', 'file:///dev/usb/lp0', True), ('QL-800', 'usb://0x04f9:0x209b', True), ('QL-800', '/dev/usb/lp1', True),
-    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False),
+    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', True),
     ('QL-800', 'simulation', False)])
 def test_printers_that_are_asked_without_cost_are_followed(model, device, follow):
     # A status query of one on Bluetooth that beeps or on the network costs,
@@ -348,7 +348,7 @@ def test_b1_out_of_reach_on_bluetooth_le_is_left_alone_until_looked_for(b1, le):
 
 @pytest.mark.parametrize('model, device, offered', [
     ('Niimbot/B1', DEVICE, True), ('Niimbot/B1', '/dev/usb/lp0', False), ('Niimbot/D110_M', DEVICE, True),
-    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False)])
+    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', True)])
 def test_only_printers_whose_connection_is_kept_save_energy(model, device, offered):
     from app.labeldesigner import drivers
     assert drivers.for_model(model).keeps_connection(device, model) is offered

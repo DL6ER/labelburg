@@ -109,25 +109,22 @@ def over_le(device: str) -> bool:
 
 
 class Connection:
-    """A printer on Bluetooth read and written like a socket: on Bluetooth LE
-    the kept connection, written in pieces of CHUNK bytes, else RFCOMM."""
+    """A printer on Bluetooth read and written like a socket: its kept
+    connection, on Bluetooth LE written in pieces of CHUNK bytes, else RFCOMM."""
 
     def __init__(self, device: str):
         self.device, self.le = device, over_le(device)
         if self.le:
             self.s = transports.kept_le(device, WRITE, NOTIFY, error=PuquError, no_answer=PuquError)
         else:
-            self.s = transports.rfcomm(device, CHANNEL)
+            self.s = transports.kept_rfcomm(device, CHANNEL)
         self.s.settimeout(ANSWER_WAIT)
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        if self.le:
-            transports.release_le(self.device, self.s)
-        else:
-            self.s.close()
+        transports.release(self.device, self.s)
 
     def settimeout(self, timeout: float):
         self.s.settimeout(timeout)

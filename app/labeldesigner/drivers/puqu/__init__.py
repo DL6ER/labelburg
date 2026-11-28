@@ -68,7 +68,7 @@ class Puqu(Driver):
     reports_tape = False
 
     def keeps_connection(self, device, model):
-        return device.startswith('bt://') and protocol.over_le(device)
+        return device.startswith('bt://')
 
     def fits(self, label, model):
         return label in LABELS
@@ -83,8 +83,11 @@ class Puqu(Driver):
         # The labels are torn off. Their top leaves it first.
         return dict(super().capabilities(model), qualities=['quality'], cutter=False, leaves_turned=True)
 
-    def status(self, device, model, unconfirmed=False):
-        return self.noted_status(device, lambda: self._status(device, model))
+    def followed_status(self, device, model):
+        return self.status(device, model, fresh=True)
+
+    def status(self, device, model, unconfirmed=False, fresh=False):
+        return self.noted_status(device, lambda: self.bluetooth_status(device, lambda: self._status(device, model), fresh))
 
     def _status(self, device, model):
         state = network_status(device, model)
@@ -115,6 +118,8 @@ class Puqu(Driver):
 
     def send(self, queue, job) -> str:
         device = queue.device_specifier
+        # Asked at the next status query
+        self.ask_again(device)
         try:
             error = protocol.print_labels(device, job, self.label_lengths(job))
             devices.note_answer(device)
