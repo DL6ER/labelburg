@@ -411,6 +411,34 @@ def test_a_label_printed_is_named_by_its_first_line_as_printed_also_a_saved_one(
     assert entry(client, again)['title'] == 'Opened 12/24/2026'
 
 
+def test_a_label_printed_by_the_scan_station_knows_its_saved_label(client):
+    saved = {'name': 'Box.json', 'label_size': '62', 'text': [{'text': 'Box {{blank:code}}', 'size': '40'}]}
+    assert client.post(f'{API}/repository/save', json=saved).status_code == 200
+    job = printed(client, 'scan', json={'name': 'Box.json', 'code': 'A-17', 'printer': 'simulation'},
+                  headers={'X-Requested-With': 'XMLHttpRequest'})
+    assert entry(client, job)['title'] == 'Box A-17'
+    assert print_store.entry(job)['named'] == 'Box.json'
+
+
+@pytest.mark.parametrize('text, code, title', [
+    ('{{blank:code}}', '\ufeffWIFI:T:WPA;S:Home;P:secret123;;', 'Home'),
+    ('Box {{blank:code}}', 'WIFI:T:WPA;S:Home;P:secret123;;', 'Box'),
+    ('Box {{blank:code}}', '\ufeffotpauth://totp/Shop:ann?secret=secret123', 'Box'),
+    ('{{blank:code}}', '\ufeffBEGIN:VCARDVERSION:3.0FN:AnnTEL:secret123END:VCARD', 'Shelf'),
+])
+def test_a_scanned_code_that_holds_more_than_a_name_never_names_a_job(client, text, code, title):
+    saved = {'name': 'Shelf.json', 'label_size': '62', 'text': [{'text': text, 'size': '40'}]}
+    assert client.post(f'{API}/repository/save', json=saved).status_code == 200
+    answer = client.post(f'{API}/scan', json={'name': 'Shelf.json', 'code': code, 'printer': 'simulation'},
+                         headers={'X-Requested-With': 'XMLHttpRequest'})
+    assert answer.status_code == 200, answer.get_json()
+    job = answer.get_json()['job']
+    # The answer to the scan tells the blanks filled, the queue and the printed labels only the title
+    told = [client.get(f'{API}/queue/{job}').data, client.get(f'{API}/queue').data, client.get(f'{API}/history').data]
+    assert [b'secret123' in body for body in told] == [False] * 3
+    assert answer.get_json()['title'] == entry(client, job)['title'] == title
+
+
 def test_the_date_is_asked_for_only_where_it_comes_out_otherwise_today(client):
     def asks(text, days=0):
         job = printed(client, data=dict(LABEL, text=lines(text)))
@@ -510,6 +538,17 @@ def test_a_label_printed_with_new_dates_or_numbers_is_named_as_it_prints(client,
     # A code left empty takes the lines
     (['BEGIN:VCARD', 'VERSION:3.0', 'FN:Ann', 'TEL:secret123', 'END:VCARD'], 'Label'),
     (['WIFI:T:WPA;S:Home;P:secret123;;'], 'Home'),
+    # Phones put a byte order mark before a contact
+    ('\ufeffWIFI:T:WPA;S:Home;P:secret123;;', 'Home'),
+    ('\ufeffBEGIN:VCARD\nVERSION:3.0\nFN:Ann\nTEL:secret123\nEND:VCARD', 'Label'),
+    ('\ufeffBEGIN:VCARDVERSION:3.0FN:AnnTEL:secret123END:VCARD', 'Label'),
+    (['\ufeffWIFI:T:WPA;S:Home;P:secret123;;'], 'Home'),
+    # After the text of the label, e.g. filled into a blank
+    (['Box WIFI:T:WPA;S:Home;P:secret123;;'], 'Box'),
+    (['Box otpauth://totp/Shop:ann?secret=secret123'], 'Box'),
+    (['Box BEGIN:VCARD', 'VERSION:3.0', 'TEL:secret123', 'END:VCARD'], 'Box'),
+    # An icon alone before it names nothing
+    (['\U000F0001 MECARD:N:Ann;TEL:secret123;;', 'TEL:secret123'], 'Label'),
 ])
 def test_a_code_that_holds_more_than_a_name_never_names_a_label(client, code, title):
     text, code = (lines(*code), '') if isinstance(code, list) else (lines(''), code)

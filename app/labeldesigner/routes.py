@@ -15,7 +15,7 @@ from collections import OrderedDict
 from io import BytesIO
 from typing import BinaryIO
 from urllib.parse import urlparse
-from . import adding, bp, codes, demos, icons, paperless, print_queue, print_store, printer_settings, problem_report, refusals, sheets, tape
+from . import adding, bp, codes, demos, icons, paperless, print_queue, print_store, printer_settings, problem_report, refusals, scan, sheets, tape
 from .refusals import IMAGE_MODE_REFUSED, UNKNOWN_MODEL
 from app import get_fonts
 from app.fonts import FontNotFound, sample as font_sample
@@ -976,7 +976,9 @@ PREVIEW_SIZE = 240
 MAX_TITLE_LENGTH = 200
 # Codes that hold more than a name, e.g., a password or a contact: they name
 # no job, a Wi-Fi code by its network alone
-HELD_CODES = re.compile(r'\s*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
+HELD_CODES = re.compile(r'[\s\ufeff]*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
+# Such a code after other text, e.g. of a blank, at the start of a word
+HELD_WITHIN = re.compile(r'(?<![^\s\ufeff])\ufeff*(?:BEGIN:V|MECARD:|OTPAUTH:|WIFI:)', re.IGNORECASE)
 WIFI_FIELD = re.compile(r'([A-Za-z]+):((?:\\.|[^\\;])*);')
 # Where a job comes from as a request may tell it, the routes name the others
 TOLD_SOURCES = ('designer', 'mcp')
@@ -1163,7 +1165,8 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', 
     code = str(getattr(drawn.label, 'code_text', '') or '') if drawn else ''
     # Nor do the lines such a code holds, also one that took the lines
     whole = code or '\n'.join(texts)
-    held = set(whole.splitlines()) if HELD_CODES.match(whole) else set()
+    start = HELD_WITHIN.search(whole)
+    held = set(whole[start.start():].splitlines()) if start else set()
     lines = [line for text in texts for line in _naming(text).splitlines() if line not in held]
     # Icons are drawn with fonts of their own, a title shows them as boxes
     lines = [''.join(char for char in line if not icons.is_icon(char)) for line in lines]
@@ -1177,12 +1180,14 @@ def _job_title(data: dict, drawn: Drawn | None = None, fallback: str = 'Label', 
 
 def _naming(text: str) -> str:
     """text as it may name a job: of a Wi-Fi code its network, of another
-    of HELD_CODES nothing."""
+    of HELD_CODES nothing, of a text with one after it the text before it."""
     if not HELD_CODES.match(text):
-        return text
-    if text.lstrip()[:5].upper() != 'WIFI:':
+        held = HELD_WITHIN.search(text)
+        return text[:held.start()] if held else text
+    text = re.sub(r'^[\s\ufeff]+', '', text)
+    if text[:5].upper() != 'WIFI:':
         return ''
-    fields = {key.upper(): value for key, value in WIFI_FIELD.findall(text.lstrip()[5:])}
+    fields = {key.upper(): value for key, value in WIFI_FIELD.findall(text[5:])}
     return re.sub(r'\\(.)', r'\1', fields.get('S', ''))
 
 
@@ -1316,6 +1321,28 @@ def repo_preview():
                            'Failed to preview file')
 
 
+def _with_blanks(data: dict, blanks: dict[str, str] | None) -> dict[str, str]:
+    """The values for the blanks of a stored label: blanks over those stored
+    with it, else as _requested_blanks() has them."""
+    return _requested_blanks(data) if blanks is None else {**_blank_values(data.get('blanks')), **blanks}
+
+
+def _preview_label(data: dict, image_dir: str, image_bytes: bytes | None, mark_blanks: bool, on_tape: bool,
+                   blanks: dict[str, str] | None = None) -> tuple[SimpleLabel, Image.Image, int | None]:
+    """The label of a stored label whose image is in image_dir, or in
+    image_bytes where it was read with the label, its preview and the page
+    count of its PDF. With blanks, they fill the blanks instead of the
+    request."""
+    data['blanks'] = _with_blanks(data, blanks)
+    if on_tape:
+        data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
+    images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
+    # As many labels as printed with the copies of the request
+    total = _count(_option('print_count', data, 1)) * _labels_per_copy(data, page_count)
+    label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data), total=total)
+    return label, label.generate(), page_count
+
+
 def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = None, mark_blanks: bool = False,
                       on_tape: bool = False):
     """The preview of a stored label whose image is in image_dir, or of
@@ -1323,14 +1350,7 @@ def _preview_response(data: dict, image_dir: str, image_bytes: bytes | None = No
     (return_format). With mark_blanks, blanks without a value show their
     name. With on_tape, it is made as _print_stored_label() prints it."""
     try:
-        data['blanks'] = _requested_blanks(data)
-        if on_tape:
-            data, _ = _stored_as_printed(data, *_resolved_printer(_requested('printer'), _requested('model')))
-        images, page_count = load_label_images(data, {}, first_only=True, image_dir=image_dir, image_bytes=image_bytes)
-        # As many labels as printed with the copies of the request
-        total = _count(_option('print_count', data, 1)) * _labels_per_copy(data, page_count)
-        label = create_label_from_request(data, {}, image=images[0], mark_blanks=mark_blanks, asn=_next_asn(data), total=total)
-        im = label.generate()
+        label, im, page_count = _preview_label(data, image_dir, image_bytes, mark_blanks, on_tape)
     except Exception as e:
         return _preview_refused(e)
 
@@ -1347,6 +1367,42 @@ def repo_print():
     # and perform the same printing logic as the /api/print endpoint.
     return _saved_response(lambda data, image_bytes: _print_stored_label(data, _get_repo_dir(), image_bytes, named=True),
                            'Failed to load file')
+
+
+@bp.route('/api/scan', methods=['POST'])
+def scan_print():
+    # Print a saved label with the blanks filled from a scanned code, or only
+    # preview it with preview_only.
+    code = _requested('code')
+
+    def respond(data, image_bytes):
+        try:
+            preview_only = _whole_or(_requested('preview_only'), 0) != 0
+            filled = scan.fill_blanks(_blank_names(data), _blank_fields(data.get('fields')), scan.code_text(code))
+        except ValueError as e:
+            _log_refused_request('Scan', e)
+            message = refusals.message(e, refusals.INVALID_INPUT)
+            hint = scan.advice(message, _title_of(data, _requested_name()), _blank_names(data))
+            return make_response(jsonify({'success': False, 'message': message, **({'hint': hint} if hint else {})}), 400)
+        result = {'success': True, 'printed': not preview_only, 'label': _requested_name(), 'filled': filled}
+        if preview_only:
+            try:
+                label, im, _ = _preview_label(data, _get_repo_dir(), image_bytes, False, True, filled)
+            except Exception as e:
+                return _preview_refused(e)
+            return {**result, 'image': base64.b64encode(image_to_png_bytes(im, gray=not label.in_color)).decode()}
+        printed = _print_stored_label(data, _get_repo_dir(), image_bytes, filled, 'png', named=True)
+        # The answer of the queue, which tells the job to follow
+        if getattr(printed, 'status_code', None) == 200 and (answer := printed.get_json(silent=True)) and answer.get('success'):
+            return {**answer, **result}
+        return printed
+    return _saved_response(respond, 'Failed to load file')
+
+
+def _title_of(data: dict, name: str) -> str:
+    """The name a stored label was saved under, else its file name."""
+    title = data.get('title')
+    return title.strip() if isinstance(title, str) and title.strip() else name.removesuffix('.json')
 
 
 def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]:
@@ -1368,12 +1424,14 @@ def _stored_as_printed(data: dict, device: str, model: str) -> tuple[dict, dict]
     return tape.on_tape(data, loaded), kept
 
 
-def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None, named: bool = False):
+def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = None, blanks: dict[str, str] | None = None,
+                        return_format=None, named: bool = False):
     """Print a stored label whose image is in image_dir, or image_bytes where
     it was read with the label, like /api/print, of a saved one (named) kept
-    with the name it is saved under."""
+    with the name it is saved under. With blanks, they fill the blanks
+    instead of the request."""
     try:
-        data['blanks'] = _requested_blanks(data)
+        data['blanks'] = _with_blanks(data, blanks)
         printer, data, high_res, fast = _stored_job(data)
         print_count = _check_print_count(_whole(_option('print_count', data, 1)))
         # Saved with the label, the request overrides it, else as set for labels
@@ -1381,7 +1439,7 @@ def _print_stored_label(data: dict, image_dir: str, image_bytes: bytes | None = 
         collate = _whole_or(collate if collate is not None else data.get('collate'), _label_settings()['collate'] or 1) != 0
     except Exception as e:
         return _refused('Print job', e, refusals.PRINT_FAILED)
-    return _print_job(printer, data, {}, print_count, collate, high_res, fast, _requested('return_format'),
+    return _print_job(printer, data, {}, print_count, collate, high_res, fast, return_format or _requested('return_format'),
                       named=data.get('name') if named else None, image_dir=image_dir, image_bytes=image_bytes)
 
 
@@ -1707,8 +1765,7 @@ def _preview_refused(error: Exception):
     """The answer to a preview that cannot be made: a fixed message, the
     details are in the log."""
     _log_refused_request('Preview', error)
-    return make_response(jsonify({'message': refusals.message(error, refusals.PREVIEW_FAILED)}),
-                         413 if isinstance(error, TextTooLong) else 400)
+    return _fail(refusals.message(error, refusals.PREVIEW_FAILED), 413 if isinstance(error, TextTooLong) else 400)
 
 
 # The X-Label-Parts header at most, in bytes: nginx takes 4 KB of headers by

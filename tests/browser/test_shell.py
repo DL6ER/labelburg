@@ -40,7 +40,7 @@ def test_commands_in_the_search(designer):
     designer.keyboard.press('Control+k')
     designer.keyboard.type('>')
     assert designer.locator('.res.cmd b').all_inner_texts() == [
-        'New label', 'Templates', 'Go to the editor', 'Printer and settings', 'Printed labels',
+        'New label', 'Templates', 'Go to the editor', 'Printer and settings', 'Printed labels', 'Scan to print',
         'Dark mode', 'Light mode', 'Follow the system for dark mode']
     designer.keyboard.type('mode')
     assert designer.locator('.res.cmd').count() == 3
@@ -167,6 +167,32 @@ def test_printers_are_asked_only_from_a_tab_that_is_shown(designer, hidden, ask)
         Object.defineProperty(document, 'hidden', {{ value: {str(hidden).lower()}, configurable: true }}); return labelEditor.{ask}(); }}""")
     designer.wait_for_timeout(300)
     assert bool(asked) is not hidden
+
+
+@pytest.mark.parametrize('ask, asks', [('poll', True), ('follow', False)])
+def test_only_the_printer_followed_waits_for_the_tab_to_be_in_focus(designer, ask, asks):
+    # A window behind another one still shows all printers every 20 s, but
+    # keeps no connection to a printer on Bluetooth open
+    asked = []
+    designer.on('request', lambda request: '/api/printer_status' in request.url and asked.append(request.url))
+    designer.evaluate(f"""() => {{ labelEditor.S.printer.follow = true;
+        document.hasFocus = () => false; return labelEditor.{ask}(); }}""")
+    designer.wait_for_timeout(300)
+    assert bool(asked) is asks
+
+
+@pytest.mark.parametrize('back', ["window.dispatchEvent(new Event('focus'))",
+                                  "document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))"])
+def test_the_printer_followed_is_asked_at_once_in_focus_again(designer, back):
+    asked = []
+    designer.on('request', lambda request: '/api/printer_status?printer=' in request.url and asked.append(request.url))
+    designer.evaluate('() => { labelEditor.S.printer.follow = true; document.hasFocus = () => false; }')
+    # Not every 2 s meanwhile
+    designer.wait_for_timeout(2500)
+    assert asked == []
+    designer.evaluate(f'() => {{ delete document.hasFocus; {back}; }}')
+    designer.wait_for_timeout(150)
+    assert asked
 
 
 def test_an_unchanged_status_of_the_printer_followed_leaves_the_printers_as_they_are(designer):

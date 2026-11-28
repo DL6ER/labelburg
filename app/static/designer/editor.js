@@ -70,8 +70,8 @@ function showLabel({ title, design, origin, values }) {
     setEdit({ title: title || 'New label', design: codeWithText(clone(design)), origin: origin || null, values: Object.assign({}, values || {}) });
     S.edit.kept = keptAs(S.edit);
     // Drawn at once where the editor is shown, e.g. under Templates; only
-    // another view, e.g. Settings, goes back to it by the address
-    if (document.body.dataset.view === 'settings') { location.hash = 'edit'; return; }
+    // another view, e.g. Settings or the scan station, goes back to it by the address
+    if (document.body.dataset.view !== 'edit') { location.hash = 'edit'; return; }
     if (location.hash !== '#edit') history.replaceState(null, '', '#edit');
     closePop();
     renderEditor();

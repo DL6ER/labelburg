@@ -593,7 +593,7 @@ textarea.in { width: 100%; resize: vertical; }
 .res small { color: var(--muted); }
 .res .ico { width: 64px; height: 36px; flex: none; padding: 3px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; color: var(--muted); }
 .res .ico img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 2px; }
-body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibility: hidden; }
+body[data-view="settings"] #save, body[data-view="settings"] .printbtn, body[data-view="scan"] #save, body[data-view="scan"] .printbtn { visibility: hidden; }
 .res .act { font-size: 12px; color: var(--muted); }
 .res.cmd .ico { color: var(--ink-2); }
 .res.cmd .ico .ic { width: 17px; height: 17px; }
@@ -622,6 +622,36 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
 .q-row small { color: var(--muted); }
 .q-img { width: 64px; height: 36px; flex: none; padding: 3px; border-radius: 8px; background: var(--surface-2); display: grid; place-items: center; }
 .q-img img { max-width: 100%; max-height: 100%; background: #fff; border-radius: 2px; }
+
+/* --- Scan station: the label chosen, the field a scanner types into, the last scan --- */
+.scan { height: 100%; overflow: auto; }
+.scan-inner { max-width: 720px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 16px; }
+.scan-label { display: flex; align-items: center; gap: 14px; padding: 14px 16px; }
+.scan-label b { display: block; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.scan-label small { display: block; }
+.scan-label .set-thumb img { max-height: 38px; }
+.scan-in { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+textarea.scan-field { width: 100%; min-height: 96px; resize: none; padding: 14px 16px; border-radius: 12px; font-size: 22px; line-height: 1.35; }
+.scan-field:focus { outline: 3px solid var(--select-soft); }
+.scan-switch { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; font-size: 13.5px; color: var(--ink-2); cursor: pointer; }
+.scan-switch input { appearance: none; position: relative; flex: none; width: 36px; height: 20px; margin: 0; border-radius: 99px; background: var(--line-2); cursor: pointer; transition: background .15s; }
+.scan-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.scan-switch input:checked { background: var(--select); }
+.scan-switch input:checked::after { transform: translateX(16px); }
+.scan-acts { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.scan-cam { overflow: hidden; border-radius: 12px; background: #000; }
+.scan-cam video { display: block; width: 100%; max-height: 360px; object-fit: cover; }
+.scan-result { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.scan-code { margin: 0; max-height: 7.5em; overflow: auto; color: var(--muted); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.scan-shot { display: grid; place-items: center; padding: 18px; border-radius: 12px; background-color: var(--stage); background-image: radial-gradient(var(--dots) 1px, transparent 1px); background-size: 14px 14px; }
+.scan-shot img { max-width: 100%; max-height: 260px; background: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, .16); }
+.scan-state { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.scan-state.ok { color: var(--ok); }
+.scan-state.warn { align-items: flex-start; color: var(--warn); font-weight: 500; }
+.scan-state.warn .ic { margin-top: 2px; }
+.scan-filled { margin: -4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.scan-hint { margin: -4px 0 0 23px; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.scan-list { display: flex; flex-direction: column; max-height: 60vh; overflow: auto; }
 
 @media (max-width: 1100px) {
     .search { width: auto; }
@@ -661,7 +691,7 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
     .gear.on { background: var(--select-soft); color: var(--select); }
 
     .mainacts { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); }
-    body[data-view="settings"] .mainacts { display: none; }
+    body[data-view="settings"] .mainacts, body[data-view="scan"] .mainacts { display: none; }
     .top .foot-adv { display: grid; width: 44px; height: 44px; background: var(--surface-2); color: var(--ink); border-radius: 12px; }
     .top .foot-adv.on { background: var(--select-soft); color: var(--select); }
     #save { width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: 12px; background: var(--surface-2); color: var(--ink); }
@@ -740,5 +770,8 @@ body[data-view="settings"] #save, body[data-view="settings"] .printbtn { visibil
 
     .toast, .queue { bottom: calc(var(--foot-h) + var(--sheet-h, 0px) + 12px + env(safe-area-inset-bottom)); }
     .toast { width: max-content; }
-    body[data-view="settings"] .toast, body[data-view="settings"] .queue { bottom: 16px; }
+    body[data-view="settings"] .toast, body[data-view="settings"] .queue, body[data-view="scan"] .toast, body[data-view="scan"] .queue { bottom: 16px; }
+    .scan-inner { padding: 16px 16px 40px; gap: 12px; }
+    .scan-label { flex-wrap: wrap; }
+    textarea.scan-field { font-size: 18px; min-height: 76px; }
 }

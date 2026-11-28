@@ -9,6 +9,8 @@ export const SIZES = Object.fromEntries(C.label_sizes.map(s => [s.id, s]));
 // Static files, e.g. the symbol lists, next to this page's style sheet
 export const STATIC = (document.querySelector('link[href*="designer/main.css"]') || { getAttribute: () => '/static/designer/main.css' })
     .getAttribute('href').replace(/designer\/main\.css.*$/, '');
+// The project, whose guides the page links
+export const SOURCE = 'https://github.com/DL6ER/labelburg';
 
 // --- Small helpers -----------------------------------------------------------
 
@@ -876,11 +878,11 @@ export async function refreshPrinters(look = false) {
 }
 
 // The printer chosen asked alone, where the server says that costs nothing,
-// e.g. one on USB: whether its status changed
+// e.g. one on USB, from a tab in focus: whether its status changed
 let following = false;
 export async function followPrinter() {
     const p = S.printer;
-    if (document.hidden || following || !(p && p.follow)) return false;
+    if (document.hidden || !document.hasFocus() || following || !(p && p.follow)) return false;
     following = true;
     try {
         const asked = { ...settingsSaves };
