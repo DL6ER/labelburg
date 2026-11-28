@@ -131,7 +131,6 @@ def answering(printer_):
 def answered(monkeypatch):
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
-    monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
@@ -506,6 +505,8 @@ def test_d110_m_that_saves_energy_is_connected_only_to_look_and_to_print(saving,
     response = saving.post('/labeldesigner/api/print', data={
         'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
     assert outcome(saving, response) == ('printed', '')
+    # Not asked again right after it printed
+    assert saving.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
     assert (len(on_rfcomm.addresses), on_rfcomm.closed) == (3, 3) and transports._kept == {}
 
 
@@ -614,13 +615,16 @@ def test_tag_laid_out_otherwise_is_an_unknown_roll(client, fake, monkeypatch):
 
 
 def test_print_updates_the_status(client, fake, monkeypatch):
-    client.get('/labeldesigner/api/printer_status')
+    # A roll it does not know first
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, bytes(8) + b'\x0801'))
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['media_width'] is None
     # Another roll was loaded since
     tag = bytes(8) + b'\x0801222281' + b'\x10PZ1G910304007921' + struct.pack('>HHB', 192, 87, 1)
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
     client.post('/labeldesigner/api/print', data={'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
+    printed = len(fake.commands)
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert (printer_['media_width'], printer_['media_length']) == (12, 40)
+    assert (printer_['media_width'], printer_['media_length']) == (12, 40) and len(fake.commands) == printed
 
 
 def test_print_that_could_not_reach_the_printer_asks_it_again(client, fake, monkeypatch):

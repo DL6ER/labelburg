@@ -169,16 +169,16 @@ def test_printers_are_asked_only_from_a_tab_that_is_shown(designer, hidden, ask)
     assert bool(asked) is not hidden
 
 
-@pytest.mark.parametrize('ask', ['poll', 'follow'])
-def test_printers_are_asked_only_from_a_tab_in_focus(designer, ask):
-    # Nor from a window behind another one: the connection to a printer on
-    # Bluetooth closes once no label designer is in front
+@pytest.mark.parametrize('ask, asks', [('poll', True), ('follow', False)])
+def test_only_the_printer_followed_waits_for_the_tab_to_be_in_focus(designer, ask, asks):
+    # A window behind another one still shows all printers every 20 s, but
+    # keeps no connection to a printer on Bluetooth open
     asked = []
     designer.on('request', lambda request: '/api/printer_status' in request.url and asked.append(request.url))
     designer.evaluate(f"""() => {{ labelEditor.S.printer.follow = true;
         document.hasFocus = () => false; return labelEditor.{ask}(); }}""")
     designer.wait_for_timeout(300)
-    assert asked == []
+    assert bool(asked) is asks
 
 
 @pytest.mark.parametrize('back', ["window.dispatchEvent(new Event('focus'))",

@@ -12,8 +12,8 @@ from . import devices
 
 # Printers on USB, also shared over USB/IP, and through usblp
 _USB = re.compile(r'(usb|usbip|file)://|/dev/')
-# The last answer of each printer and when it was asked, by
-# devices.lock_key(), see Driver.saving_status()
+# The last answer of each printer on Bluetooth and when it was asked, by
+# devices.lock_key(), see Driver.bluetooth_status()
 _last_answers: dict[str, tuple[float, dict]] = {}
 
 
@@ -159,7 +159,7 @@ class Driver:
         """Whether the driver keeps its connection to the printer between
         uses, as transports.kept_le() and kept_rfcomm() on Bluetooth. Its
         setting save_energy closes it after each print and status query
-        instead, see devices.saves_energy() and saving_status()."""
+        instead, see devices.saves_energy() and bluetooth_status()."""
         return False
 
     def device_capabilities(self, device: str, model: str) -> dict:
@@ -239,23 +239,32 @@ class Driver:
         devices.note_answer(device)
         return state
 
-    def saving_status(self, device: str, query) -> dict:
-        """The status query() tells, or the last one of a printer that saves
-        energy, see devices.saves_energy(): that is asked only when the label
-        designer looks for printers and after a job, see ask_again(), and
-        while it tells an error, so that the error goes once it is fixed."""
-        key = devices.lock_key(device)
-        asked, state = _last_answers.get(key, (-1.0, None))
-        if devices.saves_energy(device) and state and not state.get('errors') and asked >= devices.looked:
+    def bluetooth_status(self, device: str, query, fresh: bool = False) -> dict:
+        """The status of a printer on bt://: its last answer from after the
+        label designer last looked for printers or a job, see ask_again(),
+        where that told no error, so that an error goes once it is fixed, else
+        what query() tells. A fresh query, from followed_status(), asks one
+        whose connection is kept, so that the connection closes once no label
+        designer follows it, but not one that saves energy, see
+        devices.saves_energy(). Other printers are always asked."""
+        asked, state = _last_answers.get(devices.lock_key(device), (-1.0, None))
+        told = not fresh or devices.saves_energy(device)
+        if told and state and not state.get('errors') and asked >= devices.looked:
             return dict(state)
         state = query()
         # One a job holds was not asked
         if state.get('status_type') != devices.BUSY_STATUS_TYPE:
-            _last_answers[key] = (time.monotonic(), dict(state))
+            self.answered(device, state)
         return state
 
+    def answered(self, device: str, state: dict):
+        """Keep the state a printer on bt:// told, e.g. while printing, as its
+        last answer, see bluetooth_status()."""
+        if device.startswith('bt://'):
+            _last_answers[devices.lock_key(device)] = (time.monotonic(), dict(state))
+
     def ask_again(self, device: str):
-        """Ask the printer at the next status query, see saving_status()."""
+        """Ask the printer at the next status query, see bluetooth_status()."""
         _last_answers.pop(devices.lock_key(device), None)
 
     def followed_status(self, device: str, model: str) -> dict | None:

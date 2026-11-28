@@ -110,13 +110,16 @@ class BrotherRaster(Driver):
     def feed_job(self, queue):
         return raster.feed(queue) if self.feed_kind(queue.model, queue.label_size) else None
 
-    def status(self, device, model, unconfirmed=False):
+    def followed_status(self, device, model):
+        return self.status(device, model, fresh=True)
+
+    def status(self, device, model, unconfirmed=False, fresh=False):
         if device.startswith('tcp://'):
             return network.query_network_status(device, model, label_printers_only=unconfirmed)
         if device.startswith('bt://'):
             _without_bluetooth(device, model)
             # One switched off is not paged at every status query, it takes the radio
-            return self.noted_status(device, lambda: self.saving_status(device, lambda: usb.query_status(device, model)))
+            return self.noted_status(device, lambda: self.bluetooth_status(device, lambda: usb.query_status(device, model), fresh))
         return usb.query_status(device, model)
 
     def announced(self, service):
@@ -143,7 +146,7 @@ class BrotherRaster(Driver):
         device = queue.device_specifier
         try:
             _without_bluetooth(device, queue.model)
-            # Also one that saves energy is asked at the next status query
+            # On Bluetooth asked at the next status query
             self.ask_again(device)
             network_printer = device.startswith('tcp://')
             if network_printer:

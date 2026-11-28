@@ -569,6 +569,31 @@ def test_brother_printer_on_bluetooth_keeps_its_connection(tmp_path, brother_lin
     assert (brother_links.addresses, brother_links.closed, len(brother_links.asked)) == ([(MAC, 1)], 0, 3)
 
 
+def test_brother_printer_on_bluetooth_is_asked_only_by_the_label_designer_following_it(tmp_path, brother_links):
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    client.get(STATUS)
+    link = transports._kept[devices.lock_key(DEVICE)]
+    used = link.used
+    # The others tell its last state, the connection is not used
+    for _ in range(2):
+        assert client.get(STATUS).get_json()['printers'][0]['errors'] == []
+    assert len(brother_links.asked) == 1 and link.used == used
+    client.get(STATUS + '?printer=' + DEVICE)
+    assert len(brother_links.asked) == 2 and link.used > used and len(brother_links.addresses) == 1
+
+
+def test_brother_printer_on_bluetooth_is_let_go_once_the_label_designer_no_longer_follows_it(tmp_path, brother_links, monkeypatch):
+    # e.g. none is in front: the status of all printers every 20 s keeps no connection open
+    monkeypatch.setattr(transports, 'KEEP_UNUSED', 0.05)
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    client.get(STATUS + '?printer=' + DEVICE)
+    deadline = time.monotonic() + 2
+    while not brother_links.closed and time.monotonic() < deadline:
+        client.get(STATUS)
+        time.sleep(0.01)
+    assert (brother_links.closed, len(brother_links.asked)) == (1, 1) and transports._kept == {}
+
+
 def test_brother_printer_on_bluetooth_that_saves_energy_is_asked_only_when_looking_and_printing(tmp_path, brother_links, monkeypatch):
     client = make_client(tmp_path, empty_repo=True, model='QL-820NWB', printer=DEVICE)
     assert client.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'}).status_code == 200
@@ -592,11 +617,11 @@ def test_printer_that_saves_energy_is_asked_again_while_busy_or_telling_an_error
     monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(DEVICE)}))
     answers = [{'status_type': devices.BUSY_STATUS_TYPE, 'errors': []}, {'errors': ['The cover is open']},
                {'errors': []}, {'errors': ['not asked']}]
-    told = [Driver().saving_status(DEVICE, lambda: answers.pop(0)) for _ in range(4)]
+    told = [Driver().bluetooth_status(DEVICE, lambda: answers.pop(0)) for _ in range(4)]
     assert told[1:] == [{'errors': ['The cover is open']}, {'errors': []}, {'errors': []}] and len(answers) == 1
     # Asked again once the label designer looks for printers
     devices.look_again()
-    assert Driver().saving_status(DEVICE, lambda: answers.pop(0)) == {'errors': ['not asked']}
+    assert Driver().bluetooth_status(DEVICE, lambda: answers.pop(0)) == {'errors': ['not asked']}
 
 
 @pytest.mark.parametrize('model', ['Niimbot/B1', 'Niimbot/D110_M', 'QL-820NWB'])

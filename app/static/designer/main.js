@@ -96,11 +96,10 @@ function shown(before) {
     redrawSettings();
     followQueue();
 }
-// Every 20 s from a tab in focus: one in the background or behind another
-// window keeps no printer busy, e.g. one on Bluetooth its connection. Shown
-// again it asks at once.
+// Every 20 s from a tab that is shown: one left in the background keeps no
+// printer busy, e.g. a B1 its Bluetooth connection. Shown again it asks at once.
 function poll() {
-    if (!document.hidden && document.hasFocus()) refresh();
+    if (!document.hidden) refresh();
 }
 // The printer chosen every 2 s where that costs nothing, e.g. one on USB, and
 // once the tab is in focus again: another roll or a lost connection shows at once
