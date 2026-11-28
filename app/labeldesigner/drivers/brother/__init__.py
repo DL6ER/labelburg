@@ -96,6 +96,10 @@ class BrotherRaster(Driver):
     def resolution_problem(self, model, high_res):
         return resolution_problem(model, high_res)
 
+    def keeps_connection(self, device, model):
+        # On Bluetooth over transports.kept_rfcomm(), see RfcommPrinter
+        return device.startswith('bt://') and getattr(MODELS.get(model), 'bluetooth', False)
+
     def feed_kind(self, model, label_size):
         # The QL-500 takes no cut commands
         if not MODELS[model].cutting:
@@ -112,7 +116,7 @@ class BrotherRaster(Driver):
         if device.startswith('bt://'):
             _without_bluetooth(device, model)
             # One switched off is not paged at every status query, it takes the radio
-            return self.noted_status(device, lambda: usb.query_status(device, model))
+            return self.noted_status(device, lambda: self.saving_status(device, lambda: usb.query_status(device, model)))
         return usb.query_status(device, model)
 
     def announced(self, service):
@@ -139,6 +143,8 @@ class BrotherRaster(Driver):
         device = queue.device_specifier
         try:
             _without_bluetooth(device, queue.model)
+            # Also one that saves energy is asked at the next status query
+            self.ask_again(device)
             network_printer = device.startswith('tcp://')
             if network_printer:
                 # Not sent to a printer that cannot take it, e.g. with an

@@ -6,11 +6,15 @@ drivers/__init__.py lists it. The label designer, the API and the printer
 detection use printers only through this interface."""
 
 import re
+import time
 
 from . import devices
 
 # Printers on USB, also shared over USB/IP, and through usblp
 _USB = re.compile(r'(usb|usbip|file)://|/dev/')
+# The last answer of each printer and when it was asked, by
+# devices.lock_key(), see Driver.saving_status()
+_last_answers: dict[str, tuple[float, dict]] = {}
 
 
 def network_status(device: str, model: str, red_support: bool = False) -> dict:
@@ -153,9 +157,9 @@ class Driver:
 
     def keeps_connection(self, device: str, model: str) -> bool:
         """Whether the driver keeps its connection to the printer between
-        uses, e.g. transports.kept_le() on Bluetooth LE. Its setting
-        save_energy closes it after each print and status query instead,
-        see devices.saves_energy()."""
+        uses, as transports.kept_le() and kept_rfcomm() on Bluetooth. Its
+        setting save_energy closes it after each print and status query
+        instead, see devices.saves_energy() and saving_status()."""
         return False
 
     def device_capabilities(self, device: str, model: str) -> dict:
@@ -196,8 +200,11 @@ class Driver:
 
     def followed(self, device: str, model: str) -> bool:
         """Whether the label designer may ask the printer every few seconds:
-        one on USB costs nothing, one on the network or on Bluetooth takes
-        the network or the radio."""
+        one on USB costs nothing, nor one on Bluetooth whose connection is
+        kept, see keeps_connection(), unless it saves energy. One on the
+        network takes the network, one on Bluetooth otherwise the radio."""
+        if (device or '').startswith('bt://'):
+            return self.keeps_connection(device, model) and not devices.saves_energy(device)
         return bool(_USB.match(device or ''))
 
     def resolution_problem(self, model: str, high_res: bool) -> str:
@@ -231,6 +238,25 @@ class Driver:
             raise
         devices.note_answer(device)
         return state
+
+    def saving_status(self, device: str, query) -> dict:
+        """The status query() tells, or the last one of a printer that saves
+        energy, see devices.saves_energy(): that is asked only when the label
+        designer looks for printers and after a job, see ask_again(), and
+        while it tells an error, so that the error goes once it is fixed."""
+        key = devices.lock_key(device)
+        asked, state = _last_answers.get(key, (-1.0, None))
+        if devices.saves_energy(device) and state and not state.get('errors') and asked >= devices.looked:
+            return dict(state)
+        state = query()
+        # One a job holds was not asked
+        if state.get('status_type') != devices.BUSY_STATUS_TYPE:
+            _last_answers[key] = (time.monotonic(), dict(state))
+        return state
+
+    def ask_again(self, device: str):
+        """Ask the printer at the next status query, see saving_status()."""
+        _last_answers.pop(devices.lock_key(device), None)
 
     def followed_status(self, device: str, model: str) -> dict | None:
         """Status of a printer the label designer follows, see followed():

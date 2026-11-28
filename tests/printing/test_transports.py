@@ -21,7 +21,7 @@ from app.labeldesigner.drivers.base import Driver
 from app.labeldesigner.drivers.brother import models as brother_models, usb as brother_usb
 from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
 from tests.printing.test_bluetooth import Management, event, found
-from tests.printing.test_niimbot import FakePrinter
+from tests.printing.test_niimbot import FakePrinter, Rfcomm
 from tests.printing.test_niimbot_ble import NIIMBOT, LePrinter
 from tests.printing.test_printer import _status_packet
 from tests.printing.test_usb_backends import Endpoint, USBError, USBTimeoutError
@@ -330,9 +330,79 @@ def test_printer_on_classic_bluetooth_takes_a_stream_of_bytes(rfcomm):
     while not (answer := printer_.read(32)) and time.monotonic() < deadline:
         pass
     assert answer == b'status'
+    # Given back, the connection stays open for the next one
     printer_.dispose()
-    theirs.settimeout(1)
-    assert theirs.recv(64) == b''
+    assert backends.open_printer(DEVICE).s is printer_.s and peer.addresses == [(MAC, 1)]
+
+
+@pytest.fixture
+def links(monkeypatch):
+    """Printers on classic Bluetooth, each connection a socket pair."""
+    peer = Rfcomm()
+    monkeypatch.setattr(transports, 'socket', peer)
+    yield peer
+    for link in list(transports._kept.values()):
+        link.close()
+    for end in peer.ends:
+        end.close()
+
+
+def test_kept_rfcomm_link_is_closed_unused_only(links, monkeypatch):
+    monkeypatch.setattr(transports, 'KEEP_UNUSED', 0.1)
+    link = transports.kept_rfcomm(DEVICE, 1)
+    transports.release(DEVICE, link)
+    # Taken again before its time is up, also by another spelling
+    assert transports.kept_rfcomm(f'bt://{MAC.lower()}/1', 1) is link
+    time.sleep(0.2)
+    with transports._kept_lock:
+        assert links.closed == 0 and link.timer is not None
+    transports.release(DEVICE, link)
+    deadline = time.monotonic() + 2
+    while not links.closed and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert links.closed == 1 and transports._kept == {}
+    assert transports.kept_rfcomm(DEVICE, 1) is not link and len(links.addresses) == 2
+
+
+def test_rfcomm_link_is_closed_after_each_use_where_the_printer_saves_energy(links, monkeypatch):
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(DEVICE)}))
+    for _ in range(2):
+        backends.open_printer(DEVICE).dispose()
+    assert (len(links.addresses), links.closed) == (2, 2) and transports._kept == {}
+
+
+def test_rfcomm_link_the_printer_closed_is_opened_again(links):
+    link = transports.kept_rfcomm(DEVICE, 1)
+    links.ends[0].close()
+    link.settimeout(1)
+    assert link.recv(64) == b'' and link.broken
+    transports.release(DEVICE, link)
+    assert links.closed == 1 and transports._kept == {}
+    again = transports.kept_rfcomm(DEVICE, 1)
+    assert again is not link and len(links.addresses) == 2
+
+
+def test_kept_rfcomm_link_the_printer_closed_meanwhile_is_opened_again(links):
+    # e.g. switched off and on, found before it is handed out
+    link = transports.kept_rfcomm(DEVICE, 1)
+    transports.release(DEVICE, link)
+    links.ends[0].close()
+    again = transports.kept_rfcomm(DEVICE, 1)
+    assert again is not link and (len(links.addresses), links.closed) == (2, 1)
+    # Not one kept before, see RfcommLink.used
+    assert again.used == 0.0 and link.used > 0
+
+
+def test_what_a_kept_rfcomm_link_received_unread_is_dropped(links):
+    link = transports.kept_rfcomm(DEVICE, 1)
+    transports.release(DEVICE, link)
+    # A late answer, e.g. to a question that timed out
+    links.ends[0].sendall(b'late' * 2000)
+    time.sleep(0.05)
+    assert transports.kept_rfcomm(DEVICE, 1) is link and not link.broken
+    links.ends[0].sendall(b'answer')
+    link.settimeout(1)
+    assert link.recv(64) == b'answer'
 
 
 def test_printer_on_classic_bluetooth_on_the_channel_it_names(rfcomm):
@@ -458,6 +528,85 @@ def test_brother_printer_on_bluetooth_is_asked_again_once_it_printed(tmp_path, o
     assert off.tries == 2
 
 
+def brother_answering(asked):
+    """A QL-820NWB at its end of an RFCOMM connection, answering each status
+    request, noted in asked."""
+    told = bytearray(_status_packet(0x00))
+    told[3], told[4] = 0x34, 0x41
+
+    def serve(end):
+        with end:
+            while True:
+                try:
+                    data = end.recv(64)
+                    if not data:
+                        return
+                    if data.endswith(b'\x1b\x69\x53'):
+                        asked.append(data)
+                        end.sendall(bytes(told))
+                except OSError:
+                    return
+    return serve
+
+
+@pytest.fixture
+def brother_links(monkeypatch, brother_bluetooth):
+    asked = []
+    peer = Rfcomm(brother_answering(asked))
+    peer.asked = asked
+    monkeypatch.setattr(transports, 'socket', peer)
+    yield peer
+    for link in list(transports._kept.values()):
+        link.close()
+
+
+def test_brother_printer_on_bluetooth_keeps_its_connection(tmp_path, brother_links):
+    client = make_client(tmp_path, model='QL-820NWB', printer=DEVICE)
+    for _ in range(3):
+        state = client.get(STATUS + '?printer=' + DEVICE).get_json()['printers'][0]
+        assert state['errors'] == []
+    assert (state['follow'], state['can_save_energy']) == (True, True)
+    assert (brother_links.addresses, brother_links.closed, len(brother_links.asked)) == ([(MAC, 1)], 0, 3)
+
+
+def test_brother_printer_on_bluetooth_that_saves_energy_is_asked_only_when_looking_and_printing(tmp_path, brother_links, monkeypatch):
+    client = make_client(tmp_path, empty_repo=True, model='QL-820NWB', printer=DEVICE)
+    assert client.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'}).status_code == 200
+    state = client.get(STATUS).get_json()['printers'][0]
+    assert (state['errors'], state['follow'], state['can_save_energy']) == ([], False, True)
+    client.get(STATUS)
+    client.get(STATUS + '?printer=' + DEVICE)
+    # Closed right after it was asked
+    assert (len(brother_links.addresses), brother_links.closed) == (1, 1)
+    client.get(STATUS + '?look=1')
+    assert (len(brother_links.addresses), brother_links.closed) == (2, 2)
+    monkeypatch.setattr(brother_usb, 'send_job', lambda data, device, lengths: {'did_print': True, 'ready_for_next_job': True})
+    response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, label_size='62'))
+    assert outcome(client, response) == ('printed', '')
+    assert client.get(STATUS).get_json()['printers'][0]['errors'] == []
+    assert (len(brother_links.addresses), brother_links.closed) == (3, 3) and transports._kept == {}
+    assert len(brother_links.asked) == 3
+
+
+def test_printer_that_saves_energy_is_asked_again_while_busy_or_telling_an_error(monkeypatch):
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(DEVICE)}))
+    answers = [{'status_type': devices.BUSY_STATUS_TYPE, 'errors': []}, {'errors': ['The cover is open']},
+               {'errors': []}, {'errors': ['not asked']}]
+    told = [Driver().saving_status(DEVICE, lambda: answers.pop(0)) for _ in range(4)]
+    assert told[1:] == [{'errors': ['The cover is open']}, {'errors': []}, {'errors': []}] and len(answers) == 1
+    # Asked again once the label designer looks for printers
+    devices.look_again()
+    assert Driver().saving_status(DEVICE, lambda: answers.pop(0)) == {'errors': ['not asked']}
+
+
+@pytest.mark.parametrize('model', ['Niimbot/B1', 'Niimbot/D110_M', 'QL-820NWB'])
+def test_printer_on_bluetooth_is_followed_unless_it_saves_energy(model, brother_bluetooth, monkeypatch):
+    driver = drivers.for_model(model)
+    assert driver.followed(DEVICE, model) is True
+    monkeypatch.setattr(devices, 'saving_energy', frozenset({devices.lock_key(DEVICE)}))
+    assert driver.followed(DEVICE, model) is False and driver.keeps_connection(DEVICE, model) is True
+
+
 class Refused(Exception):
     pass
 
@@ -564,7 +713,7 @@ def test_kept_bluetooth_le_link_is_taken_again(le):
 
 
 def test_kept_bluetooth_le_link_is_closed_unused_only(le, monkeypatch):
-    monkeypatch.setattr(transports, 'KEEP_LE', 0.1)
+    monkeypatch.setattr(transports, 'KEEP_UNUSED', 0.1)
     link = transports.kept_le(DEVICE, NIIMBOT, error=Refused, no_answer=Gone)
     transports.release_le(DEVICE, link)
     # Taken again before its time is up: kept while in use, its time
@@ -770,7 +919,7 @@ def test_a_kept_bluetooth_link_is_closed_after_each_use_where_the_printer_saves_
     for device, link in links.items():
         transports._kept[devices.lock_key(device)] = link
         transports.release_le(device, link)
-    # The other one is kept until it was unused for KEEP_LE seconds
+    # The other one is kept until it was unused for KEEP_UNUSED seconds
     links[other].timer.cancel()
     assert (links[saving].closed, links[other].closed) == (1, 0)
     assert list(transports._kept) == [devices.lock_key(other)]
