@@ -634,7 +634,7 @@ def test_cut_count_of_a_ptouch_job_fits_its_printer(monkeypatch, model, label_si
 
 def test_copies_on_ql_printers_are_sent_at_once(client, monkeypatch):
     sent = []
-    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths: sent.append(len(page_lengths)) or {'did_print': True, 'ready_for_next_job': True})
+    monkeypatch.setattr(usb, 'send_job', lambda data, device, page_lengths, confirmed=True: sent.append(len(page_lengths)) or {'did_print': True, 'ready_for_next_job': True})
     response = client.post('/labeldesigner/api/print', data=dict(EXAMPLE_FORMDATA, print_count='12', cut_once='1'))
     assert outcome(client, response) == ('printed', '')
     assert sent == [12]

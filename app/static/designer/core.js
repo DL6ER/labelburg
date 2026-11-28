@@ -102,7 +102,7 @@ export const isEndless = s => s.form === 'endless' || s.form === 'ptouch_endless
 export const isPtouch = id => !!SIZES[id] && SIZES[id].models.length > 0 && SIZES[id].models.every(m => m.startsWith('PT-'));
 export const isColorTape = id => !!SIZES[id] && SIZES[id].palette === 'color';
 export const redTape = d => !!(SIZES[d.label_size] && SIZES[d.label_size].red);
-const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, calibration: false };
+const ANY_PRINTER = { qualities: ['fast', 'quality', 'high'], high_res: true, cutter: true, half_cut: false, chain: false, feed_waste: false, colors: 'black', never_cut: '', leaves_turned: false, lead_mm: 0, vendor: '', manual_cutter: false, cuts_each: false, calibration: false };
 export const capsOf = model => (C.models || {})[model] || ANY_PRINTER;
 // With what the printer told of itself, e.g. a receipt printer without a cutter
 export const printerCaps = (p = S.printer) => p && p.caps ? Object.assign({}, capsOf(p.model), p.caps) : capsOf(p && p.model);
@@ -403,6 +403,7 @@ export const noCutter = k => k.cutter === false;
 export const noCutterWhy = k => k.manual_cutter ? 'This printer has no automatic cutter' : 'This printer has no cutter';
 // Without a cutter, one that must not keep the last label inside feeds it to the tear bar
 const usableCut = (c, k) => noCutter(k) ? Object.assign(c, { cut: neverWhy(k) ? 'last' : 'none' })
+    : k.cuts_each ? Object.assign(c, { cut: 'each' })
     : neverWhy(k) && c.cut === 'none' ? Object.assign(c, { cut: 'last' }) : c;
 export const kept = (p = S.printer) => (p && p.settings) || {};
 export const printerCut = (p = S.printer) => { const k = kept(p); return usableCut({ cut: k.cut || 'each', half_cut: k.half_cut || '1', chain: k.chain || '0' }, printerCaps(p)); };

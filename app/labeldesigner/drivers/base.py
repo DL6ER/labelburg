@@ -141,7 +141,8 @@ class Driver:
         """What the label designer offers for the model: the qualities it
         shows (fast, quality, high for 600 dpi), whether the model prints at
         600 dpi, whether it has a cutter, else whether its labels are cut
-        off by hand with a lever, half cuts between labels and chain prints,
+        off by hand with a lever, whether it cuts after each label whatever it
+        is told (cuts_each), half cuts between labels and chain prints,
         whether it feeds tape before the first label, its colors, why it does
         not leave labels uncut, if it does not, whether labels leave it top
         first, the label designer then shows the printer below them, the
@@ -149,7 +150,7 @@ class Driver:
         printhead and cutter, the maker of the model and whether its print
         position is calibrated with a calibration label."""
         return {'qualities': ['fast', 'quality'], 'high_res': False, 'cutter': True, 'manual_cutter': False,
-                'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
+                'cuts_each': False, 'half_cut': False, 'chain': False, 'feed_waste': False, 'colors': self.colors(model),
                 'never_cut': '', 'leaves_turned': False, 'lead_mm': 0, 'vendor': self.vendor, 'calibration': False}
 
     def keeps_connection(self, device: str, model: str) -> bool:

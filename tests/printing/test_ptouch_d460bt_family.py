@@ -1,0 +1,281 @@
+"""The PT-D460BT family of ptouch-print: the PT-D410, PT-D460BT, PT-D610BT,
+PT-E310BT and PT-E560BT, of which Brother publishes no raster command
+reference. Their jobs follow ptouch-print by Dominic Radermacher (GPLv3) at
+b7c55272, src/libptouch.c and src/ptouch-print.c:
+https://github.com/probonopd/ptouch-print
+their tapes, longest labels and Bluetooth names Brother's User's Guides and
+Quick Setup Guides."""
+import time
+import types
+
+import pytest
+from PIL import Image
+
+from app.labeldesigner import drivers, printer, refusals
+from app.labeldesigner.drivers import brother, devices, progress
+from app.labeldesigner.drivers.brother.commands import Raster
+from app.labeldesigner.drivers.brother.raster import convert, render
+from app.labeldesigner.enums import LabelContent, LabelOrientation, LabelType
+from tests.helpers import EXAMPLE_FORMDATA, make_client, outcome
+from tests.printing.test_ptouch_bluetooth import (DEVICE, MAC, PRINT, STATUS, UNNAMED, UsbBrother, brother_on_bluetooth,  # noqa: F401
+                                                  rows, told)
+from tests.printing.test_transports import PRINTER_CLASS
+
+
+@pytest.fixture(autouse=True)
+def printed_at_once(monkeypatch):
+    """The printer is held for no time after a job, see progress.held()."""
+    monkeypatch.setattr(progress, 'time', types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda seconds: None))
+
+
+FAMILY = ('PT-D410', 'PT-D460BT', 'PT-D610BT', 'PT-E310BT', 'PT-E560BT')
+# ESC i a 01 (FLAG_P700_INIT), on the PT-D410 ESC i R 01 (libptouch.c 78-93, 290-304)
+MODES = {'PT-D410': b'\x1b\x69\x52\x01', 'PT-D460BT': b'\x1b\x69\x61\x01', 'PT-D610BT': b'\x1b\x69\x61\x01',
+         'PT-E310BT': b'\x1b\x69\x61\x01', 'PT-E560BT': b'\x1b\x69\x61\x01'}
+# ptdevs[] (libptouch.c 78-93)
+PRODUCTS = {'PT-D410': 0x20DF, 'PT-D460BT': 0x20E0, 'PT-D610BT': 0x20E1, 'PT-E310BT': 0x2201, 'PT-E560BT': 0x2203}
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_job_is_what_ptouch_print_sends(model):
+    # Two labels on 18 mm tape, the first pixel black in the first line,
+    # asked to cut each, half cut and chain print, which they are not told
+    raster = Raster(model)
+    page = rows([b'\x80' + bytes(13), bytes(14)], 112)
+    convert(raster, [page, page], 'pt18', rotate=0, compress=True, cut_every=1, half_cut=True, chain=True)
+    # Pixel 8 of 128, centered as ptouch-print places 112 pixels: bit 0 of the
+    # last byte but one (ptouch-print.c 141-150, 170)
+    black = bytes(14) + b'\x01\x00'
+    page_bytes = (MODES[model]
+                  # Print information without valid flags, 18 mm, 2 lines, n9 = 2 (libptouch.c 248-275)
+                  + b'\x1b\x69\x7a\x00\x00\x12\x00' + b'\x02\x00\x00\x00' + b'\x02\x00'
+                  # Margins of 0Eh, P-touch software's (libptouch.c 234), directly followed by M 00 (227-239)
+                  + b'\x1b\x69\x64\x0e\x00' + b'\x4d\x00'
+                  # 16 bytes a line without compression (libptouch.c 441-454)
+                  + b'\x47\x10\x00' + black + b'\x47\x10\x00' + bytes(16)
+                  # Print with feeding after each copy (libptouch.c 321-334, ptouch-print.c 821-827)
+                  + b'\x1a')
+    # Invalidate with 100 bytes, initialize, status request (libptouch.c 207-215, 352; ptouch-print.c 728-731)
+    assert raster.data == bytes(100) + b'\x1b\x40' + b'\x1b\x69\x53' + page_bytes * 2
+
+
+class _Label:
+    label_type, label_orientation = LabelType.ENDLESS_LABEL, LabelOrientation.STANDARD
+
+    def __init__(self, content: LabelContent):
+        self.label_content = content
+
+    def generate(self):
+        return Image.new('1', (70, 3), 1)
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_labels_of_different_settings_are_initialized_once(model):
+    # One dithered, one not: converted apart, still one job begun once
+    entries = [{'label': _Label(content), 'high_res': False, 'fast': False, 'cut': True}
+               for content in (LabelContent.IMAGE_BW, LabelContent.IMAGE_GRAYSCALE)]
+    data = render(printer.PrinterQueue(model, '/dev/usb/lp0', 'pt12'), entries).data
+    assert data.startswith(bytes(100) + b'\x1b\x40\x1b\x69\x53' + MODES[model])
+    assert (data.count(b'\x1b\x40'), data.count(b'\x1b\x69\x53'), data.count(MODES[model])) == (1, 1, 2)
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_family_is_told_no_cut_chain_quality_or_status_notification(model):
+    raster = Raster(model)
+    convert(raster, [Image.new('1', (70, 3), 1)] * 3, 'pt12', rotate=0, compress=True, cut_every=3, chain=False)
+    for command in (b'\x1b\x69\x4d', b'\x1b\x69\x41', b'\x1b\x69\x4b', b'\x1b\x69\x21', b'\x4d\x02'):
+        assert command not in raster.data
+    # Each label printed with feeding, the next one in raster mode again
+    assert raster.data.count(b'\x1a' + MODES[model]) == 2 and raster.data.endswith(b'\x1a')
+    assert drivers.BROTHER.capabilities(model)['qualities'] == ['quality']
+
+
+@pytest.mark.parametrize('model, tapes', [
+    ('PT-D410', ['pt6', 'pt9', 'pt12', 'pt18']), ('PT-D460BT', ['pt6', 'pt9', 'pt12', 'pt18']),
+    ('PT-E310BT', ['pt6', 'pt9', 'pt12', 'pt18']), ('PT-D610BT', ['pt6', 'pt9', 'pt12', 'pt18', 'pt24']),
+    ('PT-E560BT', ['pt6', 'pt9', 'pt12', 'pt18', 'pt24'])])
+def test_tapes_after_the_users_guides(model, tapes):
+    # Specifications, Media: up to 18 mm on the PT-D410, PT-D460BT and
+    # PT-E310BT, up to 24 mm on the PT-D610BT and PT-E560BT
+    assert [label.identifier for label in drivers.BROTHER.labels if drivers.BROTHER.fits(label, model)] == tapes
+
+
+@pytest.mark.parametrize('model, longest, lines', [('PT-D410', 300, 2126), ('PT-D460BT', 300, 2126), ('PT-D610BT', 300, 2126),
+                                                   ('PT-E310BT', 999, 7079), ('PT-E560BT', 999, 7079)])
+def test_longest_labels_after_the_users_guides(model, longest, lines):
+    # "Labels can be between 30 mm and 300 mm in length" on the PT-D models,
+    # a label length of up to 999 mm on the PT-E models
+    problem = f'Labels on the {model} can be at most {longest} mm long'
+    assert drivers.BROTHER.length_problem(model, lines, False) == ''
+    assert drivers.BROTHER.length_problem(model, lines + 1, False) == problem and problem in refusals.MESSAGES
+    problem = f'The {model} cannot print at 600 dpi, turn off 600 dpi printing'
+    assert drivers.resolution_problem(model, True) == problem and problem in refusals.MESSAGES
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_known_by_their_usb_product_id(tmp_path, monkeypatch, model):
+    product = PRODUCTS[model]
+    assert drivers.resolve(f'usb://0x04f9:0x{product:04x}/A1', 'QL-800') == (drivers.BROTHER, model)
+    assert drivers.resolve(f'usb://0x04F9:0x{product:04X}', 'Unknown') == (drivers.BROTHER, model)
+    # Through usblp by the IDs the kernel tells
+    monkeypatch.setattr(devices, 'USB_IDS', str(tmp_path / '{name}-{field}'))
+    (tmp_path / 'lp1-idVendor').write_text('04f9\n')
+    (tmp_path / 'lp1-idProduct').write_text(f'{product:04x}\n')
+    assert drivers.resolve('/dev/usb/lp1', 'QL-800') == (drivers.BROTHER, model)
+    assert drivers.resolve('file:///dev/usb/lp1', 'QL-800') == (drivers.BROTHER, model)
+    # Only printers of usblp, not e.g. a parallel port of the same name
+    assert devices.usb_ids('/dev/lp1') is None
+    # Not a device of another maker, nor one usblp does not tell
+    assert drivers.resolve(f'usb://0x1234:0x{product:04x}', 'QL-800') == (drivers.BROTHER, 'QL-800')
+    assert drivers.resolve('/dev/usb/lp2', 'QL-800') == (drivers.BROTHER, 'QL-800')
+
+
+def test_other_brother_printers_are_still_known_by_their_status():
+    assert drivers.resolve('usb://0x04f9:0x2042/A1', 'QL-800') == (drivers.BROTHER, 'QL-800')
+    assert devices.usb_ids('tcp://192.0.2.1') is None and devices.usb_ids('usb://0x04f9') is None
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_status_names_the_model_given(monkeypatch, model):
+    # Brother documents no model code of them, their status keeps the model
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    state = drivers.BROTHER.status('/dev/usb/lp0', model)
+    assert (state['model'], state['media_width'], state['errors']) == (model, 12, [])
+
+
+def test_found_on_usb_by_their_product_id(tmp_path, monkeypatch):
+    found = 'usb://0x04f9:0x20e1/A1'
+    monkeypatch.setattr(printer, 'USB_PRINTER_DEVICES', [])
+    monkeypatch.setattr(devices, 'found_usb_printers', lambda: ([found], []))
+    monkeypatch.setattr(devices, 'usb_device_id', lambda device, connect=True: '')
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    client = make_client(tmp_path)
+    client.application.config['PRINTER_PRINTER'] = '?'
+    first = client.get(STATUS).get_json()['printers'][0]
+    assert (first['path'], first['model'], first['errors'], first['label_size']) == (found, 'PT-D610BT', [], 'pt12')
+
+
+@pytest.mark.parametrize('name, model', [('PT-D460BT1234', 'PT-D460BT'), ('PT-D610BT0042', 'PT-D610BT'),
+                                         ('PT-E310BT1234', None), ('PT-E560BT', None), ('PT-D410', None)])
+def test_known_by_their_names_on_classic_bluetooth(name, model):
+    # PT-D460BT**** and PT-D610BT**** in their Quick Setup Guides, Brother
+    # names none of the PT-E models, the PT-D410 has no Bluetooth
+    device = {'address': MAC, 'name': name, 'le': False, 'services': [], 'classic': True, 'device_class': PRINTER_CLASS}
+    assert drivers.BROTHER.found_on_bluetooth(device) == ((DEVICE, model) if model else None)
+
+
+def test_pt_d410_is_not_reached_on_bluetooth():
+    with pytest.raises(FileNotFoundError):
+        drivers.BROTHER.status(DEVICE, 'PT-D410')
+
+
+@pytest.mark.parametrize('model', ['PT-D460BT', 'PT-E560BT'])
+def test_printing_on_bluetooth(tmp_path, brother_on_bluetooth, model):  # noqa: F811
+    fake = brother_on_bluetooth(UNNAMED, 12)
+    client = make_client(tmp_path, model=model, printer=DEVICE)
+    state = client.get(STATUS).get_json()['printers'][0]
+    assert (state['model'], state['errors'], state['label_size']) == (model, [], 'pt12')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('printed', '')
+    [job] = fake.jobs
+    assert job.startswith(bytes(100) + b'\x1b\x40\x1b\x69\x53\x1b\x69\x61\x01\x1b\x69\x7a\x00\x00\x0c\x00')
+    assert job.endswith(b'\x1a') and b'\x1b\x69\x4d' not in job
+    assert set(fake.addresses) == {(MAC, 1)}
+
+
+class Answering(UsbBrother):
+    """A printer on USB that sends these messages when a job is written:
+    (status type, errors of byte 8), else as UsbBrother."""
+
+    def __init__(self, *messages: tuple[int, int]):
+        super().__init__(UNNAMED)
+        self.messages = messages
+
+    def write(self, data: bytes):
+        if len(data) <= 3:
+            return super().write(data)
+        for status_type, errors in self.messages:
+            packet = bytearray(told(self.model_code, status_type=status_type))
+            packet[8] = errors
+            self.unread += bytes(packet)
+
+
+# A job of one label of 2 mm as the family gets it, without its lines
+JOB = bytes(100) + b'\x1b\x40\x1b\x69\x53' + b'\x1a'
+
+
+@pytest.mark.parametrize('model', FAMILY)
+def test_a_job_sent_is_printed(tmp_path, monkeypatch, model):
+    # The printer tells nothing after the job, no source says it reports printed labels
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x00)))
+    client = make_client(tmp_path, model=model, printer='/dev/usb/lp0')
+    assert client.get(STATUS).get_json()['printers'][0]['model'] == model
+    start = time.monotonic()
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('printed', '') and time.monotonic() - start < brother.usb.STATUS_WAIT
+
+
+def test_an_error_in_the_reply_to_the_job_is_shown(tmp_path, monkeypatch):
+    # No tape in the reply to the status request of the job
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x01)))
+    client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('failed', 'The printer reports: There are no labels in the printer')
+
+
+def test_other_brother_printers_still_wait_until_printed(tmp_path, monkeypatch):
+    monkeypatch.setattr(brother.usb, 'STATUS_WAIT', 0.2)
+    monkeypatch.setattr(brother.usb, 'SLOWEST_PRINT_SPEED', 10 ** 6)
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    client = make_client(tmp_path, model='PT-P710BT', printer='/dev/usb/lp0')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('failed', 'The printer did not answer after receiving the label, check whether it was printed')
+
+
+@pytest.mark.parametrize('owed, messages, printed, errors', [
+    # A late "No media" of an earlier request fails no job, a late reply
+    # without one hides no "No media" of the job's own
+    (1, ((0x00, 0x01), (0x00, 0x00)), True, []), (1, ((0x00, 0x00), (0x00, 0x01)), False, ['No media when printing']),
+    # An error told unasked fails it
+    (0, ((0x02, 0x01),), False, ['No media when printing'])])
+def test_the_reply_to_the_job_comes_after_those_owed(monkeypatch, owed, messages, printed, errors):
+    device = '/dev/usb/lp0'
+    key = devices.lock_key(device)
+    if owed:
+        monkeypatch.setitem(brother.usb._unanswered, key, owed)
+        monkeypatch.setitem(brother.usb._asked, key, time.monotonic())
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering(*messages))
+    info = brother.usb.send_job(JOB, device, [2.0], confirmed=False)
+    assert info['did_print'] is printed and devices.status_cache[key]['errors'] == errors
+    # Those owed are answered, the next status query asks at once
+    assert brother.usb._unanswered[key] == 0 and key not in brother.usb._asked
+
+
+def test_no_reply_to_the_job_within_the_wait_counts_as_printed(monkeypatch):
+    monkeypatch.setattr(brother.usb, 'JOB_REPLY_WAIT', 0.1)
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: UsbBrother(UNNAMED))
+    before = {'model': 'PT-D460BT', 'media_width': 12, 'errors': []}
+    monkeypatch.setitem(devices.status_cache, devices.lock_key('/dev/usb/lp0'), before)
+    info = brother.usb.send_job(JOB, '/dev/usb/lp0', [2.0], confirmed=False)
+    assert (info['did_print'], info['ready_for_next_job'], info['printer_state']) == (True, True, None)
+    # Its last status stays, there is none in place of it
+    assert devices.status_cache[devices.lock_key('/dev/usb/lp0')] is before
+
+
+def test_the_printer_is_held_while_it_prints(tmp_path, monkeypatch):
+    # As long as its job is estimated to print, which tells nothing of its speed
+    held = []
+
+    def sleep(seconds):
+        with devices.device_lock('/dev/usb/lp0', timeout=0) as acquired:
+            state = progress.state('/dev/usb/lp0')
+            # Not which label it prints, the printer does not tell
+            held.append((seconds > 1, acquired, state['labels'], 'label' in state))
+    monkeypatch.setattr(progress, 'time', types.SimpleNamespace(monotonic=time.monotonic, sleep=sleep))
+    monkeypatch.setattr(progress, '_factors', {})
+    monkeypatch.setattr(brother.usb, 'get_printer', lambda device: Answering((0x00, 0x00)))
+    client = make_client(tmp_path, model='PT-D460BT', printer='/dev/usb/lp0')
+    response = client.post(PRINT, data=dict(EXAMPLE_FORMDATA, label_size='pt12'))
+    assert outcome(client, response) == ('printed', '')
+    assert held == [(True, False, 1, False)] and progress._factors == {}
+    assert not progress.running('/dev/usb/lp0')

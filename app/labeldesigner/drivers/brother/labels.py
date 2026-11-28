@@ -12,6 +12,9 @@ WIDE = ('QL-1050', 'QL-1060N', 'QL-1100', 'QL-1110NWB', 'QL-1115NWB')
 # has a print head of its own, its tapes are "18" and pt36.
 # https://download.brother.com/welcome/docp100064/cv_pte550wp750wp710bt_eng_raster_102.pdf
 SMALL_HEAD = ('PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT')
+# The PT-D460BT family takes 128 pixels a line too, tapes up to 18 or 24 mm
+UP_TO_18 = ('PT-D410', 'PT-D460BT', 'PT-E310BT')
+UP_TO_24 = ('PT-D610BT', 'PT-E560BT')
 
 LABELS = (
     Label('12', (12, 0), FormFactor.ENDLESS, (142, 0), (106, 0), 29, feed_margin=35),
@@ -46,11 +49,11 @@ LABELS = (
     Label('d12', (12, 12), FormFactor.ROUND_DIE_CUT, (142, 142), (94, 94), 113, feed_margin=35),
     Label('d24', (24, 24), FormFactor.ROUND_DIE_CUT, (284, 284), (236, 236), 42),
     Label('d58', (58, 58), FormFactor.ROUND_DIE_CUT, (688, 688), (618, 618), 51),
-    Label('pt6', (6, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (32, 0), 48, feed_margin=14, models=SMALL_HEAD),
-    Label('pt9', (9, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (50, 0), 39, feed_margin=14, models=SMALL_HEAD),
-    Label('pt12', (12, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (70, 0), 29, feed_margin=14, models=SMALL_HEAD),
-    Label('pt18', (18, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (112, 0), 8, feed_margin=14, models=SMALL_HEAD),
-    Label('pt24', (24, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (128, 0), 0, feed_margin=14, models=SMALL_HEAD),
+    Label('pt6', (6, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (32, 0), 48, feed_margin=14, models=SMALL_HEAD + UP_TO_18 + UP_TO_24),
+    Label('pt9', (9, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (50, 0), 39, feed_margin=14, models=SMALL_HEAD + UP_TO_18 + UP_TO_24),
+    Label('pt12', (12, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (70, 0), 29, feed_margin=14, models=SMALL_HEAD + UP_TO_18 + UP_TO_24),
+    Label('pt18', (18, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (112, 0), 8, feed_margin=14, models=SMALL_HEAD + UP_TO_18 + UP_TO_24),
+    Label('pt24', (24, 0), FormFactor.PTOUCH_ENDLESS, (128, 0), (128, 0), 0, feed_margin=14, models=SMALL_HEAD + UP_TO_24),
     Label('pt36', (36, 0), FormFactor.PTOUCH_ENDLESS, (512, 0), (454, 0), 61, feed_margin=14),
 )
 BY_ID = {label.identifier: label for label in LABELS}

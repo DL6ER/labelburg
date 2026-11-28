@@ -118,11 +118,19 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
     if red and not raster.spec.two_color:
         raise RasterError('Printing in red is not supported with the selected model.')
 
-    raster.add_switch_mode()
-    raster.add_invalidate()
-    raster.add_initialize()
-    raster.add_switch_mode()
-    raster.add_status_notification()
+    alone = raster.spec.d460bt_family
+    if alone:
+        # As ptouch-print begins, once a job: an ESC @ between labels would end the one printing
+        if not raster.data:
+            raster.add_invalidate()
+            raster.add_initialize()
+            raster.add_status_information()
+    else:
+        raster.add_switch_mode()
+        raster.add_invalidate()
+        raster.add_initialize()
+        raster.add_switch_mode()
+        raster.add_status_notification()
     for i, im in enumerate(images):
         if im.mode.endswith('A'):
             # In front of a white background
@@ -178,8 +186,12 @@ def convert(raster: Raster, images: list, label_size: str, *, red: bool = False,
             else:
                 im = im.point(lambda x: 0 if x < THRESHOLD else 255, mode='1')
 
-        raster.add_status_information()
         tape = label.tape_size
+        if alone:
+            # Neither cut nor chain printed, as ptouch-print prints by default
+            raster.add_alone(im, tape[0], label.feed_margin)
+            continue
+        raster.add_status_information()
         if label.form_factor in (FormFactor.DIE_CUT, FormFactor.ROUND_DIE_CUT):
             raster.add_media_and_quality(im.size[1], 0x0B, tape[0], tape[1], hq)
         elif label.form_factor == FormFactor.ENDLESS:

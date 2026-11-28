@@ -28,6 +28,9 @@ DRAIN_READS = 100
 # How long a reply owed to an earlier status request is waited for: the
 # printer has it already, it may be a round trip to a USB/IP host away
 REPLY_WAIT = 0.5
+# How long a job that is not confirmed waits for the reply to the status
+# request it holds, as get_status() waits for one
+JOB_REPLY_WAIT = 2.0
 # Status requests counted at most, also through an error held for hours: a
 # reply that does not come ends the wait for the others at once
 MOST_UNANSWERED = 1000
@@ -51,26 +54,37 @@ _retry_answered: set[str] = set()
 CLEAR_AT_PRINTER = 'Clear the error at the printer'
 
 
-def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
+def send_job(data: bytes, device_specifier: str, page_lengths: list, confirmed: bool = True) -> dict:
     """Send a print job to a USB printer and read its status messages until
     it reports every page printed and that it is ready for the next job, an
     error, or until it stays silent for longer than a page takes to print.
     A long label is printed while it is received, a job of several labels
     sends messages for each of them.
 
-    page_lengths: the length of each page in mm. Returns, as print_failure()
-    reads it: did_print, ready_for_next_job, the last printer_state, and the
-    pages of the job and how many the printer confirmed."""
+    page_lengths: the length of each page in mm. Without confirmed, the job
+    counts as printed unless the reply to its status request tells an error.
+    Returns, as print_failure() reads it: did_print, ready_for_next_job, the
+    last printer_state, and the pages of the job and how many the printer
+    confirmed."""
     info = {'did_print': False, 'ready_for_next_job': False, 'printer_state': None,
             'pages': len(page_lengths), 'confirmed': 0}
     key = devices.lock_key(device_specifier)
     owed = unanswered = _unanswered.get(key, 0)
     printer = get_printer(device_specifier)
-    progress.counting(device_specifier)
+    if confirmed:
+        progress.counting(device_specifier)
     try:
         # Not waited for, a reply owed that came is read
         unanswered = _drain(printer, unanswered, key=key)
         received = _write_reading(printer, data)
+        if not confirmed:
+            reply, unanswered = _job_reply(printer, received, unanswered)
+            info['printer_state'] = reply
+            if reply and reply['errors']:
+                devices.status_cache[key] = reply
+            else:
+                info.update(did_print=True, ready_for_next_job=True, confirmed=len(page_lengths))
+            return info
         # A page may take as long as the longest one, the whole job as long
         # as all its pages
         page_wait = STATUS_WAIT + max(page_lengths, default=0) / SLOWEST_PRINT_SPEED
@@ -133,10 +147,28 @@ def send_job(data: bytes, device_specifier: str, page_lengths: list) -> dict:
         if unanswered < owed:
             # Answered, or the replies will not come
             _asked.pop(key, None)
-        if info['did_print']:
+        if info['did_print'] and info['printer_state']:
             # In place of e.g. an error told before the job, which is gone
             devices.status_cache[key] = info['printer_state']
         _release(printer)
+
+
+def _job_reply(printer, received: bytes, unanswered: int) -> tuple[dict | None, int]:
+    """The reply to the status request in a job, or an error the printer
+    tells unasked, None if neither comes within JOB_REPLY_WAIT. The replies
+    of the unanswered requests before come first, they are counted off."""
+    until = time.monotonic() + JOB_REPLY_WAIT
+    while True:
+        states, received = _status_messages(received)
+        for state in states:
+            if state['status_code'] == 0x00 and unanswered:
+                unanswered -= 1
+            elif state['status_code'] == 0x00 or state['errors']:
+                return state, unanswered
+        if time.monotonic() >= until:
+            return None, unanswered
+        time.sleep(0.02)
+        received += printer.read(32) or b''
 
 
 def _write_reading(printer, data: bytes) -> bytes:

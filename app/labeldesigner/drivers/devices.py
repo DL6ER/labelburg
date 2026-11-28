@@ -150,6 +150,10 @@ def tcp_address(device_specifier: str, port: int) -> tuple[str, int]:
 USB_DEVICE_ID = '/sys/class/usbmisc/{name}/device/ieee1284_id'
 
 
+# The vendor or product ID (field) of a printer on USB that usblp holds
+USB_IDS = '/sys/class/usbmisc/{name}/device/../{field}'
+
+
 # The device IDs of printers on usb://, which do not change, asked once
 _usb_device_ids: dict[str, str] = {}
 
@@ -204,6 +208,25 @@ def usb_device_id(device_specifier: str, connect: bool = True) -> str:
             return file.read()
     except OSError:
         return ''
+
+
+def usb_ids(device_specifier: str) -> tuple[int, int] | None:
+    """Vendor and product ID of a printer on usb://<vendor>:<product>[/...] or
+    /dev/usb/lp<N>, None for other printers or when they are not known."""
+    try:
+        if device_specifier.startswith('usb://'):
+            vendor, _, product = device_specifier.removeprefix('usb://').partition('/')[0].partition(':')
+            return int(vendor, 16), int(product, 16)
+        path = os.path.normpath(device_specifier.removeprefix('file://'))
+        if not path.startswith('/dev/usb/lp'):
+            return None
+        ids = []
+        for field in ('idVendor', 'idProduct'):
+            with open(USB_IDS.format(name=os.path.basename(path), field=field)) as file:
+                ids.append(int(file.read(), 16))
+        return ids[0], ids[1]
+    except (OSError, ValueError):
+        return None
 
 
 def device_id_fields(device_id: str) -> dict:

@@ -63,6 +63,17 @@ def test_how_the_label_leaves_the_printer(editor):  # noqa: F811
     assert editor.locator('#cutShow .cm.none').count() == 2
 
 
+def test_a_printer_cutting_after_each_label_offers_no_other_cut(editor):  # noqa: F811
+    # The automatic cutter of a PT-D610BT cuts each label, also where it is set to cut after the last
+    status_is(editor, with_tape({'model': 'PT-D610BT', 'media_width': 12, 'media_type': 'Laminated tape', 'settings': {'cut': 'last'}}, 'pt12'))
+    type_label(editor, 'Shelf 3')
+    editor.click('#advBtn')
+    assert editor.inner_text('#adv .cutrow') == 'After each label'
+    assert 'Cut after each label' in editor.inner_text('#cutShow')
+    assert editor.locator('#cutShow .cm.full').count() == 3
+    assert editor.locator('#adv [data-cut], #adv [data-cutchange]').count() == 0
+
+
 def test_the_bottom_leaving_first_and_the_large_preview(editor):  # noqa: F811
     status_is(editor, with_tape({'model': 'QL-800', 'name': 'Office', 'settings': {'leaves_first': 'bottom'}}))
     type_label(editor, 'Shelf 3')

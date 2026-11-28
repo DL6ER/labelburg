@@ -13,7 +13,10 @@ class Model:
     whether it prints red, the zero bytes that clear its command buffer, and
     the codes it gives in its status (series and model). Its longest label
     has max_length_dots lines at dpi. It prints speed mm/s, as Brother's
-    data sheets give it. With bluetooth it is reached on bt:// too."""
+    data sheets give it. With bluetooth it is reached on bt:// too.
+    mode_command selects raster mode, usb_product (vendor 04F9h) tells the
+    model on USB where its status does not, and a model of the PT-D460BT
+    family is sent the jobs ptouch-print sends it, see Raster.add_alone()."""
     identifier: str
     speed: int = 0
     max_length_dots: int = 11811
@@ -31,6 +34,9 @@ class Model:
     series_code: int = 0xFFFF
     model_code: int = 0xFFFF
     bluetooth: bool = False
+    mode_command: bytes = b'\x1b\x69\x61\x01'
+    usb_product: int | None = None
+    d460bt_family: bool = False
 
 
 MODELS = {model.identifier: model for model in (
@@ -64,10 +70,13 @@ MODELS = {model.identifier: model for model in (
     # https://download.brother.com/welcome/docp000771/cv_pth500p700e500_eng_raster_111.pdf
     Model('PT-P700', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0, series_code=0x30, model_code=0x67),
     Model('PT-P750W', speed=30, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=99, series_code=0x30, model_code=0x68),
-    # The same reference names no model code of the PT-P710BT. It takes no
-    # ESC i A, and Brother's driver turns its status while printing off.
+    # The same reference names no model code of the PT-P710BT, but its product
+    # ID 20AFh on USB (Appendix A). It takes no ESC i A, and Brother's driver
+    # turns its status while printing off.
     Model('PT-P710BT', speed=20, max_length_dots=7086, dpi=180, number_bytes_per_row=16, cut_every=0,
-          status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True),
+          status_notification=True, num_invalidate_bytes=100, series_code=0x30, bluetooth=True, usb_product=0x20AF),
+    # "q" (71h) on USB as 2083h in the reference of the PT-P900 series (pp. 24, 49)
+    Model('PT-P900', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x71),
     # "o" is 6Fh, not the 69h of the PT-P900 reference; Brother's index links it as 6F30
     # https://support.brother.com/g/s/es/dev/en/command/reference/index.html
     Model('PT-P900W', speed=60, max_length_dots=14173, dpi=360, number_bytes_per_row=70, series_code=0x30, model_code=0x6F),
@@ -77,6 +86,18 @@ MODELS = {model.identifier: model for model in (
     # https://download.brother.com/welcome/docp100407/cv_ptp900_eng_raster_102.pdf
     Model('PT-P910BT', speed=20, max_length_dots=14173, dpi=360, number_bytes_per_row=70, status_notification=True,
           series_code=0x30, model_code=0x78, bluetooth=True),
+    # The PT-D460BT family after ptouch-print's libptouch.c, Brother names no model codes;
+    # speeds and longest labels after Brother's User's Guides
+    Model('PT-D410', speed=20, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, mode_command=b'\x1b\x69\x52\x01', usb_product=0x20DF, d460bt_family=True),
+    Model('PT-D460BT', speed=30, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x20E0, d460bt_family=True),
+    Model('PT-D610BT', speed=30, max_length_dots=2126, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x20E1, d460bt_family=True),
+    Model('PT-E310BT', speed=20, max_length_dots=7079, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x2201, d460bt_family=True),
+    Model('PT-E560BT', speed=30, max_length_dots=7079, dpi=180, number_bytes_per_row=16, cutting=False, expanded_mode=False,
+          num_invalidate_bytes=100, bluetooth=True, usb_product=0x2203, d460bt_family=True),
 )}
 
 # The QL-1100 series prints at 300 dpi only. Brother's raster command
@@ -84,8 +105,9 @@ MODELS = {model.identifier: model for model in (
 # QL-800, and a 600 dpi label came out twice as long on a QL-1100 (#103):
 # https://download.brother.com/welcome/docp100366/cv_ql1100_eng_raster_100.pdf
 # The P-touch printers print at 180 dpi, their reference has no 600 dpi, nor
-# has the PT-P910BT high-resolution printing.
-MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', 'PT-P910BT')
+# has the PT-P910BT high-resolution printing, nor the PT-D460BT family.
+MODELS_WITHOUT_600_DPI = ('QL-1100', 'QL-1110NWB', 'QL-1115NWB', 'PT-E550W', 'PT-P700', 'PT-P750W', 'PT-P710BT', 'PT-P910BT',
+                          *(model for model, spec in MODELS.items() if spec.d460bt_family))
 
 # Black and red on the QL-800 series, after Brother's data sheets
 RED_SPEED = 24
@@ -97,7 +119,13 @@ PTOUCH_BESIDES = 2.0
 QUALITY_SLOWER = 1.7
 
 # P-touch printers with a half cutter, the PT-P700 and the PT-P710BT have none
-HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
+HALF_CUTTERS = ('PT-E550W', 'PT-P750W', 'PT-P900', 'PT-P900W', 'PT-P950NW', 'PT-P910BT')
+# Automatic cutters of the PT-D460BT family after Brother's product pages.
+# They cut after each label: ptouch-print's chain command, which is to "Skip
+# final feed of label and any automatic cut", is not sent.
+AUTO_CUTTERS = ('PT-D610BT', 'PT-E560BT')
+# Not found on Bluetooth by name, Brother's guides name none
+UNNAMED_ON_BLUETOOTH = ('PT-E310BT', 'PT-E560BT')
 
 # Brother's raster command references: a print of at least 12.7 mm (150
 # dots) on QL printers, 4.4 mm (31 dots at 180 dpi) on TZe tape
