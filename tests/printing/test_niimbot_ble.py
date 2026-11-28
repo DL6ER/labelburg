@@ -123,7 +123,6 @@ def answered(monkeypatch):
     monkeypatch.setattr(transports, '_kept', {})
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
-    monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
@@ -217,7 +216,7 @@ def test_b1_on_bluetooth_keeps_its_connection_for_the_designer_following_it(b1, 
 def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le, monkeypatch):
     # A label designer left open in the background asks every 20 s; that
     # keeps the B1 neither connected nor beeping
-    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_UNUSED', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:
@@ -228,7 +227,7 @@ def test_status_of_all_printers_tells_the_last_state_of_a_b1_on_bluetooth(b1, le
 
 def test_kept_connection_is_closed_unused(b1, le, monkeypatch):
     # Then the phone app can connect to the printer
-    monkeypatch.setattr(transports, 'KEEP_LE', 0.05)
+    monkeypatch.setattr(transports, 'KEEP_UNUSED', 0.05)
     b1.get(STATUS)
     deadline = time.monotonic() + 2
     while not le.closed and time.monotonic() < deadline:
@@ -305,12 +304,13 @@ def test_a_b1_that_saves_energy_tells_its_last_state_between_prints(b1, le):
 
 
 @pytest.mark.parametrize('model, device, follow', [
-    ('Niimbot/B1', DEVICE, True), ('Niimbot/D110_M', DEVICE, False), ('Niimbot/B1', 'usbip://192.0.2.7/1-4.1.3', True),
+    ('Niimbot/B1', DEVICE, True), ('Niimbot/D110_M', DEVICE, True), ('Niimbot/B1', 'usbip://192.0.2.7/1-4.1.3', True),
     ('QL-800', 'file:///dev/usb/lp0', True), ('QL-800', 'usb://0x04f9:0x209b', True), ('QL-800', '/dev/usb/lp1', True),
-    ('QL-800', 'tcp://192.0.2.9', False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False), ('QL-800', 'simulation', False)])
+    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False),
+    ('QL-800', 'simulation', False)])
 def test_printers_that_are_asked_without_cost_are_followed(model, device, follow):
     # A status query of one on Bluetooth that beeps or on the network costs,
-    # one on USB or kept on Bluetooth LE does not
+    # one on USB or kept on Bluetooth does not
     from app.labeldesigner import drivers
     assert drivers.for_model(model).followed(device, model) is follow
 
@@ -347,8 +347,8 @@ def test_b1_out_of_reach_on_bluetooth_le_is_left_alone_until_looked_for(b1, le):
 
 
 @pytest.mark.parametrize('model, device, offered', [
-    ('Niimbot/B1', DEVICE, True), ('Niimbot/B1', '/dev/usb/lp0', False), ('Niimbot/D110_M', DEVICE, False),
-    ('QL-800', 'tcp://192.0.2.9', False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False)])
+    ('Niimbot/B1', DEVICE, True), ('Niimbot/B1', '/dev/usb/lp0', False), ('Niimbot/D110_M', DEVICE, True),
+    ('QL-800', 'tcp://192.0.2.9', False), ('QL-800', DEVICE, False), ('PUQU/Q00', 'bt://00:00:5E:00:53:02/2', False)])
 def test_only_printers_whose_connection_is_kept_save_energy(model, device, offered):
     from app.labeldesigner import drivers
     assert drivers.for_model(model).keeps_connection(device, model) is offered

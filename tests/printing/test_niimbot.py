@@ -4,7 +4,9 @@ label designer."""
 import errno
 import json
 import os
+import socket
 import struct
+import threading
 import time
 from types import SimpleNamespace
 
@@ -68,11 +70,67 @@ class FakePrinter:
         return data
 
 
+class Rfcomm:
+    """Printers on classic Bluetooth in place of the socket module of
+    transports.py: each connection a socket pair, the printer's end in ends,
+    served by serve(end) on a thread of its own where given."""
+
+    def __init__(self, serve=None):
+        self.serve, self.ends, self.addresses, self.closed = serve, [], [], 0
+
+    def socket(self, family, kind, proto):
+        return RfcommSocket(self)
+
+    def __getattr__(self, name):
+        return getattr(socket, name)
+
+
+class RfcommSocket:
+    def __init__(self, rfcomm):
+        self.rfcomm = rfcomm
+        self.ours, self.theirs = socket.socketpair()
+
+    def connect(self, address):
+        self.rfcomm.addresses.append(address)
+        self.rfcomm.ends.append(self.theirs)
+        if self.rfcomm.serve:
+            threading.Thread(target=self.rfcomm.serve, args=(self.theirs,), daemon=True).start()
+
+    def close(self):
+        self.rfcomm.closed += 1
+        self.ours.close()
+
+    def __getattr__(self, name):
+        return getattr(self.ours, name)
+
+
+def answering(printer_):
+    """What serves a fake printer at its end of an RFCOMM connection."""
+    def serve(end):
+        received = b''
+        with end:
+            while True:
+                try:
+                    data = end.recv(65536)
+                except OSError:
+                    return
+                if not data:
+                    return
+                found, received = protocol.parse(received + data)
+                for command, content in found:
+                    printer_._take(protocol.packet(command, content))
+                answer, printer_.pending = printer_.pending, b''
+                try:
+                    end.sendall(answer)
+                except OSError:
+                    return
+    return serve
+
+
 @pytest.fixture(autouse=True)
 def answered(monkeypatch):
     monkeypatch.setattr(devices, '_unanswered', {})
     monkeypatch.setattr(devices, 'status_cache', {})
-    monkeypatch.setattr(niimbot, '_asked', {})
     monkeypatch.setattr(niimbot, '_no_serial', set())
     monkeypatch.setattr(niimbot, '_owed', {})
     monkeypatch.setattr(devices, 'looked', 0.0)
@@ -93,8 +151,31 @@ def fake(monkeypatch):
 
 
 @pytest.fixture
+def on_rfcomm(monkeypatch):
+    """A D110_M on classic Bluetooth, the fake printer at its end of each
+    connection."""
+    printer_ = FakePrinter()
+    peer = Rfcomm(answering(printer_))
+    peer.printer = printer_
+    monkeypatch.setattr(transports, 'socket', peer)
+    monkeypatch.setattr(protocol, 'PAGE_POLL', 0.01)
+    yield peer
+    for link in list(transports._kept.values()):
+        link.close()
+
+
+@pytest.fixture
 def client(tmp_path):
     return make_client(tmp_path, model='Niimbot/D110_M', printer=DEVICE)
+
+
+@pytest.fixture
+def saving(tmp_path):
+    """The client with a D110_M on Bluetooth that saves energy, its settings
+    kept in a folder of its own."""
+    client = make_client(tmp_path, empty_repo=True, model='Niimbot/D110_M', printer=DEVICE)
+    assert client.post('/labeldesigner/api/settings', data={'printer': DEVICE, 'save_energy': '1'}).status_code == 200
+    return client
 
 
 @pytest.fixture
@@ -377,15 +458,56 @@ def test_b1_status_tells_the_size_of_its_roll(b1, fake):
     assert (printer_['media_width'], printer_['media_length']) == (50, 30)
 
 
-def test_printer_is_asked_only_when_looking_for_printers(client, fake):
+def test_printer_that_saves_energy_is_asked_only_when_looking_for_printers(saving, fake):
     # It beeps at each connection, the designer asks for the status every 20 s
-    client.get('/labeldesigner/api/printer_status')
-    client.get('/labeldesigner/api/printer_status')
+    saving.get('/labeldesigner/api/printer_status')
+    saving.get('/labeldesigner/api/printer_status')
+    saving.get('/labeldesigner/api/printer_status?printer=' + DEVICE)
     assert fake.commands == [0xdc, 0x1a]
-    assert client.get('/labeldesigner/api/printer_status?look=1').get_json()['printers'][0]['errors'] == []
+    assert saving.get('/labeldesigner/api/printer_status?look=1').get_json()['printers'][0]['errors'] == []
     assert fake.commands == [0xdc, 0x1a] * 2
-    client.get('/labeldesigner/api/printer_status')
+    saving.get('/labeldesigner/api/printer_status')
     assert fake.commands == [0xdc, 0x1a] * 2
+
+
+def test_d110_m_on_classic_bluetooth_keeps_one_connection(client, on_rfcomm):
+    # It beeps when a connection opens and when it closes, not at what goes
+    # over it: the label designer showing it asks it every 2 s
+    followed = '/labeldesigner/api/printer_status?printer=' + DEVICE
+    for _ in range(3):
+        printer_ = client.get(followed).get_json()['printers'][0]
+        assert printer_['errors'] == []
+    assert (printer_['follow'], printer_['can_save_energy']) == (True, True)
+    response = client.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
+    assert outcome(client, response) == ('printed', '')
+    assert on_rfcomm.printer.commands[:9] == [0xdc, 0x1a] * 3 + [0x40, 0xdc, 0x1a] and 0xf3 in on_rfcomm.printer.commands
+    assert (on_rfcomm.addresses, on_rfcomm.closed) == ([('00:F4:BA:17:12:06', 1)], 0)
+
+
+def test_d110_m_that_closed_its_connection_is_connected_again(client, on_rfcomm):
+    # e.g. switched off and on again meanwhile
+    followed = '/labeldesigner/api/printer_status?printer=' + DEVICE
+    client.get(followed)
+    on_rfcomm.ends[0].shutdown(socket.SHUT_RDWR)
+    assert client.get(followed).get_json()['printers'][0]['errors'] == []
+    assert (len(on_rfcomm.addresses), on_rfcomm.closed) == (2, 1)
+
+
+def test_d110_m_that_saves_energy_is_connected_only_to_look_and_to_print(saving, on_rfcomm):
+    printer_ = saving.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
+    # Closed right after it was asked, not followed every 2 s
+    assert (printer_['follow'], printer_['can_save_energy']) == (False, True)
+    saving.get('/labeldesigner/api/printer_status?printer=' + DEVICE)
+    assert (len(on_rfcomm.addresses), on_rfcomm.closed) == (1, 1)
+    saving.get('/labeldesigner/api/printer_status?look=1')
+    assert (len(on_rfcomm.addresses), on_rfcomm.closed) == (2, 2)
+    response = saving.post('/labeldesigner/api/print', data={
+        'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
+    assert outcome(saving, response) == ('printed', '')
+    # Not asked again right after it printed
+    assert saving.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    assert (len(on_rfcomm.addresses), on_rfcomm.closed) == (3, 3) and transports._kept == {}
 
 
 def beat(lid=1, battery=3):
@@ -411,15 +533,15 @@ def test_open_lid_is_an_error(client, fake, monkeypatch):
     assert 0x21 not in fake.commands
 
 
-def test_lid_closed_again_is_told_at_the_next_status_query(client, fake, monkeypatch):
+def test_lid_closed_again_is_told_at_the_next_status_query(saving, fake, monkeypatch):
     monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes.fromhex('10220054005432460004')))
-    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The cover of the printer is open']
+    assert saving.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == ['The cover of the printer is open']
     # Closed, without "Look for printers"
     monkeypatch.setitem(REPLIES, 0xdc, (0xdd, bytes.fromhex('101f0069006932460104')))
-    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
+    assert saving.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['errors'] == []
     # Then the kept state is told, the printer beeps at each connection
     sent = len(fake.commands)
-    client.get('/labeldesigner/api/printer_status')
+    saving.get('/labeldesigner/api/printer_status')
     assert fake.commands[sent:] == []
 
 
@@ -493,13 +615,16 @@ def test_tag_laid_out_otherwise_is_an_unknown_roll(client, fake, monkeypatch):
 
 
 def test_print_updates_the_status(client, fake, monkeypatch):
-    client.get('/labeldesigner/api/printer_status')
+    # A roll it does not know first
+    monkeypatch.setitem(REPLIES, 0x1a, (0x1b, bytes(8) + b'\x0801'))
+    assert client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]['media_width'] is None
     # Another roll was loaded since
     tag = bytes(8) + b'\x0801222281' + b'\x10PZ1G910304007921' + struct.pack('>HHB', 192, 87, 1)
     monkeypatch.setitem(REPLIES, 0x1a, (0x1b, tag))
     client.post('/labeldesigner/api/print', data={'label_size': 'niimbot12x40', 'print_type': 'text', 'text': TEXT})
+    printed = len(fake.commands)
     printer_ = client.get('/labeldesigner/api/printer_status').get_json()['printers'][0]
-    assert (printer_['media_width'], printer_['media_length']) == (12, 40)
+    assert (printer_['media_width'], printer_['media_length']) == (12, 40) and len(fake.commands) == printed
 
 
 def test_print_that_could_not_reach_the_printer_asks_it_again(client, fake, monkeypatch):

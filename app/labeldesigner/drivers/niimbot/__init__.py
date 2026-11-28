@@ -57,12 +57,6 @@ ROLLS = {'01222281': (12, 40),  # T12*40-155WHITE
          '080924002': (50, 50)}  # T50*50ROUND
 # Rolls of round labels, told apart from square ones of the same size
 ROUND = {'080924002'}
-# On Bluetooth it beeps at each connection: it is asked only when the label
-# designer looks for printers and when printing, the other status queries are
-# answered from the last state. A B1 keeps its connection over Bluetooth LE
-# while used, see transports.KEEP_LE, and is also asked by the label designer
-# that follows it, see followed_status(). When each was last asked:
-_asked: dict[str, float] = {}
 # B1s that told no serial number, not asked again: each question unanswered
 # waits for its answer
 _no_serial: set[str] = set()
@@ -70,8 +64,8 @@ _no_serial: set[str] = set()
 # went unanswered read whether its answer came, for OWED_WAIT seconds, and
 # tell the last state meanwhile. After STATUS_LOST seconds it counts as lost:
 # the printer does not answer, and the next poll asks anew. Over classic
-# Bluetooth no answer outlives its connection, the B1 keeps its connection
-# over Bluetooth LE. By device: the question, when
+# Bluetooth an answer that came between uses is dropped, see
+# transports.kept_rfcomm(). By device: the question, when
 # it was asked, and whether the printer was told as not answering.
 STATUS_LOST = 20
 OWED_WAIT = 0.2
@@ -84,15 +78,10 @@ def _over_le(model: str) -> bool:
     return model == 'Niimbot/B1'
 
 
-def _kept(device: str, model: str) -> bool:
-    """Whether the connection to a printer on bt:// is kept, see
-    transports.KEEP_LE: over Bluetooth LE, unless it saves energy."""
-    return device.startswith('bt://') and _over_le(model) and not devices.saves_energy(device)
-
-
-def _beeps(device: str, model: str) -> bool:
-    """Whether each status query beeps, a new connection over Bluetooth."""
-    return device.startswith('bt://') and not _kept(device, model)
+def _beeps(device: str) -> bool:
+    """Whether each status query beeps, a new connection over Bluetooth: the
+    connection is kept, see transports.KEEP_UNUSED, unless it saves energy."""
+    return device.startswith('bt://') and devices.saves_energy(device)
 
 
 def _label(width: int, length: int, model: str, form: FormFactor = FormFactor.DIE_CUT) -> Label:
@@ -204,7 +193,7 @@ class Niimbot(Driver):
                     calibration=model == 'Niimbot/B1')
 
     def keeps_connection(self, device, model):
-        return device.startswith('bt://') and _over_le(model)
+        return device.startswith('bt://')
 
     def calibration_kind(self, model, label_size):
         size = next((label for label in LABELS if label.identifier == label_size and model in label.models), None)
@@ -236,24 +225,17 @@ class Niimbot(Driver):
             return None
         return super().found_on_bluetooth(device)
 
-    def followed(self, device, model):
-        # Its kept connection over Bluetooth LE costs nothing either
-        return _kept(device, model) or super().followed(device, model)
-
     def followed_status(self, device, model):
         return self.status(device, model, fresh=True)
 
     def status(self, device, model, unconfirmed=False, fresh=False):
-        return self.noted_status(device, lambda: self._status(device, model, fresh))
+        # On Bluetooth it beeps when a connection opens and when it closes:
+        # only the label designer that follows it asks it, see
+        # bluetooth_status(). On USB it is asked every time, it tells another
+        # roll or a lost connection so.
+        return self.noted_status(device, lambda: self.bluetooth_status(device, lambda: self._status(device, model), fresh))
 
-    def _status(self, device, model, fresh):
-        cached = devices.status_cache.get(devices.lock_key(device))
-        # Also asked while it cannot print, so that the error goes once the
-        # lid is closed; it beeps every status query only then. On USB it is
-        # asked every time, it tells another roll or a lost connection so.
-        if (device.startswith('bt://') and not (fresh and _kept(device, model)) and cached and not cached.get('errors')
-                and _asked.get(device, -1) >= devices.looked):
-            return dict(cached)
+    def _status(self, device, model):
         with devices.device_lock(device, timeout=progress.status_wait(device)) as acquired:
             if not acquired:
                 return devices.busy_state(device, network_status(device, model))
@@ -283,7 +265,7 @@ class Niimbot(Driver):
             try:
                 told[step] = getattr(protocol, step)(c, send=not waiting, wait=OWED_WAIT if waiting else None)
             except protocol.NoAnswer:
-                if _beeps(device, model):
+                if _beeps(device):
                     raise
                 _owed[device] = (step, owed[1], silent) if waiting else (step, now, silent)
                 if silent or devices.lock_key(device) not in devices.status_cache:
@@ -327,7 +309,6 @@ class Niimbot(Driver):
             if roll['barcode'] in ROUND:
                 state['media_type'] = 'Round die-cut labels'
         devices.status_cache[devices.lock_key(device)] = state
-        _asked[device] = time.monotonic()
         return state
 
     def print_speed(self, model, fast, red):
@@ -363,6 +344,7 @@ class Niimbot(Driver):
                 beat = protocol.heartbeat(c)
                 loaded = protocol.roll(c)
                 state = self._keep(device, model, beat, loaded, self._serial(c, device, model))
+                self.answered(device, state)
                 if state['errors']:
                     devices.note_answer(device)
                     return state['errors'][0]
@@ -375,7 +357,7 @@ class Niimbot(Driver):
         except protocol.NiimbotError as e:
             logger.warning('Printing on %s failed: %s', device, e)
             # Asked again at the next status query
-            _asked.pop(device, None)
+            self.ask_again(device)
             if isinstance(e, protocol.NoAnswer):
                 return 'The printer does not answer'
             if isinstance(e, protocol.NoTag):
@@ -387,7 +369,7 @@ class Niimbot(Driver):
             logger.warning('Printing on %s failed: %s', device, e)
             # Asked again at the next status query, which then tells why
             devices.note_answer(device, e)
-            _asked.pop(device, None)
+            self.ask_again(device)
             return devices.not_sent(e)
         return ''
 
