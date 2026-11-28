@@ -23,10 +23,9 @@ logger = logging.getLogger(__name__)
 USB_VENDOR = 0x04F9
 USB_PRODUCTS = {spec.usb_product: model for model, spec in MODELS.items() if spec.usb_product}
 
-# A printer on Bluetooth is asked at most every BLUETOOTH_STATUS_EVERY s, or
-# when looking for printers or printing; status queries between get its last
-# answer. When each was asked, by devices.lock_key(), and the error it gave.
-BLUETOOTH_STATUS_EVERY = 30
+# A printer on Bluetooth is asked only when looking for printers and after
+# printing, so that it can sleep; status queries between get its last answer.
+# When each was asked, by devices.lock_key(), and the error it gave.
 _bluetooth_asked: dict[str, tuple[float, Exception | None]] = {}
 
 
@@ -38,10 +37,10 @@ def _without_bluetooth(device: str, model: str):
 
 
 def _on_bluetooth(device: str, model: str) -> dict:
-    """The status of a printer on Bluetooth, see BLUETOOTH_STATUS_EVERY."""
+    """The status of a printer on Bluetooth, see _bluetooth_asked."""
     key = devices.lock_key(device)
     asked, error = _bluetooth_asked.get(key, (None, None))
-    if asked is not None and asked >= devices.looked and time.monotonic() - asked < BLUETOOTH_STATUS_EVERY:
+    if asked is not None and asked >= devices.looked:
         if error is not None:
             raise error.with_traceback(None)
         if key in devices.status_cache:
