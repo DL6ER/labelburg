@@ -9,6 +9,8 @@ export const SIZES = Object.fromEntries(C.label_sizes.map(s => [s.id, s]));
 // Static files, e.g. the symbol lists, next to this page's style sheet
 export const STATIC = (document.querySelector('link[href*="designer/main.css"]') || { getAttribute: () => '/static/designer/main.css' })
     .getAttribute('href').replace(/designer\/main\.css.*$/, '');
+// The project, whose guides the page links
+export const SOURCE = 'https://github.com/DL6ER/labelburg';
 
 // --- Small helpers -----------------------------------------------------------
 

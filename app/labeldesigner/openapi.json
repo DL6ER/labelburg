@@ -271,7 +271,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -281,7 +281,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Message"
+                  "$ref": "#/components/schemas/Result"
                 }
               }
             }
@@ -2961,6 +2961,131 @@
         }
       }
     },
+    "/labeldesigner/api/scan": {
+      "post": {
+        "summary": "Print a saved label filled with a scanned code",
+        "description": "Loads the saved label `name`, fills its blanks from the scanned text `code` and prints it as `repository/print` does (saved copies, cutting, quality), or with `preview_only` only returns its image. A blank named `code` gets the text as it is. Without one, the only blank of the label gets it. A vCard or MECARD fills the blanks named like its details, e.g. `Name`, `First name`, `Last name`, `Company`, `Street`, `Postcode`, `City`, `Country`, `Phone`, `Email` and `Address`. Other fields of the request never fill blanks.",
+        "operationId": "scanPrint",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Queued for printing as any print, with the fields of `QueuedAnswer`, or with `preview_only` only previewed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "printed": {
+                      "type": "boolean",
+                      "description": "True where the label was sent to the printer, false for `preview_only`. Whether it printed tells `/labeldesigner/api/queue/{job_id}` with `job`."
+                    },
+                    "job": {
+                      "type": "string",
+                      "description": "The id of the print job, not for `preview_only`."
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "File name of the saved label."
+                    },
+                    "filled": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "description": "The values the blanks got, by name."
+                    },
+                    "image": {
+                      "type": "string",
+                      "description": "The image of the first label as base64 PNG: as the printer got it, or with `preview_only` placed on the tape loaded in the printer."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused, `message` says why: no name, nothing scanned, no blank or several blanks for the code, a contact none of whose details fits a blank, a scanner with another keyboard layout, a code that came in incomplete, is not text or is too long, a value of the request that is invalid, or a label that cannot be printed or previewed as asked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Result"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "hint": {
+                          "type": "string",
+                          "description": "What to change in the label, with its name and blanks, or at the scanner, e.g., `In the editor, rename the blank \"Room\" of \"Shelf\" to code.`"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No saved label has that name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "With `preview_only`, the text does not fit on the label, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The saved label could not be read, `message` says why.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not printed, the printer could not print the label, `message` says why. The same request may succeed later. Also when another label was being saved or deleted for longer than 10 seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Result"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/labeldesigner/api/demos/list": {
       "get": {
         "summary": "List the demo labels",
@@ -3816,6 +3941,34 @@
       }
     },
     "schemas": {
+      "ScanRequest": {
+        "type": "object",
+        "required": ["name", "code"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "File name of the saved label, e.g. `Box.json`."
+          },
+          "code": {
+            "type": ["string", "integer"],
+            "description": "The scanned text; a whole number in JSON is read as its digits, e.g. an EAN."
+          },
+          "printer": {
+            "type": "string",
+            "description": "Printer to use, as for `repository/print`."
+          },
+          "model": {
+            "type": "string",
+            "description": "Printer model, as for `repository/print`."
+          },
+          "preview_only": {
+            "type": "integer",
+            "enum": [0, 1],
+            "default": 0,
+            "description": "1 (also `true`) prints nothing and only returns the image. 0 (also `false`) or left out prints. Any other value is refused."
+          }
+        }
+      },
       "QueuedAnswer": {
         "type": "object",
         "description": "The answer to a print request: the job is accepted. `success` does not tell that it printed, read that from `/labeldesigner/api/queue/{job_id}`.",
@@ -4257,14 +4410,6 @@
             "type": "string",
             "enum": ["", "0", "1"],
             "description": "Whether labels printed are kept, see `/labeldesigner/api/history`. 0 removes those kept and keeps none from now on. Empty: kept."
-          }
-        }
-      },
-      "Message": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
           }
         }
       },

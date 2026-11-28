@@ -6,7 +6,7 @@ import {
     $, $$, esc, icon, S, C, API, familyOf, chosenFamily, saveLabelSettings, toast, hideToast, own, load, storeQuiet, post, capsOf,
     printerLabel, printerName, isDemo, printerState, tapeLeft, sizeName, isPtouch, isColorTape, detectTape, tapeState, CUTS, noCutter,
     neverWhy, halfOf, chainOf, baseDesign, L, runsAlong, printerCaps, printJob, browserDateFormat, dateCodeExamples, settingsSaves,
-    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE,
+    itemDesign, demoItem, originOf, kept, printerCut, cutText, leavesFirst, announcePrint, lineBusy, followJob, QUEUE, UNREACHABLE, SOURCE,
     openLayer, closeLayer, loadPrinted, keptSub, printKeptAgain, IMAGE_GONE, keptLabel, withColors
 } from './core.js';
 import { openEditor, printerChanged } from './editor.js';
@@ -30,7 +30,6 @@ const PATHS = {
     robot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V5M2 13v3M22 13v3M9 13v1M15 13v1M9.5 17h5"/><circle cx="12" cy="4" r="1"/>',
 };
 const ic = name => Object.hasOwn(PATHS, name) ? `<svg class="ic s" viewBox="0 0 24 24" aria-hidden="true">${PATHS[name]}</svg>` : icon(name);
-const SOURCE = 'https://github.com/DL6ER/labelburg';
 
 // main.js hands over the printer chip, the status refresh and the theme
 const host = { chip: () => { }, refresh: async () => { }, theme: () => { } };
